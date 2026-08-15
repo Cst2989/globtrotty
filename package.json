@@ -1,0 +1,20 @@
+{
+	"name": "globetrotty",
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/node": "^26.2.0",
+		"postgres": "^3.4.9",
+		"tsx": "^4.23.12",
+		"typescript": "^7.0.2",
+		"vitest": "^4.1.10"
+	},
+	"dependencies": {
+		"zod": "^4.4.3"
+	}
+}
