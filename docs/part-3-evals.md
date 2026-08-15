@@ -84,6 +84,26 @@ for (const c of cases) {
   const offer  = await latestProposal(convo);
   const trace  = await loadTrace(convo);
 
+  // REVIEW(globetrotty) — these two lines are the article's central claim ("one
+  // implementation carrying two duties") and both have a hole that makes the reuse unsound.
+  //
+  // 1. `convo.requirements` IS THE NOTEBOOK AS IT STANDS NOW, not as it stood when the gate
+  //    ran in production. update_requirements mutates it in place and nothing snapshots it
+  //    onto the proposal. So: she rejected a 1,500 EUR offer, later raised her budget to
+  //    2,000, and replaying the gate today PASSES an offer production rejected. The identity
+  //    between production checks and eval checks — which this article rightly says matters
+  //    more than it looks — is broken silently, and in the direction that makes evals look
+  //    green. Fix: snapshot the requirements onto the proposal row at save time. This is
+  //    unbackfillable — the prior notebook states are gone the moment the notebook is
+  //    overwritten.
+  //
+  // 2. `trace.toolResults` HAS NO HOME. Results from code tools (fare sweeps, hotel sweeps,
+  //    transfers) are not model calls, so they never enter model_calls. They exist only in
+  //    turn state, which part 2 describes as "the memory of one wake of the loop", overwrites
+  //    every step, and gives no retention guarantee. Whatever survives has also been through
+  //    trimForContext ("3 fields per fare, not 40"), so the fields provenance needs to check
+  //    may be gone. Provenance needs its own durable, untrimmed, append-only store keyed
+  //    (conversation_id, source_id) — separate from what the model reads.
   assertEmpty(checkBudget(offer, convo.requirements));      // the gates, reused
   assertEmpty(checkProvenance(offer, trace.toolResults));
   assertIncludes(offer, c.expect.mustInclude);
@@ -95,6 +115,20 @@ for (const c of cases) {
 Twenty cases cover more than you'd think, if they're chosen adversarially: the hotel-only lookup, the "I don't know where" discovery, the budget she never states, the gibberish opener, the request in Portuguese, the trip that's impossible under the budget so the honest answer is "not for 1,500 in August." That last kind matters most, because an agency that never says "no" is an agency that invents.
 
 Non-determinism cuts through here too, so the suite runs each case 3 times on the nightly schedule, and a case that passes twice out of 3 is a flaky case, which is information rather than noise. τ-bench formalizes this as pass^k, the probability of passing k runs in a row, which is the honest number for anything customer-facing.
+
+<!-- REVIEW(globetrotty) — pass^k is meant to measure MODEL variance, so three other sources
+     of variance have to be pinned or the number measures nothing. None are mentioned:
+     - THE SUPPLIER SEED. If the mock supplier seeds from a per-run conversation id, three
+       runs of one case see three different fare universes. Seed from the golden case id.
+     - THE CLOCK. Golden trips with relative dates ("a week in September") drift into the past
+       and start failing for calendar reasons. Part 2 already says the shell owns the clock and
+       hands it in — evals must inject a fixed `now`.
+     - THE SIMULATED USER. It is itself a small model, so its variance contaminates every
+       pass^k number unless its model, prompt, and seat are pinned and traced.
+     Also worth noting: this suite needs to drive a conversation WITHOUT the HTTP layer, and
+     20 cases x 3 runs against per-user daily spend caps will trip those caps nightly. Both are
+     cheap to design for on day one and painful to retrofit. -->
+
 
 ## Trajectory grading: how it got there
 

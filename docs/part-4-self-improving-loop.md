@@ -20,6 +20,22 @@ All of that is sitting in the proposals table, from part 2's schema, unused. Thi
 
 The reason we can build a learning loop at all is one foreign key we wrote back in part 2: `bookings.proposal_id`, plus the `decision` column on proposals.
 
+<!-- REVIEW(globetrotty) — this section assumes the product OWNS the booking, and a large
+     share of readers building on this series won't. Anyone who hands off to a supplier —
+     affiliate, metasearch, referral — never writes a bookings row at all, and the article's
+     own "capture at the moment or never" rule then bites harder, not softer: the conversion
+     is reported back by the affiliate network days later, keyed ONLY by whatever sub-id was
+     embedded in the outbound URL. If that id isn't minted and stored before the link is
+     built, the commission arrives with no way to join it to a proposal, a prompt version, or
+     a traveller — and it cannot be reconstructed afterwards.
+     Worth a paragraph, because the fix is three lines and the failure is silent: mint the
+     click id first, embed it as the sub-id, store the exact string you sent (networks mangle,
+     truncate, and lowercase parameters), and create the conversions table on day one even
+     though it stays empty for weeks. Also worth saying plainly that a CLICK IS NOT A
+     CONVERSION — a link-out product that treats click-through as its success signal is
+     measuring the attractiveness of a link, not the quality of a trip. -->
+
+
 That link has a property that makes it precious: it can only be recorded at the moment it happens. When she books, we know which proposal the booking came from. A week later, the booking exists, the proposals exist, and nothing ties them together, so the capture is a write at booking time or it's nothing. I call it the provenance link, the same idea as part 2's provenance check, pointed backwards: not "where did this price come from" but "where did this booking come from."
 
 With the link in place, the signals rank themselves by how much they say.
@@ -62,6 +78,13 @@ Now a refactor changes what gets stored, and the itinerary column starts holding
 The system's next move deserves slow reading. Its best work, the proposals she booked without changing a word, scores as its most-rejected work, and gets suppressed from the examples. Its strongest positive signal, filed as its strongest negative, one booking at a time, with no error anywhere to notice.
 
 And every test passes, because the fixture uses a flights-only itinerary, a shape production never writes.
+
+<!-- REVIEW(globetrotty) — there is a fourth defense, and it's cheaper than all three below:
+     put a schema version on the itinerary column itself. The whole failure mode in this
+     section is a shape change going undetected, and an explicit `itinerary_schema_version`
+     written at save time turns "the similarity function silently compared two different
+     shapes" into a loud mismatch at the first row. One integer column. Worth adding, since
+     the section's own argument is that the bug is invisible by construction. -->
 
 Three defenses close it, all cheap. The similarity function asserts its inputs have the same shape and refuses mismatches loudly. The derived scores carry provenance, so one query shows the untouched proposal scoring 0.2 and someone asks why. And the golden trips from part 3 include one case that asserts a known-booked-unchanged proposal scores above 0.9, which turns the inversion into a red build instead of a quiet slide.
 

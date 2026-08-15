@@ -545,6 +545,27 @@ The senior is the reviewer, architecture 5, back on the frontier model: one mode
 
 In code, the checker and the senior live together inside the `propose_itinerary` tool, in that order, because the free check should reject a broken offer before the expensive one reads it:
 
+<!-- REVIEW(globetrotty) — three problems in this eleven-line gate.
+
+     1. THE EXHAUSTED-ROUNDS BRANCH SHIPS A REJECTED OFFER, UNMARKED. When
+        `!review.approved && rounds >= 2`, control falls straight through to
+        `saveProposal(offer)` — an itinerary the senior reviewer rejected twice reaches her
+        looking identical to an approved one. Part 2 explicitly argues that a system needs a
+        state meaning "finished but the checks failed"; this gate has one available and
+        silently doesn't use it. It also poisons part 4: if she accepts a reviewer-rejected
+        offer, it enters the example pool as exemplary work — the inversion bug wearing a
+        different costume. Either don't ship it, or ship it flagged and say so on the card.
+
+     2. `rounds` IS NOT DURABLE. It lives in the loop, not in turn state, so a crash and
+        resume resets it to zero and the "bounded at 2 rounds" promise isn't a bound at all —
+        a crash-looping turn pays for unbounded frontier reviewer calls.
+
+     3. NO CURRENCY, ANYWHERE. The flagship example is "under 1,500 euros", flights and hotels
+        and transfers come from three different suppliers, and `checkBudget` sums bare
+        numbers. Summing minor units across currencies is a correctness bug that every
+        downstream check then blesses. Every price wants {amount_minor, currency}, and the
+        checker should emit a VIOLATION on any currency that doesn't match the notebook's
+        budget currency rather than converting. Never convert inside a gate. -->
 ```js
 // what runs when the agent submits an offer
 const violations = checkBudget(offer, notebook);        // the checker: free
@@ -564,6 +585,21 @@ One more employee reads over everyone's shoulder: an async monitor, a cheap mode
 **The user is architecture 10, the human in the loop.** A person checks the agent's work before anything irreversible happens, and here that person is our user. Her agent brings her two finished offers. 
 
 In code, the offer lands as a saved proposal, and her click writes one labeled row: approve, edit, or reject.
+
+<!-- REVIEW(globetrotty) — the cashier needs three more branches than it has here.
+     - "Same or lower, it books" treats a PRICE DROP as safe. It often isn't: a total that
+       fell because the supplier swapped a refundable fare for basic economy, or a sea-view
+       room for an interior one, is a downgrade she never approved. Compare per ITEM and on
+       item identity (fare class, baggage, refundability, board type), not just on the sum.
+     - There is no branch for "we don't know". If the re-quote call times out or errors, the
+       article's own philosophy elsewhere — a missing record is an answer, not a bug — pushes
+       the implementer toward reading it as benign. Unknown is not unchanged. Any item whose
+       re-quote doesn't return a fresh, successful, same-currency price must BLOCK.
+     - No tolerance policy: a re-quote one cent higher refuses, which on FX-rounded data will
+       fire constantly. Make the tolerance an explicit decision, not an accident of `>`.
+     Also worth stating: if the re-quote reads the same cached feed that produced the original
+     price, the gate compares cache to cache and passes while the traveller still lands on the
+     higher number. The gate is only as live as its price source. -->
 
 **The cashier is plain code again.** Between the offer and the booking, prices move. So at the end, code makes one API call to re-read the fare and one comparison against the number she approved. Same or lower, it books. 
 
