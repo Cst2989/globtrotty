@@ -67,4 +67,15 @@ describe('applyRequirements', () => {
     expect(rejected).toEqual(['budget'])
     expect(next.budget?.value.currency).toBe('EUR')
   })
+
+  // Ruled behaviour: a patch mixing a valid field with an unrecognised key
+  // is rejected wholesale, not applied field by field. Partially applying an
+  // attacker-influenced patch is a worse failure than discarding it, and
+  // `rejected` still names every offending key.
+  it('rejects a mixed patch wholesale, applying neither the valid nor the invalid field', () => {
+    const { next, rejected } = applyRequirements(base(),
+      { nights: 10, sneaky: true }, 'user')
+    expect(rejected).toEqual(['sneaky'])
+    expect(next.nights?.value).toBe(7)   // unchanged — the valid field was NOT applied
+  })
 })

@@ -71,11 +71,15 @@ export function applyRequirements(
   source: Provenance,
 ): { next: Notebook; rejected: string[] } {
   const parsed = PatchSchema.safeParse(patch)
-  const rejected: string[] = []
   if (!parsed.success) {
-    // Unknown or malformed keys are reported, never stored.
+    // A patch that fails validation — whether from an unrecognised key or a
+    // malformed known field — is rejected wholesale, not applied field by
+    // field. Partially applying an attacker-influenced patch is a worse
+    // failure than discarding it; `rejected` still names every offending
+    // key so the caller can see why nothing landed.
     // zod reports extraneous keys via `issue.keys` (path is empty for
     // `unrecognized_keys`), and per-field validation failures via `issue.path`.
+    const rejected: string[] = []
     for (const issue of parsed.error.issues) {
       if (issue.code === 'unrecognized_keys') {
         for (const k of issue.keys) rejected.push(k)
@@ -83,11 +87,11 @@ export function applyRequirements(
         rejected.push(String(issue.path[0] ?? 'unknown'))
       }
     }
-    const known = PatchSchema.partial().safeParse(patch)
-    if (!known.success) return { next: current, rejected: [...new Set(rejected)] }
+    return { next: current, rejected: [...new Set(rejected)] }
   }
 
-  const data = (parsed.success ? parsed.data : {}) as Record<string, unknown>
+  const data = parsed.data as Record<string, unknown>
+  const rejected: string[] = []
   const next: Notebook = { ...current }
   const at = new Date().toISOString()
 
