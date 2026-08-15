@@ -13,7 +13,8 @@ const KNOWN = new Set([
   'CAD', 'AUD', 'NZD', 'BRL', 'MXN', 'ZAR', 'TRY', 'AED',
 ])
 
-export type Money = { minor: bigint; currency: string }
+declare const MoneyBrand: unique symbol
+export type Money = { readonly minor: bigint; readonly currency: string; readonly [MoneyBrand]: true }
 
 export class CurrencyMismatchError extends Error {
   constructor(readonly a: string, readonly b: string) {
@@ -31,10 +32,10 @@ export function minorUnitExponent(currency: string): number {
 export function money(minor: bigint | number, currency: string): Money {
   const c = currency.toUpperCase()
   minorUnitExponent(c) // throws on unknown
-  if (typeof minor === 'number' && !Number.isInteger(minor)) {
+  if (typeof minor === 'number' && !Number.isSafeInteger(minor)) {
     throw new Error(`Money must be whole minor units, got ${minor}`)
   }
-  return { minor: BigInt(minor), currency: c }
+  return { minor: BigInt(minor), currency: c } as Money
 }
 
 function assertSame(a: Money, b: Money): void {
@@ -43,13 +44,13 @@ function assertSame(a: Money, b: Money): void {
 
 export function addMoney(a: Money, b: Money): Money {
   assertSame(a, b)
-  return { minor: a.minor + b.minor, currency: a.currency }
+  return { minor: a.minor + b.minor, currency: a.currency } as Money
 }
 
 export function sumMoney(items: Money[]): Money {
   const first = items[0]
   if (!first) throw new Error('Cannot sum an empty list: the currency would be unknowable')
-  return items.slice(1).reduce(addMoney, first)
+  return items.slice(1).reduce(addMoney, first) as Money
 }
 
 export function compareMoney(a: Money, b: Money): -1 | 0 | 1 {

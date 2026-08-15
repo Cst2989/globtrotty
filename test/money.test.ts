@@ -16,7 +16,16 @@ describe('money', () => {
     expect(money(1412_00, 'EUR')).toEqual({ minor: 141200n, currency: 'EUR' })
   })
   it('rejects a non-integer amount', () => expect(() => money(10.5 as never, 'EUR')).toThrow())
+  it('rejects unsafe integers that have lost precision', () => {
+    expect(() => money(2 ** 53 + 1, 'EUR')).toThrow()
+  })
   it('uppercases the currency', () => expect(money(1n, 'eur').currency).toBe('EUR'))
+  it('prevents hand-built objects that bypass validation', () => {
+    // @ts-expect-error — Money has a brand; this literal cannot satisfy the type
+    const handBuilt: Money = { minor: 100n, currency: 'ZZZ' }
+    // If this line compiles, the brand is broken and this test fails the build
+    void handBuilt
+  })
 })
 
 describe('currency safety', () => {
@@ -56,5 +65,9 @@ describe('formatMoney', () => {
   it('renders 2-exponent currencies', () => expect(formatMoney(money(141200n, 'EUR'))).toContain('1,412'))
   it('renders 0-exponent currencies without decimals', () => {
     expect(formatMoney(money(1412n, 'JPY'))).not.toContain('.')
+  })
+  it('renders 3-exponent currencies with three fraction digits', () => {
+    const formatted = formatMoney(money(141200n, 'KWD'))
+    expect(formatted).toContain('141.2')
   })
 })
