@@ -389,11 +389,24 @@ No business-development track blocks anything. Every source in slice 1 is self-s
 
 ## 13. Assumptions and accepted risks
 
-**Must verify before build:**
-1. **`response.model` on an aliased model.** If it echoes the alias, §7's drift mitigation detects nothing and we build the behavioural canary instead. One curl, and it decides whether a paragraph of part 2 needs rewriting.
-2. **Kiwi MCP**: confirm the endpoint is still live and unauthenticated, what its terms say about programmatic use, and whether `bookingUrl` deep links stay valid long enough to survive the gap between proposal and hand-off.
-3. **SerpApi**: confirm current Google Flights/Hotels coverage and per-search pricing, and note the ongoing Google litigation — the $2M legal shield applies only at the $150/mo tier and covers collection rather than use. At one-user volume this is a small risk, but it should be a conscious one.
-4. **Currency and market scoping on every source.** A supplier defaulting to another market or currency silently poisons every budget check, and there is no currency in a bare integer.
+**Verified 2026-08-15 (probed live):**
+
+- **Kiwi MCP is live, unauthenticated, and stateless.** `POST https://mcp.kiwi.com`, SSE response, no session handshake required — `tools/list` and `tools/call` work on a bare POST. Server `kiwicom-flight-search` v1.28.1.
+- **One call covers the date grid.** `search-flight` takes `flyFrom`/`flyTo` (IATA *or* place name), `departureDate` in **dd/mm/yyyy**, `departureDateFlexDays` (±N), `returnDate`/`returnDateFlexDays`, `adults`/`children`/`infants`, `cabinClass`, `currency`, `locale`, `max_sector_stopovers`, `nights_in_dst_from/to`, `one_for_city` (the "I don't know where" case in a single call), and per-passenger bag counts. `explore_flights` is therefore **one call, not an N×M sweep**.
+- **The response carries what the gates need.** `{query, currency, passengers, resultsCount, itineraries, searchTimeMs}`; each itinerary has `id`, `price`, `priceFormatted`, `totalDurationSeconds`, `bookingUrl`, `baggage {personalItem, cabinBag, checkedBag}`, and `outbound`/`inbound` legs with `route`, local ISO times, `stops`, `cabinClass`, and `segments` carrying `carrier`/`carrierName`. Currency is a request parameter, which closes the market-scoping risk.
+- **Itinerary IDs are stable across repeated identical searches** — 15/15 matched on both ID and price. **This is what makes `quote()` implementable**: re-run the stored search params, find by native ID, compare; absent means unavailable. `mayRequote: true` is real, not aspirational.
+- **`bookingUrl` is a `kiwi.com` short link.** It is supplier-supplied data flowing into an outbound request, so §10's host allowlist applies to it directly.
+
+**Two live-data findings that change the design:**
+
+- **`allow_self_transfer` defaults to `true`.** That is Kiwi's virtual interlining: a missed connection is the traveller's problem, not the airline's. `explore_flights` sets it explicitly, and any itinerary relying on it must say so on the card.
+- **The cheapest result is routinely the wrong recommendation.** The €628 Berlin→Faro option returns `checkedBag: 0` for two adults and an infant flying for a week. Baggage counts are carried into the notebook comparison and rendered on the card; a budget-matching agent without them confidently recommends the worse trip.
+
+**Still to verify:**
+1. **`response.model` on an aliased model.** No Anthropic credential is configured in this environment yet (`ANTHROPIC_API_KEY` unset, no `ant` CLI). One call once the key exists, and it decides whether §7's drift mitigation is real or whether we build the behavioural canary — and whether a paragraph of part 2 needs rewriting.
+2. **`bookingUrl` lifetime** — how long a `kiwi.com/u/…` short link stays valid, which bounds the acceptable gap between proposal and hand-off.
+3. **Kiwi's terms on programmatic use.** The endpoint is open; that is not the same as sanctioned. Worth reading before this is demoed publicly.
+4. **Hotels have no free live source.** SerpApi Google Hotels needs a paid key (~$0.01–0.025/search, trivial at one-user volume); confirm coverage and note the ongoing Google litigation, whose legal shield applies only from the $150/mo tier. Until a key exists, hotels run on `MockSupplier` and the flight half of the product is fully real.
 
 **Accepted risks, recorded deliberately:**
 
