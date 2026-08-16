@@ -1,8 +1,9 @@
+import { timingSafeEqual } from 'node:crypto'
 import postgres from 'postgres'
 import { z } from 'zod'
 import { loadEnv } from '../../src/env.js'
 import { runTurn, echoAgent } from '../../src/worker.js'
-import type { Limits } from '../../src/engine.js'
+import { DEFAULT_LIMITS } from '../../src/limits.js'
 
 /**
  * Tier 3: the background function. Netlify Functions v2 (esbuild-bundled, `.mts`) hand every
@@ -24,16 +25,6 @@ import type { Limits } from '../../src/engine.js'
  * the real agent fleet behind the same `Agent` type and nothing else here changes.
  */
 
-// Same figures used throughout the harness's own tests ($8 conversation / $15 daily /
-// $50 global ceiling, 24-step cap). No config module exists yet for production limits;
-// when one lands, this constant moves there rather than being redefined per entrypoint.
-const LIMITS: Limits = {
-  conversationCeilingMicros: 8_000_000n,
-  dailyCeilingMicros: 15_000_000n,
-  globalCeilingMicros: 50_000_000n,
-  maxSteps: 24,
-}
-
 // Background functions on Netlify run up to 15 minutes; leave headroom so a turn that would
 // otherwise be killed mid-step instead persists state and reinvokes (see decideNext's
 // `continue_later` path).
@@ -41,11 +32,27 @@ const BACKGROUND_BUDGET_MS = 14 * 60_000
 
 const Body = z.object({ turnId: z.string().min(1) })
 
+/**
+ * Constant-time secret comparison. `timingSafeEqual` throws on a length mismatch rather than
+ * returning false, and a naive `provided.length === expected.length` short-circuit ahead of it
+ * would itself leak the secret's length through timing — so the length check has to fail
+ * closed into the exact same rejection as a content mismatch, never a distinguishable path.
+ */
+function secretsMatch(provided: string | null, expected: string): boolean {
+  if (provided === null) return false
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
 export default async (req: Request): Promise<Response> => {
   const env = loadEnv(process.env)
 
-  const provided = req.headers.get('x-worker-secret')
-  if (!provided || provided !== env.WORKER_SHARED_SECRET) {
+  // Both rejection paths inside secretsMatch (wrong length, wrong content) collapse to this
+  // single boolean, so this one call site is the only place a 401 is constructed — a length
+  // mismatch and a content mismatch are byte-for-byte the same response.
+  if (!secretsMatch(req.headers.get('x-worker-secret'), env.WORKER_SHARED_SECRET)) {
     return new Response('unauthorized', { status: 401 })
   }
 
@@ -61,7 +68,7 @@ export default async (req: Request): Promise<Response> => {
     await runTurn(
       {
         sql,
-        limits: LIMITS,
+        limits: DEFAULT_LIMITS,
         agent: echoAgent,
         now: () => Date.now(),
         deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,

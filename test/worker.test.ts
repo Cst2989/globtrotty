@@ -4,14 +4,10 @@ import { withTestDb, describeDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
 import { runTurn, echoAgent, type Agent, type WorkerDeps } from '../src/worker.js'
 import { claimTurn } from '../src/repo/turns.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
-const LIMITS = {
-  conversationCeilingMicros: 8_000_000n,
-  dailyCeilingMicros: 15_000_000n,
-  globalCeilingMicros: 50_000_000n,
-  maxSteps: 24,
-}
+const LIMITS = DEFAULT_LIMITS
 
 const workerDeps = (sql: postgres.Sql, agent: Agent = echoAgent): WorkerDeps => ({
   sql, limits: LIMITS, agent,
@@ -91,10 +87,12 @@ describeDb('runTurn end to end', () => {
   it('stops and records limit_reached when the ceiling is hit mid-turn', async () => {
     await withTestDb(async (sql) => {
       const greedy: Agent = async () => ({
-        kind: 'message' as const, text: 'x', costMicros: 9_000_000n,   // over the $8 ceiling
+        // never actually spent — decideNext stops before the agent is invoked once the
+        // conversation ceiling below is already met
+        kind: 'message' as const, text: 'x', costMicros: LIMITS.conversationCeilingMicros + 1_000_000n,
       })
       const r = await submit(sql)
-      await sql`update conversations set spend_usd_micros = 8000000
+      await sql`update conversations set spend_usd_micros = ${LIMITS.conversationCeilingMicros.toString()}
                  where id = ${r.conversationId}`
       await runTurn(workerDeps(sql, greedy), r.turnId!)
       const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`

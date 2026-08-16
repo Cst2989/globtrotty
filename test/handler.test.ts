@@ -2,14 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
-const LIMITS = {
-  conversationCeilingMicros: 8_000_000n,
-  dailyCeilingMicros: 15_000_000n,
-  globalCeilingMicros: 50_000_000n,
-  maxSteps: 24,
-}
+const LIMITS = DEFAULT_LIMITS
 const deps = (sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined)) => ({
   sql, limits: LIMITS, invoke,
 })
@@ -59,7 +55,7 @@ describeDb('submitMessage', () => {
   it('denies when the daily ceiling is reached, before spending anything', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into daily_usage (user_id, day, cost_micros)
-                values (${USER}, current_date, 15000000)`
+                values (${USER}, current_date, ${LIMITS.dailyCeilingMicros.toString()})`
       const invoke = vi.fn()
       const r = await submitMessage(deps(sql, invoke), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'i1',
