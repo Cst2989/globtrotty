@@ -23,11 +23,17 @@ export default async (): Promise<Response> => {
   const env = loadEnv(process.env)
   const sql = postgres(env.DATABASE_URL)
 
-  let result: { requeued: string[]; backlog: number }
+  let result: { requeued: string[]; backlog: number; reaped: string[] }
   try {
     result = await sweep(sql)
   } finally {
     await sql.end({ timeout: 5 })
+  }
+
+  if (result.reaped.length > 0) {
+    // Best-effort visibility into crash-loop failures; no structured logging
+    // pipeline exists yet in this plan.
+    console.error('sweep: reaped crash-loop turns', { turnIds: result.reaped })
   }
 
   for (let i = 0; i < result.requeued.length; i += CONCURRENCY) {
@@ -36,7 +42,9 @@ export default async (): Promise<Response> => {
   }
 
   return new Response(
-    JSON.stringify({ requeued: result.requeued.length, backlog: result.backlog }),
+    JSON.stringify({
+      requeued: result.requeued.length, backlog: result.backlog, reaped: result.reaped.length,
+    }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   )
 }

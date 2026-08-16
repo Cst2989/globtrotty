@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { sweep } from '../src/sweeper.js'
+import { MAX_ATTEMPTS } from '../src/repo/turns.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 
@@ -57,6 +58,51 @@ describeDb('sweep', () => {
                 values (${cid}, ${USER}, 'k', 'done', now() - interval '2 hours',
                         now() - interval '2 hours')`
       expect((await sweep(sql, {})).requeued).toHaveLength(0)
+    })
+  })
+
+  // CRITICAL 3: a turn at attempts >= MAX_ATTEMPTS can never be reclaimed
+  // (claimTurn's own guard), so without reaping it the old sweeper would requeue
+  // it forever — alive-looking, never actually worked, its conversation stuck
+  // 'working', and the one-active-turn-per-conversation slot permanently held.
+  it('fails a turn at MAX_ATTEMPTS with crash_loop and moves its conversation off working', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await convo(sql)
+      await sql`update conversations set status = 'working' where id = ${cid}`
+      const [t] = await sql`
+        insert into turns (conversation_id, user_id, idempotency_key, status,
+                           attempts, started_at, heartbeat_at)
+        values (${cid}, ${USER}, 'k', 'running', ${MAX_ATTEMPTS},
+                now() - interval '10 minutes', now() - interval '10 minutes')
+        returning id`
+      const out = await sweep(sql, {})
+
+      expect(out.reaped).toContain(t!.id)
+      expect(out.requeued).not.toContain(t!.id)   // NOT requeued
+
+      const [turn] = await sql`select status, fail_reason, finished_at from turns where id = ${t!.id}`
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('crash_loop')
+      expect(turn!.finished_at).not.toBeNull()
+
+      const [c] = await sql`select status from conversations where id = ${cid}`
+      expect(c!.status).toBe('failed')
+      expect(c!.status).not.toBe('working')
+    })
+  })
+
+  it('does not reap a live turn even at MAX_ATTEMPTS', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await convo(sql)
+      const [t] = await sql`
+        insert into turns (conversation_id, user_id, idempotency_key, status,
+                           attempts, started_at, heartbeat_at)
+        values (${cid}, ${USER}, 'k', 'running', ${MAX_ATTEMPTS}, now(), now())
+        returning id`
+      const out = await sweep(sql, {})
+      expect(out.reaped).toHaveLength(0)
+      const [turn] = await sql`select status from turns where id = ${t!.id}`
+      expect(turn!.status).toBe('running')
     })
   })
 
