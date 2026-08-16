@@ -45,13 +45,33 @@ export async function beginToolCall(
   return { status: 'ambiguous' }
 }
 
+/**
+ * Marks a pending tool call as done and stores its result. Only ever reached
+ * after `beginToolCall` returned `fresh` — a `done` row is reported as
+ * `replayed` and the caller never executes the tool a second time, so the
+ * `and status = 'pending'` guard keeps a duplicate `finishToolCall` call from
+ * silently overwriting a previously-stored result.
+ *
+ * Verifies its own effect like every other writer in this directory
+ * (`claimTurn`, `saveTurnState`, `heartbeat`, `completeTurn`, `failTurn`,
+ * `recordSpend`): zero rows back means the `(turnId, callId)` pair was never
+ * begun (or was already finished), which would otherwise leave a `pending`
+ * row stuck forever and every later replay silently reporting `ambiguous`
+ * with no explanation in the system.
+ */
 export async function finishToolCall(
   sql: postgres.Sql,
   turnId: string,
   callId: string,
   result: unknown,
 ): Promise<void> {
-  await sql`
+  const rows = await sql`
     update tool_calls set status = 'done', result = ${sql.json(result as never)}
-     where turn_id = ${turnId} and call_id = ${callId}`
+     where turn_id = ${turnId} and call_id = ${callId} and status = 'pending'
+    returning call_id`
+  if (rows.length === 0) {
+    throw new Error(
+      `finishToolCall: no pending tool_calls row for turn ${turnId}, call ${callId}`,
+    )
+  }
 }

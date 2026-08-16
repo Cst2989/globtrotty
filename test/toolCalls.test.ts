@@ -49,4 +49,22 @@ describeDb('tool call idempotency', () => {
       expect(await beginToolCall(sql, b, 'toolu_1', 'x')).toEqual({ status: 'fresh' })
     })
   })
+
+  it('rejects finishing a call that was never begun', async () => {
+    await withTestDb(async (sql) => {
+      const turnId = await seedTurn(sql)
+      await expect(finishToolCall(sql, turnId, 'toolu_never_begun', { ok: true }))
+        .rejects.toThrow()
+    })
+  })
+
+  it('replays a stored null result without confusing it for no result', async () => {
+    await withTestDb(async (sql) => {
+      const turnId = await seedTurn(sql)
+      await beginToolCall(sql, turnId, 'toolu_1', 'lookup_availability')
+      await finishToolCall(sql, turnId, 'toolu_1', null)
+      expect(await beginToolCall(sql, turnId, 'toolu_1', 'lookup_availability'))
+        .toEqual({ status: 'replayed', result: null })
+    })
+  })
 })
