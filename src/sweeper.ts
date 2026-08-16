@@ -30,16 +30,20 @@ export async function sweep(
 ): Promise<{ requeued: string[]; backlog: number }> {
   const limit = opts.batchSize ?? DEFAULT_BATCH
 
+  // Single source of truth for "stale", interpolated into both queries below so
+  // the backlog count and the batch it's alarming on can never drift apart —
+  // a threshold edit made in only one place would otherwise go undetected.
+  const stale = sql`
+    (status = 'running' and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE}))
+    or (status = 'queued' and queued_at < now() - make_interval(secs => ${QUEUED_STALE}))`
+
   const [count] = await sql<{ count: number }[]>`
-    select count(*)::int as count from turns
-     where (status = 'running' and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE}))
-        or (status = 'queued'  and queued_at    < now() - make_interval(secs => ${QUEUED_STALE}))`
+    select count(*)::int as count from turns where ${stale}`
 
   const rows = await sql<{ id: string }[]>`
     with batch as (
       select id from turns
-       where (status = 'running' and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE}))
-          or (status = 'queued'  and queued_at    < now() - make_interval(secs => ${QUEUED_STALE}))
+       where ${stale}
        order by coalesce(heartbeat_at, queued_at)
        limit ${limit}
        for update skip locked
