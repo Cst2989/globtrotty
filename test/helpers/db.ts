@@ -11,7 +11,15 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
     let out!: T
     await sql
       .begin(async (tx) => {
-        out = await fn(tx as unknown as postgres.Sql)
+        // postgres.js only exposes `.savepoint` on a transaction-scoped `sql`, not
+        // `.begin` — production code calls `sql.begin(...)` to wrap a group of writes
+        // in a transaction, whether it's handed the root client or (as here, nested
+        // inside this test's own rollback-only transaction) an already-open one. Shim
+        // `.begin` onto the nested `tx` so those nested calls become savepoints.
+        const nested = Object.assign(tx, {
+          begin: <R>(cb: (sql: postgres.TransactionSql) => R | Promise<R>) => tx.savepoint(cb),
+        }) as unknown as postgres.Sql
+        out = await fn(nested)
         throw new Rollback()
       })
       .catch((e) => {

@@ -1,5 +1,5 @@
 import type postgres from 'postgres'
-import type { TurnState } from '../engine.js'
+import type { TurnState, FailReason } from '../engine.js'
 
 /**
  * Seconds of heartbeat silence after which a `running` turn is considered dead
@@ -81,4 +81,70 @@ export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> 
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
+}
+
+/**
+ * Ends a turn in a single transaction: state, status, spend, message, and the
+ * conversation's status all land together or not at all. Crashing between any
+ * two of these writes used to leave a `done` turn with no message and an
+ * `active` conversation forever — the sweeper only rescues live turns.
+ *
+ * Parking is TERMINAL for the turn: a parked turn is `done`, not `running`.
+ * Left `running`, the sweeper would reclaim and re-execute a parked
+ * conversation every heartbeat window, quietly re-billing a feature that's
+ * supposed to cost nothing while it waits on the user.
+ *
+ * Spend here is turn-level only: `turns.spend_usd_micros` is set to the
+ * amount for this turn. Conversation and daily spend accrue exclusively
+ * through `recordSpend` (Task 8) — duplicating that here would double-count
+ * conversation spend and silently bypass the daily_usage counter that a
+ * spend limit reads.
+ */
+export async function completeTurn(
+  sql: postgres.Sql,
+  claim: Claim,
+  opts: {
+    state: TurnState
+    agentMessage: string | null
+    parked: boolean
+    spendMicros: bigint
+  },
+): Promise<void> {
+  await sql.begin(async (tx) => {
+    const rows = await tx`
+      update turns
+         set status = 'done', state = ${tx.json(opts.state as never)},
+             finished_at = now(), heartbeat_at = now(),
+             spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
+       where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+      returning id`
+    if (rows.length === 0) throw new FencedError(claim.turnId)
+
+    if (opts.agentMessage !== null) {
+      await tx`insert into messages (conversation_id, user_id, turn_id, role, content)
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       'agent', ${opts.agentMessage})`
+    }
+
+    await tx`
+      update conversations
+         set status = ${opts.parked ? 'awaiting_user' : 'active'},
+             updated_at = now()
+       where id = ${claim.conversationId} and user_id = ${claim.userId}`
+  })
+  // Notification goes here, AFTER commit, and may never fail the turn:
+  //   notifyUser(claim.conversationId).catch(logOnly)
+}
+
+export async function failTurn(sql: postgres.Sql, claim: Claim, reason: FailReason): Promise<void> {
+  await sql.begin(async (tx) => {
+    const rows = await tx`
+      update turns set status = 'failed', fail_reason = ${reason},
+                       finished_at = now()
+       where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+      returning id`
+    if (rows.length === 0) throw new FencedError(claim.turnId)
+    await tx`update conversations set status = 'failed', updated_at = now()
+              where id = ${claim.conversationId} and user_id = ${claim.userId}`
+  })
 }
