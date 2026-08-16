@@ -60,4 +60,19 @@ describe('decideNext', () => {
     const after = JSON.stringify(input, (_, v) => (typeof v === 'bigint' ? String(v) : v))
     expect(after).toBe(before)
   })
+
+  it('stops on the step cap even when the deadline has also passed', () => {
+    const d = decideNext(base({ state: { step: 24, messages: [], reviewRounds: 0 }, nowMs: 550_000, deadlineMs: 600_000, estStepMs: 60_000 }))
+    expect(d).toEqual({ kind: 'stop', reason: 'step_cap' })
+  })
+
+  it('stops on the daily ceiling even when the step cap is also reached', () => {
+    const d = decideNext(base({ spend: { conversationMicros: 10n, dailyMicros: 15_000_000n }, state: { step: 24, messages: [], reviewRounds: 0 } }))
+    expect(d).toEqual({ kind: 'stop', reason: 'limit_reached' })
+  })
+
+  it('continues later when at the exact deadline boundary', () => {
+    const d = decideNext(base({ nowMs: 540_000, deadlineMs: 600_000, estStepMs: 60_000 }))
+    expect(d).toEqual({ kind: 'continue_later' })
+  })
 })
