@@ -150,6 +150,30 @@ create table model_calls (
 );
 ```
 
+<!-- REVIEW(globetrotty) — found while implementing the spend ledger against this schema.
+     Two columns short, and one of them causes a 12.5x error.
+
+     1. `tokens_in` CANNOT REPRESENT CACHED INPUT. Providers bill three different input
+        categories at three different rates: fresh input at 1x, cache WRITES at ~1.25x, and
+        cache READS at ~0.1x. One `tokens_in` column collapses all three, and the spread
+        between a write and a read is 12.5x. Worse, `input_tokens` in the API response is only
+        the UNCACHED remainder, not the total — so a system that stores `usage.input_tokens`
+        into `tokens_in` and calls it "input" under-reports every cached call. The section
+        immediately above recommends caching; this table cannot measure what caching did.
+        Four columns, not two: input_tokens, cache_creation_input_tokens,
+        cache_read_input_tokens, output_tokens.
+
+     2. NO COST COLUMN. The money section later says "we convert tokens into currency somewhere
+        where a human can look" — and there is nowhere to look. With three models at different
+        rates plus two cache multipliers, tokens are not convertible to dollars after the fact
+        unless the rate at the time is also recorded. A `cost_micros` computed at write time
+        from a price table in git makes "does the reviewer earn its keep?" one GROUP BY. It is
+        unbackfillable later, because prices move and resolved models change.
+
+     3. `int` for token counts is fine, but note the same section's `cents int` on conversations
+        is not — see the note on that DDL. -->
+
+
 We keep this table honest with four rules.
 
 **Writing to it must never fail or delay the work it observes.** The shell wraps the insert and swallows its errors. It puts a timeout around the whole thing too.
@@ -852,6 +876,20 @@ create table conversations (
   status        text not null default 'active',
                 -- active | awaiting_user | limit_reached | archived
   requirements  jsonb not null default '{}',   -- the notebook, shared by every desk
+  -- REVIEW(globetrotty) — `cents` as an integer silently rounds the window-shopper's spend
+  -- to ZERO, defeating the exact ceiling this column exists to enforce. A small-model
+  -- classify or brief costs a fraction of a cent; stored as integer cents that is 0. The
+  -- money section argues, correctly, that the dangerous user is the one who explores across
+  -- forty cheap turns and never books — and every one of those turns adds nothing here.
+  -- Accumulate micros (bigint) or store token counts and price at read time. If you keep
+  -- cents, round UP, never toward zero: a guardrail must never undercount.
+  -- Related, and worth a sentence in this section: the article describes a per-user daily
+  -- limit and shows `assertUnderDailyLimit(userId)` in the handler, but no code sample
+  -- anywhere WRITES the daily total. Implemented literally, the daily cap reads a table
+  -- nothing populates and therefore does not exist. The check and the increment want to be
+  -- one atomic statement whose RETURNING value is what the gate reads — otherwise the
+  -- per-call check compares against a number that is stale for the whole turn, and a
+  -- twelve-step runaway passes the same stale check twelve times.
   cents         int not null default 0,        -- accumulates across every turn
   updated_at    timestamptz default now()
 );
