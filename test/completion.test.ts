@@ -68,6 +68,38 @@ describeDb('completeTurn', () => {
       expect(msgs).toHaveLength(0)               // no partial write survived
       expect(turn!.spend_usd_micros).toBe('0')
       expect(convo!.spend_usd_micros).toBe('0')
+      expect(convo!.status).toBe('active')        // the conversation-status write never ran either
+    })
+  })
+
+  // The fenced test above throws on the FIRST statement (the fencing UPDATE itself),
+  // so it can't tell a real transaction apart from an unbatched sequence of writes —
+  // an unbatched version would pass it too. Force the failure on a LATER statement
+  // instead: a live, correctly-fenced claim whose userId doesn't match the seeded
+  // conversation's owner. The turns UPDATE (keyed on id/attempts/status only) still
+  // matches and sets status='done', then the messages insert violates the composite
+  // FK (conversation_id, user_id) -> conversations(id, user_id) and throws. Only a
+  // real transaction rolls the turns UPDATE back with it.
+  it('rolls back an earlier write when a later write fails, leaving the turn running', async () => {
+    await withTestDb(async (sql) => {
+      const { c, t } = await seed(sql)
+      const claim = (await claimTurn(sql, t.id))!
+      const mismatched = { ...claim, userId: '22222222-2222-2222-2222-222222222222' }
+
+      await expect(
+        completeTurn(sql, mismatched, {
+          state: EMPTY, agentMessage: 'will not survive', parked: true, spendMicros: 500n,
+        }),
+      ).rejects.toThrow()
+
+      const [turn] = await sql`select status, spend_usd_micros from turns where id = ${t.id}`
+      const msgs = await sql`select * from messages where conversation_id = ${c.id}`
+      const [convo] = await sql`select status from conversations where id = ${c.id}`
+
+      expect(turn!.status).toBe('running')  // fails against an unbatched implementation
+      expect(turn!.spend_usd_micros).toBe('0')
+      expect(msgs).toHaveLength(0)
+      expect(convo!.status).toBe('active')
     })
   })
 })
