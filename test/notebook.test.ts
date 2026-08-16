@@ -35,11 +35,17 @@ describe('applyRequirements', () => {
     expect(rejected).toEqual(['budget'])
   })
 
-  it('lets a tool TIGHTEN a constraint, which is harmless', () => {
+  // Superseded by the coordinator's ruling below: budget is uniquely
+  // sensitive, so a `tool` source is refused for *every* write to it, even
+  // a tightening one that would be harmless for other constraint fields.
+  // (Originally this test asserted the tightening was accepted; see the
+  // maxStops/nights tests further down for that pattern, which still holds
+  // for those fields.)
+  it('REFUSES a tool write to budget even when it would tighten the constraint', () => {
     const { next, rejected } = applyRequirements(base(),
       { budget: { minor: '100000', currency: 'EUR' } }, 'tool')
-    expect(next.budget?.value.minor).toBe(100000n)
-    expect(rejected).toEqual([])
+    expect(next.budget?.value.minor).toBe(150000n)   // unchanged
+    expect(rejected).toEqual(['budget'])
   })
 
   it('refuses a budget in a different currency than the one already set', () => {
@@ -77,5 +83,52 @@ describe('applyRequirements', () => {
       { nights: 10, sneaky: true }, 'user')
     expect(rejected).toEqual(['sneaky'])
     expect(next.nights?.value).toBe(7)   // unchanged — the valid field was NOT applied
+  })
+
+  // A `tool` source may never establish or relax `budget` — not even a
+  // first write on an empty notebook, since a downstream money gate would
+  // validate against a value that originated in attacker-controlled content.
+  it('REFUSES a tool from establishing budget on an empty notebook', () => {
+    const { next, rejected } = applyRequirements(emptyNotebook(),
+      { budget: { minor: '500000', currency: 'EUR' } }, 'tool')
+    expect(next.budget).toBeNull()
+    expect(rejected).toEqual(['budget'])
+  })
+
+  it('lets an inferred source establish budget on an empty notebook', () => {
+    const { next, rejected } = applyRequirements(emptyNotebook(),
+      { budget: { minor: '80000', currency: 'EUR' } }, 'inferred')
+    expect(next.budget?.value.minor).toBe(80000n)
+    expect(next.budget?.source).toBe('inferred')
+    expect(rejected).toEqual([])
+  })
+
+  // maxStops and nights go through the same CONSTRAINT_FIELDS/relaxes()
+  // path as budget's relax-only guard did before the budget-specific rule
+  // above. These prove that path is reachable and correct for both fields.
+  it('REFUSES to let a tool relax maxStops', () => {
+    const withStops = applyRequirements(base(), { maxStops: 1 }, 'user').next
+    const { next, rejected } = applyRequirements(withStops, { maxStops: 2 }, 'tool')
+    expect(next.maxStops?.value).toBe(1)   // unchanged
+    expect(rejected).toEqual(['maxStops'])
+  })
+
+  it('lets a tool tighten maxStops', () => {
+    const withStops = applyRequirements(base(), { maxStops: 1 }, 'user').next
+    const { next, rejected } = applyRequirements(withStops, { maxStops: 0 }, 'tool')
+    expect(next.maxStops?.value).toBe(0)
+    expect(rejected).toEqual([])
+  })
+
+  it('REFUSES to let a tool relax nights', () => {
+    const { next, rejected } = applyRequirements(base(), { nights: 10 }, 'tool')
+    expect(next.nights?.value).toBe(7)   // unchanged
+    expect(rejected).toEqual(['nights'])
+  })
+
+  it('lets a tool tighten nights', () => {
+    const { next, rejected } = applyRequirements(base(), { nights: 5 }, 'tool')
+    expect(next.nights?.value).toBe(5)
+    expect(rejected).toEqual([])
   })
 })

@@ -116,6 +116,18 @@ export function applyRequirements(
         rejected.push(key)          // never coerce currencies
         continue
       }
+      // Money is uniquely sensitive: a `tool` source is refused for every
+      // write to `budget` — a first write on an empty notebook as well as
+      // an update — not just a relaxation of an existing value. A
+      // downstream money gate reads this field directly, so a value that
+      // originated in attacker-controlled content (an injected listing)
+      // must never be able to establish it in the first place. `user` and
+      // `inferred` are unaffected: both may still set or tighten it, and
+      // the general relax-only guard below still applies to `inferred`.
+      if (source === 'tool') {
+        rejected.push(key)
+        continue
+      }
       value = parsedMoney
     }
 
@@ -127,7 +139,7 @@ export function applyRequirements(
       }
     }
 
-    ;(next as never as Record<string, unknown>)[key] = { value, source, at }
+    ;(next as unknown as Record<string, unknown>)[key] = { value, source, at }
   }
 
   return { next, rejected: [...new Set(rejected)] }
