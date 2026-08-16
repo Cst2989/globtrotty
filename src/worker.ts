@@ -1,7 +1,8 @@
 import type postgres from 'postgres'
 import { decideNext, type Limits, type TurnState, type LoopMessage } from './engine.js'
 import {
-  claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, FencedError, type Claim,
+  claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, releaseForContinuation,
+  FencedError, type Claim,
 } from './repo/turns.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
@@ -118,12 +119,33 @@ async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
       pendingUserMessage: null,
     })
 
-    if (decision.kind === 'stop') { await failTurn(sql, claim, decision.reason); return }
-
-    if (decision.kind === 'continue_later') {
-      await saveTurnState(sql, claim, state)     // persist FIRST
-      await deps.reinvoke(claim.turnId)          // then schedule
-      return
+    switch (decision.kind) {
+      case 'stop':
+        await failTurn(sql, claim, decision.reason)
+        return
+      case 'continue_later':
+        // Persist state AND release ownership (status -> 'queued') in one statement,
+        // THEN schedule — see releaseForContinuation's doc comment. Using
+        // saveTurnState here would leave the turn 'running' with a fresh
+        // heartbeat_at, so the re-invocation's own claimTurn could never claim it.
+        await releaseForContinuation(sql, claim, state)
+        await deps.reinvoke(claim.turnId)
+        return
+      case 'park':
+        // decideNext never returns this today (Task 1 ruling — parking isn't wired
+        // up yet). Handled explicitly, rather than silently falling through to
+        // calling the agent, so a later plan that wires this up must replace this
+        // throw with real behavior instead of finding it already "working" by
+        // accident.
+        throw new Error(`worker: 'park' decision is not implemented (message: ${decision.message})`)
+      case 'call_model':
+        break // fall through to invoking the agent below
+      default: {
+        // Exhaustiveness guard for any FUTURE Decision variant: the compiler
+        // rejects this file the moment engine.ts grows a kind not listed above.
+        const unhandled: never = decision
+        throw new Error(`worker: unhandled decision kind ${JSON.stringify(unhandled)}`)
+      }
     }
 
     const step = await withHeartbeat(

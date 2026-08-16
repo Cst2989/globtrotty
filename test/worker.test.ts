@@ -115,6 +115,25 @@ describeDb('runTurn end to end', () => {
     })
   })
 
+  // CRITICAL 2 end to end: continue_later must release ownership (status -> 'queued'),
+  // not just persist state, or the re-invocation's own claimTurn can never claim it.
+  it('leaves a continue_later turn immediately claimable by the re-invocation', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      const deps = workerDeps(sql)
+      deps.deadlineMs = () => Date.now()   // any step blows the deadline -> continue_later
+      await runTurn(deps, r.turnId!)
+
+      expect(deps.reinvoke).toHaveBeenCalledWith(r.turnId)
+
+      const [turn] = await sql<TurnRow[]>`select status from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('queued')
+
+      const reclaimed = await claimTurn(sql, r.turnId!)
+      expect(reclaimed).not.toBeNull()
+    })
+  })
+
   it('stops and records limit_reached when the ceiling is hit mid-turn', async () => {
     await withTestDb(async (sql) => {
       const greedy: Agent = async () => ({

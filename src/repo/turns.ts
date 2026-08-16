@@ -84,6 +84,31 @@ export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> 
 }
 
 /**
+ * The `continue_later` path must persist state AND release ownership in the same
+ * act. `saveTurnState` alone leaves `status = 'running'` with a fresh
+ * `heartbeat_at` — so the re-invocation's own `claimTurn` (which requires
+ * `status = 'queued'`, or a `running` row whose heartbeat has gone stale for
+ * HEARTBEAT_STALE seconds) can satisfy neither condition and returns null. The
+ * continuation would then only ever recover via the sweeper: up to
+ * HEARTBEAT_STALE seconds of staleness plus up to a sweep interval of cron.
+ *
+ * Setting `status = 'queued'` here makes the turn immediately claimable — the
+ * queued arm of `claimTurn`'s WHERE has no staleness requirement at all.
+ */
+export async function releaseForContinuation(
+  sql: postgres.Sql,
+  claim: Claim,
+  state: TurnState,
+): Promise<void> {
+  const rows = await sql`
+    update turns
+       set state = ${sql.json(state)}, status = 'queued', queued_at = now()
+     where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+    returning id`
+  if (rows.length === 0) throw new FencedError(claim.turnId)
+}
+
+/**
  * Ends a turn in a single transaction: state, status, spend, message, and the
  * conversation's status all land together or not at all. Crashing between any
  * two of these writes used to leave a `done` turn with no message and an
