@@ -919,6 +919,38 @@ create table bookings (
 );
 ```
 
+<!-- REVIEW(globetrotty) — this schema has ZERO indexes, and one of the missing ones is
+     load-bearing for an argument the article makes two sections later.
+
+     Postgres does NOT auto-index foreign-key child columns — only primary keys and unique
+     constraints get an index. So every `references` column above is unindexed, and every
+     cascade delete is a sequential scan.
+
+     The one that matters most is the sweeper's. It runs every few minutes and scans `turns`
+     for stale rows; without a partial index on the status/timestamp it uses, that is a
+     sequential scan over a table that only ever grows. That is exactly what makes the
+     "sweeper gets killed mid-run at scale" failure arrive sooner — so the article
+     recommends a sweeper whose own query gets slower as the system gets busier.
+
+     A warning worth including, because I got this wrong myself while implementing: an index
+     on `coalesce(heartbeat_at, queued_at)` does NOT serve a query that compares
+     `heartbeat_at` and `queued_at` separately against different thresholds. Postgres derives
+     a scan key only from a comparison against the indexed EXPRESSION, so the coalesce index
+     silently degrades to a filtered scan. Two partial indexes — one per status arm — are what
+     actually serve it:
+       create index ... on turns (heartbeat_at) where status = 'running';
+       create index ... on turns (queued_at)    where status = 'queued';
+
+     Minimum set to add alongside the DDL: the sweeper's two, conversations(user_id,
+     updated_at) for the sidebar, messages(conversation_id, created_at) for the thread,
+     model_calls(created_at) for the retention delete, and an index on every FK child column.
+
+     Also missing: CHECK constraints on the status/enum columns. `status` is plain `text` with
+     the allowed values only in a `--` comment, so a row written as 'Running' matches neither
+     the claim's `status='queued'` nor the sweeper's `status='running'` and is stranded
+     forever, invisibly. -->
+
+
 The conversation statuses came from the user-visibility section, plus one the audit forced on us: `limit_reached` exists so a conversation that hit its spend ceiling has somewhere honest to live, with words she can act on instead of silence.
 
 The request handler is tier 2, and it does no model work:
