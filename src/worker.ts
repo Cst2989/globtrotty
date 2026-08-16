@@ -1,7 +1,7 @@
 import type postgres from 'postgres'
 import { decideNext, type Limits, type TurnState, type LoopMessage } from './engine.js'
 import {
-  claimTurn, saveTurnState, completeTurn, failTurn, FencedError, type Claim,
+  claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, FencedError, type Claim,
 } from './repo/turns.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
@@ -21,9 +21,19 @@ export type WorkerDeps = {
   now: () => number
   deadlineMs: () => number
   reinvoke: (turnId: string) => Promise<void>
+  /**
+   * How often to emit a liveness heartbeat while a step is in flight. Defaults to
+   * HEARTBEAT_INTERVAL_MS. Tests override this to something short so the behavior
+   * can be observed without a real multi-second wait.
+   */
+  heartbeatIntervalMs?: number
 }
 
 const EST_STEP_MS = 60_000
+// Well under HEARTBEAT_STALE (90s, src/repo/turns.ts) so a real step — a dozen
+// model calls, parallel workers, a 60s Retry-After sleep — keeps refreshing
+// heartbeat_at faster than the sweeper's staleness window can close on it.
+const HEARTBEAT_INTERVAL_MS = 25_000
 const EMPTY: TurnState = { step: 0, messages: [], reviewRounds: 0 }
 
 /** Proves the harness without a model: echoes the last user message back. */
@@ -50,6 +60,34 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // client in a later plan — see progress.md Ruling E.
     await failTurn(sql, claim, 'provider_down').catch(() => {})
     throw err
+  }
+}
+
+/**
+ * Runs `work` while periodically calling heartbeat(sql, claim), so a step that
+ * runs long (a dozen model calls, parallel workers, a 60s Retry-After sleep)
+ * keeps advancing heartbeat_at and is never mistaken by the sweeper for a dead
+ * worker mid-call. If a tick discovers we've been superseded (FencedError), the
+ * error is captured and re-thrown once `work` settles — the loop aborts rather
+ * than continuing to act on a turn it no longer owns. Any other heartbeat
+ * failure is treated as transient and swallowed (the next tick retries), so a
+ * tick can never surface as an unhandled rejection.
+ */
+async function withHeartbeat<T>(
+  sql: postgres.Sql, claim: Claim, intervalMs: number, work: () => Promise<T>,
+): Promise<T> {
+  let fenced: FencedError | null = null
+  const timer = setInterval(() => {
+    heartbeat(sql, claim).catch((err: unknown) => {
+      if (err instanceof FencedError) fenced = err
+    })
+  }, intervalMs)
+  try {
+    const result = await work()
+    if (fenced) throw fenced
+    return result
+  } finally {
+    clearInterval(timer)
   }
 }
 
@@ -88,9 +126,10 @@ async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
       return
     }
 
-    const step = await deps.agent({
-      state, conversationId: claim.conversationId, userId: claim.userId,
-    })
+    const step = await withHeartbeat(
+      sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+      () => deps.agent({ state, conversationId: claim.conversationId, userId: claim.userId }),
+    )
 
     if (step.kind === 'message') {
       await recordSpend(sql, {

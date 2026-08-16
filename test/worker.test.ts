@@ -4,6 +4,7 @@ import { withTestDb, describeDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
 import { runTurn, echoAgent, type Agent, type WorkerDeps } from '../src/worker.js'
 import { claimTurn } from '../src/repo/turns.js'
+import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
@@ -81,6 +82,36 @@ describeDb('runTurn end to end', () => {
       handedOut = false
       await runTurn(workerDeps(sql, agent), r.turnId!)
       expect(sideEffect).toHaveBeenCalledTimes(1)       // NOT twice
+    })
+  })
+
+  // CRITICAL 1: a real step (a dozen model calls, a 60s Retry-After sleep) can run
+  // well past HEARTBEAT_STALE (90s). Nothing advanced heartbeat_at DURING a step —
+  // only saveTurnState, AFTER — so a live worker looked dead to the sweeper mid-call.
+  it('emits a heartbeat while a slow step is still in flight', async () => {
+    await withTestDb(async (sql) => {
+      const heartbeatSpy = vi.spyOn(turnsRepo, 'heartbeat')
+      let ticksSeenDuringStep = -1
+      const slow: Agent = async () => {
+        // Sleep well past several heartbeat intervals so the timer has room to fire
+        // more than once before the step resolves.
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        ticksSeenDuringStep = heartbeatSpy.mock.calls.length
+        return { kind: 'message' as const, text: 'ok', costMicros: 10n }
+      }
+
+      const r = await submit(sql)
+      const deps = workerDeps(sql, slow)
+      deps.heartbeatIntervalMs = 20
+      await runTurn(deps, r.turnId!)
+
+      // Proves the tick fired WHILE the agent call was still in flight, not just
+      // once at the end — the property that did not hold before this fix.
+      expect(ticksSeenDuringStep).toBeGreaterThan(0)
+
+      const [turn] = await sql<{ heartbeat_at: Date }[]>`
+        select heartbeat_at from turns where id = ${r.turnId}`
+      expect(turn!.heartbeat_at).not.toBeNull()
     })
   })
 
