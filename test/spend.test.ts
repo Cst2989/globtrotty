@@ -60,7 +60,16 @@ describeDb('recordSpend', () => {
     })
   })
 
-  it('upserts daily usage rather than losing a concurrent increment', async () => {
+  // NOTE: this does NOT prove concurrency safety. withTestDb opens the pool
+  // with max: 1, and each recordSpend's sql.begin() is shimmed onto that one
+  // already-open connection as a savepoint, so a single physical connection
+  // cannot interleave transactions — postgres.js queues these ten calls and
+  // they execute strictly sequentially. The concurrency guarantee rests on
+  // the single-statement atomic upsert (`on conflict ... do update set
+  // cost_micros = daily_usage.cost_micros + excluded.cost_micros`) in
+  // recordSpend itself, not on this test. This test only proves that
+  // repeated increments accumulate into one row.
+  it('accumulates repeated increments into one daily_usage row', async () => {
     await withTestDb(async (sql) => {
       const [c] = await sql`insert into conversations (user_id) values (${USER}) returning *`
       await Promise.all(
