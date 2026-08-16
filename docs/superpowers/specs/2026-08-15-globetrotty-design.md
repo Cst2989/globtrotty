@@ -53,7 +53,7 @@ Because this is a reference implementation, the fleet stays — the seats *are* 
 | Durable execution | Hand-rolled | It is part 2's content. Netlify Async Workloads is the documented alternative. |
 | Live updates | **Split channel** — streamed prose + gated price artifacts | See §9. v1 refused streaming; that was a false dichotomy. |
 | Flights | **Kiwi MCP** (live, free, unauthenticated) primary; **SerpApi Google Flights** as cross-check | Reversed from v2 now that commission is not the goal. Kiwi's MCP endpoint returns live prices, baggage, and `bookingUrl` deep links with no affiliate parameter and no MAU gate — strictly better data than the cached Travelpayouts feed a commercial build is forced onto. SerpApi is self-serve at $0.01–0.025/search, trivial at one-user volume, and gives a genuine second opinion for the freshness gate. |
-| Hotels | **SerpApi Google Hotels** primary; constructed Booking/Agoda search URLs for hand-off | Also reversed. Hotellook is dead and Agoda MSE is a months-long partner track that exists to license *commission*; for personal use we can read live hotel prices from SerpApi and hand off to a constructed search URL. No contract, no MAU floor, working this week. |
+| Hotels | **SearchApi.io Google Hotels** primary; constructed Booking/Agoda search URLs for hand-off | Also reversed. Hotellook is dead and Agoda MSE is a months-long partner track that exists to license *commission*; for personal use we can read live hotel prices and hand off to a constructed search URL. No contract, no MAU floor. Keyed and verified live 2026-08-16 — SearchApi.io rather than SerpApi, same engine name (`google_hotels`), different vendor and response envelope. |
 | Affiliate adapters | Deferred, behind the same port | If this ever wants commission, Agoda MSE and the Travelpayouts links API slot in behind `Supplier` without touching the agent. Not slice 1. |
 | Models | Driver Opus 5, reviewer Opus 5, cheap Haiku 4.5 (**dated ID**) | Start strongest so a bad output means the idea failed. `effort` set per seat. |
 | Spend posture | $15/user/day, $8/conversation, **plus a global daily ceiling** | Per-user caps behind free magic-link signup are not a spend cap. |
@@ -402,11 +402,16 @@ No business-development track blocks anything. Every source in slice 1 is self-s
 - **`allow_self_transfer` defaults to `true`.** That is Kiwi's virtual interlining: a missed connection is the traveller's problem, not the airline's. `explore_flights` sets it explicitly, and any itinerary relying on it must say so on the card.
 - **The cheapest result is routinely the wrong recommendation.** The €628 Berlin→Faro option returns `checkedBag: 0` for two adults and an infant flying for a week. Baggage counts are carried into the notebook comparison and rendered on the card; a budget-matching agent without them confidently recommends the worse trip.
 
+**Also verified 2026-08-16 (probed live):**
+
+- **`response.model` echoes the alias verbatim.** A request for `claude-opus-5` returns `"model": "claude-opus-5"` — not a resolved dated version. **§7's drift mitigation by string comparison detects nothing**, and every `model_calls` row reads identically before and after a weights change. The behavioural canary is therefore not optional, it is the only mechanism: pin `model_config_id` to a dated ID where one exists, and detect drift on aliased seats by periodically replaying a fixed prompt set and alarming on output distribution, never on the returned string. Part 2's drift paragraph is annotated accordingly.
+- **SearchApi.io Google Hotels is keyed and live.** 20 Faro properties in 1.5s. Each carries `property_token` (stable, so `quote()` is implementable the same way Kiwi's is), `total_price` **and** `price_before_taxes`, `gps_coordinates`, `rating`, and an `offers[]` array naming the booking source. The pre-tax/total split is a gate surface in its own right: a supplier that quotes pre-tax and a notebook budget that means all-in disagree silently unless `checkTotals` reads the same field the card renders.
+- **Kiwi returns `price` as a JSON float** (`454.0`) and leg times as **naive local ISO with no offset** (`2026-09-12T16:40:00`). Both are adapter-boundary hazards: the float must be rounded into `bigint` minor units exactly once, and a naive timestamp parsed as UTC silently shifts every date-window check.
+
 **Still to verify:**
-1. **`response.model` on an aliased model.** No Anthropic credential is configured in this environment yet (`ANTHROPIC_API_KEY` unset, no `ant` CLI). One call once the key exists, and it decides whether §7's drift mitigation is real or whether we build the behavioural canary — and whether a paragraph of part 2 needs rewriting.
-2. **`bookingUrl` lifetime** — how long a `kiwi.com/u/…` short link stays valid, which bounds the acceptable gap between proposal and hand-off.
-3. **Kiwi's terms on programmatic use.** The endpoint is open; that is not the same as sanctioned. Worth reading before this is demoed publicly.
-4. **Hotels have no free live source.** SerpApi Google Hotels needs a paid key (~$0.01–0.025/search, trivial at one-user volume); confirm coverage and note the ongoing Google litigation, whose legal shield applies only from the $150/mo tier. Until a key exists, hotels run on `MockSupplier` and the flight half of the product is fully real.
+1. **`bookingUrl` lifetime** — how long a `kiwi.com/u/…` short link stays valid, which bounds the acceptable gap between proposal and hand-off.
+2. **Kiwi's terms on programmatic use.** The endpoint is open; that is not the same as sanctioned. Worth reading before this is demoed publicly.
+3. **SearchApi.io coverage and the Google litigation shield**, whose protection applies only from the higher-priced tiers. Immaterial at one user; recorded because it is the kind of thing that changes when the audience does.
 
 **Accepted risks, recorded deliberately:**
 

@@ -200,18 +200,26 @@ That `model` column comes with a warning comment for a reason. A string like `cl
      2. But it IS true for the cheap seat: `claude-haiku-4-5-20251001` is a real dated ID.
         So the correct rule is "pin where a dated snapshot exists, alias where it doesn't",
         not a blanket instruction.
-     3. VERIFY BEFORE REWRITING: if `response.model` simply echoes the alias for an aliased
-        model, then "recording the resolved version" records `claude-opus-5` on every row —
-        exactly the identical-strings hole this paragraph warns about, kept in form while
-        losing its function. That would be worse than admitting the gap, because it stops
-        anyone from looking for a detector that works.
+     3. CONFIRMED AGAINST THE LIVE API (2026-08-16) — this was filed as "verify before
+        rewriting" and the verification has now run. A request for `claude-opus-5` returns
+        `"model": "claude-opus-5"`. The alias is echoed back verbatim; no dated version is
+        resolved. So "record the resolved version per call" writes `claude-opus-5` onto every
+        row, before a weights swap and after it — the paragraph below prescribes a mitigation
+        and then, for the frontier seats, describes its own failure mode without noticing.
+        The sentence "the comparison that would have caught the change compares two identical
+        strings" is not the hazard being warned against; it is what this advice PRODUCES.
 
-     If (3) confirms, the honest replacement is a behavioural detector rather than a string
-     one: a scheduled golden-prompt canary (fixed prompt, fixed params, nightly, output
-     fingerprinted and diffed) plus the part 3 fixed cases scored on a schedule. Also record
-     the request SHAPE (effort, thinking mode, max_tokens) — a silent provider-side change to
-     a default is now as likely a drift vector as a weights swap, and undetectable against an
-     uncontrolled comparison. -->
+     The honest replacement is a behavioural detector, not a string one: a scheduled
+     golden-prompt canary (fixed prompt, fixed params, nightly, output fingerprinted and
+     diffed) plus the part 3 fixed cases scored on a schedule. Also record the request SHAPE
+     (effort, thinking mode, max_tokens) — a silent provider-side change to a default is now
+     as likely a drift vector as a weights swap, and undetectable against an uncontrolled
+     comparison.
+
+     Suggested rewrite of the paragraph below: keep the diagnosis, drop the prescription.
+     "Pin where a dated snapshot exists, and accept that for aliased models you cannot detect
+     drift by comparison at all — the API will hand back the string you sent it. There, the
+     detector has to be behavioural." -->
 
 Pinning a dated version and recording the resolved version per call closes the hole. The recording half matters as much as the pinning half, because a system that writes the alias into its traces has turned off the one mechanism it built to notice drift: every row says `claude-opus-5` before the swap and after it. Hence, the comparison that would have caught the change compares two identical strings.
 

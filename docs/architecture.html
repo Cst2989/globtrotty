@@ -1,0 +1,607 @@
+<title>Globetrotty Harness</title>
+<style>
+  :root {
+    --ground:#F5F6F8; --surface:#FFFFFF; --sunk:#EDEFF3;
+    --fg:#131922; --fg-muted:#5A6472; --fg-faint:#8A93A0;
+    --rule:#DCE1E7; --rule-soft:#E8EBEF;
+    --accent:#A9660F; --accent-bright:#B5701A; --accent-soft:#F6E7D0;
+    --ok:#2C7554; --ok-soft:#DDEDE4;
+    --off:#79838F; --off-soft:#E6E9ED;
+    --shadow:0 1px 2px rgba(16,24,36,.05), 0 8px 24px -16px rgba(16,24,36,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0E141C; --surface:#141C26; --sunk:#1A232F;
+      --fg:#DDE4ED; --fg-muted:#8E9AAA; --fg-faint:#6C7686;
+      --rule:#26313E; --rule-soft:#1D2733;
+      --accent:#E9A544; --accent-bright:#F2B45C; --accent-soft:#3A2C15;
+      --ok:#4FAE81; --ok-soft:#17301F;
+      --off:#6C7686; --off-soft:#1E2733;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0E141C; --surface:#141C26; --sunk:#1A232F;
+    --fg:#DDE4ED; --fg-muted:#8E9AAA; --fg-faint:#6C7686;
+    --rule:#26313E; --rule-soft:#1D2733;
+    --accent:#E9A544; --accent-bright:#F2B45C; --accent-soft:#3A2C15;
+    --ok:#4FAE81; --ok-soft:#17301F;
+    --off:#6C7686; --off-soft:#1E2733;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+  }
+
+  :root {
+    --serif: ui-serif, "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin:0; background:var(--ground); color:var(--fg);
+    font-family: var(--sans);
+    font-size:16.5px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .page { max-width:1140px; margin:0 auto; padding:0 clamp(1.25rem,4vw,3rem) 6rem; }
+
+  /* ── two-column ledger grid: mono gutter + reading column ───────────── */
+  .row { display:grid; grid-template-columns:7.5rem minmax(0,68ch); gap:0 2.5rem; }
+  @media (max-width:900px) { .row { grid-template-columns:minmax(0,1fr); gap:0; } }
+
+  .mark {
+    font-family: var(--mono);
+    font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--fg-faint); padding-top:.55rem; text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+  @media (max-width:900px) { .mark { text-align:left; padding-top:0; margin-bottom:.4rem; } }
+
+  .col > * + * { margin-top:1.05rem; }
+
+  /* ── masthead ───────────────────────────────────────────────────────── */
+  header.masthead { padding:clamp(3.5rem,9vw,6rem) 0 2.5rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size:.72rem; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size:clamp(2.4rem,5.5vw,3.6rem); line-height:1.08; font-weight:600;
+    letter-spacing:-.015em; margin:0; text-wrap:balance; max-width:20ch;
+  }
+  .standfirst {
+    font-size:1.16rem; line-height:1.6; color:var(--fg-muted);
+    max-width:62ch; margin:1.4rem 0 0;
+  }
+  .meta {
+    display:flex; flex-wrap:wrap; gap:.4rem 1.5rem; margin-top:2.2rem;
+    padding-top:1.3rem; border-top:1px solid var(--rule);
+    font-family: var(--mono);
+    font-size:.76rem; color:var(--fg-faint); font-variant-numeric:tabular-nums;
+  }
+  .meta b { color:var(--fg-muted); font-weight:500; }
+
+  /* ── sections ───────────────────────────────────────────────────────── */
+  section { padding-top:3.4rem; }
+  h2 {
+    font-family: var(--serif);
+    font-size:1.75rem; line-height:1.25; font-weight:600; letter-spacing:-.01em;
+    margin:0 0 .3rem; text-wrap:balance;
+  }
+  h3 {
+    font-size:.98rem; font-weight:650; margin:2.1rem 0 -.35rem;
+    letter-spacing:-.005em;
+  }
+  p { margin:0; }
+  .col p + p { margin-top:1.05rem; }
+  a { color:var(--accent); text-decoration:underline; text-underline-offset:2px;
+      text-decoration-thickness:1px; text-decoration-color:color-mix(in srgb,var(--accent) 40%,transparent); }
+  a:hover { text-decoration-color:var(--accent); }
+  a:focus-visible, summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:2px; }
+  strong { font-weight:650; }
+  code {
+    font-family: var(--mono);
+    font-size:.855em; background:var(--sunk); padding:.12em .38em;
+    border-radius:3px; border:1px solid var(--rule-soft);
+  }
+
+  /* ── status table ───────────────────────────────────────────────────── */
+  .wide { grid-column:1/-1; }
+  @media (min-width:901px) { .bleed { max-width:none; } }
+  .scroll { overflow-x:auto; margin-top:1.5rem; }
+  table { border-collapse:collapse; width:100%; min-width:660px; font-size:.9rem; }
+  th {
+    text-align:left; font-family: var(--mono);
+    font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--fg-faint); font-weight:500; padding:0 1rem .6rem 0;
+    border-bottom:1px solid var(--rule);
+  }
+  td { padding:.72rem 1rem .72rem 0; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+  td:first-child { font-weight:600; white-space:nowrap; }
+  td.desc { color:var(--fg-muted); font-size:.875rem; line-height:1.5; }
+  tr:last-child td { border-bottom:none; }
+
+  .chip {
+    display:inline-block; font-family: var(--mono);
+    font-size:.66rem; letter-spacing:.07em; text-transform:uppercase; font-weight:500;
+    padding:.22em .55em; border-radius:3px; white-space:nowrap;
+  }
+  .chip.on  { background:var(--ok-soft);  color:var(--ok);  }
+  .chip.mid { background:var(--accent-soft); color:var(--accent); }
+  .chip.off { background:var(--off-soft); color:var(--off); }
+
+  /* ── pipeline diagram ───────────────────────────────────────────────── */
+  .pipe { display:flex; gap:.65rem; align-items:stretch; min-width:720px; }
+  .node {
+    flex:1; background:var(--surface); border:1px solid var(--rule);
+    border-radius:5px; padding:.9rem 1rem 1rem; box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:.35rem;
+  }
+  .node .tier {
+    font-family: var(--mono);
+    font-size:.64rem; letter-spacing:.11em; text-transform:uppercase; color:var(--accent);
+  }
+  .node .name { font-weight:650; font-size:.92rem; line-height:1.3; }
+  .node .budget {
+    font-family: var(--mono);
+    font-size:.72rem; color:var(--fg-faint); font-variant-numeric:tabular-nums;
+  }
+  .node .what { font-size:.82rem; color:var(--fg-muted); line-height:1.45; margin-top:.15rem; }
+  .arrow {
+    align-self:center; color:var(--fg-faint); font-size:1.1rem; flex:0 0 auto;
+    font-family: ui-monospace, monospace;
+  }
+  .loopback {
+    min-width:720px; margin-top:.55rem; padding:.5rem .9rem;
+    border-left:2px solid var(--accent); background:var(--accent-soft);
+    border-radius:0 4px 4px 0;
+    font-size:.82rem; color:var(--fg); line-height:1.45;
+  }
+  .loopback b { font-weight:650; }
+
+  /* ── guarantee list ─────────────────────────────────────────────────── */
+  .guarantees { list-style:none; padding:0; margin:1.5rem 0 0; display:grid; gap:1.15rem; }
+  .guarantees li {
+    display:grid; grid-template-columns:1.9rem minmax(0,1fr); gap:0 .85rem;
+    padding-bottom:1.15rem; border-bottom:1px solid var(--rule-soft);
+  }
+  .guarantees li:last-child { border-bottom:none; padding-bottom:0; }
+  .g-num {
+    font-family: var(--mono);
+    font-size:.78rem; color:var(--accent); font-variant-numeric:tabular-nums;
+    padding-top:.16rem;
+  }
+  .g-body .claim { font-weight:650; display:block; margin-bottom:.28rem; }
+  .g-body .mech { color:var(--fg-muted); font-size:.92rem; line-height:1.55; }
+
+  /* ── callout ────────────────────────────────────────────────────────── */
+  .callout {
+    background:var(--surface); border:1px solid var(--rule); border-left:3px solid var(--accent);
+    border-radius:0 5px 5px 0; padding:1.05rem 1.25rem; box-shadow:var(--shadow);
+  }
+  .callout .lede {
+    font-family: var(--mono);
+    font-size:.67rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--accent); display:block; margin-bottom:.45rem;
+  }
+  .callout p { font-size:.93rem; line-height:1.6; }
+  .callout p + p { margin-top:.7rem; }
+
+  pre {
+    background:var(--sunk); border:1px solid var(--rule-soft); border-radius:5px;
+    padding:.95rem 1.1rem; overflow-x:auto; margin:0;
+    font-family: var(--mono);
+    font-size:.82rem; line-height:1.65;
+  }
+  pre code { background:none; border:none; padding:0; font-size:inherit; }
+  pre .c { color:var(--fg-faint); }
+
+  /* ── file map ───────────────────────────────────────────────────────── */
+  .files { display:grid; gap:.05rem; margin-top:1.4rem; }
+  .file {
+    display:grid; grid-template-columns:13rem minmax(0,1fr); gap:0 1.25rem;
+    padding:.6rem 0; border-bottom:1px solid var(--rule-soft); align-items:baseline;
+  }
+  .file:last-child { border-bottom:none; }
+  .file code { background:none; border:none; padding:0; color:var(--fg); font-weight:500; font-size:.83rem; }
+  .file span { color:var(--fg-muted); font-size:.875rem; line-height:1.5; }
+  @media (max-width:640px) { .file { grid-template-columns:minmax(0,1fr); gap:.15rem; } }
+
+  footer {
+    margin-top:5rem; padding-top:1.5rem; border-top:1px solid var(--rule);
+    font-family: var(--mono);
+    font-size:.74rem; color:var(--fg-faint); line-height:1.7;
+  }
+  @media (prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="row">
+      <div class="mark"></div>
+      <div class="col">
+        <p class="eyebrow">Globetrotty · Implementation record</p>
+        <h1>A travel agent that survives being killed</h1>
+        <p class="standfirst">
+          The foundation is built and running against a live database: a durable-execution
+          harness that can lose power mid-booking, get double-invoked, or have two workers
+          fight over the same turn, and still do exactly the right thing once. No model is
+          wired in yet. This is the layer everything else stands on.
+        </p>
+        <div class="meta">
+          <span><b>Status</b> Foundation merged</span>
+          <span><b>Tests</b> 102 passing / 12 files</span>
+          <span><b>Runtime</b> TypeScript · Postgres 17 · Netlify</span>
+          <span><b>Updated</b> 16 Aug 2026</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Status</div>
+      <div class="col">
+        <h2>What exists today</h2>
+        <p>
+          Honest summary first, because the interesting part of this project is not yet the
+          part people expect. There is no chat interface and no model call. What there is, is
+          the machinery that makes a chat interface safe to build: a request tier that never
+          blocks, a worker that can be killed at any instruction, and a sweeper that finds
+          whatever got dropped.
+        </p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="mark"></div>
+      <div class="col wide scroll">
+        <table>
+          <thead>
+            <tr><th>Component</th><th>State</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Durable turns</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Claim, heartbeat, fence, resume, complete. A turn is a database row, not a process.</td>
+            </tr>
+            <tr>
+              <td>Sweeper</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Requeues abandoned work; reaps turns that have crashed too many times to be worth retrying.</td>
+            </tr>
+            <tr>
+              <td>Spend ledger</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Per-conversation and per-day ceilings, metered before every call, read fail-closed.</td>
+            </tr>
+            <tr>
+              <td>Money type</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Branded integer minor units with currency. Floats cannot represent a price in this codebase.</td>
+            </tr>
+            <tr>
+              <td>Notebook</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Requirements store with per-field provenance. A tool result can never write the budget.</td>
+            </tr>
+            <tr>
+              <td>Decision engine</td><td><span class="chip on">Built</span></td>
+              <td class="desc">Pure function deciding call / continue / park / stop. Every limit is tested without a database.</td>
+            </tr>
+            <tr>
+              <td>Flight supplier</td><td><span class="chip mid">Verified, not wired</span></td>
+              <td class="desc">Kiwi's MCP endpoint answers live and returns stable itinerary ids. No adapter yet.</td>
+            </tr>
+            <tr>
+              <td>Hotel supplier</td><td><span class="chip mid">Verified, not wired</span></td>
+              <td class="desc">SearchApi returns stable property tokens, totals, and pre-tax prices. Key is in place.</td>
+            </tr>
+            <tr>
+              <td>Gates</td><td><span class="chip off">Next</span></td>
+              <td class="desc">Provenance, freshness, currency, totals, budget, dates — the checks that make an offer trustworthy.</td>
+            </tr>
+            <tr>
+              <td>Agent fleet</td><td><span class="chip off">Planned</span></td>
+              <td class="desc">Front desk, planner, scouts, reviewer, cashier. Where the model finally appears.</td>
+            </tr>
+            <tr>
+              <td>Chat interface</td><td><span class="chip off">Planned</span></td>
+              <td class="desc">Sidebar of trips, proposal cards, accept and reject per component.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Shape</div>
+      <div class="col">
+        <h2>Four tiers, because the platform has four budgets</h2>
+        <p>
+          The architecture is not a preference. Netlify gives a synchronous request about ten
+          seconds, a background function fifteen minutes, and a scheduled function thirty.
+          A travel search that fans out across suppliers and reviews its own work does not fit
+          in ten seconds, so the work has to leave the request. Once it leaves, it has to be
+          recoverable — which is the entire reason the rest of this document exists.
+        </p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="mark"></div>
+      <div class="col wide scroll">
+        <div class="pipe">
+          <div class="node">
+            <span class="tier">Tier 1</span>
+            <span class="name">Browser</span>
+            <span class="budget">—</span>
+            <span class="what">Posts a message. Subscribes to the conversation and watches rows change.</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="node">
+            <span class="tier">Tier 2</span>
+            <span class="name">Request handler</span>
+            <span class="budget">~10 s</span>
+            <span class="what">Checks spend, writes the message, opens one turn, returns. Does no model work at all.</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="node">
+            <span class="tier">Tier 3</span>
+            <span class="name">Background worker</span>
+            <span class="budget">15 min</span>
+            <span class="what">Claims the turn, runs the loop, heartbeats while it thinks, saves state after every step.</span>
+          </div>
+          <span class="arrow">→</span>
+          <div class="node">
+            <span class="tier">Tier 4</span>
+            <span class="name">Sweeper</span>
+            <span class="budget">30 s</span>
+            <span class="what">Runs on a schedule. Finds turns nobody is working on and puts them back in the queue.</span>
+          </div>
+        </div>
+        <div class="loopback">
+          <b>The loop back is the point.</b> The sweeper does not report failures — it repairs
+          them. A turn whose worker died is indistinguishable from a turn whose worker is slow,
+          so the only honest test is silence: ninety seconds without a heartbeat and the turn is
+          fair game again. Everything else in the harness exists to make that reclaim safe.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Guarantees</div>
+      <div class="col">
+        <h2>What the harness actually promises</h2>
+        <p>
+          Five properties, each with a mechanism rather than an intention. All five are covered
+          by tests, and all five are demonstrable in one command against the real database.
+        </p>
+
+        <ol class="guarantees">
+          <li>
+            <span class="g-num">01</span>
+            <div class="g-body">
+              <span class="claim">Pressing send fifty times buys one turn.</span>
+              <span class="mech">
+                A partial unique index allows exactly one turn per conversation in
+                <code>queued</code> or <code>running</code>. A retried request with the same
+                idempotency key reads back the turn it already created; a genuinely new message
+                arriving mid-flight is stored for the running turn to pick up, never dropped.
+              </span>
+            </div>
+          </li>
+          <li>
+            <span class="g-num">02</span>
+            <div class="g-body">
+              <span class="claim">Two workers cannot both write.</span>
+              <span class="mech">
+                Claiming increments <code>attempts</code>, and every subsequent write carries
+                that number in its <code>WHERE</code>. A worker that was superseded while it was
+                thinking updates zero rows and raises rather than silently doing nothing — the
+                fencing token is the attempt counter itself, so there is no second thing to keep
+                in sync.
+              </span>
+            </div>
+          </li>
+          <li>
+            <span class="g-num">03</span>
+            <div class="g-body">
+              <span class="claim">A tool with side effects runs once across a crash.</span>
+              <span class="mech">
+                Intent is written before the effect. On resume, a finished call replays its
+                stored result and a call that died mid-effect is reported as <em>ambiguous</em> —
+                escalated rather than guessed, because nothing can tell you whether the email
+                went out.
+              </span>
+            </div>
+          </li>
+          <li>
+            <span class="g-num">04</span>
+            <div class="g-body">
+              <span class="claim">The spend ceiling fails closed.</span>
+              <span class="mech">
+                The usage read throws rather than returning zero when the database cannot
+                confirm the number. A <code>?? 0</code> there would disable the guardrail at the
+                exact moment it is most needed. Ceilings are checked before every call, not once
+                per turn.
+              </span>
+            </div>
+          </li>
+          <li>
+            <span class="g-num">05</span>
+            <div class="g-body">
+              <span class="claim">A turn cannot end half-written.</span>
+              <span class="mech">
+                Finishing a turn writes its state, status, spend, the agent's message, and the
+                conversation's status in one transaction. The earlier version wrote them
+                separately, which left <code>done</code> turns with no message and conversations
+                stuck on <em>working</em> forever — the sweeper only rescues live turns, so
+                nothing would ever have found them.
+              </span>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Run it</div>
+      <div class="col">
+        <h2>Seeing it work</h2>
+        <p>
+          The demo is narrated and runs against the live Supabase instance. It kills a turn
+          mid-tool-call, waits for the sweeper, resumes it on a fresh worker, and counts side
+          effects to prove the tool ran exactly once. Then it stages two workers against one turn
+          and shows the loser's write being rejected.
+        </p>
+        <pre><code>npm test        <span class="c"># 102 tests, 12 files</span>
+npm run demo    <span class="c"># narrated tour against the real database</span>
+npm run typecheck</code></pre>
+        <p>
+          Everything the demo writes is scoped to one fixed user id and deleted at both ends, so
+          it is safe to run repeatedly.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Code</div>
+      <div class="col">
+        <h2>Where things live</h2>
+        <div class="files">
+          <div class="file"><code>src/engine.ts</code><span>Pure decision function. Precedence: conversation ceiling, then daily, then step cap, then deadline.</span></div>
+          <div class="file"><code>src/handler.ts</code><span>Tier 2. Spend check, message, one turn, return. Durable before scheduled.</span></div>
+          <div class="file"><code>src/worker.ts</code><span>Tier 3. The loop, the heartbeat, the tool-call ledger.</span></div>
+          <div class="file"><code>src/sweeper.ts</code><span>Tier 4. Batched reclaim under <code>skip locked</code>, plus the crash-loop reaper.</span></div>
+          <div class="file"><code>src/repo/turns.ts</code><span>Claim, fence, save, release, complete, fail. Every writer verifies its own effect.</span></div>
+          <div class="file"><code>src/repo/spend.ts</code><span>The only writer of conversation and daily spend. Atomic upsert, no read-then-write.</span></div>
+          <div class="file"><code>src/repo/toolCalls.ts</code><span>Intent before effect. Fresh, replayed, or ambiguous.</span></div>
+          <div class="file"><code>src/money.ts</code><span>Branded <code>bigint</code> minor units. Currency mismatches are a type error, not a rounding error.</span></div>
+          <div class="file"><code>src/notebook.ts</code><span>Requirements with per-field provenance. A <code>tool</code> source may never write <code>budget</code>.</span></div>
+          <div class="file"><code>supabase/migrations/</code><span>Nine tables, the sweeper's indexes, and a lockdown migration that revokes anon access.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Findings</div>
+      <div class="col">
+        <h2>What the reviews changed</h2>
+        <p>
+          The foundation was built task by task, each one implemented by a fresh agent and
+          reviewed by another, then reviewed once more across the whole branch. That last review
+          is the one that earned its keep.
+        </p>
+
+        <div class="callout">
+          <span class="lede">Three defects only a whole-branch review could see</span>
+          <p>
+            Every per-task review passed. The seams between tasks did not. The heartbeat was
+            never actually emitted during a step; the continuation path saved state without
+            releasing ownership, so a resumed turn could never claim itself; and a failure path
+            left the attempt counter somewhere no reaper would look.
+          </p>
+          <p>
+            All three were invisible under the echo agent used for testing, because nothing it
+            did took long enough to matter. They would have surfaced the first time a real model
+            call ran past ninety seconds.
+          </p>
+        </div>
+
+        <h3>A recurring pattern worth naming</h3>
+        <p>
+          Across twelve tasks, the implementations were almost always right and the tests were
+          the weak point. Four separate findings were tests that would have passed against a
+          wrong implementation: an unpinned precedence order, a fenced test that short-circuited
+          on its first statement, a concurrency test quietly serialised by a connection limit,
+          and a guard that needed tracing before anyone could confirm it discriminated at all.
+        </p>
+
+        <h3>Sixteen notes back into the articles</h3>
+        <p>
+          Building the harness from the source articles surfaced defects in the articles
+          themselves. Those are recorded in place as HTML comments — invisible when rendered,
+          greppable with <code>grep -rn "REVIEW(globetrotty)" docs/</code>. Thirteen are in part
+          two.
+        </p>
+        <p>
+          The heaviest one: the provenance check validates identity but never values. A model can
+          cite a real hotel with a real source id and attach a price it invented; provenance
+          passes, and the budget check then dutifully validates the invented number. The second:
+          the drift-detection advice compares <code>response.model</code> against what was
+          requested — but for an aliased model the API echoes the alias back verbatim, confirmed
+          against the live endpoint, so every trace row reads identically before and after a
+          weights change.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="row">
+      <div class="mark">Next</div>
+      <div class="col">
+        <h2>What comes next</h2>
+        <p>
+          Three plans remain, in order. Each produces something testable on its own.
+        </p>
+
+        <h3>Suppliers and gates</h3>
+        <p>
+          A supplier port with a mock behind it, the Kiwi adapter for flights, and the gate stack:
+          rehydration, freshness, currency, totals, budget, dates. Both live sources are now
+          verified and keyed, and the pre-tax-versus-total split that SearchApi returns is exactly
+          the seam a totals gate exists to catch. This plan also implements the global daily
+          ceiling, which the foundation defines but deliberately leaves unenforced.
+        </p>
+
+        <h3>The fleet</h3>
+        <p>
+          Front desk, planning loop, scouts, reviewer, cashier — and the first real model call.
+          Two changes to the harness are required here and already recorded: the agent step must
+          run inside the heartbeat wrapper, and the agent type needs an abort signal. Both are
+          unreachable under an echo agent and both become live the moment a frontier model or a
+          supplier sweep runs past ninety seconds.
+        </p>
+
+        <h3>The interface</h3>
+        <p>
+          The chat itself: a sidebar of trips named after their destination, proposal cards with
+          per-component accept and reject, a split channel so the agent's progress is visible
+          while it works. Plus row-level security policies with a two-user isolation test, since
+          the lockdown migration currently revokes access rather than scoping it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="row">
+      <div class="mark"></div>
+      <div class="col">
+        Globetrotty · foundation merged 16 Aug 2026 · 42 files, 4,539 insertions<br>
+        Derived from the four-part series in <code>docs/</code> — architecture, harness, evals, self-improving loop.
+      </div>
+    </div>
+  </footer>
+
+</div>

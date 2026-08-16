@@ -1,21 +1,22 @@
 {
-	"name": "globetrotty",
-	"version": "0.0.0",
-	"type": "module",
-	"scripts": {
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"typecheck": "tsc --noEmit"
-	},
-	"devDependencies": {
-		"@types/node": "^26.2.0",
-		"dotenv": "^17.4.2",
-		"tsx": "^4.23.12",
-		"typescript": "^7.0.2",
-		"vitest": "^4.1.10"
-	},
-	"dependencies": {
-		"postgres": "^3.4.9",
-		"zod": "^4.4.3"
-	}
+  "name": "globetrotty",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
+  }
 }

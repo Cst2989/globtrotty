@@ -100,6 +100,28 @@ One honest trap in this consumer, because it costs quality exactly where users n
 
 **Judge calibration, continuously.** Part 3 calibrated the judges against 100 of her decisions once. The loop makes it a standing job: agreement between judge verdicts and user decisions, recomputed monthly, charted. A judge drifting away from users is measuring something users stopped caring about, and the chart says so before the judge quietly reshapes the product.
 
+<!-- REVIEW(globetrotty) — "ships behind part 2's canary" is a forward reference to something
+     part 2 never builds. Part 2's drift section builds a STRING COMPARISON (`response.model`
+     against the requested ID), not a canary; and confirmed live on 2026-08-16, that
+     comparison cannot fire for aliased models, because the API echoes the alias back
+     verbatim. So this sentence rests on a mechanism that is absent in the cited part and
+     inoperative in the form it does take.
+
+     Two separate things are being conflated under one word, and the series would be clearer
+     if it separated them:
+       - a RELEASE canary — ship a prompt edit to a fraction of traffic, compare outcomes,
+         roll back on regression. This is what THIS paragraph actually needs, and nothing in
+         parts 1–3 builds it.
+       - a DRIFT canary — replay a fixed prompt set on a schedule and fingerprint the output,
+         to notice the provider changing weights under you. This is what part 2 needs and
+         doesn't have.
+
+     They share a name and almost no machinery: one is a traffic split with a rollback, the
+     other is a scheduled replay with a diff. Suggested fix: build the release canary here in
+     part 4 where it belongs, build the drift canary in part 2, and make each cross-reference
+     name which one it means. As written, part 4 borrows from part 2 and part 3 line ~188
+     borrows from part 2, and the thing all three borrow was never built. -->
+
 **And prompt changes, gated the long way around.** The loop's biggest outputs are hypotheses: the layover keeps getting killed, so the desk prompt should weigh layovers against party composition. A hypothesis becomes a prompt edit, the edit runs the part 3 suite, ships behind part 2's canary, and gets judged by conversion, which closes the circle: users generate the signal, the signal changes the prompt, the users grade the change.
 
 ## The cadence

@@ -185,6 +185,24 @@ The suite splits by cost, because we can't run everything everywhere.
 
 **Nightly:** all golden trips times 3 runs, the trajectory checks over the day's production traces, and the judges over a sample of the day's proposals. This is where flakiness and drift show up as trends instead of incidents.
 
+<!-- REVIEW(globetrotty) — this sentence inherits a defect from what it cites. Part 2's drift
+     section prescribes detecting a model change by comparing `response.model` against the
+     requested ID; confirmed against the live API on 2026-08-16, an aliased model echoes the
+     alias back verbatim, so that comparison can never fire for the frontier seats. See the
+     REVIEW note at part 2's drift paragraph.
+
+     The dependency runs the wrong way here, and fixing part 2 does not fix this line. "Before
+     a model migration" assumes you KNOW a migration is happening — which is true for a
+     migration you perform deliberately, and false for the case part 2's section exists to
+     catch, where the provider moves the weights under a stable alias and nobody schedules
+     anything. This suite is the right instrument; the trigger is what's missing.
+
+     Suggested rewrite: make it a SCHEDULE, not an event. Run the shadow suite on a fixed
+     cadence against the aliased seats regardless of whether anyone announced a migration, and
+     alarm on the score moving rather than on the version string changing. That turns this
+     paragraph into the behavioural detector part 2 needs and currently lacks — which is also
+     what part 4 line ~103 already assumes exists. -->
+
 **Before a model migration:** the full suite on the new model, shadowed against the old, exactly the machinery from part 2's drift section. The new model needs a number to beat, and this suite is the number.
 
 One honesty rule for all of it: every pass rate carries its denominator. "92% pass" means nothing if traces dropped silently, which is why part 2 made silent drops impossible: a missing trace is distinguishable from a dropped one, so the denominator is real.
