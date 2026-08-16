@@ -56,27 +56,44 @@ export async function submitMessage(
 ): Promise<SubmitResult> {
   const { sql, limits } = deps
 
+  // Conversation creation stays here, ahead of the spend check, even though a
+  // capped-and-brand-new request creates a conversation it then immediately
+  // marks 'limit_reached'. Moving creation below the check was considered and
+  // rejected: `messages.conversation_id` is NOT NULL with a composite FK to
+  // conversations(id, user_id), so a message cannot be attached to a
+  // conversation that does not yet exist — and dropping her first message
+  // instead (to avoid creating the conversation) would contradict the
+  // preservation guarantee below, which this project has already ruled is the
+  // worse failure. With the fix below, the created conversation is never
+  // actually empty in the sidebar: it holds her message, correctly marked
+  // 'limit_reached' instead of looking like inert clutter.
   const conversationId = input.conversationId ?? (
     await sql`insert into conversations (user_id) values (${input.userId}) returning id`
   )[0]!.id as string
 
   // Fail closed: this throws rather than returning zero when it cannot confirm.
+  // Deliberately BEFORE any message or turn is written — a database hiccup here
+  // must deny the request outright, not write a message on top of an unconfirmed
+  // spend state.
   const spend = await readSpendFailClosed(sql, input.userId, conversationId)
+
+  // Recorded regardless of what happens next, INCLUDING when the ceiling below
+  // stops the turn before it starts. An in-flight turn (the `busy` path below)
+  // can pick this message up as its next pending user message — see
+  // `DecideInput.pendingUserMessage` in engine.ts, which exists for exactly
+  // this "she typed again while the agent was still working" case. Dropping
+  // the message on `busy` OR `limit_reached` would be the worse failure in
+  // both cases: it discards something she typed instead of just delaying who
+  // reads it, or telling her she's capped without keeping her words.
+  await sql`insert into messages (conversation_id, user_id, role, content)
+            values (${conversationId}, ${input.userId}, 'user', ${input.message})`
+
   if (spend.dailyMicros >= limits.dailyCeilingMicros ||
       spend.conversationMicros >= limits.conversationCeilingMicros) {
     await sql`update conversations set status = 'limit_reached', updated_at = now()
                where id = ${conversationId} and user_id = ${input.userId}`
     return { conversationId, turnId: null, status: 'limit_reached' }
   }
-
-  // Recorded regardless of what happens next: an in-flight turn (the `busy`
-  // path below) can pick this message up as its next pending user message —
-  // see `DecideInput.pendingUserMessage` in engine.ts, which exists for
-  // exactly this "she typed again while the agent was still working" case.
-  // Dropping the message on `busy` would be the worse failure: it discards
-  // something she typed instead of just delaying who reads it.
-  await sql`insert into messages (conversation_id, user_id, role, content)
-            values (${conversationId}, ${input.userId}, 'user', ${input.message})`
 
   const inserted = await sql`
     insert into turns (conversation_id, user_id, idempotency_key)

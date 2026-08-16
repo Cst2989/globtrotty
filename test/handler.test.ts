@@ -65,6 +65,24 @@ describeDb('submitMessage', () => {
     })
   })
 
+  // IMPORTANT 5: the old code returned on the limit_reached path ten lines above
+  // the message insert, so a capped user's words were silently dropped.
+  it('still preserves her message when the ceiling is reached', async () => {
+    await withTestDb(async (sql) => {
+      await sql`insert into daily_usage (user_id, day, cost_micros)
+                values (${USER}, current_date, ${LIMITS.dailyCeilingMicros.toString()})`
+      const r = await submitMessage(deps(sql), {
+        userId: USER, conversationId: null, message: 'a very expensive trip to Japan',
+        idempotencyKey: 'i1',
+      })
+      expect(r.status).toBe('limit_reached')
+      const msgs = await sql`select role, content from messages where conversation_id = ${r.conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[0]!.content).toBe('a very expensive trip to Japan')
+    })
+  })
+
   // The turn is durable before invoke runs; the sweeper is the backstop.
   it('still reports queued when the invocation fails', async () => {
     await withTestDb(async (sql) => {
