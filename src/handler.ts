@@ -6,7 +6,6 @@ export type SubmitDeps = {
   sql: postgres.Sql
   limits: Limits
   invoke: (turnId: string) => Promise<void>
-  now: () => Date
 }
 
 export type SubmitInput = {

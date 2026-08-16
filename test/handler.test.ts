@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
 
@@ -9,8 +10,8 @@ const LIMITS = {
   globalCeilingMicros: 50_000_000n,
   maxSteps: 24,
 }
-const deps = (sql: any, invoke = vi.fn().mockResolvedValue(undefined)) => ({
-  sql, limits: LIMITS, invoke, now: () => new Date('2026-09-01T10:00:00Z'),
+const deps = (sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined)) => ({
+  sql, limits: LIMITS, invoke,
 })
 
 describeDb('submitMessage', () => {
