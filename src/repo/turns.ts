@@ -161,15 +161,34 @@ export async function completeTurn(
   //   notifyUser(claim.conversationId).catch(logOnly)
 }
 
-export async function failTurn(sql: postgres.Sql, claim: Claim, reason: FailReason): Promise<void> {
+/**
+ * `spendMicros` is the total accumulated across every step of THIS turn (the
+ * caller's running total, not a delta) — same accounting convention as
+ * `completeTurn`, so `turns.spend_usd_micros` reflects what a turn spent even
+ * when it stops at a ceiling rather than finishing normally.
+ *
+ * The conversation status mirrors the reason rather than collapsing everything
+ * to 'failed': `submitMessage` (src/handler.ts) sets 'limit_reached' for the
+ * exact same condition hit pre-turn, so hitting the cap one step into a turn
+ * must read the same way to the user — a spend ceiling is not "something
+ * broke".
+ */
+export async function failTurn(
+  sql: postgres.Sql,
+  claim: Claim,
+  reason: FailReason,
+  spendMicros: bigint,
+): Promise<void> {
+  const conversationStatus = reason === 'limit_reached' ? 'limit_reached' : 'failed'
   await sql.begin(async (tx) => {
     const rows = await tx`
-      update turns set status = 'failed', fail_reason = ${reason},
-                       finished_at = now()
+      update turns
+         set status = 'failed', fail_reason = ${reason}, finished_at = now(),
+             spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
        where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
       returning id`
     if (rows.length === 0) throw new FencedError(claim.turnId)
-    await tx`update conversations set status = 'failed', updated_at = now()
+    await tx`update conversations set status = ${conversationStatus}, updated_at = now()
               where id = ${claim.conversationId} and user_id = ${claim.userId}`
   })
 }

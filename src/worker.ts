@@ -52,14 +52,19 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
   const claim = await claimTurn(sql, turnId)
   if (!claim) return                       // another worker owns it; walk away silently
 
+  // Accumulated across every step of this run, so whichever exit path fires —
+  // completeTurn, failTurn on a decideNext stop, or the crash handler below —
+  // records what this turn actually spent instead of always writing 0.
+  const turnSpend = { total: 0n }
+
   try {
-    await loop(deps, claim)
+    await loop(deps, claim, turnSpend)
   } catch (err) {
     if (err instanceof FencedError) return // superseded: write nothing
     // Accepted limitation (plan 1): every error maps to 'provider_down'. The echo agent
     // cannot produce a real provider error, and the classifier arrives with the model
     // client in a later plan — see progress.md Ruling E.
-    await failTurn(sql, claim, 'provider_down').catch(() => {})
+    await failTurn(sql, claim, 'provider_down', turnSpend.total).catch(() => {})
     throw err
   }
 }
@@ -94,7 +99,9 @@ async function withHeartbeat<T>(
 
 type MessageRow = { role: 'user' | 'agent'; content: string }
 
-async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
+async function loop(
+  deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint },
+): Promise<void> {
   const { sql, limits } = deps
   let state: TurnState = claim.state ?? { ...EMPTY }
 
@@ -121,7 +128,7 @@ async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
 
     switch (decision.kind) {
       case 'stop':
-        await failTurn(sql, claim, decision.reason)
+        await failTurn(sql, claim, decision.reason, turnSpend.total)
         return
       case 'continue_later':
         // Persist state AND release ownership (status -> 'queued') in one statement,
@@ -154,16 +161,25 @@ async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
     )
 
     if (step.kind === 'message') {
+      // heartbeat() as a cheap ownership assertion: recordSpend and completeTurn
+      // don't carry the `attempts` fencing token themselves (they take bare ids),
+      // so this fenced single-row update stands in for them — if we've been
+      // superseded it throws FencedError here, before any money is spent.
+      await heartbeat(sql, claim)
       await recordSpend(sql, {
         userId: claim.userId, conversationId: claim.conversationId,
         costMicros: step.costMicros,
       })
+      turnSpend.total += step.costMicros
       await completeTurn(sql, claim, {
-        state, agentMessage: step.text, parked: true, spendMicros: 0n,
+        state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
       })
       return
     }
 
+    // Same ownership assertion ahead of beginToolCall — a superseded worker must
+    // not be the one deciding whether this tool call is fresh.
+    await heartbeat(sql, claim)
     const outcome = await beginToolCall(sql, claim.turnId, step.callId, step.name)
     let result: unknown
     if (outcome.status === 'replayed') {
@@ -171,15 +187,20 @@ async function loop(deps: WorkerDeps, claim: Claim): Promise<void> {
     } else if (outcome.status === 'ambiguous') {
       // The previous attempt died mid-side-effect. We cannot know whether it ran
       // (e.g. an email already sent), so we escalate rather than guess either way.
-      await failTurn(sql, claim, 'fenced')
+      await failTurn(sql, claim, 'fenced', turnSpend.total)
       return
     } else {
       result = await step.run()
+      // ...and ahead of finishToolCall — a superseded worker must not be the one
+      // recording this tool call's result as authoritative.
+      await heartbeat(sql, claim)
       await finishToolCall(sql, claim.turnId, step.callId, result)
+      await heartbeat(sql, claim)
       await recordSpend(sql, {
         userId: claim.userId, conversationId: claim.conversationId,
         costMicros: step.costMicros,
       })
+      turnSpend.total += step.costMicros
     }
 
     state = {

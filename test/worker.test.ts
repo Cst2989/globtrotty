@@ -26,7 +26,7 @@ async function submit(sql: postgres.Sql, message = 'hello') {
 
 type MessageRow = { role: string; content: string }
 type ConversationRow = { status: string; spend_usd_micros: string }
-type TurnRow = { status: string; fail_reason: string | null }
+type TurnRow = { status: string; fail_reason: string | null; spend_usd_micros: string }
 
 describeDb('runTurn end to end', () => {
   it('produces an agent reply and parks the conversation', async () => {
@@ -44,6 +44,8 @@ describeDb('runTurn end to end', () => {
       expect(convo!.status).toBe('awaiting_user')
       expect(turn!.status).toBe('done')
       expect(BigInt(convo!.spend_usd_micros)).toBeGreaterThan(0n)
+      // IMPORTANT 2: turns.spend_usd_micros used to be hard-coded to 0 on every row.
+      expect(BigInt(turn!.spend_usd_micros)).toBeGreaterThan(0n)
     })
   })
 
@@ -146,7 +148,12 @@ describeDb('runTurn end to end', () => {
                  where id = ${r.conversationId}`
       await runTurn(workerDeps(sql, greedy), r.turnId!)
       const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      const [convo] = await sql<ConversationRow[]>`select * from conversations where id = ${r.conversationId}`
       expect(turn!.fail_reason).toBe('limit_reached')
+      // IMPORTANT 3: a spend ceiling must not render as "something broke" — the
+      // conversation status has to match what submitMessage sets for the same
+      // condition pre-turn.
+      expect(convo!.status).toBe('limit_reached')
     })
   })
 })

@@ -105,16 +105,32 @@ describeDb('completeTurn', () => {
 })
 
 describeDb('failTurn', () => {
-  it('records the reason and surfaces it on the conversation', async () => {
+  it('records the reason, the accumulated spend, and surfaces failed on the conversation', async () => {
     await withTestDb(async (sql) => {
       const { c, t } = await seed(sql)
       const claim = (await claimTurn(sql, t.id))!
-      await failTurn(sql, claim, 'provider_down')
+      await failTurn(sql, claim, 'provider_down', 4_200n)
       const [turn] = await sql`select * from turns where id = ${t.id}`
       const [convo] = await sql`select status from conversations where id = ${c.id}`
       expect(turn!.status).toBe('failed')
       expect(turn!.fail_reason).toBe('provider_down')
+      expect(turn!.spend_usd_micros).toBe('4200')
       expect(convo!.status).toBe('failed')
+    })
+  })
+
+  // IMPORTANT 3: submitMessage (src/handler.ts) sets 'limit_reached' on the
+  // conversation for the exact same condition hit pre-turn. Hitting the ceiling
+  // one step into a turn must read the same way, not as "something broke".
+  it('surfaces limit_reached, not failed, on the conversation when the reason is a ceiling', async () => {
+    await withTestDb(async (sql) => {
+      const { c, t } = await seed(sql)
+      const claim = (await claimTurn(sql, t.id))!
+      await failTurn(sql, claim, 'limit_reached', 0n)
+      const [turn] = await sql`select fail_reason from turns where id = ${t.id}`
+      const [convo] = await sql`select status from conversations where id = ${c.id}`
+      expect(turn!.fail_reason).toBe('limit_reached')
+      expect(convo!.status).toBe('limit_reached')
     })
   })
 
@@ -125,7 +141,7 @@ describeDb('failTurn', () => {
       await sql`update turns set heartbeat_at = now() - interval '5 minutes' where id = ${t.id}`
       await claimTurn(sql, t.id)
 
-      await expect(failTurn(sql, first, 'provider_down')).rejects.toThrow(FencedError)
+      await expect(failTurn(sql, first, 'provider_down', 0n)).rejects.toThrow(FencedError)
 
       const [turn] = await sql`select status from turns where id = ${t.id}`
       expect(turn!.status).toBe('running')
