@@ -24,6 +24,25 @@ npm run trip
 
 This calls the live API using whatever the travel agent can do at that point in the course.
 
+## The database
+
+From lesson 2.1 on, some tests need Postgres: they write real rows and read them
+back, rather than mocking the database away. Every one of those tests is
+declared with `describeDb`, so it skips cleanly when `DATABASE_URL` is unset;
+`npm test` still passes with no database at all, it just runs fewer tests.
+
+To run them, point `DATABASE_URL` (in `.env.local`) at a Postgres instance. A
+free Supabase project is enough: create one at supabase.com, open Project
+settings, Database, and copy the direct connection string. Then apply the
+course's migrations, which live in `supabase/migrations` and run in order:
+
+```bash
+npm run migrate
+```
+
+Everything the course creates lives in its own `course` schema, so it never
+touches a product's tables in `public`.
+
 ## Holes the tests admit to
 
 Most tests in this repo assert what already works. A few, marked `it.fails`,

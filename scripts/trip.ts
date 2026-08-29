@@ -2,6 +2,9 @@ import 'dotenv/config'
 import { config } from 'dotenv'
 import { liveClient } from '../src/client.js'
 import { newConversation, turn } from '../src/conversation.js'
+import { connect } from '../src/db.js'
+import { loadEnv } from '../src/env.js'
+import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
@@ -9,25 +12,40 @@ import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 
 config({ path: '.env.local', override: false })
+const env = loadEnv(process.env)
 
-const client = liveClient()
-const run = mockRunner(new MockSupplier())
+// A demo user id, so the script can run without a login.
+const USER = '11111111-1111-1111-1111-111111111111'
 
-// Two turns on one conversation: her first message, then the follow-up that
-// lowers her budget. The notebook printed after each turn is the proof that
-// the second turn planned from what she said on both, not only the last one.
-const messages = [HER_MESSAGE, 'Actually, let us keep it under 1,200 euros.']
+const sql = connect(env.DATABASE_URL)
+const text = process.argv[2] ?? HER_MESSAGE
+try {
+  // The conversation row is created here rather than by submitMessage, because
+  // the in-process invoke below needs its id: the Conversation the loop works on
+  // and the conversation the database holds have to be the same one, or the
+  // reply is written against a row nobody will read. Lesson 2.2 removes this,
+  // because the background function loads the id from the turn itself.
+  const [row] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+  const conversationId = row!.id as string
 
-let conversation = newConversation()
-for (const text of messages) {
-  const result = await turn(conversation, text, client, run)
-  conversation = result.conversation
-  console.log(`> ${text}`)
-  console.log(`${result.desk} desk, outcome ${result.outcome} (${result.steps} step${result.steps === 1 ? '' : 's'})`)
-  for (const call of result.toolTrace) console.log(`${call.name}(${JSON.stringify(call.input)})`)
-  console.log(result.text)
-  console.log(dollars(result.costMicros))
-  console.log('notebook:')
-  console.log(notebookForPrompt(conversation.notebook))
-  console.log('')
+  const submitted = await submitMessage({
+    sql,
+    invoke: async (turnId) => {
+      console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
+      const result = await turn(
+        newConversation(conversationId),
+        text,
+        liveClient(),
+        mockRunner(new MockSupplier()),
+      )
+      console.log(result.text)
+      console.log(`outcome ${result.outcome}, ${result.steps} steps, ${dollars(result.costMicros)}`)
+      console.log('notebook:')
+      console.log(notebookForPrompt(result.conversation.notebook))
+    },
+  }, { userId: USER, conversationId, message: text })
+
+  console.log(`conversation ${submitted.conversationId}, turn ${submitted.turnId}, ${submitted.status}`)
+} finally {
+  await sql.end({ timeout: 5 })
 }
