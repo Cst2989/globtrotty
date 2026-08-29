@@ -6,6 +6,7 @@ import { connect } from '../src/db.js'
 import { loadEnv } from '../src/env.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
+import { httpInvoke } from '../src/invoke.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { MockSupplier } from '../src/supplier/mock.js'
@@ -23,27 +24,34 @@ try {
   // The conversation row is created here rather than by submitMessage, because
   // the in-process invoke below needs its id: the Conversation the loop works on
   // and the conversation the database holds have to be the same one, or the
-  // reply is written against a row nobody will read. Lesson 2.2 removes this,
-  // because the background function loads the id from the turn itself.
+  // reply is written against a row nobody will read. Lesson 2.2's other path,
+  // TIER3, does not need this: the background function loads the id from the
+  // turn itself.
   const [row] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
   const conversationId = row!.id as string
 
-  const submitted = await submitMessage({
-    sql,
-    invoke: async (turnId) => {
-      console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
-      const result = await turn(
-        newConversation(conversationId),
-        text,
-        liveClient(),
-        mockRunner(new MockSupplier()),
-      )
-      console.log(result.text)
-      console.log(`outcome ${result.outcome}, ${result.steps} steps, ${dollars(result.costMicros)}`)
-      console.log('notebook:')
-      console.log(notebookForPrompt(result.conversation.notebook))
-    },
-  }, { userId: USER, conversationId, message: text })
+  // `npm run trip` runs the turn here, in this process, which is what lesson 2.1
+  // showed. `TIER3=1 npm run trip`, with `npx netlify dev` running in another
+  // terminal, posts to the background function instead and returns immediately:
+  // the same submitMessage, a different tier doing the work.
+  const inProcess = async (turnId: string) => {
+    console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
+    const result = await turn(
+      newConversation(conversationId),
+      text,
+      liveClient(),
+      mockRunner(new MockSupplier()),
+    )
+    console.log(result.text)
+    console.log(`outcome ${result.outcome}, ${result.steps} steps, ${dollars(result.costMicros)}`)
+    console.log('notebook:')
+    console.log(notebookForPrompt(result.conversation.notebook))
+  }
+
+  const submitted = await submitMessage(
+    { sql, invoke: process.env.TIER3 ? httpInvoke(env) : inProcess },
+    { userId: USER, conversationId, message: text },
+  )
 
   console.log(`conversation ${submitted.conversationId}, turn ${submitted.turnId}, ${submitted.status}`)
 } finally {

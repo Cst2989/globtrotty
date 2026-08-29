@@ -1,10 +1,12 @@
 /**
- * The variables this branch cannot run without. Two today; the Netlify tier
- * adds two more in lesson 2.2. Reported all at once rather than one per run,
- * because finding out about a second missing key after fixing the first is a
- * second wasted deploy.
+ * The variables this branch cannot run without. Two from lesson 2.1, plus the
+ * two lesson 2.2 adds for tier 3: `WORKER_SHARED_SECRET`, read by the
+ * background function and by `httpInvoke`, and `SITE_URL`, read by
+ * `httpInvoke` to know where tier 3 lives. Reported all at once rather than
+ * one per run, because finding out about a second missing key after fixing
+ * the first is a second wasted deploy.
  */
-const KEYS = ['DATABASE_URL', 'ANTHROPIC_API_KEY'] as const
+const KEYS = ['DATABASE_URL', 'ANTHROPIC_API_KEY', 'WORKER_SHARED_SECRET', 'SITE_URL'] as const
 
 export type Env = Record<(typeof KEYS)[number], string>
 

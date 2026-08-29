@@ -12,3 +12,4 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-1-6 | Two desks | npm test (test/desks.test.ts) |
 | lesson-1-7 | The notebook | npm test (test/notebook.test.ts, test/conversation.test.ts, test/crash.test.ts) |
 | lesson-2-1 | Persist first | npm run migrate, then npm test (test/crash.test.ts, test/handler.test.ts) |
+| lesson-2-2 | Four tiers with a clock each | npm test (test/tier3.test.ts) |

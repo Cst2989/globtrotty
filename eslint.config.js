@@ -5,7 +5,10 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     rules: {
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // ignoreRestSiblings: destructuring named keys off an object purely to
+      // exclude them from a `...rest` (test/env.test.ts's missing-keys test) is
+      // not an unused binding, it is how the rest is built.
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', ignoreRestSiblings: true }],
     },
   },
 )

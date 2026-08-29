@@ -57,6 +57,35 @@ comment or a skipped test that quietly stops meaning anything. The next
 module turns it into a plain `it`, and the suite tells us the moment it
 does not yet deserve to.
 
+## The four tiers, and the clock each one runs against
+
+    tier 1                tier 2                      tier 3                     tier 4
+    her browser           the request handler          the background function    the scheduled sweeper
+    +-----------+         +-------------------+        +---------------------+    +-------------------+
+    |  she      |  POST   |  submitMessage    |  POST  |  run-turn-background|    |  every few        |
+    |  presses  | ------> |  writes the rows  | -----> |  .mts runs the turn |    |  minutes, it      |
+    |  Send     | <------ |  and returns      |        |  and writes back    |    |  rescues turns    |
+    +-----------+  turn   +-------------------+        +---------------------+    |  nobody finished  |
+         ^         id            |      ^                     |        ^          +-------------------+
+         |                       |      |                     |        |                   |
+         | she waits             v      |                     v        |                   v
+         | as long as         +------------------------------------------------------------------+
+         | she likes          |                  Postgres: conversations, turns, messages         |
+         +------------------- |  the only thing all four tiers share, and the only durable one    |
+                              +------------------------------------------------------------------+
+
+    tier 1  as long as she is willing to wait
+    tier 2  about ten seconds, so it only writes and returns
+    tier 3  fifteen minutes, which is where the turn actually runs
+    tier 4  every few minutes, and it is module 3
+
+The arrow from tier 2 to tier 3 carries `x-worker-secret`. Tier 3 is reachable by
+anyone who knows the URL and it starts work that costs money, so a call without
+that header is refused before its body is read. Tier 3 is a background
+function, so the caller's socket gets an immediate 202 whether or not the
+secret matches; a wrong secret is observed only in tier 3's own log and in
+`test/tier3.test.ts`'s unit tests, never in a status code sent back to tier 2.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.
