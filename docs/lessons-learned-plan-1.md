@@ -227,3 +227,47 @@ Both are defects *between* correct components. Each task did its job; the joins 
 
 **Lesson:** budget for a whole-branch review as a separate, mandatory pass. It finds a different
 class of defect, and the per-task reviews cannot substitute for it however thorough they are.
+
+---
+
+## 13. A model refusal is not an exception
+
+Found while scoping plan 3, and it changes the harness's failure model.
+
+`stop_reason: "refusal"` arrives as an **HTTP 200** with a populated `stop_details` object
+carrying a category. It does not throw. An agent runtime whose error handling only inspects
+exceptions will read a refusal as a **successful turn that produced no content**, and hand the
+user an empty answer with no failure recorded anywhere.
+
+Two consequences for a harness:
+
+- Check `stop_reason` **before** reading `content`, on every response. It is not an error path
+  bolted on beside the `catch`; it is part of the normal path.
+- The failure taxonomy needs a value for it. `turns.fail_reason` had eight values and none of
+  them fits — a refusal is not `provider_down`, not `fetch_failed`, and certainly not success.
+
+**Lesson:** enumerate your agent's terminal states from the API's actual response shapes, not
+from the ones that raise. The states that return 200 are the ones you will miss.
+
+---
+
+## 14. Your prior on the request shape is stale too
+
+Section 9 covers drift in what the API *returns*. The request side moves as well, and the
+harness had assumptions that are now hard errors:
+
+- **`budget_tokens` is removed** on the current Opus tier — sending it returns **400**. The
+  replacement is adaptive thinking plus a separate effort control. The spec's per-seat `effort`
+  turned out to be the right shape; a harness that had hardcoded a thinking budget would now be
+  failing every call.
+- **Assistant prefill returns 400.** Any output-shaping that relied on prefilling the assistant
+  turn has to become structured outputs or a system instruction.
+- **Thinking is on by default** on the strongest seat, where it previously had to be enabled.
+
+None of these are subtle-wrong. They are 400s — the harness simply stops working. But they only
+surface at the first real model call, which in this build is two plans after the code that
+assumed them was written.
+
+**Lesson:** when a plan writes model-client code far ahead of executing it, re-verify the request
+surface against current documentation at the moment you implement, not the moment you planned.
+The failure mode is not a subtle regression; it is a hard error the plan cannot anticipate.

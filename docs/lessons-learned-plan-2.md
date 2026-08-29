@@ -221,6 +221,54 @@ way rather than overselling it, which is the right call.
 system where an agent's spend limits are the only thing between you and an unbounded bill, the
 day boundary is a correctness property, not a formatting detail.
 
+## 12b. A provenance corpus that overwrites cannot answer "what did the gate see?"
+
+`tool_results` is the corpus the gates rehydrate from. The spec says **append-only**. The
+implementation upserts: a re-search overwrites the previous quote's price and timestamp.
+
+The justification is real — when the freshness gate says "these prices are too old, search
+again", the re-search must be able to move `fetched_at`, or the gate rejects the retry for
+exactly the reason the retry existed. But the consequence is that a proposal which was *rejected*
+by a gate leaves no record of the price it was rejected on. Anything that became a proposal is
+safe, because the rehydrated itinerary is snapshotted there. Everything the gates refused is not.
+
+That is the corpus's whole purpose in the next slice: replaying a conversation and asking why a
+gate fired. This is also the one deferred item whose cost **accrues while it waits** — every
+re-quote destroys one more historical price, unrecoverably.
+
+**Lesson:** for an agent's provenance store, "append-only" is not a retention preference, it is
+what makes the store answer questions about the past. If you must upsert, know that you have
+traded away replay, and write down what it costs.
+
+## 12c. Metered tool calls need a per-turn budget, and the loop is where it goes
+
+Spec §8 names a per-turn supplier-call budget, and calls its absence a defect being fixed. It
+shipped unimplemented — defensibly, because the supplier `search()` and `quote()` methods had no
+callers outside tests. There was genuinely nothing to count.
+
+But that is the shape of the trap: the budget is easy to defer while building the *port*, and by
+the time there are call sites they are inside an agent loop that can run a couple of dozen steps.
+Model spend was capped from plan 1. Supplier calls — rate-limited and sometimes metered — were
+not capped at all.
+
+**Lesson:** an agent loop needs a ceiling on every metered resource it can consume, not just
+tokens. Add the counter when you build the loop, not when you notice the bill.
+
+## 12d. An audit table needs a uniqueness rule, or the fire-rate is fiction
+
+`gate_results.round` defaults to `0` and there is no unique constraint on
+`(conversation_id, proposal_id, round, gate)`. Two gate runs in one turn that both leave `round`
+at its default write two complete sets of rows.
+
+The question this table exists to answer is "how often did this gate fire?". Double-counted rows
+do not corrupt anything a user sees — they corrupt the measurement you plan to make decisions
+with, which is worse in a quieter way, because nothing looks broken.
+
+**Lesson:** if instrumentation is going to justify keeping or cutting a component, its
+uniqueness rule is part of its correctness. An audit row you can accidentally write twice is not
+evidence.
+
+
 ---
 
 # Part II — Using agents to build the agentic system
