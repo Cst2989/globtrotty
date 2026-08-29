@@ -1,9 +1,12 @@
 import type postgres from 'postgres'
+import { exceedsAnyCeiling, type Limits } from './engine.js'
+import { readSpendFailClosed } from './repo/spend.js'
 
 export type SubmitDeps = {
   sql: postgres.Sql
   /** Starts the work. Injected, so tests never make an HTTP call. */
   invoke: (turnId: string) => Promise<void>
+  limits: Limits
 }
 
 export type SubmitInput = {
@@ -14,8 +17,23 @@ export type SubmitInput = {
 
 export type SubmitResult = {
   conversationId: string
-  turnId: string
-  status: 'queued'
+  // Null, not an empty string, when no turn exists to name: an empty string is
+  // indistinguishable from a truncated id at a glance and invites a check that
+  // silently does the wrong thing.
+  turnId: string | null
+  status: 'queued' | 'limit_reached'
+}
+
+/**
+ * Her words, kept whatever else happens. `turnId` is null on the paths where no
+ * turn was opened for them: lesson 2.2's worker loads a turn's message by this
+ * id, so a message with no turn is simply a message nothing is running for yet.
+ */
+async function writeHerMessage(
+  sql: postgres.Sql, input: SubmitInput, conversationId: string, turnId: string | null,
+): Promise<void> {
+  await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+            values (${conversationId}, ${input.userId}, ${turnId}, 'user', ${input.message})`
 }
 
 /**
@@ -42,17 +60,32 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
     await sql`insert into course.conversations (user_id) values (${input.userId}) returning id`
   )[0]!.id as string
 
+  // Fail closed: this throws rather than returning zero when it cannot confirm.
+  // Deliberately before the turn is written, so a database hiccup denies the
+  // request outright rather than queueing work on top of an unconfirmed state.
+  const spend = await readSpendFailClosed(sql, input.userId, conversationId)
+
+  // All three ceilings, through the same predicate decideNext uses rather than a
+  // second copy of the same three comparisons. The global one is checked here
+  // rather than left to the worker because a capped account must be refused
+  // before a turn is queued at all; otherwise the refusal arrives one step into
+  // the turn, after a model call has already been paid for. It can fire while
+  // both of this user's own counters read zero: it protects the account, not the
+  // user.
+  if (exceedsAnyCeiling(spend, deps.limits)) {
+    await writeHerMessage(sql, input, conversationId, null)
+    await sql`update course.conversations set status = 'limit_reached', updated_at = now()
+               where id = ${conversationId} and user_id = ${input.userId}`
+    return { conversationId, turnId: null, status: 'limit_reached' }
+  }
+
   const inserted = await sql`
     insert into course.turns (conversation_id, user_id) values (${conversationId}, ${input.userId})
     returning id`
   const turnId = inserted[0]!.id as string
 
-  await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-            values (${conversationId}, ${input.userId}, ${turnId}, 'user', ${input.message})`
+  await writeHerMessage(sql, input, conversationId, turnId)
 
-  // Marks the conversation row as having a turn in flight, so anything reading
-  // it (her, or an operator) can tell a reply is being worked on rather than
-  // reading stale silence as nothing having happened.
   await sql`update course.conversations set status = 'working', updated_at = now()
              where id = ${conversationId} and user_id = ${input.userId}`
 

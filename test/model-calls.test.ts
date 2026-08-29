@@ -2,6 +2,7 @@ import type postgres from 'postgres'
 import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
 import { loadDesk } from '../src/desks.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { costMicros } from '../src/pricing.js'
 import { memorySink, pgSink } from '../src/repo/model-calls.js'
 import { SEATS } from '../src/seats.js'
@@ -84,11 +85,11 @@ describe('a recorded turn', () => {
 describeDb('pgSink', () => {
   it('writes the four token counts and the cost against her turn', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage({ sql, invoke: async () => {} }, {
+      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
         userId: USER, conversationId: null, message: HER_MESSAGE,
       })
       const record = pgSink(sql, {
-        userId: USER, conversationId: submitted.conversationId, turnId: submitted.turnId,
+        userId: USER, conversationId: submitted.conversationId, turnId: submitted.turnId!,
       })
       const client = fakeClient([label, requirements, search, answer])
       const result = await turn(newConversation(submitted.conversationId), HER_MESSAGE, client,

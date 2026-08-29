@@ -2,7 +2,7 @@ import { liveClient } from '../../src/client.js'
 import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
-import { pgSink } from '../../src/repo/model-calls.js'
+import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { finishTurn, loadTurnInput } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
@@ -46,11 +46,8 @@ export default async (req: Request): Promise<Response> => {
       mockRunner(new MockSupplier()),
       {
         deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
-        record: pgSink(sql, {
-          userId: input.userId,
-          conversationId: input.conversationId,
-          turnId: input.turnId,
-        }),
+        record: ledgerSink(sql, { userId: input.userId, conversationId: input.conversationId, turnId: input.turnId }),
+        readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
       },
     )
     await finishTurn(sql, input, result.text)

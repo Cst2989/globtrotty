@@ -7,6 +7,7 @@ import { loadEnv } from '../src/env.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { pgSink } from '../src/repo/model-calls.js'
@@ -58,7 +59,7 @@ try {
   }
 
   const submitted = await submitMessage(
-    { sql, invoke: process.env.TIER3 ? httpInvoke(env) : inProcess },
+    { sql, invoke: process.env.TIER3 ? httpInvoke(env) : inProcess, limits: DEFAULT_LIMITS },
     { userId: USER, conversationId, message: text },
   )
 

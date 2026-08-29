@@ -1,6 +1,7 @@
 import type { ModelClient } from './client.js'
 import { loadDesk, renderPrompt, toolsFor } from './desks.js'
 import { classify } from './classify.js'
+import type { Spend } from './engine.js'
 import { extract } from './extract.js'
 import { addUsage, toolLoop, type LoopResult } from './loop.js'
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
@@ -32,6 +33,8 @@ export type TurnOptions = {
   deadlineMs?: number
   /** Where every model call this turn makes writes its row. */
   record?: ModelCallSink
+  /** Read once per step, so a ceiling check is never stale for the rest of the turn. */
+  readSpend?: () => Promise<Spend>
 }
 
 /**
@@ -62,6 +65,7 @@ export async function turn(
       deadlineMs: options.deadlineMs,
       promptVersion: desk.promptVersion,
       record: options.record,
+      readSpend: options.readSpend,
     })
     const next = { ...conversation, replies: [...conversation.replies, result.text] }
     return {
@@ -91,6 +95,7 @@ export async function turn(
     deadlineMs: options.deadlineMs,
     promptVersion: desk.promptVersion,
     record: options.record,
+    readSpend: options.readSpend,
   })
   const next = { ...conversation, notebook, replies: [...conversation.replies, result.text] }
   return {

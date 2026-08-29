@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner, type ToolRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
@@ -37,7 +38,7 @@ describeDb('when the process dies mid-search', () => {
         const dying = fakeClient([label, requirements, search, crash])
         await turn(newConversation(), HER_MESSAGE, dying, supplier.run)
       }
-      const result = await submitMessage({ sql, invoke }, {
+      const result = await submitMessage({ sql, invoke, limits: DEFAULT_LIMITS }, {
         userId: USER, conversationId: null, message: HER_MESSAGE,
       })
 

@@ -16,3 +16,4 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-2-3 | Engine and shell | npm test (test/engine.test.ts, test/loop.test.ts) |
 | lesson-2-4 | Money is never a bare number | npm test (test/cashier.test.ts, test/money.test.ts) |
 | lesson-2-5 | Record every call | npm run migrate, then npm test (test/model-calls.test.ts, test/alias-echo.test.ts) |
+| lesson-2-6 | Control the money | npm run migrate, then npm test (test/spend.test.ts) |

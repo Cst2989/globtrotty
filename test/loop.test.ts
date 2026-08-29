@@ -1,5 +1,6 @@
 import { RateLimitError } from '@anthropic-ai/sdk'
-import { MAX_STEPS, UNMETERED_LIMITS, toolLoop } from '../src/loop.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
+import { toolLoop } from '../src/loop.js'
 import { SEATS } from '../src/seats.js'
 import { TOOLS } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
@@ -12,12 +13,12 @@ describe('toolLoop', () => {
     const client = fakeClient([toolUseMessage('search_flights', { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: null, adults: 2, children: 1 })])
     const result = await toolLoop({ ...base, client })
     expect(result.outcome).toBe('step_cap')
-    expect(result.steps).toBe(MAX_STEPS)
-    expect(client.calls).toBe(MAX_STEPS)
+    expect(result.steps).toBe(DEFAULT_LIMITS.maxSteps)
+    expect(client.calls).toBe(DEFAULT_LIMITS.maxSteps)
   })
   it('honours a smaller cap', async () => {
     const client = fakeClient([toolUseMessage('search_hotels', { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 })])
-    const result = await toolLoop({ ...base, client, limits: { ...UNMETERED_LIMITS, maxSteps: 3 } })
+    const result = await toolLoop({ ...base, client, limits: { ...DEFAULT_LIMITS, maxSteps: 3 } })
     expect(result.outcome).toBe('step_cap')
     expect(result.steps).toBe(3)
     expect(result.toolTrace).toHaveLength(3)
@@ -35,10 +36,11 @@ describe('toolLoop', () => {
     const client = fakeClient([textMessage('Here is a plan.')])
     const result = await toolLoop({
       ...base, client,
-      limits: { ...UNMETERED_LIMITS, maxSteps: 0, globalCeilingMicros: 1n },
-      spend: { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 1n },
+      limits: { ...DEFAULT_LIMITS, maxSteps: 0 },
+      readSpend: async () => ({ conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros, dailyMicros: 0n, globalMicros: 0n }),
     })
     expect(result.outcome).toBe('limit_reached')   // not step_cap
+    expect(client.calls).toBe(0)
   })
   it('treats a refusal as an outcome, not an exception', async () => {
     const client = fakeClient([textMessage('I cannot help with that.', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'other' } } as never)])
