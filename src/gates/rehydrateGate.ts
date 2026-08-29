@@ -39,6 +39,12 @@ const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
 export const ProposalRefsSchema = z.strictObject({
   refs: z.array(z.strictObject({
     sourceId: z.string().min(1).max(512),
+    // Shape only. The VALUE is judged by `checkTotals`, which requires exactly
+    // 1 because every shipped supplier prices the whole booking. Deliberately
+    // not tightened to `z.literal(1)` here: a schema failure is reported as a
+    // `provenance` violation with no source ids, and an inflated quantity is a
+    // `totals` fault about specific items. Keeping the bound loose is what puts
+    // the fault in the right `gate_results` row with the right ids on it.
     quantity: z.int().positive().max(16),
     slot: z.enum(SLOT_NAMES),
   })).min(1).max(24)
@@ -113,6 +119,17 @@ export async function rehydrateRefs(
       // Rebuild rather than alias the caller's ref object: every output field
       // is discarded-and-rebuilt from validated data, matching the class's
       // whole premise, not just `item`.
+      //
+      // `lineTotal` is computed from the REHYDRATED price and the ref's
+      // quantity, and the quantity has not been judged yet — `checkTotals` owns
+      // that verdict (see its `quantity must be 1` section) and files a `totals`
+      // violation for anything above 1. So a `lineTotal` here can be inflated by
+      // a model-chosen multiplier; it never escapes, because the same proposal
+      // is rejected before any total is returned, and `checkTotals` recomputes
+      // rather than trusting this value. Judging quantity here instead was
+      // considered and rejected: this function's failures are `provenance`
+      // faults, and a quantity fault is a `totals` fault — filing it under the
+      // wrong gate name would put it in the wrong `gate_results` row.
       return {
         ref: { sourceId: ref.sourceId, quantity: ref.quantity, slot: ref.slot },
         item,

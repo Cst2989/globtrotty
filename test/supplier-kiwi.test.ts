@@ -147,6 +147,196 @@ describe('parseKiwiResponse', () => {
     expect(() => parseKiwiResponse(wrong, { ...params, currency: 'EUR' }, NOW))
       .toThrow(/currency/i)
   })
+
+  /**
+   * A MISSING currency echo is refused too, and that is a separate case from a
+   * mismatched one. The old guard was `if (data.currency && data.currency !==
+   * requested)`, so an absent field skipped the check entirely and the
+   * requested code was stamped onto whatever number came back — "absence of
+   * evidence is confirmation". That contradicts this codebase's own posture
+   * everywhere else: `checkFreshness` calls an unparseable timestamp STALE, and
+   * `quote()` calls a transport failure `unavailable`, because unknown is not
+   * unchanged.
+   *
+   * The captured fixture always carries `currency: "EUR"`, so this costs
+   * nothing against the real API — which is exactly why the missing case needs
+   * a synthetic payload to be covered at all.
+   */
+  it('refuses a response that does not say what currency it priced in', () => {
+    const silent = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        // No `currency` key at all.
+        itineraries: [{
+          id: 'no-currency-1', price: 100, totalDurationSeconds: 100, bookingUrl: null,
+          baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    // Pinned on 'absent', not merely /currency/i: a mismatch message would also
+    // match a loose regex, and the whole point is that this is the ABSENT case.
+    expect(() => parseKiwiResponse(silent, params, NOW)).toThrow(/absent/)
+    // And the itinerary must not have been returned priced in the requested
+    // currency, which is precisely what the old truthiness guard did.
+    expect(() => parseKiwiResponse(silent, params, NOW)).toThrow(/EUR/)
+  })
+
+  // The other side of the boundary: an echo that agrees still parses. Without
+  // this, "throw on everything" would pass the test above.
+  it('accepts a response whose currency echo matches the request', () => {
+    expect(parseKiwiResponse(sse, params, NOW).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * §6 names `flight_no` in the normalised corpus shape, and §5's cashier must
+   * compare "per item and on item identity, not just on the sum" — a refundable
+   * fare and basic economy differ by flight number while carrier, route and
+   * times can all stay put. Every fixture segment carries `flightNumber`; the
+   * parse used to drop it.
+   */
+  it('keeps every segment flight number, in order, on both legs', () => {
+    const d = items[0]!.detail
+    if (d.kind !== 'flight') throw new Error('unreachable')
+    // Pinned to the fixture's exact values and exact order. A dedupe, a sort,
+    // or a "first segment only" implementation all fail this.
+    expect(d.outbound.flightNumbers).toEqual(['U22202', 'LS875'])
+    expect(d.inbound!.flightNumbers).toEqual(['FR1762', 'FR1638'])
+    // Distinct from `carriers`, which IS a deduped set of operators. The
+    // inbound leg is the discriminator: both segments are Ryanair, so
+    // `carriers` collapses to one entry while `flightNumbers` must keep two.
+    // A copy-paste of the `carriers` expression would fail here.
+    expect(d.outbound.carriers).toEqual(['U2', 'LS'])
+    expect(d.inbound!.carriers).toEqual(['FR'])
+  })
+
+  it('yields an empty flight-number list rather than blanks when segments omit it', () => {
+    const noNumbers = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [{
+          id: 'no-flight-numbers', price: 100, totalDurationSeconds: 100, bookingUrl: null,
+          baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy',
+            segments: [{ carrier: 'FR' }],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    const d = parseKiwiResponse(noNumbers, params, NOW)[0]!.detail
+    if (d.kind !== 'flight') throw new Error('unreachable')
+    expect(d.outbound.flightNumbers).toEqual([])   // not [''], and not undefined
+  })
+
+  /**
+   * A zero price would pass a bare `Number.isFinite` check and then be the
+   * cheapest option in every budget and ranking comparison — the most
+   * attractive possible answer, and entirely fictional. `pickPrice` in
+   * searchapi.ts already guards with `total > 0`; this makes Kiwi symmetric.
+   */
+  it.each([[0], [-1], [-0.01]])('refuses an itinerary priced %p', (price) => {
+    const doc = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [{
+          id: 'zero-price', price, totalDurationSeconds: 100, bookingUrl: null,
+          baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    expect(() => parseKiwiResponse(doc, params, NOW)).toThrow(/unusable price/)
+  })
+
+  // The other side of that boundary: the smallest representable positive price
+  // is legal and converts exactly. `> 0` must not have become `>= 1`.
+  it('accepts the smallest positive price', () => {
+    const doc = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [{
+          id: 'one-cent', price: 0.01, totalDurationSeconds: 100, bookingUrl: null,
+          baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    expect(parseKiwiResponse(doc, params, NOW)[0]!.price.minor).toBe(1n)
+  })
+
+  /**
+   * §13 makes baggage load-bearing for the recommendation, and the field was
+   * typed as required but never checked — a response that omitted it produced
+   * `detail.baggage === undefined`, which renders as nothing at all rather than
+   * as "no allowance". Zero is the honest floor: it claims nothing we were not
+   * told.
+   */
+  it('defaults a missing baggage block to zeroes rather than undefined', () => {
+    const doc = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [{
+          id: 'no-baggage', price: 100, totalDurationSeconds: 100, bookingUrl: null,
+          // No `baggage` key at all.
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    const d = parseKiwiResponse(doc, params, NOW)[0]!.detail
+    if (d.kind !== 'flight') throw new Error('unreachable')
+    expect(d.baggage).toEqual({ personalItem: 0, cabinBag: 0, checkedBag: 0 })
+  })
+
+  it('fills only the missing baggage counts, keeping the ones that were given', () => {
+    const doc = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [{
+          id: 'partial-baggage', price: 100, totalDurationSeconds: 100, bookingUrl: null,
+          baggage: { checkedBag: 2 },
+          outbound: {
+            from: 'BER', to: 'FAO',
+            departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+            stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+          },
+          inbound: null,
+        }],
+      }) }] },
+    })
+    const d = parseKiwiResponse(doc, params, NOW)[0]!.detail
+    if (d.kind !== 'flight') throw new Error('unreachable')
+    // 2 survives; the two absent counts become 0, not undefined.
+    expect(d.baggage).toEqual({ personalItem: 0, cabinBag: 0, checkedBag: 2 })
+  })
 })
 
 describe('KiwiSupplier capabilities', () => {

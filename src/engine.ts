@@ -41,26 +41,45 @@ export type Decision =
   | { kind: 'stop'; reason: FailReason }
   | { kind: 'continue_later' }
 
+/**
+ * "Is any of the three ceilings reached?" — the money predicate, in ONE place.
+ *
+ * Two tiers ask this question: `decideNext` below, before each model call, and
+ * `submitMessage` (src/handler.ts), before a turn is queued at all. They were
+ * two independent copies of the same three `>=` comparisons, which is exactly
+ * what `DEFAULT_LIMITS`' own doc comment argues against for the constants — and
+ * for the same reason: two consumers disagreeing about a money limit means one
+ * of them silently is not enforcing what the other thinks it is. Duplicating
+ * the comparisons re-opens that hole one level up from the numbers, where a
+ * typo'd field pair (`dailyMicros >= globalCeilingMicros`) type-checks fine.
+ *
+ * `>=`, not `>`: the ceiling is reached AT the limit, not one micro past it.
+ * Both tiers' tests pin both sides of that boundary.
+ *
+ * Which of the three fired is deliberately not returned. All three produce the
+ * identical outcome at both call sites, so a discriminator would be a value
+ * nothing reads and no test could pin.
+ */
+export function exceedsAnyCeiling(spend: Spend, limits: Limits): boolean {
+  // Global first because it is the only ceiling protecting the ACCOUNT rather
+  // than one user — the one cap that can fire while both per-user counters read
+  // zero. With a boolean result the order is not observable; it is kept because
+  // it is the order that reads correctly.
+  return spend.globalMicros >= limits.globalCeilingMicros
+      || spend.conversationMicros >= limits.conversationCeilingMicros
+      || spend.dailyMicros >= limits.dailyCeilingMicros
+}
+
 export function decideNext(input: DecideInput): Decision {
   const { state, spend, limits, nowMs, deadlineMs, estStepMs } = input
 
-  // Money first: a ceiling beats every other consideration.
-  //
-  // Global comes first of the three because it is the only ceiling protecting the
-  // ACCOUNT rather than one user — a runaway that has exhausted the account is not
-  // a per-conversation problem, and it is the one cap that can fire while both
-  // per-user counters read zero. Note honestly that all three return the identical
-  // decision, so this ordering is not observable from outside and no test can pin
-  // it (the brief's `detail` discriminator, which would have made it observable,
-  // contradicted its own assertions and is deliberately not added). What IS pinned
-  // by test is that all three beat the step cap and the deadline below.
-  if (spend.globalMicros >= limits.globalCeilingMicros) {
-    return { kind: 'stop', reason: 'limit_reached' }
-  }
-  if (spend.conversationMicros >= limits.conversationCeilingMicros) {
-    return { kind: 'stop', reason: 'limit_reached' }
-  }
-  if (spend.dailyMicros >= limits.dailyCeilingMicros) {
+  // Money first: a ceiling beats every other consideration. Note honestly that
+  // all three ceilings return the identical decision, so their relative order is
+  // not observable from outside and no test can pin it (the brief's `detail`
+  // discriminator, which would have made it observable, contradicted its own
+  // assertions and is deliberately not added). What IS pinned by test is that
+  // all three beat the step cap and the deadline below.
+  if (exceedsAnyCeiling(spend, limits)) {
     return { kind: 'stop', reason: 'limit_reached' }
   }
   if (state.step >= limits.maxSteps) {

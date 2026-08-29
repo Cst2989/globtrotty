@@ -110,6 +110,11 @@ export class MockSupplier implements Supplier {
             arrivalLocal: `${params.departureDate}T11:30:00`,
             stops: i % 2, route: [params.from, params.to],
             cabinClass: params.cabinClass, carriers: ['ZZ'],
+            // Derived from `i`, like every other field here, so a replay in
+            // slice 2 gets the same identity back. Two entries when the leg has
+            // a stop, one when it does not: the list is per SEGMENT, and
+            // `stops: i % 2` is what decides how many segments there are.
+            flightNumbers: i % 2 === 1 ? [`ZZ${100 + i}`, `ZZ${200 + i}`] : [`ZZ${100 + i}`],
           },
           inbound: params.returnDate ? {
             from: params.to, to: params.from,
@@ -117,6 +122,7 @@ export class MockSupplier implements Supplier {
             arrivalLocal: `${params.returnDate}T21:30:00`,
             stops: i % 2, route: [params.to, params.from],
             cabinClass: params.cabinClass, carriers: ['ZZ'],
+            flightNumbers: i % 2 === 1 ? [`ZZ${300 + i}`, `ZZ${400 + i}`] : [`ZZ${300 + i}`],
           } : null,
           baggage: { personalItem: params.adults, cabinBag: i % 2, checkedBag: i % 3 },
           totalDurationSeconds: 12_600 + i * 600,

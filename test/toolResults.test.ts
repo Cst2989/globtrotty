@@ -95,6 +95,57 @@ describeDb('tool_results repo', () => {
     })
   })
 
+  /**
+   * A supplier can legitimately return the same native id twice in one response
+   * — an itinerary offered under two fare families, a property listed by two
+   * OTAs. Before the dedupe, `insert ... on conflict do update` raised
+   * `ON CONFLICT DO UPDATE command cannot affect row a second time`: opaque,
+   * naming neither the id nor the table, and fatal to the whole turn.
+   *
+   * Newest wins on `fetchedAt`, not on array position — position is just
+   * whatever order the supplier replied in.
+   */
+  it('dedupes a repeated sourceId within one batch instead of raising a postgres error', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '07')
+      const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
+      const older = { ...item!, price: money(11_100n, 'EUR'),
+                      fetchedAt: new Date('2026-08-16T10:00:00Z') }
+      const newer = { ...item!, price: money(22_200n, 'EUR'),
+                      fetchedAt: new Date('2026-08-16T11:00:00Z') }
+
+      // Newest LAST in the array, so a naive "last wins" also gets this right...
+      await expect(recordResults(sql, {
+        conversationId, userId, turnId: null, params, items: [older, newer],
+      })).resolves.toBe(1)
+      const a = (await rehydrate(sql, conversationId, [item!.sourceId])).get(item!.sourceId)!
+      expect(a.price.minor).toBe(22_200n)
+
+      // ...and newest FIRST, which it does not. This ordering is what pins that
+      // the winner is chosen on fetchedAt rather than on position.
+      await expect(recordResults(sql, {
+        conversationId, userId, turnId: null, params, items: [newer, older],
+      })).resolves.toBe(1)
+      const b = (await rehydrate(sql, conversationId, [item!.sourceId])).get(item!.sourceId)!
+      expect(b.price.minor).toBe(22_200n)
+      expect(b.fetchedAt.toISOString()).toBe('2026-08-16T11:00:00.000Z')
+    })
+  })
+
+  it('still records every DISTINCT id in a batch that also contains a duplicate', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '08')
+      const items = await new MockSupplier({ kind: 'flight', count: 3 }).search(params)
+      // 4 items in, 3 distinct ids: the dedupe must not swallow the others.
+      const n = await recordResults(sql, {
+        conversationId, userId, turnId: null, params, items: [...items, items[0]!],
+      })
+      expect(n).toBe(3)
+      const got = await rehydrate(sql, conversationId, items.map((i) => i.sourceId))
+      expect(got.size).toBe(3)
+    })
+  })
+
   it('handles an empty id list without a query', async () => {
     await withTestDb(async (sql) => {
       const { conversationId } = await convo(sql, '06')

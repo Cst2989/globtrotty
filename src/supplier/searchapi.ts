@@ -51,10 +51,19 @@ export function parseSearchApiHotels(
   // than stamping the requested currency onto a number scoped to a different
   // market — same position as Kiwi (src/supplier/kiwi.ts): this codebase
   // never converts, it only refuses.
+  //
+  // An ABSENT echo is refused too. `if (echoed && ...)` treated a missing field
+  // as agreement and stamped the requested code onto whatever number came back
+  // — "absence of evidence is confirmation", and the exact opposite of the
+  // position taken by `checkFreshness` (an unparseable timestamp is STALE) and
+  // `quote()` (a transport failure is `unavailable`). The captured fixture
+  // always carries `search_parameters.currency: "EUR"`, so requiring it costs
+  // nothing against the real API.
   const echoed = data.search_parameters?.currency
-  if (echoed && echoed !== params.currency) {
+  if (echoed !== params.currency) {
     throw new Error(
-      `searchapi: requested currency ${params.currency} but response is ${echoed}`)
+      `searchapi: requested currency ${params.currency} but response is `
+    + `${echoed ?? 'absent — the response did not say, and we do not assume'}`)
   }
 
   const exp = minorUnitExponent(params.currency)

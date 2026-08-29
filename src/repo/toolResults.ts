@@ -19,6 +19,46 @@ type Row = {
  * them", the re-search has to be able to move both the price and `fetched_at`
  * — a `do nothing` would leave the stale row in place and the gate would
  * reject the retry for exactly the reason the retry was meant to fix.
+ *
+ * ## DELIBERATE DEVIATION FROM SPEC §6 — read before relying on this table
+ *
+ * §6 calls `tool_results` "Untrimmed, append-only, retained at least as long as
+ * `model_calls`". This is *upsert*-only, not append-only, and the difference is
+ * real: when a re-search moves a price, the previous quote for that
+ * `(conversation_id, source_id)` is OVERWRITTEN and gone. So this table can
+ * answer "what price does the corpus hold for X now" but NOT "what price did a
+ * gate run see for X at 14:03" for any proposal that was never saved. A gate
+ * run's own record (`gate_results.detail` / `source_ids`) and an approved
+ * proposal's rehydrated `proposals.itinerary` both survive; a REJECTED
+ * proposal's exact inputs do not, once the item has been re-quoted.
+ *
+ * ### Why the deviation stands rather than being fixed here
+ *
+ * The same §6 sentence names `(conversation_id, source_id)` as the corpus's
+ * key. A row-per-fetch table cannot keep that as a key — rehydration stops
+ * being a point read and becomes a newest-per-id `distinct on`, which is a
+ * different lookup with a different index and different tie-break behaviour
+ * when two fetches share a `fetched_at`. The spec is therefore in tension with
+ * itself, and this branch's approved plan resolved that tension explicitly:
+ * "(conversation_id, source_id) is the lookup key, and it must be unique so
+ * rehydration is a point read."
+ *
+ * Reversing that decision means dropping a unique constraint from a LIVE table,
+ * rewriting the gate stack's only corpus reader, and changing the corpus's
+ * growth profile — a structural change to the central table of the branch, with
+ * no consumer in this branch or the next that reads a superseded row. That is
+ * work that deserves its own task and its own review, not a slot in a fix wave.
+ *
+ * ### What it costs if this was the wrong call
+ *
+ * Every re-quote between now and the change destroys one historical price. The
+ * loss is silent and unrecoverable — unlike a code defect, it cannot be fixed
+ * retroactively. If slice 2's replay needs "the price the gate actually saw",
+ * the fix is a migration that drops `unique (conversation_id, source_id)`, adds
+ * `(conversation_id, source_id, fetched_at desc)`, turns this into a plain
+ * insert, and makes `rehydrate` below a `select distinct on (source_id) ...
+ * order by source_id, fetched_at desc`. Doing it EARLY is much cheaper than
+ * doing it late, because the rows lost in between never come back.
  */
 export async function recordResults(
   sql: postgres.Sql,
@@ -31,7 +71,29 @@ export async function recordResults(
   },
 ): Promise<number> {
   if (args.items.length === 0) return 0
-  const rows = args.items.map((i) => ({
+
+  // One row per source_id per statement. `on conflict do update` cannot touch a
+  // row twice in the same command: postgres raises
+  // `ON CONFLICT DO UPDATE command cannot affect row a second time`, which is
+  // opaque, names neither the id nor the table, and takes the whole turn down
+  // for what is a recoverable input shape. A supplier CAN legitimately return
+  // the same native id twice (an itinerary offered under two fare families,
+  // a property listed by two OTAs), and that is not a reason to lose the search.
+  //
+  // Newest wins, judged on `fetchedAt` rather than array position, because
+  // position carries no meaning — the caller's array order is whatever the
+  // supplier's response order was. Ties keep the LAST occurrence, which matches
+  // what the upsert would have done had the duplicates arrived as two separate
+  // statements. Deduped before the map so the discarded rows are never built.
+  const newestBySourceId = new Map<string, SupplierItem>()
+  for (const i of args.items) {
+    const seen = newestBySourceId.get(i.sourceId)
+    if (!seen || i.fetchedAt.getTime() >= seen.fetchedAt.getTime()) {
+      newestBySourceId.set(i.sourceId, i)
+    }
+  }
+
+  const rows = [...newestBySourceId.values()].map((i) => ({
     conversation_id: args.conversationId,
     user_id: args.userId,
     turn_id: args.turnId,

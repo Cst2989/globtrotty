@@ -219,6 +219,15 @@ export type TotalsResult = { violations: Violation[]; total: Money | null }
  *    branches leave the set uniform.
  *  - `itemTotal` throws on a quantity that is not a positive integer, so
  *    quantities are validated into a violation first.
+ *
+ * ## `quantity` must be 1
+ *
+ * `quantity` is the last model-controlled number that still moves the total, so
+ * it is checked here rather than trusted. Every supplier this repository ships
+ * quotes the WHOLE booking — Kiwi's price is the party total, SearchApi's is
+ * the whole stay — which makes 1 the only correct multiplier and anything else
+ * a `totals` violation. The reasoning, the fixture evidence, and what a real
+ * per-unit supplier would have to do instead are all at the check itself below.
  */
 export function checkTotals(items: RehydratedItem[], expected: string | null): TotalsResult {
   if (items.length === 0) return { violations: [], total: null }
@@ -251,7 +260,61 @@ export function checkTotals(items: RehydratedItem[], expected: string | null): T
       sourceIds: badQuantity.map((i) => i.item.sourceId),
       detail: `These items have a quantity that is not a whole positive number: `
             + `${badQuantity.map((i) => `${i.item.sourceId} (${i.ref.quantity})`).join(', ')}. `
-            + `Quantity counts identical units — 3 seats, 7 nights — so it cannot be fractional.`,
+            + `Quantity counts identical units, so it cannot be fractional or zero.`,
+    })
+  }
+
+  // ## The quantity hole, and why the only legal quantity is 1
+  //
+  // `quantity` is the one number in a proposal the MODEL still controls, and
+  // the line above only bounded its shape. `total = Σ(corpus_price × quantity)`
+  // — so a model that sends `quantity: 16` gets a 16× trip total back, computed
+  // by the server, from real corpus prices, with `gate_results` recording
+  // `totals: pass`. That is the single hole in this branch's headline guarantee
+  // that no price the model writes reaches the user: it never wrote a price,
+  // it wrote a multiplier, and the effect on the number the user sees is the
+  // same.
+  //
+  // What closes it is that for every supplier this repository ships, the
+  // corpus price ALREADY covers the whole thing. Verified against the captured
+  // fixtures, not assumed:
+  //
+  //  - Kiwi searches `2 adults` and returns `price: 464` — €464 for the party,
+  //    not per seat. Multiplying by the passenger count double-counts them.
+  //  - SearchApi reads `total_price`, the whole stay. `HotelDetail.nights` is
+  //    derived from the requested window and is descriptive, never a
+  //    multiplier.
+  //  - MockSupplier mirrors both, one price per item.
+  //
+  // So `1` is the only correct quantity anything in this branch can produce,
+  // and anything else is a fault worth telling the model about rather than
+  // silently multiplying. §5's "3 seats, 7 nights" mental model does not match
+  // either shipped adapter's price basis; this is where that mismatch is
+  // recorded instead of being absorbed into a wrong total.
+  //
+  // A GENUINE per-unit supplier — one whose corpus price is per seat or per
+  // night — must relax this DELIBERATELY, and the right shape for that is a
+  // field on `SupplierItem` saying what the price covers, set by each adapter
+  // and read here, so the answer travels with the item instead of being a
+  // global assumption. That field is not added today because every supplier in
+  // the repository would set the same value, which carries no information and
+  // buys an unexercised code path plus a live-schema column. Add it with the
+  // adapter that needs it.
+  //
+  // Filed as a `totals` violation, never thrown: this is model-controlled input
+  // reaching a gate, and a gate returns violations.
+  const multiplied = items.filter(
+    (i) => Number.isSafeInteger(i.ref.quantity) && i.ref.quantity > 1,
+  )
+  if (multiplied.length > 0) {
+    violations.push({
+      gate: 'totals',
+      sourceIds: multiplied.map((i) => i.item.sourceId),
+      detail: `These items were proposed with a quantity above 1: `
+            + `${multiplied.map((i) => `${i.item.sourceId} (${i.ref.quantity})`).join(', ')}. `
+            + `Every price in this system already covers the whole booking — a flight `
+            + `price covers the whole party, a hotel price covers the whole stay — so `
+            + `quantity must be 1. Propose each item once with quantity 1.`,
     })
   }
 

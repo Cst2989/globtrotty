@@ -11,6 +11,20 @@ export type LegSummary = {
   route: string[]
   cabinClass: string
   carriers: string[]
+  /**
+   * One entry per segment, in segment order, e.g. `['U22202', 'LS875']`.
+   *
+   * §6 names `flight_no` in the normalised `tool_results` shape and §5 requires
+   * the cashier to compare "per item and on item identity, not just on the
+   * sum". Carrier alone is not identity: `FR1762` and `FR1763` are the same
+   * airline on the same route at different times and different fare rules, and
+   * a refundable fare downgraded to basic economy differs by flight number
+   * while every other field this type carries stays put. Deliberately NOT
+   * deduplicated and NOT sorted — a two-segment leg flown twice by the same
+   * number is a different itinerary from one flown once, and order is what
+   * makes the list comparable to `route`.
+   */
+  flightNumbers: string[]
 }
 export type FlightDetail = {
   kind: 'flight'
@@ -91,10 +105,30 @@ export interface Supplier {
 }
 
 /**
- * `quantity` is a count of identical units (3 seats, 7 nights), so this is
- * integer multiplication in minor units and never a float multiply. A
- * non-integer quantity is a caller bug, not a rounding question — there is no
- * correct way to charge 1.5 of a seat, so it throws rather than picking one.
+ * `quantity` is a count of identical units, so this is integer multiplication
+ * in minor units and never a float multiply. A non-integer quantity is a caller
+ * bug, not a rounding question — there is no correct way to charge 1.5 of a
+ * seat, so it throws rather than picking one.
+ *
+ * ## Read this before passing anything other than 1
+ *
+ * This function multiplies; it does NOT know what `item.price` covers. For
+ * every supplier this repository ships, the corpus price already covers the
+ * whole booking, so the only correct quantity is 1:
+ *
+ *  - **Kiwi** returns a party total. The captured fixture's search is
+ *    `2 adults` and the itinerary is priced `464` EUR — €464 for the pair, not
+ *    per seat. Multiplying by the passenger count doubles a price that already
+ *    counted them.
+ *  - **SearchApi** reads `total_price`, which is the whole stay; `nights` is
+ *    derived from the requested window and is descriptive, not a multiplier.
+ *  - **MockSupplier** mirrors both, quoting one price per item.
+ *
+ * So `checkTotals` (src/gates/checks.ts) refuses a model-supplied quantity
+ * other than 1 and files a `totals` violation. That check is the enforcement
+ * point; this function stays a pure multiplier because a genuine per-unit
+ * supplier would need it, and because a gate is the right place to turn a
+ * model's mistake into a message rather than an exception.
  */
 export function itemTotal(item: SupplierItem, quantity: number): Money {
   if (!Number.isSafeInteger(quantity) || quantity <= 0) {

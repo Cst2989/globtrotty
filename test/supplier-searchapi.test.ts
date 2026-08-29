@@ -102,6 +102,40 @@ describe('parseSearchApiHotels', () => {
     expect(() => parseSearchApiHotels(doc, params, NOW))
       .toThrow(/requested currency EUR but response is USD/)
   })
+
+  /**
+   * An ABSENT echo is a distinct case from a mismatched one, and the old guard
+   * (`if (echoed && echoed !== requested)`) treated it as agreement: the
+   * requested code was stamped onto whatever number came back. "Absence of
+   * evidence is confirmation" is the opposite of this codebase's posture
+   * everywhere else — `checkFreshness` calls an unparseable timestamp STALE,
+   * `quote()` calls a transport failure `unavailable` — because unknown is not
+   * unchanged. The captured fixture always carries
+   * `search_parameters.currency: "EUR"`, so requiring it costs nothing live.
+   */
+  it('refuses a response that does not say what currency it priced in', () => {
+    // No `search_parameters` at all.
+    const missing = JSON.stringify({
+      properties: [{ property_token: 'G', name: 'Silent', total_price: { extracted_price: 100 } }],
+    })
+    // Pinned on 'absent', not merely /currency/i: a mismatch message would match
+    // a loose regex too, and this is specifically the ABSENT case.
+    expect(() => parseSearchApiHotels(missing, params, NOW))
+      .toThrow(/requested currency EUR but response is absent/)
+
+    // Present but with no currency key — the same fault, one level down.
+    const emptyParams = JSON.stringify({
+      search_parameters: { q: 'Faro Portugal' },
+      properties: [{ property_token: 'H', name: 'Silent', total_price: { extracted_price: 100 } }],
+    })
+    expect(() => parseSearchApiHotels(emptyParams, params, NOW)).toThrow(/absent/)
+  })
+
+  // The other side of the boundary: an echo that agrees still parses, so
+  // "throw on everything" cannot pass the test above.
+  it('accepts a response whose currency echo matches the request', () => {
+    expect(parseSearchApiHotels(raw, params, NOW).length).toBeGreaterThan(0)
+  })
 })
 
 describe('SearchApiHotels capabilities', () => {

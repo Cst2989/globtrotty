@@ -24,9 +24,11 @@ function flight(id: string, dep: string, arr: string): RehydratedItem {
     detail: {
       kind: 'flight',
       outbound: { from: 'BER', to: 'FAO', departureLocal: dep, arrivalLocal: dep,
-                  stops: 0, route: [], cabinClass: 'Economy', carriers: [] },
+                  stops: 0, route: [], cabinClass: 'Economy', carriers: [],
+                  flightNumbers: [] },
       inbound: { from: 'FAO', to: 'BER', departureLocal: arr, arrivalLocal: arr,
-                 stops: 0, route: [], cabinClass: 'Economy', carriers: [] },
+                 stops: 0, route: [], cabinClass: 'Economy', carriers: [],
+                 flightNumbers: [] },
       baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
       totalDurationSeconds: 1, selfTransfer: false,
     },
@@ -41,9 +43,11 @@ function inSlot(r: RehydratedItem, slot: string): RehydratedItem {
 
 describe('checkTotals', () => {
   it('sums line totals server-side', () => {
-    const r = checkTotals([hotel('A', 10_000n, 7), hotel('B', 5_000n)], 'EUR')
+    const r = checkTotals([hotel('A', 10_000n), hotel('B', 5_000n)], 'EUR')
     expect(r.violations).toEqual([])
-    expect(r.total!.minor).toBe(75_000n)
+    // Pinned exactly: 10_000 + 5_000. An implementation that dropped an item,
+    // or summed the first only, produces a different number here.
+    expect(r.total!.minor).toBe(15_000n)
     expect(r.total!.currency).toBe('EUR')
   })
 
@@ -88,8 +92,13 @@ describe('checkTotals', () => {
   })
 
   it('recomputes rather than trusting a tampered lineTotal', () => {
-    const lying = { ...hotel('L', 10_000n, 2), lineTotal: money(1n, 'EUR') }
-    expect(checkTotals([lying], 'EUR').total!.minor).toBe(20_000n)
+    // The handed-in `lineTotal` is a lie by four orders of magnitude. A summer
+    // that trusted it would return 1n; recomputing from the corpus price
+    // returns 10_000n. (This used to use quantity 2 to open the gap; quantity
+    // above 1 is now a totals violation, so the gap comes from the tampered
+    // value alone — which is what the test was ever about.)
+    const lying = { ...hotel('L', 10_000n), lineTotal: money(1n, 'EUR') }
+    expect(checkTotals([lying], 'EUR').total!.minor).toBe(10_000n)
   })
 
   it('reports both faults when a set mixes bases AND currencies', () => {
@@ -117,6 +126,60 @@ describe('checkTotals', () => {
     expect(r.violations).toHaveLength(1)
     expect(r.violations[0]!.sourceIds).toEqual(['Z'])
     expect(r.total).toBeNull()
+  })
+
+  /**
+   * `quantity` is the one number in a proposal the MODEL still controls, and it
+   * multiplies straight into the trip total. Both shipped adapters price the
+   * WHOLE booking (Kiwi quotes the party total, SearchApi the whole stay), so 1
+   * is the only correct multiplier and anything else silently inflates a total
+   * built from otherwise-genuine corpus prices.
+   *
+   * These assert the VIOLATION, deliberately not an inflated total: a test that
+   * merely checked `total === 20_000n` would pass against the very bug this
+   * closes.
+   */
+  it('refuses a quantity of 2 rather than doubling a price that already covers the booking', () => {
+    const two = { ...hotel('Q2', 10_000n), ref: { sourceId: 'Q2', quantity: 2, slot: 'stay' } }
+    const r = checkTotals([two], 'EUR')
+    expect(r.total).toBeNull()                       // NOT money(20_000n, 'EUR')
+    expect(r.violations).toHaveLength(1)
+    expect(r.violations[0]!.gate).toBe('totals')
+    expect(r.violations[0]!.sourceIds).toEqual(['Q2'])
+    expect(r.violations[0]!.detail).toContain('quantity above 1')
+    expect(r.violations[0]!.detail).toContain('Q2 (2)')
+  })
+
+  it('refuses the schema\'s maximum quantity too, and names every offender', () => {
+    const a = { ...hotel('A', 10_000n), ref: { sourceId: 'A', quantity: 16, slot: 'stay' } }
+    const b = { ...hotel('B', 5_000n), ref: { sourceId: 'B', quantity: 3, slot: 'stay' } }
+    const r = checkTotals([a, b, hotel('C', 1_000n)], 'EUR')
+    expect(r.total).toBeNull()
+    const totals = r.violations.filter((v) => v.gate === 'totals')
+    expect(totals).toHaveLength(1)
+    // C is quantity 1 and is NOT an offender: the message must not tell the
+    // model to change a line that is already correct.
+    expect(totals[0]!.sourceIds).toEqual(['A', 'B'])
+  })
+
+  // The other side of the boundary. 1 is not merely "not rejected": it is the
+  // value that still produces a real total, so this pins that the check did not
+  // simply refuse everything.
+  it('accepts a quantity of exactly 1 and still totals it', () => {
+    const r = checkTotals([hotel('A', 10_000n), hotel('B', 5_000n)], 'EUR')
+    expect(r.violations).toEqual([])
+    expect(r.total!.minor).toBe(15_000n)
+  })
+
+  // A fractional quantity must report ONE fault, not two. 1.5 is both "not a
+  // whole number" and "> 1"; describing it twice would hand the model two
+  // sentences about one line and make it guess whether it has two problems.
+  it('reports a fractional quantity once, not once per quantity rule', () => {
+    const bad = { ...hotel('F', 10_000n), ref: { sourceId: 'F', quantity: 1.5, slot: 'stay' } }
+    const r = checkTotals([bad], 'EUR')
+    expect(r.violations.filter((v) => v.gate === 'totals')).toHaveLength(1)
+    expect(r.violations[0]!.detail).toMatch(/quantit/i)
+    expect(r.violations[0]!.detail).not.toContain('quantity above 1')
   })
 })
 

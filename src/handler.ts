@@ -1,4 +1,5 @@
 import type postgres from 'postgres'
+import { exceedsAnyCeiling } from './engine.js'
 import type { Limits } from './engine.js'
 import { readSpendFailClosed } from './repo/spend.js'
 
@@ -91,15 +92,15 @@ export async function submitMessage(
   await sql`insert into messages (conversation_id, user_id, role, content)
             values (${conversationId}, ${input.userId}, 'user', ${input.message})`
 
-  // All three ceilings, not two. The global one is checked here rather than left
-  // to the worker's `decideNext` because a capped ACCOUNT must be refused before
-  // a turn is queued at all — otherwise the refusal arrives one step into the
-  // turn, after a model call has already been paid for, which is precisely the
-  // spend the ceiling exists to prevent. Note it can fire while both of this
-  // user's own counters read zero: it protects the account, not the user.
-  if (spend.globalMicros >= limits.globalCeilingMicros ||
-      spend.dailyMicros >= limits.dailyCeilingMicros ||
-      spend.conversationMicros >= limits.conversationCeilingMicros) {
+  // All three ceilings, not two — and via `exceedsAnyCeiling`, the same
+  // predicate `decideNext` uses, rather than a second copy of the same three
+  // comparisons. The global one is checked at this tier rather than left to the
+  // worker because a capped ACCOUNT must be refused before a turn is queued at
+  // all — otherwise the refusal arrives one step into the turn, after a model
+  // call has already been paid for, which is precisely the spend the ceiling
+  // exists to prevent. Note it can fire while both of this user's own counters
+  // read zero: it protects the account, not the user.
+  if (exceedsAnyCeiling(spend, limits)) {
     await sql`update conversations set status = 'limit_reached', updated_at = now()
                where id = ${conversationId} and user_id = ${input.userId}`
     return { conversationId, turnId: null, status: 'limit_reached' }

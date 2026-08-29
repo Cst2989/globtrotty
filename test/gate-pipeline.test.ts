@@ -131,17 +131,60 @@ describeDb('runGates', () => {
     await withTestDb(async (sql) => {
       const { conversationId, items } = await seed(sql, '01')
       const real = items[0]!.price.minor
+      const other = items[1]!.price.minor
       const res = await runGates(sql, {
         conversationId, turnId: null, now: NOW, notebook,
-        refs: [{ sourceId: items[0]!.sourceId, quantity: 3, slot: 'flight' }],
+        refs: [
+          { sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' },
+          { sourceId: items[1]!.sourceId, quantity: 1, slot: 'inbound' },
+        ],
       })
       expect(res.ok).toBe(true)
       if (!res.ok) throw new Error('unreachable')
-      // quantity 3: pins that the total is price x quantity, not merely the price.
-      expect(res.total.minor).toBe(real * 3n)
+      // Two DIFFERENT corpus prices, summed. The pair is what pins that the
+      // total is built from the corpus rather than echoed from one item: the
+      // seeded prices differ, so returning either one alone fails here.
+      // (This used to pin `price x 3` via a quantity-3 ref; quantity above 1 is
+      // now a totals violation — see the test below.)
+      expect(res.total.minor).toBe(real + other)
       expect(res.total.currency).toBe('EUR')
       expect(res.items[0]!.item.price.minor).toBe(real)
-      expect(res.items[0]!.lineTotal.minor).toBe(real * 3n)
+      expect(res.items[0]!.lineTotal.minor).toBe(real)
+    })
+  })
+
+  /**
+   * The `quantity` hole, end to end. The model controls this integer and the
+   * server multiplies it into the total, so a `quantity: 16` proposal used to
+   * come back with a 16x total and `gate_results` recording `totals: pass` —
+   * a price the model effectively wrote, reaching the user through gates that
+   * all said yes. Both shipped adapters price the whole booking (Kiwi quotes
+   * the party total, SearchApi the whole stay), so 1 is the only correct
+   * multiplier.
+   *
+   * Asserts the VIOLATION and the recorded row, deliberately not an inflated
+   * total: checking `total === price x 2` would pass against the bug.
+   */
+  it('rejects a quantity above 1 instead of multiplying a whole-booking price', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, '18')
+      const res = await runGates(sql, {
+        conversationId, turnId: null, now: NOW, notebook,
+        refs: [{ sourceId: items[0]!.sourceId, quantity: 2, slot: 'flight' }],
+      })
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations.map((v) => v.gate)).toEqual(['totals'])
+      expect(res.violations[0]!.sourceIds).toEqual([items[0]!.sourceId])
+      expect(res.violations[0]!.detail).toContain('quantity must be 1')
+
+      // And it is recorded as a totals FAILURE, not a pass and not a null.
+      const rows = await gateRows(sql, conversationId)
+      expect(rows.get('totals')!.passed).toBe(false)
+      expect(rows.get('totals')!.detail).toContain('quantity above 1')
+      // budget could not be evaluated: there is no total to compare.
+      expect(rows.get('budget')!.passed).toBeNull()
+      expect(rows.get('budget')!.detail).toBe(NOT_EVALUATED.noTotal)
     })
   })
 
