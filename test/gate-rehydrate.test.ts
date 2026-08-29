@@ -60,6 +60,15 @@ describe('ProposalRefsSchema — the model cannot send values', () => {
     }
   })
 
+  it('rejects a quantity above the per-line cap', () => {
+    expect(ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'K1', quantity: 16, slot: 'x' }],
+    }).success).toBe(true)
+    expect(ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'K1', quantity: 17, slot: 'x' }],
+    }).success).toBe(false)
+  })
+
   it('rejects an empty ref list', () => {
     expect(ProposalRefsSchema.safeParse({ refs: [] }).success).toBe(false)
   })
@@ -111,6 +120,15 @@ describeDb('rehydrateRefs', () => {
         { sourceId: a.items[0]!.sourceId, quantity: 1, slot: 'a' },
       ])
       expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      // Pinned, not just `ok === false`: it must fail for the RIGHT reason
+      // (provenance, naming a's id) — an implementation that dropped the
+      // conversation_id predicate would fail this for a DIFFERENT reason
+      // (or not fail at all), while one that failed for an unrelated cause
+      // would still satisfy a bare `toBe(false)`.
+      expect(res.violations).toHaveLength(1)
+      expect(res.violations[0]!.gate).toBe('provenance')
+      expect(res.violations[0]!.sourceIds).toEqual([a.items[0]!.sourceId])
     })
   })
 
@@ -124,6 +142,45 @@ describeDb('rehydrateRefs', () => {
       expect(res.ok).toBe(false)
       if (res.ok) throw new Error('unreachable')
       expect(res.violations[0]!.sourceIds.sort()).toEqual(['X1', 'X2'])
+    })
+  })
+
+  // The defense-in-depth case: TypeScript's `ItemRef[]` parameter type is
+  // erased at runtime, so a caller that skipped `ProposalRefsSchema` — or
+  // handed in raw model JSON forced through `as any` — must still be caught
+  // HERE, inside `rehydrateRefs` itself, not merely at some upstream call
+  // site that might not exist yet. This proves the schema re-runs inside
+  // the function: a real, present, corpus-backed sourceId with a smuggled
+  // `price` is still rejected, and never reaches the database lookup.
+  it('re-enforces the schema even when the caller skips it', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, '06')
+      const tampered = [
+        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'a', price: 1 },
+      ] as unknown as Parameters<typeof rehydrateRefs>[2]
+      const res = await rehydrateRefs(sql, conversationId, tampered)
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations).toHaveLength(1)
+      expect(res.violations[0]!.gate).toBe('provenance')
+      expect(res.violations[0]!.detail).toMatch(/price/i)
+    })
+  })
+
+  // `rehydrate()` alone short-circuits an empty id list to an empty Map, which
+  // would otherwise make an empty `refs: []` report as a SUCCESSFUL
+  // rehydration of zero items — and Tasks 9/10 call `sumMoney` on the result,
+  // which THROWS on an empty array. Re-running the schema (`.min(1)`) inside
+  // `rehydrateRefs` turns this into a reported violation instead of an
+  // unhandled exception two gates downstream.
+  it('rejects an empty ref list as a violation, not a successful empty result', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId } = await seed(sql, '07')
+      const res = await rehydrateRefs(sql, conversationId, [])
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations).toHaveLength(1)
+      expect(res.violations[0]!.gate).toBe('provenance')
     })
   })
 })

@@ -24,7 +24,7 @@ import type { ItemRef, RehydratedItem, Violation } from './types.js'
 export const ProposalRefsSchema = z.strictObject({
   refs: z.array(z.strictObject({
     sourceId: z.string().min(1).max(512),
-    quantity: z.int().positive(),
+    quantity: z.int().positive().max(16),
     slot: z.string().min(1).max(64),
   })).min(1).max(24)
     .refine(
@@ -41,17 +41,44 @@ export type RehydrateResult =
  * Reads every referenced item from the corpus and discards whatever the caller
  * thought those items were. Scoped to one conversation: an id seen in someone
  * else's conversation is not provenance for this one.
+ *
+ * `refs` is typed `ItemRef[]`, but TypeScript is erased at runtime — a caller
+ * that skipped `ProposalRefsSchema` (or handed in raw, untyped model JSON cast
+ * to the type) could still get an extra `price` key past the compiler. So the
+ * schema is re-applied HERE, inside the function, rather than trusted to have
+ * already run: the boundary check must not be skippable by construction. A
+ * schema failure is reported as a `provenance` violation, not thrown — this
+ * function's contract is "return a result the caller can record and hand back
+ * to the model," the same contract every other failure path here already
+ * uses, and a caller in the turn loop wants a violation to log and answer
+ * with, not a `try/catch` around a `ZodError` for one specific failure mode
+ * among several.
  */
 export async function rehydrateRefs(
   sql: postgres.Sql,
   conversationId: string,
   refs: ItemRef[],
 ): Promise<RehydrateResult> {
-  const found = await rehydrate(sql, conversationId, refs.map((r) => r.sourceId))
+  const parsed = ProposalRefsSchema.safeParse({ refs })
+  if (!parsed.success) {
+    const detail = `The proposal must reference search results and nothing else `
+                 + `({sourceId, quantity, slot}). Rejected: `
+                 + parsed.error.issues.map((i) => i.message).join('; ')
+    return {
+      ok: false,
+      violations: [{ gate: 'provenance', sourceIds: [], detail }],
+    }
+  }
+  const safeRefs = parsed.data.refs
+
+  const found = await rehydrate(sql, conversationId, safeRefs.map((r) => r.sourceId))
 
   // Report ALL missing ids together. One-at-a-time rejection costs a model round
   // trip per bad reference, and the model cannot see the pattern in its own error.
-  const missing = refs.filter((r) => !found.has(r.sourceId)).map((r) => r.sourceId)
+  // Deduped: a direct (non-schema-mediated) call could in principle repeat an id.
+  const missing = [...new Set(
+    safeRefs.filter((r) => !found.has(r.sourceId)).map((r) => r.sourceId),
+  )]
   if (missing.length > 0) {
     return {
       ok: false,
@@ -66,9 +93,16 @@ export async function rehydrateRefs(
 
   return {
     ok: true,
-    items: refs.map((ref) => {
+    items: safeRefs.map((ref) => {
       const item = found.get(ref.sourceId)!
-      return { ref, item, lineTotal: itemTotal(item, ref.quantity) }
+      // Rebuild rather than alias the caller's ref object: every output field
+      // is discarded-and-rebuilt from validated data, matching the class's
+      // whole premise, not just `item`.
+      return {
+        ref: { sourceId: ref.sourceId, quantity: ref.quantity, slot: ref.slot },
+        item,
+        lineTotal: itemTotal(item, ref.quantity),
+      }
     }),
   }
 }
