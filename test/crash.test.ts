@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
@@ -21,6 +22,12 @@ const requirements = textMessage('{"budget":{"amount":1500,"currency":"EUR"},"de
 const crash = () => { throw new Error('process killed') }
 
 describeDb('when the process dies mid-search', () => {
+  // submitMessage logs `invoke failed for turn <uuid>` on this path by design
+  // (see src/handler.ts); the spy keeps that expected noise out of every run.
+  let errorSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {}) })
+  afterEach(() => { errorSpy.mockRestore() })
+
   it('her message and her turn are still there afterwards', async () => {
     await withTestDb(async (sql) => {
       const supplier = countingRunner()
