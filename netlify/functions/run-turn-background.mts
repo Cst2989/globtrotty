@@ -50,7 +50,9 @@ export default async (req: Request): Promise<Response> => {
         readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
       },
     )
-    await finishTurn(sql, input, result.text)
+    // Tier 3's ceiling denial leaves the same record behind tier 2's does
+    // (src/handler.ts), not the record a normal reply leaves.
+    await finishTurn(sql, input, result.text, result.outcome === 'limit_reached' ? 'limit_reached' : undefined)
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)
   } finally {
     await sql.end({ timeout: 5 })

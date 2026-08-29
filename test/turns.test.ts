@@ -64,4 +64,25 @@ describeDb('finishTurn', () => {
       expect(c!.status).toBe('active')
     })
   })
+
+  // New defect C from the fix1 re-review: before this, a tier-3 ceiling
+  // denial left the turn 'done' with no fail_reason and the conversation
+  // 'active', indistinguishable from a normal reply, while tier 2's own
+  // ceiling denial (src/handler.ts) leaves the conversation 'limit_reached'.
+  // Passing 'limit_reached' here is how run-turn-background.mts now makes the
+  // two tiers describe the same denial the same way.
+  it('records the same limit_reached reason tier 2 does, when passed one', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+        userId: USER, conversationId: null, message: 'hi',
+      })
+      const input = (await loadTurnInput(sql, submitted.turnId!))!
+      await finishTurn(sql, input, '', 'limit_reached')
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('done')
+      expect(t!.fail_reason).toBe('limit_reached')
+      const [c] = await sql`select status from course.conversations where id = ${submitted.conversationId}`
+      expect(c!.status).toBe('limit_reached')
+    })
+  })
 })

@@ -8,6 +8,7 @@ import { DEFAULT_LIMITS } from './limits.js'
 import { callAndRecord } from './metered.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
 import type { ModelCallSink } from './repo/model-calls.js'
+import { SpendUnconfirmedError } from './repo/spend.js'
 import { withSeat, type Seat } from './seats.js'
 import type { ToolRunner } from './tools.js'
 
@@ -68,6 +69,35 @@ export function addUsage(a: Usage, b: Usage): Usage {
 }
 
 /**
+ * Runs a caller's `readSpend` and turns its one fail-closed throw into the
+ * sentinel `'limit_reached'` instead of letting it escape. Shared by this
+ * loop's per-step read below and `turn()`'s top-of-turn read
+ * (src/conversation.ts), which is the read that runs before the loop, on
+ * classify and extract: two call sites that both must not strand a turn on a
+ * read that could not confirm what was spent, described once rather than
+ * twice.
+ *
+ * Only `SpendUnconfirmedError` is caught. Anything else, a `TypeError` in a
+ * caller-supplied reader, a bug in `readSpendFailClosed` itself, a
+ * connection-pool error that surfaces as something else, is a crash in our
+ * own code and not a failed read, and it propagates: this is the same rule
+ * the loop's own model-call catch applies to a non-`APIError` below, and a
+ * blanket catch here would silently turn a real bug into an empty reply for
+ * her instead of a stack trace for whoever is on call.
+ */
+export async function readSpendOrLimitReached(
+  readSpend: () => Promise<Spend>,
+): Promise<Spend | 'limit_reached'> {
+  try {
+    return await readSpend()
+  } catch (err) {
+    if (!(err instanceof SpendUnconfirmedError)) throw err
+    console.error('readSpend failed, denying as a reached ceiling', err)
+    return 'limit_reached'
+  }
+}
+
+/**
  * The model asks for a tool, we run it, the result goes back in the next user
  * turn, and the model chooses again. The loop ends when the model stops
  * asking, when it hits the step cap, when it refuses, or when the provider
@@ -93,22 +123,19 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
   for (;;) {
     let spend: Spend
     if (options.readSpend) {
-      try {
-        spend = await options.readSpend()
-      } catch (err) {
-        // readSpendFailClosed throws rather than returning a number when it
-        // cannot confirm what has been spent (src/repo/spend.ts). That throw
-        // must not escape here: this function's whole contract is "never a
-        // thrown exception" (see the docstring above), and the caller across
-        // the process boundary (run-turn-background.mts) awaits `turn()`
-        // inside a try/finally with no catch, so an uncaught throw here would
-        // strand the turn at 'queued' instead of finishing it. A read that
-        // cannot confirm spend is treated the same as a read that confirms
-        // the ceiling is reached: both mean "do not prove it is safe to spend
-        // more", which is exactly what a fail-closed guard is for.
-        console.error('readSpend failed, denying as a reached ceiling', err)
-        return finish('limit_reached', '')
-      }
+      // readSpendFailClosed throws rather than returning a number when it
+      // cannot confirm what has been spent (src/repo/spend.ts). That throw
+      // must not escape here: this function's whole contract is "never a
+      // thrown exception" (see the docstring above), and the caller across
+      // the process boundary (run-turn-background.mts) awaits `turn()`
+      // inside a try/finally with no catch, so an uncaught throw here would
+      // strand the turn at 'queued' instead of finishing it. A read that
+      // cannot confirm spend is treated the same as a read that confirms
+      // the ceiling is reached: both mean "do not prove it is safe to spend
+      // more", which is exactly what a fail-closed guard is for.
+      const read = await readSpendOrLimitReached(options.readSpend)
+      if (read === 'limit_reached') return finish('limit_reached', '')
+      spend = read
     } else {
       spend = { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
     }

@@ -41,17 +41,30 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
  * Writes the answer and closes the turn. Two statements in one transaction, so a
  * crash between them cannot leave a finished turn with no reply. Lesson 3.3
  * takes this much further; the transaction is the part that matters today.
+ *
+ * `failReason`, when passed, is written to `turns.fail_reason` and the
+ * conversation is left at that status instead of 'active'. Today the only
+ * value ever passed is 'limit_reached', so that tier 3's ceiling denial
+ * leaves the same record behind that tier 2's does (src/handler.ts sets
+ * `conversations.status = 'limit_reached'` on its own denial). It is typed
+ * narrowly rather than as the full `FailReason` union on purpose: lesson 2.7
+ * mirrors that whole list into a `turns.fail_reason` check constraint and is
+ * where every other outcome earns the same treatment; until then a normal
+ * turn keeps recording nothing here, exactly as before.
  */
 export async function finishTurn(
   sql: postgres.Sql,
   input: TurnInput,
   reply: string,
+  failReason?: 'limit_reached',
 ): Promise<void> {
+  const status = failReason === 'limit_reached' ? 'limit_reached' : 'active'
   await sql.begin(async (tx) => {
     await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
              values (${input.conversationId}, ${input.userId}, ${input.turnId}, 'agent', ${reply})`
-    await tx`update course.turns set status = 'done', finished_at = now() where id = ${input.turnId}`
-    await tx`update course.conversations set status = 'active', updated_at = now()
+    await tx`update course.turns set status = 'done', finished_at = now(), fail_reason = ${failReason ?? null}
+              where id = ${input.turnId}`
+    await tx`update course.conversations set status = ${status}, updated_at = now()
               where id = ${input.conversationId} and user_id = ${input.userId}`
   })
 }

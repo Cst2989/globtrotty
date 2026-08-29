@@ -3,6 +3,22 @@ import type { Spend } from '../engine.js'
 import { pgSink, type ModelCallSink, type TurnContext } from './model-calls.js'
 
 /**
+ * Thrown only by `readSpendFailClosed`'s own fail-closed branch: a
+ * conversation row that could not be confirmed. Named so a caller's catch can
+ * ask "is this the read I chose to deny on" rather than "is this any Error",
+ * which is the difference between denying a request on purpose and denying it
+ * because a bug happened to throw. A plain `Error` (a real bug in our code, a
+ * connection dropped mid-query in a way that surfaces as something else) must
+ * still propagate past every catch that only looks for this class.
+ */
+export class SpendUnconfirmedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SpendUnconfirmedError'
+  }
+}
+
+/**
  * THE DAY BOUNDARY IS UTC, everywhere in this file, and it must stay that way.
  *
  * `current_date` was the obvious spelling and is the wrong one: it is the
@@ -89,7 +105,7 @@ export async function readSpendFailClosed(
     select spend_usd_micros from course.conversations
      where id = ${conversationId} and user_id = ${userId}`
   if (conv.length === 0) {
-    throw new Error('Cannot confirm conversation spend, fail closed, denying the request')
+    throw new SpendUnconfirmedError('Cannot confirm conversation spend, fail closed, denying the request')
   }
   const day = await sql`
     select cost_micros from course.daily_usage

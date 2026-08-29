@@ -4,7 +4,7 @@ import { classify } from './classify.js'
 import { exceedsAnyCeiling, type Spend } from './engine.js'
 import { extract } from './extract.js'
 import { DEFAULT_LIMITS } from './limits.js'
-import { addUsage, toolLoop, type LoopResult } from './loop.js'
+import { addUsage, readSpendOrLimitReached, toolLoop, type LoopResult } from './loop.js'
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
 import type { ModelCallSink } from './repo/model-calls.js'
 import type { ToolRunner } from './tools.js'
@@ -61,19 +61,30 @@ export async function turn(
   // see because they run before the loop starts. Lesson 2.7 is where a
   // ceiling hit like this one reaches her as a real reply rather than the
   // empty text below; see the same note on the loop's own stop branch.
-  if (options.readSpend && exceedsAnyCeiling(await options.readSpend(), DEFAULT_LIMITS)) {
-    return {
-      outcome: 'limit_reached',
-      text: '',
-      steps: 0,
-      toolTrace: [],
-      usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-      costMicros: 0n,
-      conversation,
-      // Arbitrary: no call was made yet, so no desk was ever chosen. Nothing
-      // downstream reads `desk` on this outcome (router.ts's `handle()` never
-      // passes `readSpend`, so this branch cannot fire there).
-      desk: 'planning',
+  //
+  // The read goes through readSpendOrLimitReached, the same helper the loop
+  // uses for its own per-step read, rather than a bare await: on tier 3 this
+  // is the FIRST read of the whole turn, before toolLoop ever runs, so an
+  // uncaught fail-closed throw here would escape turn() itself and strand the
+  // turn at 'queued' the way run-turn-background.mts's try/finally (no catch)
+  // cannot recover from. A throw and a confirmed ceiling hit both end up
+  // meaning the same thing: do not prove it is safe to spend more.
+  if (options.readSpend) {
+    const read = await readSpendOrLimitReached(options.readSpend)
+    if (read === 'limit_reached' || exceedsAnyCeiling(read, DEFAULT_LIMITS)) {
+      return {
+        outcome: 'limit_reached',
+        text: '',
+        steps: 0,
+        toolTrace: [],
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        costMicros: 0n,
+        conversation,
+        // Arbitrary: no call was made yet, so no desk was ever chosen. Nothing
+        // downstream reads `desk` on this outcome (router.ts's `handle()` never
+        // passes `readSpend`, so this branch cannot fire there).
+        desk: 'planning',
+      }
     }
   }
   const classified = await classify(text, client, options.record)

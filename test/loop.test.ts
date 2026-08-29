@@ -2,6 +2,7 @@ import { RateLimitError } from '@anthropic-ai/sdk'
 import { vi } from 'vitest'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { toolLoop } from '../src/loop.js'
+import { SpendUnconfirmedError } from '../src/repo/spend.js'
 import { SEATS } from '../src/seats.js'
 import { TOOLS } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
@@ -43,24 +44,40 @@ describe('toolLoop', () => {
     expect(result.outcome).toBe('limit_reached')   // not step_cap
     expect(client.calls).toBe(0)
   })
-  // readSpendFailClosed throws when it cannot confirm spend (src/repo/spend.ts).
-  // That throw must not escape toolLoop: this pins that it ends the turn
-  // instead, the same way a confirmed ceiling hit would, rather than
-  // stranding a caller who awaits `turn()` with no catch of its own
-  // (run-turn-background.mts).
+  // readSpendFailClosed throws SpendUnconfirmedError when it cannot confirm
+  // spend (src/repo/spend.ts). That throw must not escape toolLoop: this pins
+  // that it ends the turn instead, the same way a confirmed ceiling hit
+  // would, rather than stranding a caller who awaits `turn()` with no catch
+  // of its own (run-turn-background.mts).
   it('ends the turn instead of throwing when the spend read cannot confirm', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const client = fakeClient([textMessage('Here is a plan.')])
       const result = await toolLoop({
         ...base, client,
-        readSpend: async () => { throw new Error('Cannot confirm conversation spend, fail closed, denying the request') },
+        readSpend: async () => { throw new SpendUnconfirmedError('Cannot confirm conversation spend, fail closed, denying the request') },
       })
       expect(result.outcome).toBe('limit_reached')
       expect(client.calls).toBe(0)
     } finally {
       logged.mockRestore()
     }
+  })
+  // The catch above only recognises SpendUnconfirmedError. Anything else, a
+  // plain bug in our own code or a caller-supplied reader, is not a failed
+  // read and must not be swallowed into a quiet 'limit_reached': this is the
+  // same rule the loop's own model-call catch applies to a non-APIError a few
+  // lines below, and new defect B in the fix1 re-review named this catch as
+  // the one place that did not yet honour it.
+  it('lets a plain Error from readSpend propagate rather than denying on it', async () => {
+    const client = fakeClient([textMessage('Here is a plan.')])
+    await expect(
+      toolLoop({
+        ...base, client,
+        readSpend: async () => { throw new Error('boom') },
+      }),
+    ).rejects.toThrow('boom')
+    expect(client.calls).toBe(0)
   })
   it('treats a refusal as an outcome, not an exception', async () => {
     const client = fakeClient([textMessage('I cannot help with that.', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'other' } } as never)])
