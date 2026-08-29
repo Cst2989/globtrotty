@@ -107,3 +107,79 @@ describeDb('0004 corpus schema', () => {
     })
   })
 })
+
+describeDb('0005 gate_results integrity', () => {
+  it('cascades an orphan gate_results row (proposal_id null) when the conversation is deleted', async () => {
+    await withTestDb(async (sql) => {
+      const userId = '00000000-0000-4000-8000-000000000005'
+      const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+      // This is exactly what Task 11 writes: gates run before a proposal row
+      // exists, so proposal_id is null and conversation_id is the only path back
+      // to the conversation. Against 0004 alone, conversation_id has no FK, so
+      // this row survives the delete below and the assertion fails.
+      await sql`
+        insert into gate_results (proposal_id, conversation_id, gate, passed)
+        values (null, ${c!.id}, 'provenance', true)`
+
+      await sql`delete from conversations where id = ${c!.id}`
+
+      const gr = await sql`select 1 from gate_results where conversation_id = ${c!.id}`
+      expect(gr.length).toBe(0)
+    })
+  })
+
+  it("accepts the 'slots' gate name", async () => {
+    await withTestDb(async (sql) => {
+      const userId = '00000000-0000-4000-8000-000000000006'
+      const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+      await sql`
+        insert into gate_results (proposal_id, conversation_id, gate, passed)
+        values (null, ${c!.id}, 'slots', false)`
+      const [row] = await sql`
+        select gate from gate_results where conversation_id = ${c!.id} and gate = 'slots'`
+      expect(row!.gate).toBe('slots')
+    })
+  })
+
+  it('rejects an unknown gate name', async () => {
+    await withTestDb(async (sql) => {
+      const userId = '00000000-0000-4000-8000-000000000007'
+      const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+      // Own savepoint: a failing insert aborts the enclosing transaction, and a
+      // later statement in that same transaction would see "current transaction
+      // is aborted" instead of the real check-constraint error.
+      await expect(
+        sql.begin((tx) => tx`
+          insert into gate_results (proposal_id, conversation_id, gate, passed)
+          values (null, ${c!.id}, 'vibes', true)`),
+      ).rejects.toThrow(/check constraint/i)
+      // The savepoint rolled back cleanly, so the outer transaction is still usable.
+      const [ok] = await sql`select 1 as ok`
+      expect(ok!.ok).toBe(1)
+    })
+  })
+
+  it('indexes gate_results on conversation_id', async () => {
+    await withTestDb(async (sql) => {
+      const rows = await sql`
+        select indexdef from pg_indexes
+         where tablename = 'gate_results' and indexdef ilike '%conversation_id%'`
+      expect(rows.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('accepts passed = null, meaning "not evaluated because a prerequisite gate failed"', async () => {
+    await withTestDb(async (sql) => {
+      const userId = '00000000-0000-4000-8000-000000000008'
+      const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+      // checkBudget returns no violation when checkTotals produced no total (a
+      // currency fault already rejected the proposal) -- there is no total to
+      // compare against. Recording that as passed = true would be a lie.
+      const [row] = await sql`
+        insert into gate_results (proposal_id, conversation_id, gate, passed)
+        values (null, ${c!.id}, 'budget', null)
+        returning passed`
+      expect(row!.passed).toBeNull()
+    })
+  })
+})
