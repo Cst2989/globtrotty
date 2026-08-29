@@ -382,22 +382,51 @@ full authority.
 
 ## 19. A wrong comment on a contract is worse than no comment
 
-Three times in one branch:
-- a code comment justifying a float-rounding value with an arithmetic claim that was false;
-- a migration comment defining a column's NULL semantics as a case that, after a later fix, never
-  occurs;
-- a justification asserting the spec was self-contradictory, which a reviewer disproved by
-  quoting it.
+**Five instances across this project.** It is the second-most-common defect after tests that
+pass against the wrong implementation, and unlike that one it is invisible to the entire test
+suite — because none of these were code.
 
-Each was trusted rather than checked, precisely because it was written down.
+Every single one had the same shape: **a correct decision, recorded with a reason that was not
+true.**
 
-The best response came from an implementer that made a comment into a **tested contract**: three
-tests read the live column comment and assert every reason string appears in it, that there are
-exactly three, and that the superseded wording is gone. Changing the code without shipping a
-migration now fails the suite.
+1. A float-rounding value justified by an arithmetic claim (`452.35 * 100` landing on
+   `45234.999...`) that is simply false — it lands exactly on `45235`.
+2. A migration comment defining a column's NULL semantics as "not evaluated because a
+   prerequisite gate failed" — the one case that, after a later refinement, writes no row at all.
+3. A justification asserting the spec was self-contradictory about `append-only`, disproved by
+   quoting the spec: two sentences, not one, and it never claimed the uniqueness the argument
+   depended on. The contradiction was in the *plan*, not the spec.
+4. A classifier comment arguing a fail-closed choice on the grounds that retrying "burns another
+   of the turn's five attempts" — there is no retry. `failTurn` is terminal, and the sweeper only
+   ever considers `queued`/`running` rows.
+5. A report recording that a lint selector "does not match BigInt `0n`", inferred from a `?? 0n`
+   going unflagged. It went unflagged because that file was **out of scope**, not because the
+   selector missed it. Two different causes, one observation, and the wrong one written down —
+   in a codebase where bigint is the actual money type, so the recorded gap would have invited
+   exactly the dangerous line it claimed was unguarded.
 
-**Lesson:** documentation that a downstream consumer will act on deserves a test. If that sounds
-excessive, note that this comment had already been wrong once.
+Note what unites 1, 4 and 5: each was an *inference from a single observation* that the author
+never checked against the mechanism. The decision was reached correctly by instinct; the
+explanation was reconstructed afterwards and never verified.
+
+That is the specific failure mode. Not carelessness — **post-hoc rationalisation of a correct
+call.** It is hard to catch precisely because the conclusion is right, so a reviewer skimming for
+wrong decisions sees nothing wrong.
+
+Two things worked against it:
+
+- **Reviewers that check the claim rather than the conclusion.** Every one of the five was caught
+  by someone computing the arithmetic, quoting the source, tracing the control flow, or running
+  the case — not by someone reading for plausibility.
+- **Making a comment a tested contract.** One implementer wired three tests that read the *live*
+  database column comment and assert every reason string appears in it, that there are exactly
+  three, and that the superseded wording is gone. Changing the code without shipping a migration
+  now fails the suite. That is the only one of the five that could not recur.
+
+**Lesson:** documentation a downstream consumer will act on deserves the same adversarial
+verification as code. When you write *why*, check that the why describes the system as it is —
+especially when you are confident, and most especially when you reconstructed the reason after
+making the call.
 
 ## 20. Whole-branch review finds a different class of defect
 
