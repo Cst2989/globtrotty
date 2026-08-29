@@ -12,6 +12,15 @@ export const SEATS = {
   cheap: { model: 'claude-haiku-4-5-20251001', effort: null },
 } as const satisfies Record<string, Seat>
 
+export type SeatName = keyof typeof SEATS
+
+/** The seat a call was made from, as a name a row can hold. */
+export function seatNameOf(seat: Seat): SeatName {
+  const found = (Object.keys(SEATS) as SeatName[]).find((name) => SEATS[name].model === seat.model)
+  if (!found) throw new Error(`No seat named for model ${seat.model}`)
+  return found
+}
+
 type SeatlessParams = Omit<MessageCreateParamsNonStreaming, 'model'>
 
 /** Writes the seat's model and effort into a request; effort is omitted, not nulled, when the seat has none. */

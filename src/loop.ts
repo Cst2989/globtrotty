@@ -4,7 +4,9 @@ import { textOf, type ModelClient } from './client.js'
 import { classifyError, isRefusal } from './errors.js'
 import { decideNext, type Limits, type Spend } from './engine.js'
 import type { FailReason } from './engine.js'
+import { callAndRecord } from './metered.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
+import type { ModelCallSink } from './repo/model-calls.js'
 import { withSeat, type Seat } from './seats.js'
 import type { ToolRunner } from './tools.js'
 
@@ -58,6 +60,9 @@ export type LoopOptions = {
   deadlineMs?: number
   /** How long one step is assumed to take, so we stop before we are cut off. */
   estStepMs?: number
+  /** Which prompt this run used, so a row can be attributed to it. */
+  promptVersion?: string
+  record?: ModelCallSink
 }
 
 /** Token-by-token sum, with no opinion on whether `a` and `b` came from the same model. */
@@ -117,8 +122,10 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
     // ceiling leaves room for the thinking and the answer both (lesson 1.1).
     let message
     try {
-      message = await options.client.create(
+      message = await callAndRecord(
+        options.client,
         withSeat(options.seat, { max_tokens: 8000, system: options.system, messages, tools: options.tools }),
+        { seat: options.seat, promptVersion: options.promptVersion ?? 'unversioned', record: options.record },
       )
     } catch (err) {
       // classifyError's `unclassified` bucket is meant for a provider error we

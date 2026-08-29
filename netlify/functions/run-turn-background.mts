@@ -2,6 +2,7 @@ import { liveClient } from '../../src/client.js'
 import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
+import { pgSink } from '../../src/repo/model-calls.js'
 import { finishTurn, loadTurnInput } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
@@ -43,7 +44,14 @@ export default async (req: Request): Promise<Response> => {
       input.message,
       liveClient(),
       mockRunner(new MockSupplier()),
-      { deadlineMs: startedMs + BACKGROUND_BUDGET_MS },
+      {
+        deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
+        record: pgSink(sql, {
+          userId: input.userId,
+          conversationId: input.conversationId,
+          turnId: input.turnId,
+        }),
+      },
     )
     await finishTurn(sql, input, result.text)
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)

@@ -27,6 +27,11 @@ const DESK_SEATS: Record<DeskName, Seat> = { front: SEATS.cheap, planning: SEATS
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'desks')
 
+/** First twelve hex characters of a prompt's SHA-256: change the text, change the version. */
+export function promptVersion(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 12)
+}
+
 export function loadDesk(name: DeskName): Desk {
   const prompt = readFileSync(path.join(DIR, `${name}-desk.md`), 'utf8')
   const sentinel = `<!-- desk: ${name} -->`
@@ -35,7 +40,7 @@ export function loadDesk(name: DeskName): Desk {
     name,
     seat: DESK_SEATS[name],
     prompt,
-    promptVersion: createHash('sha256').update(prompt).digest('hex').slice(0, 12),
+    promptVersion: promptVersion(prompt),
     tools: DESK_TOOLS[name],
   }
 }

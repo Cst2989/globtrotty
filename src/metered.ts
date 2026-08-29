@@ -1,0 +1,37 @@
+import type { Message, MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resources/messages'
+import type { ModelClient } from './client.js'
+import { costMicros, usageOf } from './pricing.js'
+import type { ModelCallSink } from './repo/model-calls.js'
+import { seatNameOf, type Seat } from './seats.js'
+
+/**
+ * The one place a model call becomes a row. Every caller in the codebase goes
+ * through it, so "did this call get recorded?" has one answer instead of one per
+ * call site.
+ *
+ * The call is priced on the model we asked for, not the one the response echoed:
+ * the price table is keyed by the name we chose, and a response that echoed
+ * something unpriced must not silently become free. Both strings are recorded,
+ * which is what makes the next test worth writing.
+ */
+export async function callAndRecord(
+  client: ModelClient,
+  params: MessageCreateParamsNonStreaming,
+  meta: { seat: Seat; promptVersion: string; record?: ModelCallSink },
+): Promise<Message> {
+  const startedMs = Date.now()
+  const message = await client.create(params)
+  if (meta.record) {
+    const usage = usageOf(message)
+    await meta.record({
+      seat: seatNameOf(meta.seat),
+      promptVersion: meta.promptVersion,
+      modelRequested: params.model,
+      modelReturned: message.model,
+      usage,
+      costMicros: costMicros(meta.seat.model, usage),
+      latencyMs: Date.now() - startedMs,
+    })
+  }
+  return message
+}

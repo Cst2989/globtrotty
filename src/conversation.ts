@@ -4,6 +4,7 @@ import { classify } from './classify.js'
 import { extract } from './extract.js'
 import { addUsage, toolLoop, type LoopResult } from './loop.js'
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
+import type { ModelCallSink } from './repo/model-calls.js'
 import type { ToolRunner } from './tools.js'
 
 export type Conversation = {
@@ -29,6 +30,8 @@ export type TurnResult = LoopResult & { conversation: Conversation; desk: 'front
 export type TurnOptions = {
   /** When the process running this turn expects to be killed. */
   deadlineMs?: number
+  /** Where every model call this turn makes writes its row. */
+  record?: ModelCallSink
 }
 
 /**
@@ -46,7 +49,7 @@ export async function turn(
   run: ToolRunner,
   options: TurnOptions = {},
 ): Promise<TurnResult> {
-  const classified = await classify(text, client)
+  const classified = await classify(text, client, options.record)
   if (classified.label === 'faq') {
     const desk = loadDesk('front')
     const result = await toolLoop({
@@ -57,6 +60,8 @@ export async function turn(
       run,
       client,
       deadlineMs: options.deadlineMs,
+      promptVersion: desk.promptVersion,
+      record: options.record,
     })
     const next = { ...conversation, replies: [...conversation.replies, result.text] }
     return {
@@ -67,7 +72,7 @@ export async function turn(
       desk: 'front',
     }
   }
-  const extracted = await extract(text, client)
+  const extracted = await extract(text, client, options.record)
   const patch = Object.fromEntries(Object.entries(extracted.requirements).filter(([, v]) => v !== null))
   const notebook = applyRequirements(conversation.notebook, patch, 'user', new Date().toISOString())
   const desk = loadDesk('planning')
@@ -84,6 +89,8 @@ export async function turn(
     run,
     client,
     deadlineMs: options.deadlineMs,
+    promptVersion: desk.promptVersion,
+    record: options.record,
   })
   const next = { ...conversation, notebook, replies: [...conversation.replies, result.text] }
   return {

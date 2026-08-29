@@ -1,7 +1,10 @@
 import { z } from 'zod'
 import { textOf, type ModelClient } from './client.js'
+import { promptVersion } from './desks.js'
+import { callAndRecord } from './metered.js'
 import { money, minorUnitExponent, type Money } from './money.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
+import type { ModelCallSink } from './repo/model-calls.js'
 import { SEATS, withSeat } from './seats.js'
 
 // The API's output_config.format rejects numeric bound keywords outright:
@@ -88,14 +91,16 @@ function mentionsAWeek(nights: number, words: Set<string>): boolean {
 
 export type Extracted = { requirements: Requirements; dropped: (keyof RawRequirements)[]; usage: Usage; costMicros: bigint }
 
-export async function extract(text: string, client: ModelClient): Promise<Extracted> {
-  const message = await client.create(
+export async function extract(text: string, client: ModelClient, record?: ModelCallSink): Promise<Extracted> {
+  const message = await callAndRecord(
+    client,
     withSeat(SEATS.cheap, {
       max_tokens: 400,
       system: SYSTEM,
       messages: [{ role: 'user', content: text }],
       output_config: { format: { type: 'json_schema', schema: z.toJSONSchema(RequirementsSchema) } },
     }),
+    { seat: SEATS.cheap, promptVersion: promptVersion(SYSTEM), record },
   )
   const usage = usageOf(message)
   const cost = costMicros(SEATS.cheap.model, usage)
