@@ -27,9 +27,10 @@ import type { Seat } from '../model/seats.js'
  * money the pre-dispatch ceiling check never saw. `Math.max(p.cacheWrite1hMult,
  * 1)` closes that: it is the highest multiplier any input token can be billed
  * at (2x list beats every other rate in the table — 1.25x 5m-write, 0.1x
- * read, 1x plain), so bounding every input token at it is still a real upper
- * bound, just a tighter one than "list price" ever was. `reconcile` charges
- * the true `actual` regardless, so the ledger was never wrong — only the
+ * read, 1x plain), so bounding every input token at it is a real upper bound
+ * again — a LARGER number than "list price" ever was, which is the whole
+ * point: the old bound was too small to be a bound. `reconcile` charges the
+ * true `actual` regardless, so the ledger was never wrong — only the
  * pre-dispatch guardrail was, and the guardrail is the thing this bound exists
  * to be.
  *
