@@ -1,10 +1,12 @@
 import { newConversation, turn } from '../src/conversation.js'
 import { HER_MESSAGE } from '../src/her.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { addUsage } from '../src/loop.js'
 import { costMicros, type Usage } from '../src/pricing.js'
 import { SEATS } from '../src/seats.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
+import { fakeClient, textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
 
 const zeroCache = { cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
@@ -39,5 +41,21 @@ describe('a conversation', () => {
     expect(second.conversation.notebook.budget?.source).toBe('user')
     expect(second.conversation.notebook.destination?.value.toLowerCase()).toContain('portugal')
     expect(second.conversation.replies).toHaveLength(2)
+  })
+
+  // classify is the FIRST model call a turn makes, before toolLoop's own
+  // per-step ceiling check ever runs. Without this check at the top of
+  // `turn()`, a capped account would still pay for classify (and, on the
+  // planning path, extract) every time, which is the gap the tier-2 handler
+  // comment claims is closed.
+  it('checks the ceiling before classify, so a capped account pays for nothing', async () => {
+    const client = fakeClient([textMessage('should never be reached')])
+    const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), {
+      readSpend: async () => (
+        { conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros, dailyMicros: 0n, globalMicros: 0n }
+      ),
+    })
+    expect(result.outcome).toBe('limit_reached')
+    expect(client.calls).toBe(0)
   })
 })

@@ -1,8 +1,9 @@
 import type { ModelClient } from './client.js'
 import { loadDesk, renderPrompt, toolsFor } from './desks.js'
 import { classify } from './classify.js'
-import type { Spend } from './engine.js'
+import { exceedsAnyCeiling, type Spend } from './engine.js'
 import { extract } from './extract.js'
+import { DEFAULT_LIMITS } from './limits.js'
 import { addUsage, toolLoop, type LoopResult } from './loop.js'
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
 import type { ModelCallSink } from './repo/model-calls.js'
@@ -52,6 +53,29 @@ export async function turn(
   run: ToolRunner,
   options: TurnOptions = {},
 ): Promise<TurnResult> {
+  // Checked before classify, which is the FIRST model call this turn makes,
+  // not only before the loop's steps. Without this, the tier-2 comment in
+  // handler.ts ("otherwise the refusal arrives one step into the turn, after
+  // a model call has already been paid for") was false for exactly the two
+  // calls, classify and extract, that toolLoop's own per-step check cannot
+  // see because they run before the loop starts. Lesson 2.7 is where a
+  // ceiling hit like this one reaches her as a real reply rather than the
+  // empty text below; see the same note on the loop's own stop branch.
+  if (options.readSpend && exceedsAnyCeiling(await options.readSpend(), DEFAULT_LIMITS)) {
+    return {
+      outcome: 'limit_reached',
+      text: '',
+      steps: 0,
+      toolTrace: [],
+      usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      costMicros: 0n,
+      conversation,
+      // Arbitrary: no call was made yet, so no desk was ever chosen. Nothing
+      // downstream reads `desk` on this outcome (router.ts's `handle()` never
+      // passes `readSpend`, so this branch cannot fire there).
+      desk: 'planning',
+    }
+  }
   const classified = await classify(text, client, options.record)
   if (classified.label === 'faq') {
     const desk = loadDesk('front')

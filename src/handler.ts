@@ -63,6 +63,13 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   // Fail closed: this throws rather than returning zero when it cannot confirm.
   // Deliberately before the turn is written, so a database hiccup denies the
   // request outright rather than queueing work on top of an unconfirmed state.
+  // Unlike the ceiling denial below, this path does NOT keep her message: a
+  // thrown read means there is no confirmed row to attach it to. The same
+  // query also doubles as the tenancy check, since it filters on
+  // (id, user_id) together: a conversationId that exists but belongs to
+  // someone else looks exactly like one that does not exist, and is rejected
+  // here, before anything is written, the same way an unreachable database
+  // would be.
   const spend = await readSpendFailClosed(sql, input.userId, conversationId)
 
   // All three ceilings, through the same predicate decideNext uses rather than a
@@ -72,6 +79,14 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   // the turn, after a model call has already been paid for. It can fire while
   // both of this user's own counters read zero: it protects the account, not the
   // user.
+  //
+  // This check is advisory, not authoritative: it is a read then a decision
+  // with nothing serialising it against a concurrent submit on the same
+  // account, so two requests can both read "under the ceiling" and both
+  // queue. It exists to avoid starting doomed work early, not to bound spend
+  // precisely; the read inside the loop, once per step, is the one that
+  // actually enforces the ceiling, because nothing can be spent between its
+  // read and its decision without another step (and another read) in between.
   if (exceedsAnyCeiling(spend, deps.limits)) {
     await writeHerMessage(sql, input, conversationId, null)
     await sql`update course.conversations set status = 'limit_reached', updated_at = now()

@@ -73,6 +73,12 @@ export async function recordSpend(
  * an answer the database failed to give. So their 0n is a real reading, not a
  * confirmed one, and neither may ever be the only guard on a request. An
  * unreachable database throws out of the first query anyway.
+ *
+ * The three reads are also three separate round trips, not one snapshot: with
+ * no shared transaction, the conversation total, the daily row and the global
+ * sum can each land at a slightly different instant. That drift is at most
+ * one concurrent call, which does not matter for a ceiling that only needs to
+ * be roughly current; it would matter for a receipt.
  */
 export async function readSpendFailClosed(
   sql: postgres.Sql,

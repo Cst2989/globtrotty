@@ -40,6 +40,7 @@ describeDb('readSpendFailClosed', () => {
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning *`
       const s = await readSpendFailClosed(sql, USER, c!.id)
       expect(s.dailyMicros).toBe(0n)
+      expect(s.conversationMicros).toBe(0n)
     })
   })
 
@@ -138,6 +139,11 @@ describeDb('ledgerSink', () => {
       })
       const rows = await sql`select cost_micros from course.model_calls where conversation_id = ${c!.id}`
       expect(rows).toHaveLength(1)
+      // The claim this sink makes is that the observability row and the
+      // enforcement counter carry the SAME number, both taken from
+      // facts.costMicros. Asserting only the row's presence would pass even
+      // if the two had diverged.
+      expect(BigInt(rows[0]!.cost_micros)).toBe(750n)
       const [conv] = await sql`select spend_usd_micros from course.conversations where id = ${c!.id}`
       expect(BigInt(conv!.spend_usd_micros)).toBe(750n)
     })

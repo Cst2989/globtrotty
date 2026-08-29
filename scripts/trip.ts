@@ -10,7 +10,7 @@ import { httpInvoke } from '../src/invoke.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
-import { pgSink } from '../src/repo/model-calls.js'
+import { ledgerSink } from '../src/repo/spend.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 
@@ -44,12 +44,17 @@ try {
       liveClient(),
       mockRunner(new MockSupplier()),
       {
-        // Wire the same sink the background function uses (lesson 2.5), so the
-        // bill this script prints below and the rows a reader queries in
-        // course.model_calls afterward agree. loadEnv already refused to start
-        // this script without DATABASE_URL, so `sql` is always connected here;
-        // there is no in-process run that skips recording.
-        record: pgSink(sql, { userId: USER, conversationId, turnId }),
+        // ledgerSink, not the bare model_calls sink: this is the one path in
+        // the whole course that calls a live model and spends real dollars,
+        // and pgSink alone would write rows to course.model_calls while
+        // leaving conversations.spend_usd_micros and daily_usage.cost_micros
+        // at zero forever, which is exactly the ceiling this lesson exists to
+        // enforce. loadEnv already refused to start this script without
+        // DATABASE_URL, so `sql` is always connected here. No `readSpend` is
+        // passed: this script records what it spends but does not enforce a
+        // ceiling on itself, so a run here always completes rather than
+        // stopping partway through the demo.
+        record: ledgerSink(sql, { userId: USER, conversationId, turnId }),
       },
     )
     console.log(result.text)

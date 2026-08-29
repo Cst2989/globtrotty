@@ -134,6 +134,24 @@ describeDb('submitMessage', () => {
     })
   })
 
+  // readSpendFailClosed filters on (id, user_id) together, so a conversation
+  // that exists but belongs to someone else is indistinguishable from one
+  // that does not exist at all: both throw, before anything is written. This
+  // is reachable with a perfectly healthy database, unlike the other
+  // fail-closed path (an unreachable one), and it is the one denial that does
+  // NOT keep her message, unlike the ceiling denials above.
+  it('rejects a conversation she does not own before writing anything', async () => {
+    await withTestDb(async (sql) => {
+      const OTHER = '44444444-4444-4444-4444-444444444444'
+      const [theirs] = await sql`insert into course.conversations (user_id) values (${OTHER}) returning id`
+      await expect(
+        submitMessage(deps(sql), { userId: USER, conversationId: theirs!.id, message: 'hi' }),
+      ).rejects.toThrow(/fail closed/i)
+      const msgs = await sql`select * from course.messages where conversation_id = ${theirs!.id}`
+      expect(msgs).toHaveLength(0)
+    })
+  })
+
   it('still queues the turn one micro BELOW the global ceiling', async () => {
     await withTestDb(async (sql) => {
       await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`

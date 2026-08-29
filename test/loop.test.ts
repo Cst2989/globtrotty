@@ -1,4 +1,5 @@
 import { RateLimitError } from '@anthropic-ai/sdk'
+import { vi } from 'vitest'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { toolLoop } from '../src/loop.js'
 import { SEATS } from '../src/seats.js'
@@ -41,6 +42,25 @@ describe('toolLoop', () => {
     })
     expect(result.outcome).toBe('limit_reached')   // not step_cap
     expect(client.calls).toBe(0)
+  })
+  // readSpendFailClosed throws when it cannot confirm spend (src/repo/spend.ts).
+  // That throw must not escape toolLoop: this pins that it ends the turn
+  // instead, the same way a confirmed ceiling hit would, rather than
+  // stranding a caller who awaits `turn()` with no catch of its own
+  // (run-turn-background.mts).
+  it('ends the turn instead of throwing when the spend read cannot confirm', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const client = fakeClient([textMessage('Here is a plan.')])
+      const result = await toolLoop({
+        ...base, client,
+        readSpend: async () => { throw new Error('Cannot confirm conversation spend, fail closed, denying the request') },
+      })
+      expect(result.outcome).toBe('limit_reached')
+      expect(client.calls).toBe(0)
+    } finally {
+      logged.mockRestore()
+    }
   })
   it('treats a refusal as an outcome, not an exception', async () => {
     const client = fakeClient([textMessage('I cannot help with that.', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'other' } } as never)])

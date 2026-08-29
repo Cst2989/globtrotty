@@ -91,9 +91,27 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
     ({ outcome, text, steps, toolTrace, usage, costMicros: costMicros(options.seat.model, usage) })
 
   for (;;) {
-    const spend = options.readSpend
-      ? await options.readSpend()
-      : { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
+    let spend: Spend
+    if (options.readSpend) {
+      try {
+        spend = await options.readSpend()
+      } catch (err) {
+        // readSpendFailClosed throws rather than returning a number when it
+        // cannot confirm what has been spent (src/repo/spend.ts). That throw
+        // must not escape here: this function's whole contract is "never a
+        // thrown exception" (see the docstring above), and the caller across
+        // the process boundary (run-turn-background.mts) awaits `turn()`
+        // inside a try/finally with no catch, so an uncaught throw here would
+        // strand the turn at 'queued' instead of finishing it. A read that
+        // cannot confirm spend is treated the same as a read that confirms
+        // the ceiling is reached: both mean "do not prove it is safe to spend
+        // more", which is exactly what a fail-closed guard is for.
+        console.error('readSpend failed, denying as a reached ceiling', err)
+        return finish('limit_reached', '')
+      }
+    } else {
+      spend = { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
+    }
     const decision = decideNext({
       state: { step: steps },
       spend,
@@ -103,6 +121,13 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       estStepMs,
       pendingUserMessage: null,
     })
+    // Every stop reason below, 'limit_reached' included, returns empty text.
+    // There is no concept yet of a real word to her for a turn that stopped
+    // instead of finishing; `finishTurn` (src/repo/turns.ts) writes that empty
+    // string as her reply and closes the turn exactly as it would a normal
+    // one. Lesson 2.7 is where `fail_reason` and an actual message for a
+    // capped account arrive; until then a ceiling hit and a successful turn
+    // are indistinguishable in the database.
     if (decision.kind === 'stop') return finish(decision.reason, '')
     // Nowhere to continue to inside one process. Module 3 saves the state here
     // and lets a fresh invocation pick the turn up.
