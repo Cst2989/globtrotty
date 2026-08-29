@@ -4,6 +4,7 @@ import { classify } from './classify.js'
 import { exceedsAnyCeiling, type Spend } from './engine.js'
 import { extract } from './extract.js'
 import { DEFAULT_LIMITS } from './limits.js'
+import { limitReachedMessage } from './limit-message.js'
 import { addUsage, readSpendOrLimitReached, toolLoop, type LoopResult } from './loop.js'
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
 import type { ModelCallSink } from './repo/model-calls.js'
@@ -58,9 +59,9 @@ export async function turn(
   // handler.ts ("otherwise the refusal arrives one step into the turn, after
   // a model call has already been paid for") was false for exactly the two
   // calls, classify and extract, that toolLoop's own per-step check cannot
-  // see because they run before the loop starts. Lesson 2.7 is where a
-  // ceiling hit like this one reaches her as a real reply rather than the
-  // empty text below; see the same note on the loop's own stop branch.
+  // see because they run before the loop starts. The reply below is the same
+  // sentence tier 2 and the loop's own stop branch write (src/limit-message.ts),
+  // so a ceiling hit here reads to her the same as either of those.
   //
   // The read goes through readSpendOrLimitReached, the same helper the loop
   // uses for its own per-step read, rather than a bare await: on tier 3 this
@@ -74,7 +75,7 @@ export async function turn(
     if (read === 'limit_reached' || exceedsAnyCeiling(read, DEFAULT_LIMITS)) {
       return {
         outcome: 'limit_reached',
-        text: '',
+        text: limitReachedMessage(read, DEFAULT_LIMITS),
         steps: 0,
         toolTrace: [],
         usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },

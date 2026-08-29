@@ -1,11 +1,11 @@
-import type { FailReason } from '../src/engine.js'
+import { FAIL_REASONS } from '../src/engine.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
-const REASONS: FailReason[] = [
-  'provider_down', 'fetch_failed', 'limit_reached', 'step_cap',
-  'deadline_exceeded', 'crash_loop', 'fenced', 'stalled',
-  'refused', 'provider_rejected', 'unclassified',
-]
+// Imported, not retyped: a hand-copied array would only be checked for
+// assignability to FailReason, not for matching it exactly, so a reason added
+// to the union and forgotten here would leave this test green and the
+// constraint silently out of date.
+const REASONS = FAIL_REASONS
 
 const USER = '11111111-1111-1111-1111-111111111111'
 
@@ -49,6 +49,41 @@ describeDb('the constraints and the types', () => {
       await expect(
         sql`insert into course.turns (conversation_id, user_id, idempotency_key) values (${c!.id}, ${USER}, 'b')`,
       ).rejects.toThrow(/turns_one_active_per_conversation/)
+    })
+  })
+
+  // The handler's read-back after `on conflict do nothing` (src/handler.ts)
+  // assumes zero rows means exactly one of these two refused, and tells
+  // duplicate from busy by checking only the first by name. A third unique
+  // index added to this table later would make some other refusal look like
+  // one of these two, silently, so this pins the whole set rather than just
+  // that each one individually still throws.
+  it('carries exactly the two unique indexes the on-conflict read-back tells apart', async () => {
+    await withTestDb(async (sql) => {
+      const idx = await sql`
+        select indexname from pg_indexes
+         where schemaname = 'course' and tablename = 'turns'
+           and indexdef ilike '%unique%' and indexname <> 'turns_pkey'
+         order by indexname`
+      expect(idx.map((r) => r.indexname)).toEqual([
+        'turns_conversation_idempotency', 'turns_one_active_per_conversation',
+      ])
+    })
+  })
+
+  // Same key, different conversations, both turns land: the pair is what is
+  // unique, not the key alone. A client's key only has to be unique against
+  // its own retries of one conversation, not against every press it ever
+  // makes.
+  it('scopes the idempotency key to the conversation, not to the key alone', async () => {
+    await withTestDb(async (sql) => {
+      const [c1] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const [c2] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const [t1] = await sql`insert into course.turns (conversation_id, user_id, idempotency_key)
+                              values (${c1!.id}, ${USER}, 'same-key') returning id`
+      const [t2] = await sql`insert into course.turns (conversation_id, user_id, idempotency_key)
+                              values (${c2!.id}, ${USER}, 'same-key') returning id`
+      expect(t1!.id).not.toBe(t2!.id)
     })
   })
 })

@@ -1,19 +1,21 @@
+import { vi } from 'vitest'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { describeDb, withRealDb } from './helpers/db.js'
 
+// Raised so a busy development database's own spend today cannot turn any of
+// these into a limit_reached test by accident; these tests are about
+// idempotency, not ceilings. withRealDb commits for real and its own contract
+// is that it only ever touches this test's invented user, so the ceiling is
+// raised out of the way rather than cleared for every other user's rows.
+const LIMITS = { ...DEFAULT_LIMITS, globalCeilingMicros: 2n ** 62n }
+
 describeDb('fifty presses of Send', () => {
   it('buy exactly one turn', async () => {
     await withRealDb(async (sql, userId) => {
-      // withRealDb commits for real and only ever deletes THIS test's rows, but
-      // readSpendFailClosed's global ceiling sums every user's spend today. A
-      // development database that already holds today's $50 would deny all
-      // fifty presses for a reason that has nothing to do with idempotency, so
-      // today's ledger is cleared first, exactly as the handler's own
-      // global-ceiling tests clear it before asserting against it.
-      await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`
       const [conversation] = await sql`insert into course.conversations (user_id) values (${userId}) returning id`
-      const deps = { sql, limits: DEFAULT_LIMITS, invoke: async () => {} }
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const deps = { sql, limits: LIMITS, invoke }
       const press = () => submitMessage(deps, {
         userId,
         conversationId: conversation!.id as string,
@@ -29,10 +31,13 @@ describeDb('fifty presses of Send', () => {
       expect(turnIds.size).toBe(1)
       expect(results.filter((r) => r.status === 'queued')).toHaveLength(1)
       expect(results.filter((r) => r.status === 'duplicate')).toHaveLength(49)
+      // One turn opened means the work started once, not fifty times: the
+      // half of "fifty presses buy one turn" that costs money if it is wrong.
+      expect(invoke).toHaveBeenCalledTimes(1)
 
       // One turn and ONE MESSAGE. Deduping only the turn would leave fifty
       // copies of her sentence in the thread, which is what she would actually
-      // see, and `npm run messages` would print it ten times.
+      // see, and would fill every line `npm run messages` prints.
       const msgs = await sql`select turn_id from course.messages where conversation_id = ${conversation!.id}`
       expect(msgs).toHaveLength(1)
       expect(msgs[0]!.turn_id).toBe(turns[0]!.id)
@@ -41,11 +46,8 @@ describeDb('fifty presses of Send', () => {
 
   it('does not open a second turn for a different message while one is in flight', async () => {
     await withRealDb(async (sql, userId) => {
-      // Same reason as the test above: clear today's global ledger before the
-      // ceiling check runs, so a busy development database cannot turn this
-      // into a limit_reached test by accident.
-      await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`
-      const deps = { sql, limits: DEFAULT_LIMITS, invoke: async () => {} }
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const deps = { sql, limits: LIMITS, invoke }
       const first = await submitMessage(deps, {
         userId, conversationId: null, message: 'one', idempotencyKey: 'k1',
       })
@@ -55,6 +57,9 @@ describeDb('fifty presses of Send', () => {
       })
       expect(second.status).toBe('busy')
       expect(second.turnId).toBeNull()
+      expect(invoke).toHaveBeenCalledTimes(1)
+      const turns = await sql`select id from course.turns where conversation_id = ${first.conversationId}`
+      expect(turns).toHaveLength(1)
       // Busy is not the same as ignored: what she typed is kept, with no turn of
       // its own, and the running turn can pick it up in module 3.
       const msgs = await sql`select content, turn_id from course.messages
@@ -62,6 +67,34 @@ describeDb('fifty presses of Send', () => {
       expect(msgs.map((m) => m.content)).toEqual(['one', 'two, and I forgot the crib'])
       expect(msgs[0]!.turn_id).toBe(first.turnId)
       expect(msgs[1]!.turn_id).toBeNull()
+    })
+  })
+
+  // Busy opens no turn, so course.turns has nothing to dedupe a retry of the
+  // second message against. Without the same idempotency key on
+  // course.messages too (this fix round), fifty retries of a message that
+  // landed busy would write fifty copies of it, the exact failure this
+  // lesson's headline claims to prevent for the first message.
+  it('does not write fifty copies of the second message while it is busy', async () => {
+    await withRealDb(async (sql, userId) => {
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const deps = { sql, limits: LIMITS, invoke }
+      const first = await submitMessage(deps, {
+        userId, conversationId: null, message: 'one', idempotencyKey: 'k1',
+      })
+      const press = () => submitMessage(deps, {
+        userId, conversationId: first.conversationId, message: 'two, and I forgot the crib',
+        idempotencyKey: 'k2',
+      })
+
+      const results = await Promise.all(Array.from({ length: 50 }, press))
+
+      expect(results.every((r) => r.status === 'busy')).toBe(true)
+      const turns = await sql`select id from course.turns where conversation_id = ${first.conversationId}`
+      expect(turns).toHaveLength(1)
+      const msgs = await sql`select id from course.messages
+                              where conversation_id = ${first.conversationId} and idempotency_key = 'k2'`
+      expect(msgs).toHaveLength(1)
     })
   })
 })

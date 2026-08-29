@@ -8,6 +8,7 @@ import { DEFAULT_LIMITS } from './limits.js'
 import { callAndRecord } from './metered.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
 import type { ModelCallSink } from './repo/model-calls.js'
+import { limitReachedMessage } from './limit-message.js'
 import { SpendUnconfirmedError } from './repo/spend.js'
 import { withSeat, type Seat } from './seats.js'
 import type { ToolRunner } from './tools.js'
@@ -101,8 +102,12 @@ export async function readSpendOrLimitReached(
  * The model asks for a tool, we run it, the result goes back in the next user
  * turn, and the model chooses again. The loop ends when the model stops
  * asking, when it hits the step cap, when it refuses, or when the provider
- * itself fails; every ending is a `LoopResult` with an `outcome`, never a
- * thrown exception (lesson 1.5).
+ * itself fails; every one of those is a `LoopResult` with an `outcome`, never
+ * a thrown exception (lesson 1.5). A read that cannot confirm what has been
+ * spent ends the turn the same way (lesson 2.6), but that is the only error
+ * class caught for it: a bug in our own code still propagates, because a
+ * retry cannot fix a bug and swallowing it would hide one behind an outcome
+ * meant for the provider or the ceiling.
  */
 export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
   const messages: MessageParam[] = [{ role: 'user', content: options.userText }]
@@ -134,7 +139,7 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       // the ceiling is reached: both mean "do not prove it is safe to spend
       // more", which is exactly what a fail-closed guard is for.
       const read = await readSpendOrLimitReached(options.readSpend)
-      if (read === 'limit_reached') return finish('limit_reached', '')
+      if (read === 'limit_reached') return finish('limit_reached', limitReachedMessage(read, limits))
       spend = read
     } else {
       spend = { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
@@ -148,14 +153,16 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       estStepMs,
       pendingUserMessage: null,
     })
-    // Every stop reason below, 'limit_reached' included, returns empty text.
-    // There is no concept yet of a real word to her for a turn that stopped
-    // instead of finishing; `finishTurn` (src/repo/turns.ts) writes that empty
-    // string as her reply and closes the turn exactly as it would a normal
-    // one. Lesson 2.7 is where `fail_reason` and an actual message for a
-    // capped account arrive; until then a ceiling hit and a successful turn
-    // are indistinguishable in the database.
-    if (decision.kind === 'stop') return finish(decision.reason, '')
+    // A capped turn is the one stop reason that reaches her as a real
+    // sentence, from src/limit-message.ts, the same one tier 2 writes on its
+    // own denial (src/handler.ts) and `finishTurn` records with `fail_reason`
+    // set. step_cap and deadline_exceeded have not earned a sentence of their
+    // own yet, so they still return empty text, and `finishTurn` now skips
+    // the agent row rather than write a blank one.
+    if (decision.kind === 'stop') {
+      const text = decision.reason === 'limit_reached' ? limitReachedMessage(spend, limits) : ''
+      return finish(decision.reason, text)
+    }
     // Nowhere to continue to inside one process. Module 3 saves the state here
     // and lets a fresh invocation pick the turn up.
     if (decision.kind === 'continue_later') return finish('continue_later', '')

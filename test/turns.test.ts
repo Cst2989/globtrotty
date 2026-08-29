@@ -74,7 +74,7 @@ describeDb('finishTurn', () => {
   it('records the same limit_reached reason tier 2 does, when passed one', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: 'hi',
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-5',
       })
       const input = (await loadTurnInput(sql, submitted.turnId!))!
       await finishTurn(sql, input, '', 'limit_reached')

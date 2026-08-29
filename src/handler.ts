@@ -1,5 +1,6 @@
 import type postgres from 'postgres'
 import { exceedsAnyCeiling, type Limits } from './engine.js'
+import { limitReachedMessage } from './limit-message.js'
 import { readSpendFailClosed } from './repo/spend.js'
 
 export type SubmitDeps = {
@@ -29,12 +30,24 @@ export type SubmitResult = {
  * Her words, kept whatever else happens. `turnId` is null on the paths where no
  * turn was opened for them: lesson 2.2's worker loads a turn's message by this
  * id, so a message with no turn is simply a message nothing is running for yet.
+ *
+ * `on conflict do nothing`, keyed on the same (conversation, idempotency key)
+ * pair as `course.turns`: busy and limit_reached open no turn, so the
+ * constraint on turns cannot dedupe a retried press on either path, and
+ * without this one a retry would write a second copy of the same sentence.
+ * Returns whether a row was actually written, so a caller that also writes a
+ * reply for this press (the ceiling denial below) can skip that too on a
+ * retry rather than answer the same press twice.
  */
 async function writeHerMessage(
   sql: postgres.Sql, input: SubmitInput, conversationId: string, turnId: string | null,
-): Promise<void> {
-  await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-            values (${conversationId}, ${input.userId}, ${turnId}, 'user', ${input.message})`
+): Promise<boolean> {
+  const rows = await sql`
+    insert into course.messages (conversation_id, user_id, turn_id, role, content, idempotency_key)
+    values (${conversationId}, ${input.userId}, ${turnId}, 'user', ${input.message}, ${input.idempotencyKey})
+    on conflict do nothing
+    returning id`
+  return rows.length > 0
 }
 
 /**
@@ -89,7 +102,16 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   // actually enforces the ceiling, because nothing can be spent between its
   // read and its decision without another step (and another read) in between.
   if (exceedsAnyCeiling(spend, deps.limits)) {
-    await writeHerMessage(sql, input, conversationId, null)
+    const wroteHerMessage = await writeHerMessage(sql, input, conversationId, null)
+    // A capped press still gets a real reply, naming which limit she hit
+    // (src/limit-message.ts), the same sentence tier 3 writes for the same
+    // denial (src/loop.ts, src/repo/turns.ts). Skipped on a retry of a press
+    // already answered: writeHerMessage returning false means this key has
+    // already written both her line and this one.
+    if (wroteHerMessage) {
+      await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+                values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
+    }
     await sql`update course.conversations set status = 'limit_reached', updated_at = now()
                where id = ${conversationId} and user_id = ${input.userId}`
     return { conversationId, turnId: null, status: 'limit_reached' }
@@ -124,8 +146,10 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
       // path writes nothing at all.
       return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
     }
-    // Busy is a genuinely new message that arrived while another turn holds the
-    // slot, so it is kept, with no turn of its own until module 3 picks it up.
+    // Busy is a new message that arrived while another turn holds the slot,
+    // so it is kept, with no turn of its own until module 3 picks it up.
+    // A retry of the same key while still busy writes nothing a second time,
+    // same as the duplicate path above, just without a turn id to answer with.
     await writeHerMessage(sql, input, conversationId, null)
     return { conversationId, turnId: null, status: 'busy' }
   }

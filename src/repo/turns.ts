@@ -60,8 +60,16 @@ export async function finishTurn(
 ): Promise<void> {
   const status = failReason === 'limit_reached' ? 'limit_reached' : 'active'
   await sql.begin(async (tx) => {
-    await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-             values (${input.conversationId}, ${input.userId}, ${input.turnId}, 'agent', ${reply})`
+    // An empty reply is not a message: it would render as a blank bubble in
+    // her thread, which reads as worse than no reply at all. A capped turn
+    // no longer hits this (src/limit-message.ts gives it a real sentence on
+    // both tiers); step_cap and deadline_exceeded still finish with '' until
+    // they earn a sentence of their own, and this is where that empty text
+    // stops rather than becoming a row.
+    if (reply !== '') {
+      await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+               values (${input.conversationId}, ${input.userId}, ${input.turnId}, 'agent', ${reply})`
+    }
     await tx`update course.turns set status = 'done', finished_at = now(), fail_reason = ${failReason ?? null}
               where id = ${input.turnId}`
     await tx`update course.conversations set status = ${status}, updated_at = now()

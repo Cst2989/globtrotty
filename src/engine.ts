@@ -2,9 +2,10 @@
 export type TurnState = { step: number }
 
 /**
- * Every terminal state a turn can be recorded in. Lesson 2.7 mirrors this list
- * exactly in the `turns.fail_reason` check constraint, so a value added to one
- * without the other fails a test rather than an insert.
+ * Every terminal state a turn can be recorded in, as one array rather than a
+ * hand-copied list, so lesson 2.7's `turns.fail_reason` check constraint and
+ * test/schema.test.ts import this instead of retyping it: a twelfth reason
+ * added here and nowhere else now fails that test, not just an insert at 3am.
  *
  * The last three arrived with the error classifier in lesson 1.5. `refused` is
  * the failure that returns HTTP 200. `provider_rejected` is the permanent
@@ -13,10 +14,13 @@ export type TurnState = { step: number }
  * word. `unclassified` is an error we could not name, which is deliberately not
  * disguised as a provider outage.
  */
-export type FailReason =
-  | 'provider_down' | 'fetch_failed' | 'limit_reached' | 'step_cap'
-  | 'deadline_exceeded' | 'crash_loop' | 'fenced' | 'stalled'
-  | 'refused' | 'provider_rejected' | 'unclassified'
+export const FAIL_REASONS = [
+  'provider_down', 'fetch_failed', 'limit_reached', 'step_cap',
+  'deadline_exceeded', 'crash_loop', 'fenced', 'stalled',
+  'refused', 'provider_rejected', 'unclassified',
+] as const
+
+export type FailReason = (typeof FAIL_REASONS)[number]
 
 export type Limits = {
   conversationCeilingMicros: bigint
@@ -65,9 +69,10 @@ export type Decision =
  * Greater-or-equal, not greater: the ceiling is reached at the limit, not one
  * micro past it. Both callers' tests pin both sides of that boundary.
  *
- * Which of the three fired is deliberately not returned. All three produce the
- * identical outcome at both call sites, so a discriminator would be a value
- * nothing reads and no test could pin.
+ * Which of the three fired is deliberately not returned here: both call sites
+ * that decide whether to stop only ever needed the boolean. `whichCeiling`
+ * below answers the question separately, for the one caller that does need a
+ * name: the sentence she reads on a capped turn (src/limit-message.ts).
  */
 export function exceedsAnyCeiling(spend: Spend, limits: Limits): boolean {
   // Global first because it is the only ceiling protecting the account rather
@@ -77,6 +82,19 @@ export function exceedsAnyCeiling(spend: Spend, limits: Limits): boolean {
   return spend.globalMicros >= limits.globalCeilingMicros
       || spend.conversationMicros >= limits.conversationCeilingMicros
       || spend.dailyMicros >= limits.dailyCeilingMicros
+}
+
+/**
+ * Which ceiling exceedsAnyCeiling found reached, in the same order and with
+ * the same boundary. Null when none is: a caller that already knows
+ * exceedsAnyCeiling returned true never sees it, but the type says so anyway
+ * rather than asserting it.
+ */
+export function whichCeiling(spend: Spend, limits: Limits): 'account' | 'conversation' | 'daily' | null {
+  if (spend.globalMicros >= limits.globalCeilingMicros) return 'account'
+  if (spend.conversationMicros >= limits.conversationCeilingMicros) return 'conversation'
+  if (spend.dailyMicros >= limits.dailyCeilingMicros) return 'daily'
+  return null
 }
 
 /**

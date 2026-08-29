@@ -3,6 +3,7 @@ import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
@@ -76,20 +77,6 @@ describeDb('submitMessage', () => {
     })
   })
 
-  it('refuses a second turn while one is in flight', async () => {
-    await withTestDb(async (sql) => {
-      const d = deps(sql)
-      const a = await submitMessage(d, {
-        userId: USER, conversationId: null, message: 'one', idempotencyKey: 'i1',
-      })
-      const b = await submitMessage(d, {
-        userId: USER, conversationId: a.conversationId, message: 'two', idempotencyKey: 'i2',
-      })
-      expect(b.status).toBe('busy')
-      expect(b.turnId).toBeNull()
-    })
-  })
-
   // The turn is durable before invoke runs. A failed invocation is not her
   // problem, but it is still ours, so it is logged rather than swallowed.
   it('still reports queued when the invocation fails, and says so on stderr', async () => {
@@ -128,8 +115,10 @@ describeDb('submitMessage', () => {
   })
 
   // The version of this handler that returned on the limit_reached path above
-  // the message insert dropped a capped user's words on the floor.
-  it('still preserves her message when the ceiling is reached', async () => {
+  // the message insert dropped a capped user's words on the floor. She now
+  // also gets a real reply back, naming the limit she hit, rather than
+  // silence after what she typed (fix round 1).
+  it('still preserves her message when the ceiling is reached, and answers her', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
                 values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
@@ -137,11 +126,14 @@ describeDb('submitMessage', () => {
         userId: USER, conversationId: null, message: 'a very expensive trip to Japan', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('limit_reached')
-      const msgs = await sql`select role, content, turn_id from course.messages where conversation_id = ${r.conversationId}`
-      expect(msgs).toHaveLength(1)
+      const msgs = await sql`select role, content, turn_id from course.messages
+                              where conversation_id = ${r.conversationId} order by seq`
+      expect(msgs).toHaveLength(2)
       expect(msgs[0]!.role).toBe('user')
       expect(msgs[0]!.content).toBe('a very expensive trip to Japan')
       expect(msgs[0]!.turn_id).toBeNull()      // no turn was opened for it
+      expect(msgs[1]!.role).toBe('agent')
+      expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.daily)
     })
   })
 
@@ -165,9 +157,14 @@ describeDb('submitMessage', () => {
       expect(invoke).not.toHaveBeenCalled()
       const [conv] = await sql`select status from course.conversations where id = ${r.conversationId}`
       expect(conv!.status).toBe('limit_reached')
-      const msgs = await sql`select content from course.messages where conversation_id = ${r.conversationId}`
-      expect(msgs).toHaveLength(1)
+      const msgs = await sql`select role, content from course.messages
+                              where conversation_id = ${r.conversationId} order by seq`
+      expect(msgs).toHaveLength(2)
       expect(msgs[0]!.content).toBe('two weeks in Peru')
+      // The global ceiling, not the conversation or the daily one, is what
+      // fired here, and the sentence names it as hers to be told about.
+      expect(msgs[1]!.role).toBe('agent')
+      expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.account)
     })
   })
 

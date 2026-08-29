@@ -8,6 +8,14 @@ alter table course.turns alter column idempotency_key set not null;
 alter table course.turns add constraint turns_conversation_idempotency
   unique (conversation_id, idempotency_key);
 
+-- Busy and limit_reached open no turn, so the constraint above cannot dedupe a
+-- retry of either. Her message row is the only durable trace those two paths
+-- leave, so the same key goes on it too; null stays allowed, since only
+-- `submitMessage` ever sets it and nothing else in the course writes here.
+alter table course.messages add column idempotency_key text;
+alter table course.messages add constraint messages_conversation_idempotency
+  unique (conversation_id, idempotency_key);
+
 -- One active turn per conversation. This is the fifty presses guard, and it is a
 -- partial index because it must not stop her from ever having a second turn,
 -- only from having two at once. `turns_live` from 0001 covered the same rows

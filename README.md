@@ -14,7 +14,7 @@ npm test
 
 The tests replay recorded model replies, so you do not need an API key to run them. This keeps the course fast and repeatable, and it keeps everyone's test run identical to what we recorded when we wrote the lesson.
 
-From lesson 2.1 on, a checkpoint needs one more step before `npm test`: `npm install`, a `DATABASE_URL` in `.env.local` (see "The database" below), `npm run migrate`, then `npm test`. Skip the database step and `npm test` still passes, it just runs fewer tests.
+From lesson 2.1 on, a checkpoint needs one more step before `npm test`: `npm install`, a `DATABASE_URL` in `.env.local` (see "The database" below), `npm run migrate`, then `npm test`. Skip the database step and `npm test` still passes; it just runs fewer tests.
 
 ## Running the agent live
 
@@ -30,8 +30,7 @@ This calls the live API using whatever the travel agent can do at that point in 
 
 From lesson 2.1 on, some tests need Postgres: they write real rows and read them
 back, rather than mocking the database away. Every one of those tests is
-declared with `describeDb`, so it skips cleanly when `DATABASE_URL` is unset;
-`npm test` still passes with no database at all, it just runs fewer tests.
+declared with `describeDb`, so it skips cleanly when `DATABASE_URL` is unset.
 
 To run them, point `DATABASE_URL` (in `.env.local`) at a Postgres instance. A
 free Supabase project is enough: create one at supabase.com, open Project
