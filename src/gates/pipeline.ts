@@ -3,6 +3,7 @@ import { ProposalRefsSchema, rehydrateRefs } from './rehydrateGate.js'
 import { checkFreshness, checkSlots, checkTotals, checkBudget, checkDates } from './checks.js'
 import { recordGateResults, type GateResultRow } from '../repo/gateResults.js'
 import type { Money } from '../money.js'
+import { GATE_NAMES } from './types.js'
 import type { GateName, GateOutcome, RehydratedItem, Violation } from './types.js'
 
 import type { NotebookConstraints } from './notebookConstraints.js'
@@ -12,17 +13,19 @@ export type { NotebookConstraints } from './notebookConstraints.js'
 export { constraintsFromNotebook } from './notebookConstraints.js'
 
 /**
- * Every gate this function runs, in the order it runs them. The list is
- * explicit rather than derived from the violations, because a gate that
- * produced no violation still has to write a row — deriving the row set from
- * the fault set is precisely how a gate stops being auditable.
+ * Why a `passed = null` row is null. `null` has more than one cause, so the
+ * reason goes in `detail` — two different nulls that read identically are, for
+ * anyone querying this table later, one null.
  *
- * 'reviewer' is deliberately absent: it needs a model and arrives in plan 3.
- * `gate_results.gate` already accepts the value, so the seam costs nothing.
+ * Exported so the tests assert the exact text rather than a regex that any
+ * message satisfies, and so a later reader of `gate_results` can match on a
+ * constant instead of a copied string literal.
  */
-const RAN_GATES: readonly GateName[] = [
-  'provenance', 'freshness', 'slots', 'currency', 'totals', 'budget', 'dates',
-]
+export const NOT_EVALUATED = {
+  noTotal:  'not evaluated: the total could not be computed',
+  noBudget: 'not evaluated: no budget configured',
+  noWindow: 'not evaluated: no travel window configured',
+} as const
 
 /**
  * The back-office gate, in the spec's order.
@@ -98,7 +101,7 @@ export async function runGates(
     // site. A hard-coded list would silently DROP any fault `rehydrateRefs`
     // grows a new name for.
     await write(rowsFor([...new Set(hydrated.violations.map((v) => v.gate))],
-                        hydrated.violations, null, null))
+                        hydrated.violations, null, {}))
     return { ok: false, violations: hydrated.violations }
   }
   const items = hydrated.items
@@ -113,9 +116,14 @@ export async function runGates(
   ]
 
   // `checkTotals` returns `total === null` only for an empty set (the schema
-  // requires >= 1 ref, so it cannot happen here) or alongside a violation of
-  // its own. The guard exists so that a future change to `checkTotals` cannot
-  // make this function return `ok: false` with nothing to tell the model.
+  // requires >= 1 ref, so it cannot happen here) or alongside a violation —
+  // its own, or `checkCurrency`'s. The guard exists so that a future change to
+  // it cannot make this function return `ok: false` with nothing to tell the
+  // model. Note what filing this violation does to the row: it makes `totals`
+  // read `false` rather than `null`, which is correct and not an exception to
+  // the rule below. A gate that produced no total and has NO upstream gate
+  // explaining why is itself the fault; `null` is for the case where another
+  // gate already owns it.
   if (totals.total === null && violations.length === 0) {
     violations.push({
       gate: 'totals',
@@ -124,7 +132,27 @@ export async function runGates(
     })
   }
 
-  await write(rowsFor(RAN_GATES, violations, items, totals.total))
+  // Why each gate that could not reach a verdict could not reach one. A gate
+  // named here records `passed = null` UNLESS it also filed a violation — a
+  // violation always wins, because a gate that rejected the proposal did in
+  // fact evaluate it.
+  const notEvaluated: Partial<Record<GateName, string>> = {}
+  if (totals.total === null) {
+    notEvaluated.totals = NOT_EVALUATED.noTotal
+    notEvaluated.budget = NOT_EVALUATED.noTotal
+  }
+  // Deliberately AFTER the `noTotal` assignment, so it wins: if no budget was
+  // ever configured, that is why the budget gate did not evaluate, whatever
+  // else was also true. Even a perfect total would not have been checked.
+  if (args.notebook.budget === null) notEvaluated.budget = NOT_EVALUATED.noBudget
+  if (args.notebook.window === null) notEvaluated.dates = NOT_EVALUATED.noWindow
+  // `currency` is NOT listed here even when the notebook has no currency, and
+  // the asymmetry is deliberate. `checkBudget` and `checkDates` have nothing to
+  // do without their constraint; `checkCurrency` with `expected === null` still
+  // runs a real check — that the items agree with EACH OTHER, which is the
+  // precondition `sumMoney` needs — so it reaches a genuine verdict either way.
+
+  await write(rowsFor(GATE_NAMES, violations, items, notEvaluated))
 
   // Written as a positive condition on `total` rather than `total!` after a
   // violations check: `ok: true` must be unable to carry a fabricated total,
@@ -136,49 +164,70 @@ export async function runGates(
 }
 
 /**
- * One row per gate that RAN, bucketed by `Violation.gate`.
+ * One row per gate, bucketed by `Violation.gate`.
  *
- * ## The `not_evaluated` rule
+ * ## The three verdicts
  *
- * When `total === null` the set could not be summed, and BOTH `totals` and
- * `budget` are recorded `passed = null` — never `true`. The discriminator is
- * `total`, not the violation list, because the violation list does not
- * partition by gate the way bucketing assumes: a mixed-currency proposal
- * returns `{violations: [<currency>], total: null}` — ZERO violations tagged
- * `totals` — and `checkBudget` correctly returns `[]` because there is no
- * number to compare. Bucketing alone would therefore record
- * `currency: fail, totals: pass, budget: pass`, an audit record asserting that
- * a trip total was computed and checked when none exists, from the one gate
- * whose whole job was to refuse to compute it.
+ * 1. **`false`** — the gate filed a violation. This is checked FIRST and beats
+ *    everything: a gate that rejected the proposal evaluated it, by definition.
+ * 2. **`null`** — the gate is named in `notEvaluated`, meaning it could not
+ *    reach a verdict. `detail` says which reason, because there is more than
+ *    one and a null that does not say why is a null nobody can query.
+ * 3. **`true`** — the gate ran and was satisfied.
  *
- * That rule is applied unconditionally on `total === null`, including when
- * `checkTotals` filed a `totals`-tagged violation of its own (mixed price
- * bases, a bad quantity). The reason is that the totals gate's verdict IS the
- * total: it never produces a total it then disapproves of, so `passed = false`
- * would be a state it cannot reach, and `passed = null` says the accurate
- * thing — no trip total exists — while `detail` still records exactly why.
+ * ## Why `null` exists at all
+ *
+ * Two false audit records, one in each direction, and both are easy to write:
+ *
+ *  - **A pass that never happened.** The violation list does not partition by
+ *    gate the way bucketing assumes: a mixed-currency proposal returns
+ *    `{violations: [<currency>], total: null}` — ZERO violations tagged
+ *    `totals` — and `checkBudget` correctly returns `[]` because there is no
+ *    number to compare. Bucketing alone records
+ *    `currency: fail, totals: pass, budget: pass`, asserting that a trip total
+ *    was computed and checked when none exists, from the one gate whose whole
+ *    job was to refuse to compute it. The same goes for a gate with no
+ *    constraint to check: counting the budget gate as a pass on every
+ *    conversation that never set a budget inflates its pass rate and makes a
+ *    gate that never fired look useless.
+ *  - **A rejection recorded as "not evaluated."** The mirror image, and the
+ *    reason the violation check comes first. `checkTotals` returns
+ *    `total === null` for a mixed price basis and a bad quantity too — but in
+ *    those it DID evaluate and DID reject, and filing that under `null` would
+ *    lose the fault exactly as surely as filing it under `pass`.
+ *
+ * So `totals` is `null` only when it neither summed nor rejected — precisely
+ * the mixed-currency case, where the fault belongs to `currency` and is
+ * recorded there.
  */
 function rowsFor(
   gates: readonly GateName[],
   violations: readonly Violation[],
   items: RehydratedItem[] | null,
-  total: Money | null,
+  notEvaluated: Partial<Record<GateName, string>>,
 ): GateResultRow[] {
-  return gates.map((gate) => {
+  return gates.map((gate): GateResultRow => {
     const mine = violations.filter((v) => v.gate === gate)
-    const notEvaluated = (gate === 'totals' || gate === 'budget') && total === null
+    if (mine.length > 0) {
+      return {
+        gate,
+        passed: false,
+        // Every violation's text, not just the first: `checkSlots` can file two
+        // (an unknown name and a wrong kind) and keeping only one would hide a
+        // fault the model was told about.
+        detail: mine.map((v) => v.detail).join(' '),
+        sourceIds: [...new Set(mine.flatMap((v) => v.sourceIds))],
+      }
+    }
+    const reason = notEvaluated[gate]
+    if (reason !== undefined) return { gate, passed: null, detail: reason, sourceIds: [] }
     return {
       gate,
-      passed: notEvaluated ? null : mine.length === 0,
-      // Every violation's text, not just the first: `checkSlots` can file two
-      // (an unknown name and a wrong kind) and keeping only one would hide a
-      // fault the model was told about.
-      detail: mine.length === 0 ? null : mine.map((v) => v.detail).join(' '),
-      sourceIds: mine.length === 0
-        // A passing gate names nothing — except provenance, whose evidence IS
-        // the set of ids it certified against the corpus.
-        ? (gate === 'provenance' && items ? items.map((i) => i.item.sourceId) : [])
-        : [...new Set(mine.flatMap((v) => v.sourceIds))],
+      passed: true,
+      detail: null,
+      // A passing gate names nothing — except provenance, whose evidence IS the
+      // set of ids it certified against the corpus.
+      sourceIds: gate === 'provenance' && items ? items.map((i) => i.item.sourceId) : [],
     }
   })
 }

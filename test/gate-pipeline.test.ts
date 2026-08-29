@@ -6,8 +6,10 @@ import { constraintsFromNotebook } from '../src/gates/notebookConstraints.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { money } from '../src/money.js'
 import { emptyNotebook, type Notebook } from '../src/notebook.js'
-import type { FlightSearch } from '../src/supplier/types.js'
+import type { FlightSearch, SupplierItem } from '../src/supplier/types.js'
 import type { NotebookConstraints } from '../src/gates/pipeline.js'
+import { GATE_NAMES } from '../src/gates/types.js'
+import { NOT_EVALUATED } from '../src/gates/pipeline.js'
 
 const params: FlightSearch = {
   kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
@@ -39,12 +41,19 @@ async function seed(sql: any, n: string, at = NOW, over: Partial<FlightSearch> =
   return { userId, conversationId, items }
 }
 
-/** Adds a second search to an EXISTING conversation, so one proposal can span both. */
+/**
+ * Adds a second search to an EXISTING conversation, so one proposal can span both.
+ * `mutate` is how a test gets a corpus row MockSupplier cannot produce (it quotes
+ * every item `priceBasis: 'total'`), without hand-writing an insert that would
+ * bypass `recordResults` and stop testing the real write path.
+ */
 async function alsoSeed(
-  sql: any, conversationId: string, userId: string, over: Partial<FlightSearch>, at = NOW,
+  sql: any, conversationId: string, userId: string, over: Partial<FlightSearch>,
+  mutate: (i: SupplierItem) => SupplierItem = (i) => i, at = NOW,
 ) {
   const seededParams: FlightSearch = { ...params, ...over }
-  const items = await new MockSupplier({ kind: 'flight', now: () => at }).search(seededParams)
+  const raw = await new MockSupplier({ kind: 'flight', now: () => at }).search(seededParams)
+  const items = raw.map(mutate)
   await recordResults(sql, { conversationId, userId, turnId: null, params: seededParams, items })
   return items
 }
@@ -300,7 +309,11 @@ describeDb('runGates', () => {
     })
   })
 
-  it('records totals AND budget as not-evaluated (null) when no total could be computed', async () => {
+  // The three verdicts the totals gate can reach, one test each. `totals` is
+  // `null` ONLY when it neither summed nor rejected — recording a real
+  // rejection as "not evaluated" is the exact mirror of the bug the null state
+  // exists to prevent.
+  it('totals is null when it NEITHER summed nor rejected — the fault was currency\'s', async () => {
     await withTestDb(async (sql) => {
       const { conversationId, userId, items } = await seed(sql, '11')
       const gbp = await alsoSeed(sql, conversationId, userId, { currency: 'GBP' })
@@ -312,9 +325,12 @@ describeDb('runGates', () => {
         ],
       })
       const rows = await gateRows(sql, conversationId)
-      // The whole point: neither gate may claim a pass it never earned.
+      // Neither gate may claim a pass it never earned...
       expect(rows.get('totals')!.passed).toBeNull()
       expect(rows.get('budget')!.passed).toBeNull()
+      // ...and `null` must say WHICH kind of not-evaluated this is.
+      expect(rows.get('totals')!.detail).toBe(NOT_EVALUATED.noTotal)
+      expect(rows.get('budget')!.detail).toBe(NOT_EVALUATED.noTotal)
       expect(rows.get('currency')!.passed).toBe(false)
       // ... and every other gate still recorded its real verdict.
       expect(rows.get('provenance')!.passed).toBe(true)
@@ -324,6 +340,36 @@ describeDb('runGates', () => {
       expect([...rows.keys()]).toEqual(
         ['budget', 'currency', 'dates', 'freshness', 'provenance', 'slots', 'totals'],
       )
+    })
+  })
+
+  it('totals is FALSE when it rejected the set itself — a mixed price basis', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, userId, items } = await seed(sql, '16')
+      // Same currency, so `currency` passes and only `totals` can be at fault.
+      const preTax = await alsoSeed(
+        sql, conversationId, userId, { flexDays: 9 },
+        (i) => ({ ...i, priceBasis: 'pre_tax' }),
+      )
+      const res = await runGates(sql, {
+        conversationId, turnId: null, now: NOW, notebook,
+        refs: [
+          { sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' },
+          { sourceId: preTax[0]!.sourceId, quantity: 1, slot: 'inbound' },
+        ],
+      })
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations.map((v) => v.gate)).toEqual(['totals'])
+      const rows = await gateRows(sql, conversationId)
+      // It DID evaluate and it DID reject. Recording that as null would lose
+      // the fault — the mirror of recording an uncomputed total as a pass.
+      expect(rows.get('totals')!.passed).toBe(false)
+      expect(rows.get('totals')!.detail).toContain('pre_tax')
+      expect(rows.get('currency')!.passed).toBe(true)
+      // Budget still could not evaluate: there is no total to compare.
+      expect(rows.get('budget')!.passed).toBeNull()
+      expect(rows.get('budget')!.detail).toBe(NOT_EVALUATED.noTotal)
     })
   })
 
@@ -344,7 +390,7 @@ describeDb('runGates', () => {
     })
   })
 
-  it('does not check dates or budget the notebook never set', async () => {
+  it('records a gate with NO constraint configured as not-evaluated, not as a pass', async () => {
     await withTestDb(async (sql) => {
       const { conversationId, items } = await seed(sql, '13')
       const res = await runGates(sql, {
@@ -356,10 +402,39 @@ describeDb('runGates', () => {
       if (!res.ok) throw new Error('unreachable')
       expect(res.total.minor).toBe(items[0]!.price.minor)
       const rows = await gateRows(sql, conversationId)
-      // A currency-less notebook still totals: the items agree with each other.
+      // A currency-less notebook still totals: the items agree with each other,
+      // so this gate really did run and really did pass.
       expect(rows.get('totals')!.passed).toBe(true)
-      expect(rows.get('budget')!.passed).toBe(true)
-      expect(rows.get('dates')!.passed).toBe(true)
+      expect(rows.get('currency')!.passed).toBe(true)
+      // These two did NOT run — there was no constraint to run them against.
+      // Recording them as passes inflates the pass rate of a gate that never
+      // fired, which is the first statistic slice 2 reads.
+      expect(rows.get('budget')!.passed).toBeNull()
+      expect(rows.get('dates')!.passed).toBeNull()
+      // `null` now has two causes, so `detail` must say which. Exact text,
+      // because two different nulls that read identically are one null.
+      expect(rows.get('budget')!.detail).toBe(NOT_EVALUATED.noBudget)
+      expect(rows.get('dates')!.detail).toBe(NOT_EVALUATED.noWindow)
+      expect(NOT_EVALUATED.noBudget).not.toBe(NOT_EVALUATED.noTotal)
+    })
+  })
+
+  // The silent-omission guard. `GateName` and the row set are derived from ONE
+  // constant, so a gate added to the union cannot be forgotten by the writer —
+  // but this pins the guarantee behaviourally too: add a name to `GATE_NAMES`
+  // without wiring it in and this fails, rather than the row quietly not
+  // existing. "No row" is indistinguishable from "the gate never ran", which is
+  // the precise failure gate_results exists to prevent.
+  it('writes a row for EVERY name in GateName, with none left to a hand-kept list', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, '17')
+      await runGates(sql, {
+        conversationId, turnId: null, now: NOW, notebook,
+        refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }],
+      })
+      const rows = await gateRows(sql, conversationId)
+      expect([...rows.keys()].sort()).toEqual([...GATE_NAMES].sort())
+      expect(GATE_NAMES.length).toBe(7)
     })
   })
 

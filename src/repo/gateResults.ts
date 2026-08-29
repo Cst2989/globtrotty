@@ -2,25 +2,35 @@ import type postgres from 'postgres'
 import type { GateName } from '../gates/types.js'
 
 /**
- * `passed` is `boolean | null`, and the third state is load-bearing:
+ * A gate outcome as a row. Deliberately a DISCRIMINATED UNION rather than
+ * `{passed: boolean | null; detail: string | null}`, because the two fields are
+ * not independent and the flat shape lets the two combinations that are lies
+ * type-check:
+ *
+ *  - `passed: true` with a `detail` — a pass that also explains itself is a
+ *    contradiction, and the explanation is the part a reader would believe.
+ *  - `passed: null` with NO detail. This is the one that matters. `null` has
+ *    more than one cause — "the total could not be computed" and "no budget was
+ *    ever configured" are different facts about the world — so a null that does
+ *    not say which is a row nobody can act on. Requiring `detail: string` on
+ *    this arm makes forgetting the reason a compile error rather than a
+ *    convention held up by a code comment.
+ *
+ * The three verdicts:
  *
  *  - `true`  — the gate ran and was satisfied.
  *  - `false` — the gate ran and rejected the proposal.
- *  - `null`  — the gate could not reach a verdict because a prerequisite gate
- *              already failed. A mixed-currency proposal has no trip total, so
- *              the totals gate produced nothing and the budget gate had nothing
- *              to compare against. `true` there would assert a total was
- *              computed and checked when none exists; omitting the row entirely
- *              would be indistinguishable from "we forgot to run the gate".
+ *  - `null`  — the gate could not reach a verdict, and `detail` says why.
  *
- * (Migration 0005 dropped the `not null` on this column for exactly this.)
+ * (Migration 0005 dropped the `not null` on the column for exactly this third
+ * state; omitting the row instead would be indistinguishable from "we forgot to
+ * run the gate".)
  */
-export type GateResultRow = {
-  gate: GateName | 'reviewer'
-  passed: boolean | null
-  detail: string | null
-  sourceIds: string[]
-}
+type GateColumn = GateName | 'reviewer'
+export type GateResultRow =
+  | { gate: GateColumn; passed: true;  detail: null;   sourceIds: string[] }
+  | { gate: GateColumn; passed: false; detail: string; sourceIds: string[] }
+  | { gate: GateColumn; passed: null;  detail: string; sourceIds: string[] }
 
 /**
  * Writes every gate outcome — passes as well as failures. A table holding only
