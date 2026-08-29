@@ -79,6 +79,18 @@ export async function recordSpend(
  * only guard on a request — the conversation read above them is what turns a
  * database that is merely unreachable into a denial (an unreachable database
  * throws out of the very first query anyway, before any of this returns).
+ *
+ * WARNING TO WHOEVER FORCES RLS — this is where the ambiguous zero above turns
+ * into a live money bug. `supabase/migrations/0003_lockdown.sql` plans `force
+ * row level security` plus per-user policies for a later plan. Under a per-user
+ * policy the global `sum` below stops seeing every user's rows and sums only the
+ * CALLER's — so the account-wide total reads far below the real figure and the
+ * global ceiling silently stops firing. There is no error and no test failure to
+ * catch it: by the design documented above, an under-count arrives as a
+ * perfectly legitimate value. That sum must therefore stay owner-visible (the
+ * worker connects as the table owner, which non-forced RLS bypasses today), or
+ * run as a `bypassrls` role, or move to a maintained per-day counter — but it
+ * must not be left to inherit a per-user policy.
  */
 export async function readSpendFailClosed(
   sql: postgres.Sql,
