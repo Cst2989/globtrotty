@@ -128,6 +128,7 @@ the actual `buildRequest(args)` payload (redacted the same way `response` is) ra
 | 3.4 | `quantity` is enforced as `=== 1` rather than data-driven | Correct for every shipped supplier (both price the whole booking). The first genuine per-unit supplier fails loudly with an explicit message rather than mispricing — so this is a carry-forward, not a trap. Revisit only when such a supplier appears. |
 | 3.5 | No test pins that the global spend sum is restricted to the current day | Both writes land today, so a dropped `day` filter passes vacuously. Insert a `day - 1` row and assert it is excluded. |
 | 3.6 | `search_params` is stored but never surfaced | `rehydrate` does not return it and `SupplierItem` has no field for it — yet §5's cashier is specified as "re-run the stored search params, find by native ID". Plan 3 or 4 needs a reader. |
+| 3.7 | `rehydrateGate` echoes a raw `sourceId` into a violation `detail` | `src/gates/rehydrateGate.ts`. Plan 3 sanitised the two `propose_itinerary` interpolation points (`sanitizeSourceId`, `src/agents/driver.ts`) but not this one, so a supplier-controlled id still reaches the model unescaped and uncapped through a gate violation. Same shape as the fixed surface, one function away; the fix is to route this interpolation through the same helper. Low reachability today (both shipped suppliers derive ids from their own responses), which is why it is Tier 3 and not Tier 2. |
 
 ---
 
