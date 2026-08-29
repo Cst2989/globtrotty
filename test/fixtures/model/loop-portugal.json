@@ -1,0 +1,783 @@
+[
+  {
+    "request": {
+      "max_tokens": 64,
+      "system": "You label one message from a traveller writing to a travel agency. new_trip: she wants a trip planned. change: she wants an existing plan or booking changed. faq: a short factual question with no planning in it. other: anything else. Answer with the label only.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros."
+        }
+      ],
+      "output_config": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "enum": [
+                  "new_trip",
+                  "change",
+                  "faq",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "response": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011CeXQiFUUoffjJ1f55GSzm",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"label\": \"new_trip\"}"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 317,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 11,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "request": {
+      "max_tokens": 400,
+      "system": "Extract trip requirements from one message. Fill a field only when the message states it; leave every other field null. Never guess a number. Currency is the ISO code, EUR for euros.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros."
+        }
+      ],
+      "output_config": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "budget": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "amount": {
+                        "type": "number"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 3
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "currency"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "destination": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "originCity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nights": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "month": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "partySize": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "adults": {
+                        "type": "number"
+                      },
+                      "children": {
+                        "type": "number"
+                      },
+                      "infants": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "adults",
+                      "children",
+                      "infants"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nearBeach": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "needsCrib": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "budget",
+              "destination",
+              "originCity",
+              "nights",
+              "month",
+              "partySize",
+              "nearBeach",
+              "needsCrib"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "response": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011CeXQiKpAuNwdrU1tFgKxd",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"budget\":{\"amount\":1500,\"currency\":\"EUR\"},\"destination\":\"Portugal\",\"originCity\":\"Berlin\",\"nights\":7,\"month\":\"September\",\"partySize\":{\"adults\":2,\"children\":1,\"infants\":0},\"nearBeach\":true,\"needsCrib\":true}"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 819,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 65,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "request": {
+      "max_tokens": 8000,
+      "system": "Here is what we read from her message so far, as JSON: {\"budget\":{\"amount\":1500,\"currency\":\"EUR\"},\"destination\":\"Portugal\",\"originCity\":\"Berlin\",\"nights\":7,\"month\":\"September\",\"partySize\":{\"adults\":2,\"children\":1,\"infants\":0},\"nearBeach\":true,\"needsCrib\":true}. Every field below came from her message; ask nothing more about them. Treat today's date as 2026-08-29 when you resolve a month or a relative date into yyyy-mm-dd, so the same request always searches the same dates. Search for flights and hotels before you quote any price. List each offer with the price the supplier quoted; do not add prices together or invent a total, and never quote a number no search returned.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros."
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "signature": "CAIS0AUKjgEIERgCKkAIWDFXTccLZpudqcN9GF5GWdr5pIS727LmOavLiE+Q8DdMt/GptjzzPl6hWyyFL4agV/N/YbLT5SMFA/XX8qysMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiRhOTMwNjY4NC0yNGM0LTQ0OTItOWRmNS01YThlMDNmODAyOTioAd2kzNQGEgwGgh3Em+ChPpHgZLMaDCakJKE1oOO3IfkfPyIw8kcC01ahJYuJdFmevHzsZAGzgwEnfb6DOLeCprvisAJ5oUb3MXYjwn/b4v0Ff34TKu4DWQ4YJM/RKifvlQ1658anzotYij6qBDm4UQeRe4Q6g8/mVvtqOqDwQSoPMq8JZqGVBZbE7RqNE+NscBLF5rpyB7xrE8epNvdxuTqT8J1kUtYfjU+vKFf/Xn2ZQr97Xu/jznZwJqar8hzYWMj8Dd52+k9PA/XqG34T73yw0wilaRhLbhpdVLReOeRt2axkjMIxJwqRgIBJLPBm4tIQQbx+F+shJtN0kd2PuyYEA4h2f4DJlngeysurU4iEQMz6Cdu/q0Vfn3jRHF0MxREiW+Lg5HMHjvcr8Knb2dsCuS/5z+R99uReA/2S0k/W0jO94zB2gJ9YvyD7afpg5+otqYzCVpya0MzP4qU15FYjJqRY+kKqsVCwbU/Ye2CStxdzmJwck1mD9/jgl/pN7TlIgRQ2JpxZEA4tqtIGOubPdjnBNyIDqo/NZOHsExZ82X8FGhHMHaejqcNr71IQMp4yc9MLQOisX/FymgBSG3T8bEKXMrSxi6L1czK+tXYNde7F/1+B9VWaMTiknUeboh8UPZcBRJAwvGG58nT+1nbk2Z3y9uitg1tIVMgte3xomX6ixUVYCKUeHf4eDDshja9b7r25r5gagV9/9PxhW8SVGc1j4kccOz+j725o2MbHX3ksjgWRA4PWhSxJFfWoZf/AVqsYAQ=="
+            },
+            {
+              "type": "text",
+              "text": "I'll search flights and hotels for a 7-night stay, 19–26 September 2026 (second half of the month), for 2 adults + 1 child."
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01Q4DhdRxR9UCRGmQcKZzWAf",
+              "name": "search_flights",
+              "input": {
+                "from": "BER",
+                "to": "FAO",
+                "departureDate": "2026-09-19",
+                "returnDate": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01Y2zbst5UZ9dWwD7ZihKYA2",
+              "name": "search_flights",
+              "input": {
+                "from": "BER",
+                "to": "LIS",
+                "departureDate": "2026-09-19",
+                "returnDate": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_013HRDehggLgJVR8jPSiVEkZ",
+              "name": "search_hotels",
+              "input": {
+                "city": "Faro",
+                "checkIn": "2026-09-19",
+                "checkOut": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_0185xJ1kxFRztSoW6RM6NxEk",
+              "name": "search_hotels",
+              "input": {
+                "city": "Lisbon",
+                "checkIn": "2026-09-19",
+                "checkOut": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01Q4DhdRxR9UCRGmQcKZzWAf",
+              "content": "[{\"sourceId\":\"flight-tap-3728\",\"kind\":\"flight\",\"name\":\"TAP BER to FAO\",\"price\":{\"amount\":388,\"currency\":\"USD\"},\"detail\":\"direct, departs 2026-09-19 6:00, return 2026-09-26\"},{\"sourceId\":\"flight-ryanair-3729\",\"kind\":\"flight\",\"name\":\"Ryanair BER to FAO\",\"price\":{\"amount\":147,\"currency\":\"USD\"},\"detail\":\"1 stop, departs 2026-09-19 10:30, return 2026-09-26\"},{\"sourceId\":\"flight-easyjet-3730\",\"kind\":\"flight\",\"name\":\"easyJet BER to FAO\",\"price\":{\"amount\":278,\"currency\":\"USD\"},\"detail\":\"2 stop, departs 2026-09-19 14:00, return 2026-09-26\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01Y2zbst5UZ9dWwD7ZihKYA2",
+              "content": "[{\"sourceId\":\"flight-tap-2490\",\"kind\":\"flight\",\"name\":\"TAP BER to LIS\",\"price\":{\"amount\":230,\"currency\":\"USD\"},\"detail\":\"direct, departs 2026-09-19 6:00, return 2026-09-26\"},{\"sourceId\":\"flight-ryanair-2491\",\"kind\":\"flight\",\"name\":\"Ryanair BER to LIS\",\"price\":{\"amount\":272,\"currency\":\"USD\"},\"detail\":\"1 stop, departs 2026-09-19 10:30, return 2026-09-26\"},{\"sourceId\":\"flight-easyjet-2492\",\"kind\":\"flight\",\"name\":\"easyJet BER to LIS\",\"price\":{\"amount\":355,\"currency\":\"USD\"},\"detail\":\"2 stop, departs 2026-09-19 14:00, return 2026-09-26\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_013HRDehggLgJVR8jPSiVEkZ",
+              "content": "[{\"sourceId\":\"hotel-0-4188\",\"kind\":\"hotel\",\"name\":\"Praia Guesthouse, Faro\",\"price\":{\"amount\":721,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 200 m from the beach\"},{\"sourceId\":\"hotel-1-4188\",\"kind\":\"hotel\",\"name\":\"Hotel Atlantico, Faro\",\"price\":{\"amount\":840,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 1800 m from the beach\"},{\"sourceId\":\"hotel-2-4188\",\"kind\":\"hotel\",\"name\":\"Quinta da Ria, Faro\",\"price\":{\"amount\":693,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib on request, 2700 m from the beach\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_0185xJ1kxFRztSoW6RM6NxEk",
+              "content": "[{\"sourceId\":\"hotel-0-1645\",\"kind\":\"hotel\",\"name\":\"Praia Guesthouse, Lisbon\",\"price\":{\"amount\":560,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 200 m from the beach\"},{\"sourceId\":\"hotel-1-1645\",\"kind\":\"hotel\",\"name\":\"Hotel Atlantico, Lisbon\",\"price\":{\"amount\":952,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 1800 m from the beach\"},{\"sourceId\":\"hotel-2-1645\",\"kind\":\"hotel\",\"name\":\"Quinta da Ria, Lisbon\",\"price\":{\"amount\":658,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib on request, 2700 m from the beach\"}]",
+              "is_error": false
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "name": "search_flights",
+          "description": "Search return flights between two airports. Returns offers with a price the supplier quoted; quote those prices exactly, never a total.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "IATA code of the departure airport"
+              },
+              "to": {
+                "type": "string",
+                "description": "IATA code of the arrival airport"
+              },
+              "departureDate": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "returnDate": {
+                "description": "yyyy-mm-dd, or null for one way",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "adults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "children": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "departureDate",
+              "returnDate",
+              "adults",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "search_hotels",
+          "description": "Search hotels in a city for a stay. Returns offers priced for the whole stay; quote those prices exactly.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              },
+              "checkIn": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "checkOut": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "adults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "children": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "city",
+              "checkIn",
+              "checkOut",
+              "adults",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "model": "claude-opus-5",
+      "output_config": {
+        "effort": "high"
+      }
+    },
+    "response": {
+      "model": "claude-opus-5",
+      "id": "msg_011CeXQiRM3v3b8yjmZ3wNba",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "CAIS0AUKjgEIERgCKkAIWDFXTccLZpudqcN9GF5GWdr5pIS727LmOavLiE+Q8DdMt/GptjzzPl6hWyyFL4agV/N/YbLT5SMFA/XX8qysMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiRhOTMwNjY4NC0yNGM0LTQ0OTItOWRmNS01YThlMDNmODAyOTioAd2kzNQGEgwGgh3Em+ChPpHgZLMaDCakJKE1oOO3IfkfPyIw8kcC01ahJYuJdFmevHzsZAGzgwEnfb6DOLeCprvisAJ5oUb3MXYjwn/b4v0Ff34TKu4DWQ4YJM/RKifvlQ1658anzotYij6qBDm4UQeRe4Q6g8/mVvtqOqDwQSoPMq8JZqGVBZbE7RqNE+NscBLF5rpyB7xrE8epNvdxuTqT8J1kUtYfjU+vKFf/Xn2ZQr97Xu/jznZwJqar8hzYWMj8Dd52+k9PA/XqG34T73yw0wilaRhLbhpdVLReOeRt2axkjMIxJwqRgIBJLPBm4tIQQbx+F+shJtN0kd2PuyYEA4h2f4DJlngeysurU4iEQMz6Cdu/q0Vfn3jRHF0MxREiW+Lg5HMHjvcr8Knb2dsCuS/5z+R99uReA/2S0k/W0jO94zB2gJ9YvyD7afpg5+otqYzCVpya0MzP4qU15FYjJqRY+kKqsVCwbU/Ye2CStxdzmJwck1mD9/jgl/pN7TlIgRQ2JpxZEA4tqtIGOubPdjnBNyIDqo/NZOHsExZ82X8FGhHMHaejqcNr71IQMp4yc9MLQOisX/FymgBSG3T8bEKXMrSxi6L1czK+tXYNde7F/1+B9VWaMTiknUeboh8UPZcBRJAwvGG58nT+1nbk2Z3y9uitg1tIVMgte3xomX6ixUVYCKUeHf4eDDshja9b7r25r5gagV9/9PxhW8SVGc1j4kccOz+j725o2MbHX3ksjgWRA4PWhSxJFfWoZf/AVqsYAQ=="
+        },
+        {
+          "type": "text",
+          "text": "I'll search flights and hotels for a 7-night stay, 19–26 September 2026 (second half of the month), for 2 adults + 1 child."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01Q4DhdRxR9UCRGmQcKZzWAf",
+          "name": "search_flights",
+          "input": {
+            "from": "BER",
+            "to": "FAO",
+            "departureDate": "2026-09-19",
+            "returnDate": "2026-09-26",
+            "adults": 2,
+            "children": 1
+          },
+          "caller": {
+            "type": "direct"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_01Y2zbst5UZ9dWwD7ZihKYA2",
+          "name": "search_flights",
+          "input": {
+            "from": "BER",
+            "to": "LIS",
+            "departureDate": "2026-09-19",
+            "returnDate": "2026-09-26",
+            "adults": 2,
+            "children": 1
+          },
+          "caller": {
+            "type": "direct"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_013HRDehggLgJVR8jPSiVEkZ",
+          "name": "search_hotels",
+          "input": {
+            "city": "Faro",
+            "checkIn": "2026-09-19",
+            "checkOut": "2026-09-26",
+            "adults": 2,
+            "children": 1
+          },
+          "caller": {
+            "type": "direct"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_0185xJ1kxFRztSoW6RM6NxEk",
+          "name": "search_hotels",
+          "input": {
+            "city": "Lisbon",
+            "checkIn": "2026-09-19",
+            "checkOut": "2026-09-26",
+            "adults": 2,
+            "children": 1
+          },
+          "caller": {
+            "type": "direct"
+          }
+        }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 1225,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 893,
+        "output_tokens_details": {
+          "thinking_tokens": 201
+        },
+        "service_tier": "standard",
+        "inference_geo": "global"
+      }
+    }
+  },
+  {
+    "request": {
+      "max_tokens": 8000,
+      "system": "Here is what we read from her message so far, as JSON: {\"budget\":{\"amount\":1500,\"currency\":\"EUR\"},\"destination\":\"Portugal\",\"originCity\":\"Berlin\",\"nights\":7,\"month\":\"September\",\"partySize\":{\"adults\":2,\"children\":1,\"infants\":0},\"nearBeach\":true,\"needsCrib\":true}. Every field below came from her message; ask nothing more about them. Treat today's date as 2026-08-29 when you resolve a month or a relative date into yyyy-mm-dd, so the same request always searches the same dates. Search for flights and hotels before you quote any price. List each offer with the price the supplier quoted; do not add prices together or invent a total, and never quote a number no search returned.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros."
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "",
+              "signature": "CAIS0AUKjgEIERgCKkAIWDFXTccLZpudqcN9GF5GWdr5pIS727LmOavLiE+Q8DdMt/GptjzzPl6hWyyFL4agV/N/YbLT5SMFA/XX8qysMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiRhOTMwNjY4NC0yNGM0LTQ0OTItOWRmNS01YThlMDNmODAyOTioAd2kzNQGEgwGgh3Em+ChPpHgZLMaDCakJKE1oOO3IfkfPyIw8kcC01ahJYuJdFmevHzsZAGzgwEnfb6DOLeCprvisAJ5oUb3MXYjwn/b4v0Ff34TKu4DWQ4YJM/RKifvlQ1658anzotYij6qBDm4UQeRe4Q6g8/mVvtqOqDwQSoPMq8JZqGVBZbE7RqNE+NscBLF5rpyB7xrE8epNvdxuTqT8J1kUtYfjU+vKFf/Xn2ZQr97Xu/jznZwJqar8hzYWMj8Dd52+k9PA/XqG34T73yw0wilaRhLbhpdVLReOeRt2axkjMIxJwqRgIBJLPBm4tIQQbx+F+shJtN0kd2PuyYEA4h2f4DJlngeysurU4iEQMz6Cdu/q0Vfn3jRHF0MxREiW+Lg5HMHjvcr8Knb2dsCuS/5z+R99uReA/2S0k/W0jO94zB2gJ9YvyD7afpg5+otqYzCVpya0MzP4qU15FYjJqRY+kKqsVCwbU/Ye2CStxdzmJwck1mD9/jgl/pN7TlIgRQ2JpxZEA4tqtIGOubPdjnBNyIDqo/NZOHsExZ82X8FGhHMHaejqcNr71IQMp4yc9MLQOisX/FymgBSG3T8bEKXMrSxi6L1czK+tXYNde7F/1+B9VWaMTiknUeboh8UPZcBRJAwvGG58nT+1nbk2Z3y9uitg1tIVMgte3xomX6ixUVYCKUeHf4eDDshja9b7r25r5gagV9/9PxhW8SVGc1j4kccOz+j725o2MbHX3ksjgWRA4PWhSxJFfWoZf/AVqsYAQ=="
+            },
+            {
+              "type": "text",
+              "text": "I'll search flights and hotels for a 7-night stay, 19–26 September 2026 (second half of the month), for 2 adults + 1 child."
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01Q4DhdRxR9UCRGmQcKZzWAf",
+              "name": "search_flights",
+              "input": {
+                "from": "BER",
+                "to": "FAO",
+                "departureDate": "2026-09-19",
+                "returnDate": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_01Y2zbst5UZ9dWwD7ZihKYA2",
+              "name": "search_flights",
+              "input": {
+                "from": "BER",
+                "to": "LIS",
+                "departureDate": "2026-09-19",
+                "returnDate": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_013HRDehggLgJVR8jPSiVEkZ",
+              "name": "search_hotels",
+              "input": {
+                "city": "Faro",
+                "checkIn": "2026-09-19",
+                "checkOut": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_0185xJ1kxFRztSoW6RM6NxEk",
+              "name": "search_hotels",
+              "input": {
+                "city": "Lisbon",
+                "checkIn": "2026-09-19",
+                "checkOut": "2026-09-26",
+                "adults": 2,
+                "children": 1
+              },
+              "caller": {
+                "type": "direct"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01Q4DhdRxR9UCRGmQcKZzWAf",
+              "content": "[{\"sourceId\":\"flight-tap-3728\",\"kind\":\"flight\",\"name\":\"TAP BER to FAO\",\"price\":{\"amount\":388,\"currency\":\"USD\"},\"detail\":\"direct, departs 2026-09-19 6:00, return 2026-09-26\"},{\"sourceId\":\"flight-ryanair-3729\",\"kind\":\"flight\",\"name\":\"Ryanair BER to FAO\",\"price\":{\"amount\":147,\"currency\":\"USD\"},\"detail\":\"1 stop, departs 2026-09-19 10:30, return 2026-09-26\"},{\"sourceId\":\"flight-easyjet-3730\",\"kind\":\"flight\",\"name\":\"easyJet BER to FAO\",\"price\":{\"amount\":278,\"currency\":\"USD\"},\"detail\":\"2 stop, departs 2026-09-19 14:00, return 2026-09-26\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01Y2zbst5UZ9dWwD7ZihKYA2",
+              "content": "[{\"sourceId\":\"flight-tap-2490\",\"kind\":\"flight\",\"name\":\"TAP BER to LIS\",\"price\":{\"amount\":230,\"currency\":\"USD\"},\"detail\":\"direct, departs 2026-09-19 6:00, return 2026-09-26\"},{\"sourceId\":\"flight-ryanair-2491\",\"kind\":\"flight\",\"name\":\"Ryanair BER to LIS\",\"price\":{\"amount\":272,\"currency\":\"USD\"},\"detail\":\"1 stop, departs 2026-09-19 10:30, return 2026-09-26\"},{\"sourceId\":\"flight-easyjet-2492\",\"kind\":\"flight\",\"name\":\"easyJet BER to LIS\",\"price\":{\"amount\":355,\"currency\":\"USD\"},\"detail\":\"2 stop, departs 2026-09-19 14:00, return 2026-09-26\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_013HRDehggLgJVR8jPSiVEkZ",
+              "content": "[{\"sourceId\":\"hotel-0-4188\",\"kind\":\"hotel\",\"name\":\"Praia Guesthouse, Faro\",\"price\":{\"amount\":721,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 200 m from the beach\"},{\"sourceId\":\"hotel-1-4188\",\"kind\":\"hotel\",\"name\":\"Hotel Atlantico, Faro\",\"price\":{\"amount\":840,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 1800 m from the beach\"},{\"sourceId\":\"hotel-2-4188\",\"kind\":\"hotel\",\"name\":\"Quinta da Ria, Faro\",\"price\":{\"amount\":693,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib on request, 2700 m from the beach\"}]",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_0185xJ1kxFRztSoW6RM6NxEk",
+              "content": "[{\"sourceId\":\"hotel-0-1645\",\"kind\":\"hotel\",\"name\":\"Praia Guesthouse, Lisbon\",\"price\":{\"amount\":560,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 200 m from the beach\"},{\"sourceId\":\"hotel-1-1645\",\"kind\":\"hotel\",\"name\":\"Hotel Atlantico, Lisbon\",\"price\":{\"amount\":952,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib available, 1800 m from the beach\"},{\"sourceId\":\"hotel-2-1645\",\"kind\":\"hotel\",\"name\":\"Quinta da Ria, Lisbon\",\"price\":{\"amount\":658,\"currency\":\"EUR\"},\"detail\":\"7 nights, crib on request, 2700 m from the beach\"}]",
+              "is_error": false
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "name": "search_flights",
+          "description": "Search return flights between two airports. Returns offers with a price the supplier quoted; quote those prices exactly, never a total.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "IATA code of the departure airport"
+              },
+              "to": {
+                "type": "string",
+                "description": "IATA code of the arrival airport"
+              },
+              "departureDate": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "returnDate": {
+                "description": "yyyy-mm-dd, or null for one way",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "adults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "children": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "departureDate",
+              "returnDate",
+              "adults",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "search_hotels",
+          "description": "Search hotels in a city for a stay. Returns offers priced for the whole stay; quote those prices exactly.",
+          "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              },
+              "checkIn": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "checkOut": {
+                "type": "string",
+                "description": "yyyy-mm-dd"
+              },
+              "adults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "children": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "city",
+              "checkIn",
+              "checkOut",
+              "adults",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "model": "claude-opus-5",
+      "output_config": {
+        "effort": "high"
+      }
+    },
+    "response": {
+      "model": "claude-opus-5",
+      "id": "msg_011CeXQj6yY7J27Fx9EWaCbS",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "CAIS0QIKjgEIERgCKkCd2cDazGqHbSN9etxbboBrmXO/uk1nDcuLXk4G0WzGZBiK6bkvaKFx54iN0LvTOrH5sQQjB5te9y5rN+UGO4gnMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiRhOTMwNjY4NC0yNGM0LTQ0OTItOWRmNS01YThlMDNmODAyOTioAeSkzNQGEgxBVczJaP76KON+j6kaDE2GBQGwFILBpsddZiIwet6lcvjzooPYipLct0F3CwRXVVDMabwfonouIjorE4DUeD7/dGLxCyWlqd4PRVpPKnAvSIOZXcfb4paiyFeBdarZMzKpCJ8rgl5jtFtHD4Bpd7XAuXbcFgz8Af8S6JQ8dPlgfFr5bpLKZpame5falp2ej/ewUgqDUCKgnZF8NJvMh9oR6nUnCSxJKrrCV4EbSdyNdACVHi6fhi4PZMU+1PmrGAE="
+        },
+        {
+          "type": "text",
+          "text": "Here's what came back for **19–26 September 2026** (7 nights), 2 adults + 1 child.\n\n**Flights, Berlin → Faro (Algarve)**\n- Ryanair BER to FAO — **147 USD** — 1 stop, departs 19 Sep 10:30, returns 26 Sep\n- easyJet BER to FAO — **278 USD** — 2 stops, departs 19 Sep 14:00, returns 26 Sep\n- TAP BER to FAO — **388 USD** — direct, departs 19 Sep 06:00, returns 26 Sep\n\n**Flights, Berlin → Lisbon**\n- TAP BER to LIS — **230 USD** — direct, departs 19 Sep 06:00, returns 26 Sep\n- Ryanair BER to LIS — **272 USD** — 1 stop, departs 19 Sep 10:30, returns 26 Sep\n- easyJet BER to LIS — **355 USD** — 2 stops, departs 19 Sep 14:00, returns 26 Sep\n\n**Hotels in Faro (7 nights)**\n- Quinta da Ria, Faro — **693 EUR** — crib on request, 2700 m from the beach\n- Praia Guesthouse, Faro — **721 EUR** — crib available, 200 m from the beach\n- Hotel Atlantico, Faro — **840 EUR** — crib available, 1800 m from the beach\n\n**Hotels in Lisbon (7 nights)**\n- Praia Guesthouse, Lisbon — **560 EUR** — crib available, 200 m from the beach\n- Quinta da Ria, Lisbon — **658 EUR** — crib on request, 2700 m from the beach\n- Hotel Atlantico, Lisbon — **952 EUR** — crib available, 1800 m from the beach\n\nA few notes:\n- On your two must-haves — beach and a guaranteed crib — the **Praia Guesthouse** options stand out in both cities: 200 m from the beach and crib listed as available rather than \"on request\".\n- The flight prices came back in **USD** while the hotels are quoted in **EUR**, so I can't reliably check them against your 1,500 EUR budget without a conversion. The cheapest combinations are clearly at the low end of what's on offer, but you'd want to confirm the euro amount at booking.\n- Faro puts you right in the Algarve, which is the more classic beach week; Lisbon gives you city plus coast. Tell me which you prefer and I can look at nearby dates or more options."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 3302,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 880,
+        "output_tokens_details": {
+          "thinking_tokens": 36
+        },
+        "service_tier": "standard",
+        "inference_geo": "global"
+      }
+    }
+  }
+]
