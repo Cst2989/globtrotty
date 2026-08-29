@@ -4,6 +4,7 @@ import {
   claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, releaseForContinuation,
   FencedError, type Claim,
 } from './repo/turns.js'
+import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 
@@ -61,10 +62,36 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     await loop(deps, claim, turnSpend)
   } catch (err) {
     if (err instanceof FencedError) return // superseded: write nothing
-    // Accepted limitation (plan 1): every error maps to 'provider_down'. The echo agent
-    // cannot produce a real provider error, and the classifier arrives with the model
-    // client in a later plan — see progress.md Ruling E.
-    await failTurn(sql, claim, 'provider_down', turnSpend.total).catch(() => {})
+    // FencedError above returns FIRST and is never classified: a superseded worker
+    // must write nothing at all, and stamping a fail_reason on a turn it no longer
+    // owns would overwrite the run that took it over.
+    //
+    // Everything else is classified rather than blanket-recorded as 'provider_down'
+    // (plan 1's accepted limitation, now removed). Only `reason` is used, and that
+    // is not a signal being withheld from anything: THERE IS NO RETRY MECHANISM TO
+    // FEED. failTurn sets status = 'failed', and the sweeper only ever considers
+    // 'queued' or 'running' rows — so every failure below is terminal, and
+    // `retryable: true` from the classifier would not mean the turn was retried.
+    // Nothing here has changed about that; the classifier changed what the row
+    // SAYS, not what happens to it.
+    //
+    // That terminality is also, by construction, the guard the brief asks for: a
+    // 'failed' turn matches neither arm of `status in ('queued','running')`, so a
+    // non-retryable failure cannot be requeued until the sweeper reaps it as a
+    // crash loop, however stale its heartbeat gets. Pinned by test/worker.test.ts.
+    //
+    // `retryable` is advice for the model client plan 3 brings (honour Retry-After,
+    // back off, give up), and for whoever decides — deliberately — whether a
+    // transient failure should ever be requeued instead of failed. Branching on it
+    // here would be inventing turn-level retry semantics with no client to justify
+    // their shape.
+    //
+    // The assignment below is also the compile-time check that every
+    // ClassifiedReason (src/errors.ts) is a real FailReason (src/engine.ts) --
+    // errors.ts deliberately does not import the engine, so this is where the two
+    // unions are proven to agree.
+    const { reason } = classifyError(err)
+    await failTurn(sql, claim, reason, turnSpend.total).catch(() => {})
     throw err
   }
 }
@@ -190,7 +217,13 @@ async function loop(
       await failTurn(sql, claim, 'fenced', turnSpend.total)
       return
     } else {
-      result = await step.run()
+      // Wrapped exactly like deps.agent(...) above: a real supplier call (plan 3)
+      // can run past HEARTBEAT_STALE, so heartbeat_at must keep advancing while
+      // it's in flight, not just before and after.
+      result = await withHeartbeat(
+        sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+        () => step.run(),
+      )
       // ...and ahead of finishToolCall — a superseded worker must not be the one
       // recording this tool call's result as authoritative.
       await heartbeat(sql, claim)

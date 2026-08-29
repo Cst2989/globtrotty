@@ -221,6 +221,54 @@ way rather than overselling it, which is the right call.
 system where an agent's spend limits are the only thing between you and an unbounded bill, the
 day boundary is a correctness property, not a formatting detail.
 
+## 12b. A provenance corpus that overwrites cannot answer "what did the gate see?"
+
+`tool_results` is the corpus the gates rehydrate from. The spec says **append-only**. The
+implementation upserts: a re-search overwrites the previous quote's price and timestamp.
+
+The justification is real — when the freshness gate says "these prices are too old, search
+again", the re-search must be able to move `fetched_at`, or the gate rejects the retry for
+exactly the reason the retry existed. But the consequence is that a proposal which was *rejected*
+by a gate leaves no record of the price it was rejected on. Anything that became a proposal is
+safe, because the rehydrated itinerary is snapshotted there. Everything the gates refused is not.
+
+That is the corpus's whole purpose in the next slice: replaying a conversation and asking why a
+gate fired. This is also the one deferred item whose cost **accrues while it waits** — every
+re-quote destroys one more historical price, unrecoverably.
+
+**Lesson:** for an agent's provenance store, "append-only" is not a retention preference, it is
+what makes the store answer questions about the past. If you must upsert, know that you have
+traded away replay, and write down what it costs.
+
+## 12c. Metered tool calls need a per-turn budget, and the loop is where it goes
+
+Spec §8 names a per-turn supplier-call budget, and calls its absence a defect being fixed. It
+shipped unimplemented — defensibly, because the supplier `search()` and `quote()` methods had no
+callers outside tests. There was genuinely nothing to count.
+
+But that is the shape of the trap: the budget is easy to defer while building the *port*, and by
+the time there are call sites they are inside an agent loop that can run a couple of dozen steps.
+Model spend was capped from plan 1. Supplier calls — rate-limited and sometimes metered — were
+not capped at all.
+
+**Lesson:** an agent loop needs a ceiling on every metered resource it can consume, not just
+tokens. Add the counter when you build the loop, not when you notice the bill.
+
+## 12d. An audit table needs a uniqueness rule, or the fire-rate is fiction
+
+`gate_results.round` defaults to `0` and there is no unique constraint on
+`(conversation_id, proposal_id, round, gate)`. Two gate runs in one turn that both leave `round`
+at its default write two complete sets of rows.
+
+The question this table exists to answer is "how often did this gate fire?". Double-counted rows
+do not corrupt anything a user sees — they corrupt the measurement you plan to make decisions
+with, which is worse in a quieter way, because nothing looks broken.
+
+**Lesson:** if instrumentation is going to justify keeping or cutting a component, its
+uniqueness rule is part of its correctness. An audit row you can accidentally write twice is not
+evidence.
+
+
 ---
 
 # Part II — Using agents to build the agentic system
@@ -334,22 +382,51 @@ full authority.
 
 ## 19. A wrong comment on a contract is worse than no comment
 
-Three times in one branch:
-- a code comment justifying a float-rounding value with an arithmetic claim that was false;
-- a migration comment defining a column's NULL semantics as a case that, after a later fix, never
-  occurs;
-- a justification asserting the spec was self-contradictory, which a reviewer disproved by
-  quoting it.
+**Five instances across this project.** It is the second-most-common defect after tests that
+pass against the wrong implementation, and unlike that one it is invisible to the entire test
+suite — because none of these were code.
 
-Each was trusted rather than checked, precisely because it was written down.
+Every single one had the same shape: **a correct decision, recorded with a reason that was not
+true.**
 
-The best response came from an implementer that made a comment into a **tested contract**: three
-tests read the live column comment and assert every reason string appears in it, that there are
-exactly three, and that the superseded wording is gone. Changing the code without shipping a
-migration now fails the suite.
+1. A float-rounding value justified by an arithmetic claim (`452.35 * 100` landing on
+   `45234.999...`) that is simply false — it lands exactly on `45235`.
+2. A migration comment defining a column's NULL semantics as "not evaluated because a
+   prerequisite gate failed" — the one case that, after a later refinement, writes no row at all.
+3. A justification asserting the spec was self-contradictory about `append-only`, disproved by
+   quoting the spec: two sentences, not one, and it never claimed the uniqueness the argument
+   depended on. The contradiction was in the *plan*, not the spec.
+4. A classifier comment arguing a fail-closed choice on the grounds that retrying "burns another
+   of the turn's five attempts" — there is no retry. `failTurn` is terminal, and the sweeper only
+   ever considers `queued`/`running` rows.
+5. A report recording that a lint selector "does not match BigInt `0n`", inferred from a `?? 0n`
+   going unflagged. It went unflagged because that file was **out of scope**, not because the
+   selector missed it. Two different causes, one observation, and the wrong one written down —
+   in a codebase where bigint is the actual money type, so the recorded gap would have invited
+   exactly the dangerous line it claimed was unguarded.
 
-**Lesson:** documentation that a downstream consumer will act on deserves a test. If that sounds
-excessive, note that this comment had already been wrong once.
+Note what unites 1, 4 and 5: each was an *inference from a single observation* that the author
+never checked against the mechanism. The decision was reached correctly by instinct; the
+explanation was reconstructed afterwards and never verified.
+
+That is the specific failure mode. Not carelessness — **post-hoc rationalisation of a correct
+call.** It is hard to catch precisely because the conclusion is right, so a reviewer skimming for
+wrong decisions sees nothing wrong.
+
+Two things worked against it:
+
+- **Reviewers that check the claim rather than the conclusion.** Every one of the five was caught
+  by someone computing the arithmetic, quoting the source, tracing the control flow, or running
+  the case — not by someone reading for plausibility.
+- **Making a comment a tested contract.** One implementer wired three tests that read the *live*
+  database column comment and assert every reason string appears in it, that there are exactly
+  three, and that the superseded wording is gone. Changing the code without shipping a migration
+  now fails the suite. That is the only one of the five that could not recur.
+
+**Lesson:** documentation a downstream consumer will act on deserves the same adversarial
+verification as code. When you write *why*, check that the why describes the system as it is —
+especially when you are confident, and most especially when you reconstructed the reason after
+making the call.
 
 ## 20. Whole-branch review finds a different class of defect
 

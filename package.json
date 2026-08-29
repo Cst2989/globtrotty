@@ -11,16 +11,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "demo": "tsx scripts/demo.ts"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
     "@types/node": "^26.2.0",
     "dotenv": "^17.4.2",
+    "eslint": "^10.9.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "postgres": "^3.4.9",
     "zod": "^4.4.3"
   }
