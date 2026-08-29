@@ -73,9 +73,9 @@ export function parseSearchApiHotels(
       supplier: 'searchapi',
       kind: 'hotel',
       name: p.name ?? token,
-      // The ONE float->bigint conversion. Round, never truncate: 452.35*100 can
-      // land on 45234.999... in binary floating point and Math.trunc would
-      // lose a cent.
+      // The ONE float->bigint conversion. Round, never truncate: 8.29*100
+      // lands on 828.9999999999999 in binary floating point (verified via
+      // `node -e`) and Math.trunc would lose a cent.
       price: money(BigInt(Math.round(picked.amount * scale)), params.currency),
       priceBasis: picked.basis,
       fetchedAt: now,

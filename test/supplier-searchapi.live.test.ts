@@ -16,11 +16,23 @@ const params: HotelSearch = {
   kind: 'hotel', query: 'Faro Portugal', checkIn, checkOut, adults: 2, currency: 'EUR',
 }
 
-live('SearchApiHotels (live)', () => {
+// The api-key check MUST live inside each `it`, never in the `describe`
+// factory: vitest runs a suite's factory during COLLECTION even when the
+// suite is `describe.skip`, to enumerate its `it`s for the skip report. A
+// throw in the factory body fires unconditionally — including when
+// LIVE_SUPPLIERS is unset — so it would break the offline default `pnpm
+// test` run on any machine whose .env.local lacks GOOGLE_SEARCH_API (i.e.
+// everyone but whoever captured the fixture). Nothing that can throw may sit
+// in the describe callback.
+function requireApiKey(): string {
   const apiKey = process.env.GOOGLE_SEARCH_API
   if (!apiKey) throw new Error('LIVE_SUPPLIERS=1 requires GOOGLE_SEARCH_API to be set')
+  return apiKey
+}
 
+live('SearchApiHotels (live)', () => {
   it('returns priced hotels in the requested currency, on the requested window, with a strict shape', async () => {
+    const apiKey = requireApiKey()
     const items = await new SearchApiHotels(apiKey).search(params)
     expect(items.length).toBeGreaterThan(0)
 
@@ -49,6 +61,7 @@ live('SearchApiHotels (live)', () => {
   }, 90_000)
 
   it('re-quotes a just-searched id to ok — the property mayRequote claims', async () => {
+    const apiKey = requireApiKey()
     const s = new SearchApiHotels(apiKey)
     const [first] = await s.search(params)
     expect(first).toBeDefined()
@@ -62,6 +75,7 @@ live('SearchApiHotels (live)', () => {
   }, 90_000)
 
   it('reports an unknown id as gone, not as an error', async () => {
+    const apiKey = requireApiKey()
     const q = await new SearchApiHotels(apiKey).quote('definitely-not-a-property-token', params)
     expect(q.status).toBe('gone')
   }, 90_000)

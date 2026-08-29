@@ -63,12 +63,25 @@ describe('parseSearchApiHotels', () => {
     expect(only!.priceBasis).toBe('pre_tax')
   })
 
-  it('converts the float price to exact minor units', () => {
+  // 452.35 * 100 === 45235 EXACTLY in IEEE-754 double precision, so a value
+  // like that does not discriminate: Math.round and Math.trunc agree on it,
+  // and a Math.trunc regression would slip through undetected. This uses two
+  // values that genuinely go inexact under a binary-float `*100` multiply, so
+  // that no single lucky number can carry the test.
+  //   8.29 * 100 === 828.9999999999999  (round -> 829, trunc -> 828)
+  //   70.07 * 100 === 7006.999999999999 (round -> 7007, trunc -> 7006)
+  // Verified live via `node -e` before relying on them.
+  it('rounds (not truncates) prices that go inexact under a float *100 multiply', () => {
     const doc = JSON.stringify({
       search_parameters: { currency: 'EUR' },
-      properties: [{ property_token: 'E', name: 'X', total_price: { extracted_price: 452.35 } }],
+      properties: [
+        { property_token: 'E', name: 'X', total_price: { extracted_price: 8.29 } },
+        { property_token: 'F', name: 'Y', total_price: { extracted_price: 70.07 } },
+      ],
     })
-    expect(parseSearchApiHotels(doc, params, NOW)[0]!.price.minor).toBe(45235n)
+    const [first, second] = parseSearchApiHotels(doc, params, NOW)
+    expect(first!.price.minor).toBe(829n)
+    expect(second!.price.minor).toBe(7007n)
   })
 
   it('throws on an API error payload', () => {
