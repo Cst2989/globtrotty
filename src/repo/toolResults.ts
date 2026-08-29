@@ -34,14 +34,32 @@ type Row = {
  *
  * ### Why the deviation stands rather than being fixed here
  *
- * The same §6 sentence names `(conversation_id, source_id)` as the corpus's
- * key. A row-per-fetch table cannot keep that as a key — rehydration stops
- * being a point read and becomes a newest-per-id `distinct on`, which is a
- * different lookup with a different index and different tie-break behaviour
- * when two fetches share a `fetched_at`. The spec is therefore in tension with
- * itself, and this branch's approved plan resolved that tension explicitly:
+ * §6's own text does not conflict with itself here. The `tool_results` entry
+ * is two sentences: the column list `(conversation_id, source_id), ...`
+ * ends with a full stop, and "Untrimmed, append-only, retained at least as
+ * long as `model_calls`" is a separate sentence about retention and
+ * mutability, not a restatement of the key. §6 never calls
+ * `(conversation_id, source_id)` a key, a primary key, or unique for this
+ * table — contrast `tool_calls`' "(turn_id, call_id) primary key",
+ * `turns`' "unique (conversation_id, idempotency_key)", and `link_clicks`'
+ * "unique (proposal_id, item_id)". The bare tuple on `tool_results` states
+ * the row's identifying grain, not an asserted constraint — and a lookup key
+ * is not the same thing as a uniqueness constraint: a row-per-fetch table
+ * still keeps `(conversation_id, source_id)` as its lookup key, it just loses
+ * uniqueness on it. §6 also uses "append-only" elsewhere for `model_calls`
+ * ("This table is the append-only cost ledger"), a table that is
+ * unambiguously insert-only — so §6 means what it says here too.
+ *
+ * The uniqueness requirement comes from this branch's OWN PLAN, not the spec:
+ * `docs/superpowers/plans/2026-08-16-supplier-port-and-gates.md` says
  * "(conversation_id, source_id) is the lookup key, and it must be unique so
- * rehydration is a point read."
+ * rehydration is a point read" — asserting both append-only and unique in the
+ * same breath — and then its DDL implements only the unique, upsert half.
+ * The plan created the tension the spec doesn't have. This file's `on
+ * conflict ... do update` is therefore a genuine, deliberate DEVIATION FROM
+ * THE SPEC, not a resolution of a spec ambiguity — and because the spec is
+ * not actually ambiguous, converting to row-per-fetch is owed, not merely an
+ * option to weigh; every re-quote before it happens is unrecoverable loss.
  *
  * Reversing that decision means dropping a unique constraint from a LIVE table,
  * rewriting the gate stack's only corpus reader, and changing the corpus's

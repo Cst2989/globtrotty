@@ -27,27 +27,49 @@ must be able to move `fetched_at`, or the gate rejects the retry for precisely t
 the retry existed. A `do nothing` conflict path deadlocks the one loop the gate stack is
 built around.
 
-**Why it was not converted to row-per-fetch in the final fix wave.**
+**Why it was not converted to row-per-fetch in the final fix wave, and why this is a
+deviation from the spec rather than a resolution of one in it.**
 
-1. **The spec is in tension with itself.** The same §6 sentence names
-   `(conversation_id, source_id)` as the corpus's key. A row-per-fetch table cannot keep
-   that as a key: rehydration stops being a point read and becomes a
-   `select distinct on (source_id) ... order by source_id, fetched_at desc`, with a
-   different index and a tie-break question when two fetches share a `fetched_at`.
-2. **The plan resolved that tension explicitly**, and it was approved:
-   *"`(conversation_id, source_id)` is the lookup key, and it must be unique so rehydration
-   is a point read."* Reversing an approved structural decision belongs in a task with its
-   own review, not in a fix wave.
-3. **Nothing reads a superseded row yet.** An approved proposal's prices survive in
+§6's `tool_results` entry is two sentences, not one: the column list `(conversation_id,
+source_id), ...` ends with a full stop, and *"Untrimmed, append-only, retained at least as
+long as `model_calls`"* is a separate sentence about retention and mutability. §6 never calls
+`(conversation_id, source_id)` a key, a primary key, or unique for this table — compare
+`tool_calls`' *"(turn_id, call_id) primary key"*, `turns`' *"unique (conversation_id,
+idempotency_key)"*, and `link_clicks`' *"unique (proposal_id, item_id)"*. The bare tuple on
+`tool_results` names the row's identifying grain, not an asserted constraint, and a lookup
+key is not the same thing as a uniqueness constraint: a row-per-fetch table still keeps
+`(conversation_id, source_id)` as its lookup key, it just loses uniqueness on it. §6 also
+calls `model_calls` *"the append-only cost ledger"*, a table that is unambiguously
+insert-only, so "append-only" means what it plainly says here too. **The spec is not in
+tension with itself.**
+
+The uniqueness requirement comes from **this branch's own plan**, not the spec:
+`docs/superpowers/plans/2026-08-16-supplier-port-and-gates.md:141` says *"It is append-only
+and untrimmed — the model sees a trimmed view, the gate sees this. `(conversation_id,
+source_id)` is the lookup key, and it must be unique so rehydration is a point read."* That
+sentence asserts both append-only and unique together, and the plan's own DDL then
+implements only the unique, upsert half (`on conflict (conversation_id, source_id) do
+update`). The plan created the tension the spec does not have; it did not resolve one that
+was already there.
+
+So the reasons the conversion was deferred stand on their own, not on a misreading of §6:
+
+1. **Reversing a live table's key is out of scope for a fix wave.** Dropping a unique
+   constraint on a LIVE table, rewriting the gate stack's only corpus reader, and changing
+   the corpus's growth profile is a structural change to the branch's central table — it
+   belongs in a task with its own review, not a slot in a fix wave.
+2. **Nothing reads a superseded row yet.** An approved proposal's prices survive in
    `proposals.itinerary` (rehydrated, never the model's version); a gate run's own evidence
    survives in `gate_results.detail` / `source_ids`. The gap is narrower than "no history":
    it is the exact corpus inputs to a REJECTED proposal, for an item that was later
    re-quoted.
 
-**What it costs if this was wrong.** Every re-quote between now and a conversion destroys
-one historical price, silently and unrecoverably. Unlike a code defect this cannot be fixed
-retroactively — the rows lost in the meantime never come back. Doing the conversion EARLY is
-much cheaper than doing it late.
+**What it costs, and why the obligation is firm.** Every re-quote between now and a
+conversion destroys one historical price, silently and unrecoverably. Unlike a code defect
+this cannot be fixed retroactively — the rows lost in the meantime never come back. Because
+the spec is not actually ambiguous here, this is a debt owed against §6, not an open question
+to revisit — doing the conversion EARLY is much cheaper than doing it late, and every day it
+waits is more history silently gone.
 
 ## Deviation from spec §5's `quantity` mental model
 
