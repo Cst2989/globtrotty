@@ -190,7 +190,13 @@ async function loop(
       await failTurn(sql, claim, 'fenced', turnSpend.total)
       return
     } else {
-      result = await step.run()
+      // Wrapped exactly like deps.agent(...) above: a real supplier call (plan 3)
+      // can run past HEARTBEAT_STALE, so heartbeat_at must keep advancing while
+      // it's in flight, not just before and after.
+      result = await withHeartbeat(
+        sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+        () => step.run(),
+      )
       // ...and ahead of finishToolCall — a superseded worker must not be the one
       // recording this tool call's result as authoritative.
       await heartbeat(sql, claim)

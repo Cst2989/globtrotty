@@ -117,6 +117,59 @@ describeDb('runTurn end to end', () => {
     })
   })
 
+  // T0.1: withHeartbeat wraps deps.agent(...) but, before this fix, not
+  // step.run() — a slow tool call (a real supplier request in plan 3) could run
+  // past HEARTBEAT_STALE with nothing refreshing heartbeat_at in between.
+  //
+  // NOTE on technique: withTestDb runs the whole test inside one Postgres
+  // transaction that is rolled back at the end (test/helpers/db.ts). Postgres
+  // freezes now() at transaction start, so every `heartbeat_at = now()` write
+  // in this test stores the SAME wall-clock value no matter how many times it
+  // runs — a raw before/after read of the column can never show movement here.
+  // So, like the existing "emits a heartbeat while a slow step is still in
+  // flight" test above, this pins against the heartbeat() CALL COUNT captured
+  // the instant run() starts, and asserts it grows while run() is still
+  // in flight — not merely that the turn eventually completed.
+  it('emits a heartbeat while a slow tool call is still in flight', async () => {
+    await withTestDb(async (sql) => {
+      const heartbeatSpy = vi.spyOn(turnsRepo, 'heartbeat')
+      let callsAtStart = -1
+      let callsDuringRun = -1
+      let handedOut = false
+
+      const agent: Agent = async () => {
+        if (handedOut) return { kind: 'message' as const, text: 'done', costMicros: 10n }
+        handedOut = true
+        return {
+          kind: 'tool' as const,
+          callId: 'toolu_slow',
+          name: 'slow_tool',
+          run: async () => {
+            callsAtStart = heartbeatSpy.mock.calls.length
+            // Sleep well past several heartbeat intervals so withHeartbeat's
+            // timer has room to tick more than once before run() resolves.
+            await new Promise((resolve) => setTimeout(resolve, 120))
+            callsDuringRun = heartbeatSpy.mock.calls.length
+            return { ok: true }
+          },
+          costMicros: 10n,
+        }
+      }
+
+      const r = await submit(sql)
+      const deps = workerDeps(sql, agent)
+      deps.heartbeatIntervalMs = 20
+      await runTurn(deps, r.turnId!)
+
+      // Pinned against the call count captured the instant run() started —
+      // not merely "the turn completed". Without the fix, step.run() isn't
+      // wrapped in withHeartbeat, so no tick fires during the sleep and
+      // callsDuringRun === callsAtStart.
+      expect(callsAtStart).toBeGreaterThanOrEqual(0)
+      expect(callsDuringRun).toBeGreaterThan(callsAtStart)
+    })
+  })
+
   // CRITICAL 2 end to end: continue_later must release ownership (status -> 'queued'),
   // not just persist state, or the re-invocation's own claimTurn can never claim it.
   it('leaves a continue_later turn immediately claimable by the re-invocation', async () => {
