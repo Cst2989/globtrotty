@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 import type { Limits, LoopMessage } from '../engine.js'
+import { classifyError } from '../errors.js'
 import { SEATS } from '../model/seats.js'
 import {
   buildCountTokensRequest, callModel, estimateInputTokens,
-  type CallArgs, type Transport,
+  type CallArgs, type ModelResult, type Transport,
 } from '../model/client.js'
 import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { costMicros } from '../pricing.js'
@@ -19,7 +20,7 @@ import { constraintsFromNotebook, runGates } from '../gates/pipeline.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
-import type { Notebook } from '../notebook.js'
+import type { Notebook, Provenance } from '../notebook.js'
 
 /**
  * `import.meta.url`, never `__dirname` — this package is `"type": "module"` with
@@ -122,7 +123,29 @@ export function makeDriver(deps: DriverDeps): Agent {
     }
 
     // ---- 2. Call, and classify before touching content ----------------------
-    const result = await callModel(deps.transport, args, deps.now)
+    // A throw here leaves the reservation debited unless the taxonomy can say the
+    // call was never billed. `billed === 'no'` means a response BODY reached us
+    // (any status: 400 through 503) and an error body carries no `usage`, so the
+    // whole reservation is refunded. `'unknown'` — a connection failure, a
+    // timeout, our own abort, or an error we cannot name — keeps the debit,
+    // because the provider may have generated and billed a response we never saw.
+    //
+    // Getting this wrong in the other direction is not a rounding error: an
+    // outage produces 429s and 5xx, ~400,000 stranded micros per attempt land in
+    // `daily_usage`, and `readSpendFailClosed` sums that column across ALL USERS
+    // for the global ceiling — so a few hundred failed calls would cap the whole
+    // product for the rest of the UTC day at zero real spend, with no operator
+    // lever short of a manual `daily_usage` write.
+    //
+    // Rethrown either way: `runTurn`'s catch classifies it again and fails the
+    // turn. This block decides the MONEY, not the outcome.
+    let result: ModelResult
+    try {
+      result = await callModel(deps.transport, args, deps.now)
+    } catch (err) {
+      if (classifyError(err).billed === 'no') await refund()
+      throw err
+    }
 
     // Priced on the seat's model, not `result.model`: the response echoes back a
     // name that may be an alias we have no price row for, and PRICES throws
@@ -194,7 +217,10 @@ export function makeDriver(deps: DriverDeps): Agent {
      * Thinking blocks are untouched: extended thinking must be echoed back
      * byte-for-byte or it is rejected.
      */
-    const assistantContent = result.content.filter((b) => b.type !== 'tool_use' || b === toolUse)
+    // Compared by `id`, not by reference: identical cost, and it still holds if
+    // anything upstream ever hands back a cloned `content` array.
+    const assistantContent =
+      result.content.filter((b) => b.type !== 'tool_use' || b.id === toolUse.id)
 
     const asToolStep = (run: () => Promise<unknown>): AgentStep => ({
       kind: 'tool',
@@ -218,8 +244,9 @@ export function makeDriver(deps: DriverDeps): Agent {
 
     if (check.def.name === 'ask_user') {
       // Terminal by construction: the answer comes from her, not from a tool.
-      // The turn's state keeps a tool_use with no tool_result, which is never
-      // re-sent — the next turn hydrates its transcript from `messages`.
+      // Nothing is written to `turns.state` on this path: `loop()` returns from
+      // the park branch before the state mutation, so the tool_use the model
+      // just emitted never enters the saved transcript at all.
       const { questions } = check.input as { questions: string[] }
       return {
         kind: 'park', message: questions.join('\n\n'),
@@ -269,6 +296,54 @@ function lastUserText(messages: LoopMessage[]): string {
  * written to the notebook, and never compared against a budget she did not set.
  */
 const currencyOf = (nb: Notebook): string => nb.budget === null ? 'EUR' : nb.budget.value.currency
+
+/**
+ * Whose word this patch is recording — decided from the transcript, at the
+ * moment of the call, and never by the model (the tool schema carries no
+ * `source` field).
+ *
+ * ## Why this is not the constant `'user'`
+ *
+ * A constant would have left the entire provenance system with no reachable
+ * caller: `applyRequirementsPatch` is `applyRequirements`' only production
+ * caller, so a hardcoded `'user'` makes src/notebook.ts's `source === 'tool'`
+ * budget refusal and its `source !== 'user'` relax-guard dead code, and the
+ * module that exists to stop an inferred value relaxing something she said
+ * would stop nothing.
+ *
+ * That is reachable WITHOUT an adversary. A supplier result reaches the model's
+ * context fenced but present (renderItems -> fenceResult -> loop()'s
+ * `tool_result` block -> the next invocation's `args.messages`). The model reads
+ * "cheapest is EUR 1,650" against her EUR 1,500 budget, calls
+ * `update_requirements` to make its plan work, and — stamped `'user'` — both
+ * guards pass, the budget is relaxed by a number the MODEL chose, and
+ * `constraintsFromNotebook` hands it to the money gate, which then passes a
+ * proposal it was built to reject.
+ *
+ * ## Why it is not the constant `'inferred'` either
+ *
+ * `'inferred'` trips the relax-guard on every constraint field, so once she set
+ * a budget she could never raise it again through this desk — the rule inverted
+ * rather than enforced. Provenance is not a constant.
+ *
+ * ## What the transcript actually tells us
+ *
+ * `loop()` hydrates a fresh turn from `messages` as role + text only, so step 0
+ * of every turn is provably her words alone. A `tool_result` block in this
+ * turn's transcript means something untrusted has already been ingested and the
+ * model is no longer transcribing only what she said.
+ *
+ * The cost to her is nothing she would notice: before any search she may relax
+ * anything she likes, after a search a patch may still TIGHTEN or establish a
+ * first value (the guard only blocks relaxations), and her next message starts a
+ * clean transcript.
+ */
+function provenanceFor(ctx: AgentContext): Provenance {
+  const tainted = ctx.state.messages.some(
+    (m) => m.content.some((b) => b.type === 'tool_result'),
+  )
+  return tainted ? 'inferred' : 'user'
+}
 
 /**
  * One handler per advertised tool. Every name in `DESK_TOOLS.planning` appears
@@ -323,14 +398,9 @@ async function execute(
     }
     case 'update_requirements': {
       const { patch } = input as { patch: unknown }
-      // 'user', not 'inferred': every update_requirements call in this plan
-      // happens inside a turn she opened with a message, recording what she just
-      // said. Stamping 'inferred' would make it impossible for her to ever relax
-      // a constraint she set herself, which inverts spec section 4's rule
-      // instead of enforcing it. The model has no say in this: the tool schema
-      // carries no `source` field, and provenance is assigned here.
       const { next, rejected } = await applyRequirementsPatch(sql, {
-        conversationId: ctx.conversationId, userId: ctx.userId, patch, source: 'user',
+        conversationId: ctx.conversationId, userId: ctx.userId, patch,
+        source: provenanceFor(ctx),
       })
       // A rejection names the KEYS that caused it, and the notebook is rendered
       // back underneath either way. `applyRequirements` rejects two different

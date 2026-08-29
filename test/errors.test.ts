@@ -6,7 +6,7 @@ import {
 } from '@anthropic-ai/sdk'
 import {
   classifyError, isRefusal, throwIfRefused, RefusalError,
-  type Classification, type ClassifiedReason,
+  type Billed, type Classification, type ClassifiedReason,
 } from '../src/errors.js'
 
 /**
@@ -30,20 +30,28 @@ type Row = {
   cls: abstract new (...args: never[]) => Error
   retryable: boolean
   reason: ClassifiedReason
+  /**
+   * Every row here is built from an HTTP STATUS, i.e. from a real error body —
+   * and an error body carries no `usage`. So the whole table is `billed: 'no'`,
+   * across both the permanent and the transient reasons: "was it billed?" and
+   * "is it worth retrying?" are orthogonal axes, and the tests below that answer
+   * 'unknown' are exactly the ones with no response to read.
+   */
+  billed: Billed
 }
 
 // Every row of the brief's taxonomy table, plus the three statuses the SDK's
 // own retry policy covers that the table does not name (408, 409, 422).
 const ROWS: readonly Row[] = [
-  { status: 400, cls: BadRequestError, retryable: false, reason: 'provider_rejected' },
-  { status: 401, cls: AuthenticationError, retryable: false, reason: 'provider_rejected' },
-  { status: 403, cls: PermissionDeniedError, retryable: false, reason: 'provider_rejected' },
-  { status: 404, cls: NotFoundError, retryable: false, reason: 'provider_rejected' },
-  { status: 409, cls: ConflictError, retryable: true, reason: 'provider_down' },
-  { status: 422, cls: UnprocessableEntityError, retryable: false, reason: 'provider_rejected' },
-  { status: 429, cls: RateLimitError, retryable: true, reason: 'provider_down' },
-  { status: 500, cls: InternalServerError, retryable: true, reason: 'provider_down' },
-  { status: 503, cls: InternalServerError, retryable: true, reason: 'provider_down' },
+  { status: 400, cls: BadRequestError, retryable: false, reason: 'provider_rejected', billed: 'no' },
+  { status: 401, cls: AuthenticationError, retryable: false, reason: 'provider_rejected', billed: 'no' },
+  { status: 403, cls: PermissionDeniedError, retryable: false, reason: 'provider_rejected', billed: 'no' },
+  { status: 404, cls: NotFoundError, retryable: false, reason: 'provider_rejected', billed: 'no' },
+  { status: 409, cls: ConflictError, retryable: true, reason: 'provider_down', billed: 'no' },
+  { status: 422, cls: UnprocessableEntityError, retryable: false, reason: 'provider_rejected', billed: 'no' },
+  { status: 429, cls: RateLimitError, retryable: true, reason: 'provider_down', billed: 'no' },
+  { status: 500, cls: InternalServerError, retryable: true, reason: 'provider_down', billed: 'no' },
+  { status: 503, cls: InternalServerError, retryable: true, reason: 'provider_down', billed: 'no' },
 ]
 
 describe('classifyError — the SDK taxonomy', () => {
@@ -52,7 +60,7 @@ describe('classifyError — the SDK taxonomy', () => {
       const err = fromStatus(row.status)
       expect(err).toBeInstanceOf(row.cls)
       expect(classifyError(err)).toEqual<Classification>({
-        retryable: row.retryable, reason: row.reason,
+        retryable: row.retryable, reason: row.reason, billed: row.billed,
       })
     })
   }
@@ -64,13 +72,13 @@ describe('classifyError — the SDK taxonomy', () => {
     expect(err).toBeInstanceOf(APIError)
     expect(err).not.toBeInstanceOf(RateLimitError)
     expect(classifyError(err)).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
+      retryable: true, reason: 'provider_down', billed: 'no',
     })
   })
 
   it('maps a bare APIError with an unlisted 4xx status (418) to provider_rejected', () => {
     expect(classifyError(fromStatus(418))).toEqual<Classification>({
-      retryable: false, reason: 'provider_rejected',
+      retryable: false, reason: 'provider_rejected', billed: 'no',
     })
   })
 
@@ -78,13 +86,13 @@ describe('classifyError — the SDK taxonomy', () => {
     const err = new APIConnectionError({ message: 'socket hang up' })
     expect(err.status).toBeUndefined()
     expect(classifyError(err)).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
+      retryable: true, reason: 'provider_down', billed: 'unknown',
     })
   })
 
   it('maps a connection TIMEOUT to provider_down as well', () => {
     expect(classifyError(new APIConnectionTimeoutError({}))).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
+      retryable: true, reason: 'provider_down', billed: 'unknown',
     })
   })
 
@@ -92,7 +100,7 @@ describe('classifyError — the SDK taxonomy', () => {
   // provider's side is wrong and retrying the same call would abort again.
   it('does not treat our own abort as a provider problem', () => {
     expect(classifyError(new APIUserAbortError({}))).toEqual<Classification>({
-      retryable: false, reason: 'unclassified',
+      retryable: false, reason: 'unclassified', billed: 'unknown',
     })
   })
 })
@@ -100,7 +108,7 @@ describe('classifyError — the SDK taxonomy', () => {
 describe('classifyError — a refusal', () => {
   it('maps a RefusalError to refused, and never retries it', () => {
     expect(classifyError(new RefusalError('cyber', 'nope'))).toEqual<Classification>({
-      retryable: false, reason: 'refused',
+      retryable: false, reason: 'refused', billed: 'unknown',
     })
   })
 })
@@ -118,13 +126,13 @@ describe('classifyError — the structural fallback', () => {
 
   it('classifies a non-SDK Error carrying a retryable status', () => {
     expect(classifyError(new ForeignHttpError('gateway'))).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
+      retryable: true, reason: 'provider_down', billed: 'no',
     })
   })
 
   it('classifies a non-SDK Error carrying a permanent status', () => {
     expect(classifyError(new ForeignPermanentError('bad'))).toEqual<Classification>({
-      retryable: false, reason: 'provider_rejected',
+      retryable: false, reason: 'provider_rejected', billed: 'no',
     })
   })
 
@@ -132,14 +140,14 @@ describe('classifyError — the structural fallback', () => {
     // A bag of JSON with a `status` field is not evidence of an HTTP failure —
     // matching it would let any thrown payload masquerade as a provider error.
     expect(classifyError({ status: 503 })).toEqual<Classification>({
-      retryable: false, reason: 'unclassified',
+      retryable: false, reason: 'unclassified', billed: 'unknown',
     })
   })
 
   it('ignores a non-numeric status', () => {
     const err = Object.assign(new Error('weird'), { status: 'down' })
     expect(classifyError(err)).toEqual<Classification>({
-      retryable: false, reason: 'unclassified',
+      retryable: false, reason: 'unclassified', billed: 'unknown',
     })
   })
 })
@@ -162,7 +170,7 @@ describe('classifyError — anything we do not recognise', () => {
   for (const [label, value] of cases) {
     it(`classifies ${label} as unclassified and non-retryable`, () => {
       expect(classifyError(value)).toEqual<Classification>({
-        retryable: false, reason: 'unclassified',
+        retryable: false, reason: 'unclassified', billed: 'unknown',
       })
     })
   }

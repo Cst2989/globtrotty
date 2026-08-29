@@ -7,8 +7,10 @@ import { submitMessage } from '../src/handler.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
-import { reconcile, reserve } from '../src/repo/reservation.js'
+import { estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
+import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { APIConnectionError, BadRequestError } from '@anthropic-ai/sdk'
 import type { FlightSearch } from '../src/supplier/types.js'
 
 const usage = {
@@ -354,6 +356,109 @@ describeDb('driver', () => {
       expect(out).toContain('elopement')
       const nb = await loadNotebook(sql, s.conversationId, s.userId)
       expect(nb.nights).toBeNull()
+    })
+  })
+
+  it('will not let a patch made AFTER a supplier result relax what she set', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '19')
+      await applyRequirementsPatch(sql, {
+        conversationId: s.conversationId, userId: s.userId, source: 'user',
+        patch: { maxStops: 0 },
+      })
+      const create = vi.fn().mockResolvedValue(toolResponse('update_requirements',
+        { patch: { maxStops: 3 } }))
+      // A transcript that has already ingested a supplier payload. `loop()`
+      // hydrates a fresh turn from `messages` as role + text only, so a
+      // tool_result block can only mean THIS turn ran a tool — the model is no
+      // longer transcribing her words, it is reacting to a listing. Stamped
+      // 'user', this patch would relax a constraint by a number the MODEL chose
+      // and hand it to the money gate.
+      const tainted = {
+        state: {
+          step: 1, reviewRounds: 0,
+          messages: [
+            { role: 'user' as const,
+              content: [{ type: 'text' as const, text: 'a week in Faro, direct flights only' }] },
+            { role: 'assistant' as const,
+              content: [{ type: 'tool_use' as const, id: 'toolu_0',
+                          name: 'explore_flights', input: {} }] },
+            { role: 'user' as const,
+              content: [{ type: 'tool_result' as const, tool_use_id: 'toolu_0',
+                          content: 'MOCK-flight-1 — cheapest has 2 stops' }] },
+          ],
+        },
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId,
+      }
+      const step = await makeDriver(deps(sql, create))(tainted)
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const out = String(await step.run())
+      expect(out).toContain('maxStops')            // the model is told, and why
+      const nb = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(nb.maxStops!.value).toBe(0)           // unchanged in the DATABASE
+      expect(nb.maxStops!.source).toBe('user')     // and still HERS
+    })
+  })
+
+  it('still records her own words as hers on an untainted transcript', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '20')
+      await applyRequirementsPatch(sql, {
+        conversationId: s.conversationId, userId: s.userId, source: 'user',
+        patch: { maxStops: 0 },
+      })
+      const create = vi.fn().mockResolvedValue(toolResponse('update_requirements',
+        { patch: { maxStops: 2 } }))
+      // The other side of the boundary. Step 0 of every turn is provably her
+      // words alone, so she can relax anything she likes — a guard that blocked
+      // this too would mean she could never change her mind, which is not a
+      // defence, it is a bug.
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      await step.run()
+      const nb = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(nb.maxStops!.value).toBe(2)
+      expect(nb.maxStops!.source).toBe('user')
+    })
+  })
+
+  it('refunds the whole reservation when the provider answered with an ERROR body', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '21')
+      const create = vi.fn().mockRejectedValue(
+        new BadRequestError(400, { type: 'error' }, 'bad request', new Headers()))
+      // An error response carries no `usage`, so nothing was billed. This holds
+      // for 429s and 5xx too — the whole point of classifying on "did a response
+      // body reach us?" rather than on retryability, since an outage produces
+      // exactly the retryable ones and stranding THOSE reservations is what
+      // takes the global ceiling down at zero real spend.
+      await expect(makeDriver(deps(sql, create))(ctx(s))).rejects.toThrow()
+      const [conv] = await sql`
+        select spend_usd_micros from conversations where id = ${s.conversationId}`
+      expect(BigInt(conv!.spend_usd_micros as string)).toBe(0n)
+      const [daily] = await sql`
+        select cost_micros from daily_usage where user_id = ${s.userId}`
+      expect(BigInt(daily!.cost_micros as string)).toBe(0n)
+    })
+  })
+
+  it('KEEPS the reservation when no response reached us at all', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '22')
+      const create = vi.fn().mockRejectedValue(new APIConnectionError({ message: 'socket hang up' }))
+      // Fail closed: the provider may have generated and billed a response we
+      // never saw, so the debit stands. The floor below is the output half of
+      // the reservation alone (max_tokens at the seat's output rate), which no
+      // prompt-size difference can move.
+      await expect(makeDriver(deps(sql, create))(ctx(s))).rejects.toThrow()
+      const floor = estimateMicros(SEATS.driver, 0)
+      expect(floor).toBe(400_000n)                 // 16,000 max_tokens * 25 micros
+      const [conv] = await sql`
+        select spend_usd_micros from conversations where id = ${s.conversationId}`
+      expect(BigInt(conv!.spend_usd_micros as string)).toBeGreaterThanOrEqual(floor)
+      const [daily] = await sql`
+        select cost_micros from daily_usage where user_id = ${s.userId}`
+      expect(BigInt(daily!.cost_micros as string)).toBeGreaterThanOrEqual(floor)
     })
   })
 

@@ -110,7 +110,14 @@ export async function applyRequirementsPatch(
  */
 export function renderNotebook(nb: Notebook): string {
   const lines: string[] = []
+  // Only keys the CURRENT Notebook shape declares. `fromStored` spreads whatever
+  // the jsonb column holds, and that column has been writable since migration
+  // 0001 — a key written by an older version of this code, or by anything else
+  // that ever touches the row, must not be printed into the model's context as
+  // though the office recorded it.
+  const shape = emptyNotebook()
   for (const [key, field] of Object.entries(nb)) {
+    if (!(key in shape)) continue
     if (field === null) continue
     const f = field as { value: unknown; source: Provenance }
     const shown = key === 'budget'

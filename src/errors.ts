@@ -77,11 +77,71 @@ export type ClassifiedReason = 'provider_down' | 'provider_rejected' | 'refused'
  * requeue a failed turn. The taxonomy exists so that decision CAN be made; it
  * does not make it.
  */
-export type Classification = { retryable: boolean; reason: ClassifiedReason }
+/**
+ * WHAT `billed` MEANS, and why it is not `retryable` by another name.
+ *
+ * A caller that debited a reservation before dispatch (spec section 8:
+ * `reserve` in src/repo/reservation.ts, called by the driver) has to decide, on
+ * an exception, whether to refund it. The question that decides that is **"did a
+ * response body reach us?"** — not "is this worth retrying":
+ *
+ *  - `'no'`      the provider answered, and the answer was an ERROR body. An
+ *                error response carries no `usage`, so nothing was billed and the
+ *                whole reservation must be refunded. This covers 400/401/403/404
+ *                AND 429/5xx alike — the retry axis is orthogonal.
+ *  - `'unknown'` no response reached us (a connection failure, a timeout, our own
+ *                abort), or we do not recognise the error at all. The provider may
+ *                have generated and billed a response we never saw, so the debit
+ *                STAYS. Fail closed, exactly as `readSpendFailClosed` does: when
+ *                we cannot confirm, we take the conservative side.
+ *
+ * There is deliberately no `'yes'`. A call that was definitely billed and
+ * definitely succeeded does not throw, and is reconciled against real `usage`
+ * rather than classified here.
+ *
+ * ## Why the split by retryability would have been WRONG
+ *
+ * The obvious cut — "refund the permanent ones, keep the transient ones" — gets
+ * the common case backwards. A provider outage produces 429s and 5xx, which are
+ * transient, and those are precisely the errors that DID return a body and bill
+ * nothing. Keeping their reservations strands ~400,000 micros per attempt in
+ * `daily_usage`, which `readSpendFailClosed` sums across ALL users for the global
+ * ceiling — so roughly 123 stranded reservations take the product down for the
+ * rest of the UTC day at zero real spend. A ten-minute provider blip would become
+ * a self-inflicted day-long outage with no operator lever short of a manual
+ * `daily_usage` write.
+ *
+ * Defined here rather than at the call site for the same reason the rest of this
+ * taxonomy is: "was it billed?" is a property of the error, and a caller
+ * re-deriving it from `reason` would be a second description of the same thing.
+ */
+export type Billed = 'no' | 'unknown'
 
-const TRANSIENT: Classification = { retryable: true, reason: 'provider_down' }
-const PERMANENT: Classification = { retryable: false, reason: 'provider_rejected' }
-const REFUSED: Classification = { retryable: false, reason: 'refused' }
+export type Classification = { retryable: boolean; reason: ClassifiedReason; billed: Billed }
+
+/**
+ * Transient AND status-carrying: a 429 or a 5xx is an error BODY, so nothing was
+ * billed. Every status-derived classification is `billed: 'no'` — see
+ * `TRANSIENT_NO_RESPONSE` for the transient case that is not.
+ */
+const TRANSIENT: Classification = { retryable: true, reason: 'provider_down', billed: 'no' }
+/**
+ * The other transient: `APIConnectionError` and its timeout subclass carry no
+ * status because no response arrived. The provider may have generated and billed
+ * one we never saw, so the reservation stays debited.
+ */
+const TRANSIENT_NO_RESPONSE: Classification =
+  { retryable: true, reason: 'provider_down', billed: 'unknown' }
+const PERMANENT: Classification =
+  { retryable: false, reason: 'provider_rejected', billed: 'no' }
+/**
+ * A refusal is an HTTP 200 that consumed tokens, so it is emphatically not
+ * `billed: 'no'`. (The driver never reaches this branch — `callModel` returns a
+ * `kind: 'refused'` result rather than throwing, and spec section 8's "does not
+ * consume quota" is a product decision applied there, not a claim about what the
+ * provider charged.)
+ */
+const REFUSED: Classification = { retryable: false, reason: 'refused', billed: 'unknown' }
 /**
  * FAIL CLOSED. An error we cannot name is NOT retryable.
  *
@@ -98,7 +158,7 @@ const REFUSED: Classification = { retryable: false, reason: 'refused' }
  * `readSpendFailClosed`: when we cannot confirm, we take the conservative side
  * rather than the optimistic one.
  */
-const UNKNOWN: Classification = { retryable: false, reason: 'unclassified' }
+const UNKNOWN: Classification = { retryable: false, reason: 'unclassified', billed: 'unknown' }
 
 /**
  * Statuses worth retrying, matching the SDK's own retry policy (408 request
@@ -207,7 +267,9 @@ export function classifyError(err: unknown): Classification {
   // abort: nothing is wrong upstream and the same call would abort again, so it is
   // not a provider failure and must not be recorded as one.
   if (err instanceof APIUserAbortError) return UNKNOWN
-  if (err instanceof APIConnectionError) return TRANSIENT
+  // TRANSIENT_NO_RESPONSE, not TRANSIENT: no response arrived, so we cannot say
+  // the call was unbilled and the caller must keep its reservation debited.
+  if (err instanceof APIConnectionError) return TRANSIENT_NO_RESPONSE
 
   // Everything else the SDK raises with a status: 5xx, 409, 422, 408, and any
   // status the SDK does not (yet) mint a subclass for.
