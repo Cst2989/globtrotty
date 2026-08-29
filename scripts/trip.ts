@@ -9,6 +9,7 @@ import { HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
+import { pgSink } from '../src/repo/model-calls.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 
@@ -41,6 +42,14 @@ try {
       text,
       liveClient(),
       mockRunner(new MockSupplier()),
+      {
+        // Wire the same sink the background function uses (lesson 2.5), so the
+        // bill this script prints below and the rows a reader queries in
+        // course.model_calls afterward agree. loadEnv already refused to start
+        // this script without DATABASE_URL, so `sql` is always connected here;
+        // there is no in-process run that skips recording.
+        record: pgSink(sql, { userId: USER, conversationId, turnId }),
+      },
     )
     console.log(result.text)
     console.log(`outcome ${result.outcome}, ${result.steps} steps, ${dollars(result.costMicros)}`)
