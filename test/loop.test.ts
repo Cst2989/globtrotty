@@ -38,4 +38,8 @@ describe('toolLoop', () => {
     expect(result.outcome).toBe('done')
     expect(result.text).toBe('Here is a plan.')
   })
+  it('lets a plain Error thrown by the client propagate, because a crash in our own code is not a provider failure', async () => {
+    const client = fakeClient([() => { throw new Error('process killed') }])
+    await expect(toolLoop({ ...base, client })).rejects.toThrow('process killed')
+  })
 })

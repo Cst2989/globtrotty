@@ -1,3 +1,4 @@
+import { APIConnectionError, APIError } from '@anthropic-ai/sdk/core/error'
 import type { ContentBlockParam, MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages'
 import { textOf, type ModelClient } from './client.js'
 import { classifyError, isRefusal, type ClassifiedReason } from './errors.js'
@@ -69,6 +70,13 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
         withSeat(options.seat, { max_tokens: 8000, system: options.system, messages, tools: options.tools }),
       )
     } catch (err) {
+      // classifyError's `unclassified` bucket is meant for a provider error we
+      // do not yet have a rule for, not for a crash in our own code: a plain
+      // Error thrown by our client (the process died, a bug threw) is not a
+      // provider failure and must not be swallowed into an outcome. Only an
+      // error the SDK itself raises (APIError, which APIConnectionError also
+      // extends) belongs to this catch; anything else propagates.
+      if (!(err instanceof APIError) && !(err instanceof APIConnectionError)) throw err
       return finish(classifyError(err).reason, '')
     }
     usage = addUsage(usage, usageOf(message))

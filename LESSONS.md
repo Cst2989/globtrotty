@@ -10,3 +10,4 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-1-4 | The first tool | npm test (test/provenance-v0.test.ts) |
 | lesson-1-5 | Bounding the loop | npm test (test/loop.test.ts) |
 | lesson-1-6 | Two desks | npm test (test/desks.test.ts) |
+| lesson-1-7 | The notebook | npm test (test/notebook.test.ts, test/conversation.test.ts, test/crash.test.ts) |
