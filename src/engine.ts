@@ -13,9 +13,21 @@ export type Limits = {
   maxSteps: number
 }
 
+/**
+ * Current spend, as read by `readSpendFailClosed`, against each of the three
+ * ceilings in `Limits`. Named and exported rather than left inline inside
+ * `DecideInput` so `src/repo/spend.ts` can declare it as its return type: one
+ * definition means the reader and the decider cannot drift apart silently.
+ */
+export type Spend = {
+  conversationMicros: bigint
+  dailyMicros: bigint
+  globalMicros: bigint
+}
+
 export type DecideInput = {
   state: TurnState
-  spend: { conversationMicros: bigint; dailyMicros: bigint }
+  spend: Spend
   limits: Limits
   nowMs: number
   deadlineMs: number
@@ -33,6 +45,18 @@ export function decideNext(input: DecideInput): Decision {
   const { state, spend, limits, nowMs, deadlineMs, estStepMs } = input
 
   // Money first: a ceiling beats every other consideration.
+  //
+  // Global comes first of the three because it is the only ceiling protecting the
+  // ACCOUNT rather than one user — a runaway that has exhausted the account is not
+  // a per-conversation problem, and it is the one cap that can fire while both
+  // per-user counters read zero. Note honestly that all three return the identical
+  // decision, so this ordering is not observable from outside and no test can pin
+  // it (the brief's `detail` discriminator, which would have made it observable,
+  // contradicted its own assertions and is deliberately not added). What IS pinned
+  // by test is that all three beat the step cap and the deadline below.
+  if (spend.globalMicros >= limits.globalCeilingMicros) {
+    return { kind: 'stop', reason: 'limit_reached' }
+  }
   if (spend.conversationMicros >= limits.conversationCeilingMicros) {
     return { kind: 'stop', reason: 'limit_reached' }
   }

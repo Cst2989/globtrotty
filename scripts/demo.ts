@@ -223,7 +223,8 @@ async function main() {
 
   const conv = await convRow(convId)
   const [day] = await sql`
-    select cost_micros from daily_usage where user_id = ${DEMO_USER} and day = current_date`
+    select cost_micros from daily_usage
+     where user_id = ${DEMO_USER} and day = (now() at time zone 'utc')::date`
   const usd = (micros: string) => `$${(Number(micros) / 1_000_000).toFixed(6)}`
   ok(`conversation spend: ${usd(conv.spend_usd_micros)}  (ceiling ${usd(DEFAULT_LIMITS.conversationCeilingMicros.toString())})`)
   ok(`today's spend:      ${usd((day as { cost_micros: string }).cost_micros)}  (ceiling ${usd(DEFAULT_LIMITS.dailyCeilingMicros.toString())})`)

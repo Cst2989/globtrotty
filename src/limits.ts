@@ -11,6 +11,6 @@ import type { Limits } from './engine.js'
 export const DEFAULT_LIMITS: Limits = {
   conversationCeilingMicros: 8_000_000n,   // $8
   dailyCeilingMicros: 15_000_000n,         // $15
-  globalCeilingMicros: 50_000_000n,        // $50 (defined but not yet enforced — see engine.ts)
+  globalCeilingMicros: 50_000_000n,        // $50, across ALL users in one UTC day
   maxSteps: 24,
 }
