@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { decideNext, exceedsAnyCeiling, type DecideInput, type TurnState } from '../src/engine.js'
+import {
+  decideNext, exceedsAnyCeiling, firstCeilingReached, type DecideInput, type TurnState,
+} from '../src/engine.js'
 
 const LIMITS = {
   conversationCeilingMicros: 8_000_000n,   // $8
@@ -183,6 +185,62 @@ describe('exceedsAnyCeiling', () => {
     expect(exceedsAnyCeiling(spend({ conversationMicros: 20_000_000n }), LIMITS)).toBe(true)
     expect(exceedsAnyCeiling(spend({ dailyMicros: 9_000_000n }), LIMITS)).toBe(false)
     expect(exceedsAnyCeiling(spend({ globalMicros: 20_000_000n }), LIMITS)).toBe(false)
+  })
+})
+
+/**
+ * `firstCeilingReached` is `exceedsAnyCeiling`'s own predicate, plus WHICH
+ * ceiling fired — the third consumer named in its doc comment is
+ * `src/agents/driver.ts`, which needs the discriminator to word her message.
+ */
+describe('firstCeilingReached', () => {
+  it('is null with all three counters at zero', () => {
+    expect(firstCeilingReached({ conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }, LIMITS))
+      .toBeNull()
+  })
+
+  it('names each ceiling by its OWN field, not a neighbour', () => {
+    expect(firstCeilingReached({ conversationMicros: 8_000_000n }, LIMITS)).toBe('conversation')
+    expect(firstCeilingReached({ dailyMicros: 15_000_000n }, LIMITS)).toBe('daily')
+    expect(firstCeilingReached({ globalMicros: 50_000_000n }, LIMITS)).toBe('global')
+  })
+
+  it('prefers global, then conversation, then daily, when more than one fires', () => {
+    expect(firstCeilingReached(
+      { conversationMicros: 8_000_000n, dailyMicros: 15_000_000n, globalMicros: 50_000_000n },
+      LIMITS,
+    )).toBe('global')
+    expect(firstCeilingReached(
+      { conversationMicros: 8_000_000n, dailyMicros: 15_000_000n }, LIMITS,
+    )).toBe('conversation')
+  })
+
+  /**
+   * This is the shape `src/agents/driver.ts` actually calls with: `reserve()`
+   * never reads the global counter, so the driver's `Partial<Spend>` omits
+   * `globalMicros` entirely. A FIELD THAT IS ABSENT must be skipped, never
+   * treated as zero-and-therefore-under-the-ceiling by accident, and never
+   * treated as `undefined >= limit` (which is `false` in JS by coincidence,
+   * not by a check that means anything) — pinned here so a future refactor
+   * that reads `spend.globalMicros ?? 0n` cannot silently start comparing an
+   * omitted field again.
+   */
+  it('skips an omitted field rather than defaulting it to zero', () => {
+    expect(firstCeilingReached({ conversationMicros: 8_000_000n, dailyMicros: 0n }, LIMITS))
+      .toBe('conversation')
+    expect(firstCeilingReached({ conversationMicros: 0n, dailyMicros: 15_000_000n }, LIMITS))
+      .toBe('daily')
+    expect(firstCeilingReached({ conversationMicros: 0n, dailyMicros: 0n }, LIMITS)).toBeNull()
+  })
+
+  it('is exclusive-below and inclusive-at every ceiling', () => {
+    expect(firstCeilingReached({ conversationMicros: 7_999_999n }, LIMITS)).toBeNull()
+    expect(firstCeilingReached({ conversationMicros: 8_000_001n }, LIMITS)).toBe('conversation')
+  })
+
+  it('agrees with exceedsAnyCeiling: null iff exceedsAnyCeiling is false', () => {
+    const s = { conversationMicros: 20_000_000n, dailyMicros: 9_000_000n, globalMicros: 0n }
+    expect(firstCeilingReached(s, LIMITS) !== null).toBe(exceedsAnyCeiling(s, LIMITS))
   })
 })
 

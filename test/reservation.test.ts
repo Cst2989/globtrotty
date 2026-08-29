@@ -4,14 +4,45 @@ import { describe, expect, it } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { estimateMicros, reserve, reconcile } from '../src/repo/reservation.js'
 import { SEATS } from '../src/model/seats.js'
-import { PRICES } from '../src/pricing.js'
+import { PRICES, costMicros } from '../src/pricing.js'
 
 describe('estimateMicros', () => {
-  it('prices input at list and assumes max_tokens of output — an upper bound', () => {
-    // driver: opus-5 at 5 micros/input-token, 25/output-token, maxTokens 16000.
-    // 1000 input => 5000, plus 16000 * 25 = 400000 => 405000.
-    expect(estimateMicros(SEATS.driver, 1000)).toBe(405_000n)
-  })
+  it(
+    'prices input at the 1h cache-WRITE rate, not list — every driver call writes '
+    + 'system+tools at that TTL, so that is the worst case, not list price',
+    () => {
+      // driver: opus-5 at 5 micros/input-token * 2 (cacheWrite1hMult) = 10/token,
+      // 25/output-token, maxTokens 16000.
+      // 1000 input => 10000, plus 16000 * 25 = 400000 => 410000.
+      expect(estimateMicros(SEATS.driver, 1000)).toBe(410_000n)
+    },
+  )
+
+  it(
+    'bounds a cold-cache call: a usage fixture that is entirely '
+    + 'cache_creation_input_tokens at 1h must not exceed the reservation for the '
+    + 'same token count — this is the exact gap IMPORTANT finding 1 named',
+    () => {
+      const seat = SEATS.driver
+      const inputTokens = 1000
+      const reserved = estimateMicros(seat, inputTokens)
+      // Every input token arrives as a cache WRITE (cold cache), and the model
+      // uses its full max_tokens of output — the worst realistic case the
+      // reservation is supposed to bound.
+      const usage = {
+        input_tokens: 0, cache_creation_input_tokens: inputTokens,
+        cache_read_input_tokens: 0, output_tokens: seat.maxTokens,
+      }
+      const actual = costMicros(seat.model, usage, '1h')
+      // Before this fix, estimateMicros priced the input term at plain list
+      // (no multiplier), so `actual` exceeded `reserved` by exactly
+      // `inputTokens * inMicrosPerToken * (cacheWrite1hMult - 1)` — reverting
+      // the multiplier in src/repo/reservation.ts makes this assertion fail
+      // again, which is the point: it is the same gap by construction.
+      expect(actual).toBeLessThanOrEqual(reserved)
+      expect(actual).toBe(reserved)   // exact here: this usage IS the assumed worst case
+    },
+  )
 
   it('rounds UP a fractional estimate — and BigInt() would throw, not truncate, if it didn\'t', () => {
     // PRICES is exported mutable and Seat is a plain object, so a fractional

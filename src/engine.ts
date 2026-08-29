@@ -84,32 +84,63 @@ export type Decision =
   | { kind: 'continue_later' }
 
 /**
- * "Is any of the three ceilings reached?" — the money predicate, in ONE place.
+ * Which ceiling is reached, in ONE place — the money predicate, checked in the
+ * order the account-level cap must win: global (the only ceiling protecting the
+ * ACCOUNT rather than one user — the one cap that can fire while both per-user
+ * counters read zero), then conversation, then daily.
  *
- * Two tiers ask this question: `decideNext` below, before each model call, and
- * `submitMessage` (src/handler.ts), before a turn is queued at all. They were
- * two independent copies of the same three `>=` comparisons, which is exactly
- * what `DEFAULT_LIMITS`' own doc comment argues against for the constants — and
- * for the same reason: two consumers disagreeing about a money limit means one
- * of them silently is not enforcing what the other thinks it is. Duplicating
- * the comparisons re-opens that hole one level up from the numbers, where a
- * typo'd field pair (`dailyMicros >= globalCeilingMicros`) type-checks fine.
+ * `Partial<Spend>` rather than `Spend`: `src/agents/driver.ts` calls this with
+ * only `conversationMicros`/`dailyMicros` — `reserve()` (src/repo/reservation.ts)
+ * never reads the global counter, and `decideNext` already checked all three
+ * from `readSpendFailClosed` before the driver runs. A field the caller did not
+ * supply is skipped, never treated as zero.
+ *
+ * Three tiers used to ask "is any ceiling reached" as three independent copies
+ * of the same `>=` comparisons: `decideNext` below, `submitMessage`
+ * (src/handler.ts) before a turn is even queued, and the driver, which also
+ * needs to know WHICH one fired to pick the right message for her. Three
+ * copies is exactly what `DEFAULT_LIMITS`' own doc comment argues against for
+ * the constants, and for the same reason: consumers disagreeing about a money
+ * limit means one of them silently is not enforcing what the others think it
+ * is. Duplicating the comparisons re-opens that hole one level up from the
+ * numbers, where a typo'd field pair (`dailyMicros >= globalCeilingMicros`)
+ * type-checks fine — which is exactly the shape the driver's own hand-copied
+ * pair used to be, before it was routed through this function too.
  *
  * `>=`, not `>`: the ceiling is reached AT the limit, not one micro past it.
- * Both tiers' tests pin both sides of that boundary.
+ * Every consumer's tests pin both sides of that boundary.
+ */
+export function firstCeilingReached(
+  spend: Partial<Spend>, limits: Limits,
+): 'global' | 'conversation' | 'daily' | null {
+  if (spend.globalMicros !== undefined && spend.globalMicros >= limits.globalCeilingMicros) {
+    return 'global'
+  }
+  if (
+    spend.conversationMicros !== undefined
+    && spend.conversationMicros >= limits.conversationCeilingMicros
+  ) {
+    return 'conversation'
+  }
+  if (spend.dailyMicros !== undefined && spend.dailyMicros >= limits.dailyCeilingMicros) {
+    return 'daily'
+  }
+  return null
+}
+
+/**
+ * "Is any of the three ceilings reached?" — `decideNext` below and
+ * `submitMessage` (src/handler.ts) only need the boolean, not which one fired,
+ * so this stays their entry point rather than making both compare
+ * `firstCeilingReached(...) !== null` themselves.
  *
- * Which of the three fired is deliberately not returned. All three produce the
- * identical outcome at both call sites, so a discriminator would be a value
- * nothing reads and no test could pin.
+ * Which of the three fired is deliberately not returned from HERE. All three
+ * produce the identical outcome at both call sites, so a discriminator would
+ * be a value nothing at either site reads and no test could pin — unlike the
+ * driver, which does read it (see `firstCeilingReached` above).
  */
 export function exceedsAnyCeiling(spend: Spend, limits: Limits): boolean {
-  // Global first because it is the only ceiling protecting the ACCOUNT rather
-  // than one user — the one cap that can fire while both per-user counters read
-  // zero. With a boolean result the order is not observable; it is kept because
-  // it is the order that reads correctly.
-  return spend.globalMicros >= limits.globalCeilingMicros
-      || spend.conversationMicros >= limits.conversationCeilingMicros
-      || spend.dailyMicros >= limits.dailyCeilingMicros
+  return firstCeilingReached(spend, limits) !== null
 }
 
 export function decideNext(input: DecideInput): Decision {

@@ -286,6 +286,33 @@ describe('callModel', () => {
     await expect(callModel(transport, base, () => 0)).rejects.toThrow(/stop_reason/)
   })
 
+  it('throws rather than defaulting a missing usage to zero — a real call must not record as free', async () => {
+    // IMPORTANT 4: `usage` is the one field on this response that is money.
+    // `raw.usage ?? ZERO_USAGE` used to default a missing usage to all-zero
+    // rather than throwing, the way the stop_reason guard above already did —
+    // and a zero-usage 'ok' result prices at 0n, so `reconcile` would refund
+    // the WHOLE reservation and a real, billed call would be recorded as free.
+    const transport = transportOf(() => ({
+      content: [{ type: 'text', text: 'x' }], stop_reason: 'end_turn', model: 'claude-opus-5',
+      // usage omitted entirely
+    }))
+    await expect(callModel(transport, base, () => 0)).rejects.toThrow(/usage/)
+  })
+
+  it('still classifies a genuine refusal correctly when usage IS present', async () => {
+    // Guards against the usage check being placed so early it starts
+    // rejecting real refusals: the SDK always returns `usage` on a refusal,
+    // so this must reach the 'refused' branch, not throw.
+    const transport = transportOf(() => ({
+      content: [], stop_reason: 'refusal',
+      stop_details: { category: 'cyber', explanation: null },
+      model: 'claude-opus-5', usage,
+    }))
+    const r = await callModel(transport, base, () => 0)
+    expect(r.kind).toBe('refused')
+    expect(r.usage).toEqual(usage)
+  })
+
   it('passes the AbortSignal through to the transport, so an abort actually aborts', async () => {
     // Review round 1, IMPORTANT 6: `signal` was accepted on CallArgs and never
     // reached the transport, so an aborted turn kept burning tokens and

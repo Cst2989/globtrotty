@@ -73,11 +73,6 @@ export type Transport = {
   countTokens?: (req: unknown) => Promise<{ input_tokens: number }>
 }
 
-const ZERO_USAGE: ModelUsage = {
-  input_tokens: 0, cache_creation_input_tokens: 0,
-  cache_read_input_tokens: 0, output_tokens: 0,
-}
-
 /**
  * Appends volatile context (the suffix) after the last block of the transcript,
  * without ever leaving the request ending on an assistant turn.
@@ -205,7 +200,6 @@ export async function callModel(
   const started = now()
   const raw = (await transport.create(buildRequest(args), { signal: args.signal })) as RawResponse
   const latencyMs = Math.max(0, now() - started)
-  const usage = raw.usage ?? ZERO_USAGE
   const model = raw.model ?? args.seat.model
   const requestId = raw._request_id ?? null
 
@@ -225,6 +219,26 @@ export async function callModel(
         'this field, so its absence means the response shape was not what we expected.',
     )
   }
+
+  // Mirrors the `stop_reason` guard immediately above, and is placed AFTER it
+  // deliberately: `usage` is the one field on this response that is MONEY, and
+  // `raw.usage ?? ZERO_USAGE` used to default it to zero. A malformed or
+  // wrapped response with no `usage` would then price at `0n`, `reconcile`
+  // (src/repo/reservation.ts) would refund the WHOLE reservation, and a real,
+  // billed call would record as free — silently, with nothing red anywhere.
+  // Ordered after `stop_reason` rather than before it so a response missing
+  // BOTH fields is reported by the more specific, already-established error
+  // first; ordered before the `isRefusal` branch below so a genuine refusal
+  // (which the SDK always returns `usage` for) is still classified correctly —
+  // this guard only ever fires on a response shape neither branch expected.
+  if (raw.usage == null) {
+    throw new Error(
+      `callModel: response has no usage (${JSON.stringify(raw.usage)}). Refusing to ` +
+        'default it to zero — usage is the field this whole ledger is priced from, ' +
+        'and a missing one would record a real, billed call as free.',
+    )
+  }
+  const usage = raw.usage
 
   // Checked BEFORE content is touched. This ordering is the whole contract, and
   // it is delegated to src/errors.ts's `isRefusal` rather than re-implemented

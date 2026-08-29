@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
-import type { Limits, LoopMessage } from '../engine.js'
+import { firstCeilingReached, type Limits, type LoopMessage } from '../engine.js'
 import { classifyError } from '../errors.js'
 import { SEATS } from '../model/seats.js'
 import {
@@ -97,13 +97,15 @@ export function makeDriver(deps: DriverDeps): Agent {
 
     // The ceiling reads the values `reserve` RETURNED. Reading either counter
     // before the turn began is the v1 staleness defect spec section 8 names: a
-    // runaway 12-step turn passed the same stale check a dozen times. Both
-    // counters `reserve` reports are checked, because it reports both and a
-    // ceiling nobody compares against is not a ceiling. The GLOBAL ceiling is
-    // not checked here: `reserve` does not read it, and `decideNext` already
-    // checks all three from `readSpendFailClosed` before this agent is called.
-    const conversationCapped = conversationMicros >= limits.conversationCeilingMicros
-    if (conversationCapped || dailyMicros >= limits.dailyCeilingMicros) {
+    // runaway 12-step turn passed the same stale check a dozen times. Routed
+    // through `firstCeilingReached` (src/engine.ts) rather than hand-copying
+    // its `>=` comparisons a third time \u2014 the third consumer that function's
+    // own doc comment now names. `globalMicros` is deliberately absent from
+    // this `Partial<Spend>`: `reserve` does not read it, and `decideNext`
+    // already checks all three from `readSpendFailClosed` before this agent is
+    // called, so it can only ever come back 'conversation', 'daily', or null.
+    const reached = firstCeilingReached({ conversationMicros, dailyMicros }, limits)
+    if (reached !== null) {
       await refund()
       return {
         kind: 'fail',
@@ -111,7 +113,7 @@ export function makeDriver(deps: DriverDeps): Agent {
         // Which ceiling fired changes what she can DO about it, so the two are
         // not collapsed into one sentence: a capped conversation is fixed by
         // starting another one, and a capped day is not.
-        message: conversationCapped
+        message: reached === 'conversation'
           ? 'This conversation has reached its spending limit, so I have stopped here '
             + 'rather than run up more. Start a new conversation and I will pick up '
             + 'from what we agreed.'

@@ -10,9 +10,31 @@ import type { Seat } from '../model/seats.js'
  * passed the same stale check a dozen times. We debit the bound first and
  * reconcile after.
  *
- * The bound assumes the worst realistic case: every input token billed at list
- * (no cache discount) and a full `max_tokens` of output. Real calls almost
- * always cost less, so `reconcile` usually refunds.
+ * The bound assumes the worst realistic case: every input token billed at the
+ * most expensive rate the request could possibly be billed at, plus a full
+ * `max_tokens` of output. "Most expensive rate" is NOT list price — every
+ * driver call writes `system` + `tools` at a 1h cache TTL (`SYSTEM_CACHE_TTL`,
+ * src/model/cache.ts), and `pricing.ts`'s own table prices a 1h cache WRITE at
+ * `cacheWrite1hMult` (2x) list, because the provider bills the write itself in
+ * addition to the tokens it stores. A cold cache — the first call of a
+ * conversation, or any call resumed past the 1h window — reports those tokens
+ * back as `cache_creation_input_tokens`, not `input_tokens`, at that 2x rate.
+ * An earlier version of this function priced the input term at plain list
+ * (`p.inMicrosPerToken`, no multiplier) and called that "no cache discount" —
+ * true of a cache READ (which is a 0.1x DISCOUNT), false of a cache WRITE
+ * (which is a PREMIUM), so on a cold cache `actual` could exceed `reserved` by
+ * `inputTokens * p.inMicrosPerToken * (cacheWrite1hMult - 1)` micros — real
+ * money the pre-dispatch ceiling check never saw. `Math.max(p.cacheWrite1hMult,
+ * 1)` closes that: it is the highest multiplier any input token can be billed
+ * at (2x list beats every other rate in the table — 1.25x 5m-write, 0.1x
+ * read, 1x plain), so bounding every input token at it is still a real upper
+ * bound, just a tighter one than "list price" ever was. `reconcile` charges
+ * the true `actual` regardless, so the ledger was never wrong — only the
+ * pre-dispatch guardrail was, and the guardrail is the thing this bound exists
+ * to be.
+ *
+ * Real calls almost always cost less than this bound, so `reconcile` usually
+ * refunds.
  *
  * Rounded UP with `Math.ceil` before the `BigInt` conversion for two reasons,
  * not one: a guardrail must never undercount, AND `BigInt()` does not truncate
@@ -24,7 +46,11 @@ import type { Seat } from '../model/seats.js'
 export function estimateMicros(seat: Seat, inputTokens: number): bigint {
   const p = PRICES[seat.model]
   if (!p) throw new Error(`No price for model "${seat.model}". Refusing to reserve zero.`)
-  const micros = inputTokens * p.inMicrosPerToken + seat.maxTokens * p.outMicrosPerToken
+  // Math.max(..., 1): a future price whose cache-write multiplier somehow
+  // drops below 1x list must not LOWER the bound below plain list price either.
+  const worstCaseInputMult = Math.max(p.cacheWrite1hMult, 1)
+  const micros =
+    inputTokens * p.inMicrosPerToken * worstCaseInputMult + seat.maxTokens * p.outMicrosPerToken
   return BigInt(Math.ceil(micros))   // round UP: a bound must never undercount
 }
 
