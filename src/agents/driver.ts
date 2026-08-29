@@ -178,6 +178,24 @@ export function makeDriver(deps: DriverDeps): Agent {
 
     // ---- 4. A tool: allowlist and zod, before any durable write -------------
     const check = validateToolCall(DESK, toolUse.name, toolUse.input)
+
+    /**
+     * The assistant turn as it goes back into the transcript: everything the
+     * model said, MINUS any sibling `tool_use` block.
+     *
+     * Parallel tool use is on by default and `buildRequest` sends no
+     * `tool_choice`, so one response can legitimately carry two `tool_use`
+     * blocks. An `AgentStep` answers exactly one of them, and `loop()` appends
+     * this content followed by a single `tool_result` — so echoing both would
+     * put an unanswered `tool_use` into the next request, which is a 400 and a
+     * dead turn, not a degraded answer. Dropping the sibling costs the model
+     * one round trip to re-ask for it; keeping it costs the whole turn.
+     *
+     * Thinking blocks are untouched: extended thinking must be echoed back
+     * byte-for-byte or it is rejected.
+     */
+    const assistantContent = result.content.filter((b) => b.type !== 'tool_use' || b === toolUse)
+
     const asToolStep = (run: () => Promise<unknown>): AgentStep => ({
       kind: 'tool',
       // The PROVIDER's id. plan 1's tool_calls primary key is (turn_id, call_id),
@@ -188,7 +206,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       run,
       costMicros: 0n,
       recordedMicros: actual,
-      assistantContent: result.content,
+      assistantContent,
     })
 
     if (!check.ok) {

@@ -238,6 +238,47 @@ describeDb('driver', () => {
     })
   })
 
+  it('answers ONE tool call and does not echo an unanswered sibling tool_use', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '17')
+      const create = vi.fn().mockResolvedValue({
+        content: [
+          { type: 'thinking', thinking: 'deciding', signature: 'sig' },
+          { type: 'tool_use', id: 'toolu_1', name: 'ask_user', input: { questions: ['Which week?'] } },
+          { type: 'tool_use', id: 'toolu_2', name: 'explore_hotels',
+            input: { query: 'Faro', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2 } },
+        ],
+        stop_reason: 'tool_use', model: 'claude-opus-5', _request_id: 'req_3', usage,
+      })
+      const create2 = vi.fn().mockResolvedValue({
+        content: [
+          { type: 'tool_use', id: 'toolu_1', name: 'explore_flights',
+            input: { from: 'BER', to: 'FAO', departureDate: '2026-09-12', adults: 2 } },
+          { type: 'tool_use', id: 'toolu_2', name: 'explore_hotels',
+            input: { query: 'Faro', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2 } },
+        ],
+        stop_reason: 'tool_use', model: 'claude-opus-5', _request_id: 'req_4', usage,
+      })
+      // Parallel tool use is on by default and `buildRequest` sends no
+      // `tool_choice`, so two tool_use blocks in one response are legal. An
+      // AgentStep answers exactly one of them, and `loop()` appends
+      // assistantContent followed by a SINGLE tool_result — so echoing the
+      // sibling would put an unanswered tool_use into the next request, which
+      // is a 400 and a dead turn.
+      const first = await makeDriver(deps(sql, create))(ctx(s))
+      expect(first.kind).toBe('park')          // the first block wins, whatever it is
+
+      const s2 = await seed(sql, '18')
+      const step = await makeDriver(deps(sql, create2))(ctx(s2))
+      expect(step.kind).toBe('tool')
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      expect(step.callId).toBe('toolu_1')
+      const echoed = step.assistantContent!.filter((b) => b.type === 'tool_use')
+      expect(echoed.length).toBe(1)
+      expect(echoed[0]).toMatchObject({ id: 'toolu_1' })
+    })
+  })
+
   it('hands back a readable rejection instead of throwing on bad tool input', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '07')
