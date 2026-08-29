@@ -14,6 +14,8 @@ npm test
 
 The tests replay recorded model replies, so you do not need an API key to run them. This keeps the course fast and repeatable, and it keeps everyone's test run identical to what we recorded when we wrote the lesson.
 
+From lesson 2.1 on, a checkpoint needs one more step before `npm test`: `npm install`, a `DATABASE_URL` in `.env.local` (see "The database" below), `npm run migrate`, then `npm test`. Skip the database step and `npm test` still passes, it just runs fewer tests.
+
 ## Running the agent live
 
 If you want to talk to the real API instead of replayed fixtures, copy `.env.example` to `.env.local` and add your `ANTHROPIC_API_KEY`. Then run:
@@ -76,7 +78,7 @@ does not yet deserve to.
 
     tier 1  as long as she is willing to wait
     tier 2  about ten seconds, so it only writes and returns
-    tier 3  fifteen minutes, which is where the turn actually runs
+    tier 3  fifteen minutes, which is where the turn runs
     tier 4  every few minutes, and it is module 3
 
 The arrow from tier 2 to tier 3 carries `x-worker-secret`. Tier 3 is reachable by

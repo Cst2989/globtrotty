@@ -39,7 +39,7 @@ describeDb('when the process dies mid-search', () => {
         await turn(newConversation(), HER_MESSAGE, dying, supplier.run)
       }
       const result = await submitMessage({ sql, invoke, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: HER_MESSAGE,
+        userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-1',
       })
 
       const msgs = await sql`select role, content from course.messages where conversation_id = ${result.conversationId}`

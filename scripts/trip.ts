@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import 'dotenv/config'
 import { config } from 'dotenv'
 import { liveClient } from '../src/client.js'
@@ -65,7 +66,12 @@ try {
 
   const submitted = await submitMessage(
     { sql, invoke: process.env.TIER3 ? httpInvoke(env) : inProcess, limits: DEFAULT_LIMITS },
-    { userId: USER, conversationId, message: text },
+    {
+      userId: USER, conversationId, message: text,
+      // A real client sends the same key when it retries a press; here a fresh
+      // key each run just means this script's one submit is never a retry.
+      idempotencyKey: randomUUID(),
+    },
   )
 
   console.log(`conversation ${submitted.conversationId}, turn ${submitted.turnId}, ${submitted.status}`)

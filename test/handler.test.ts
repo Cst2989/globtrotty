@@ -19,7 +19,7 @@ describeDb('submitMessage', () => {
     await withTestDb(async (sql) => {
       const invoke = vi.fn().mockResolvedValue(undefined)
       const result = await submitMessage(deps(sql, invoke), {
-        userId: USER, conversationId: null, message: HER_MESSAGE,
+        userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'i1',
       })
       expect(result.status).toBe('queued')
       expect(invoke).toHaveBeenCalledWith(result.turnId)
@@ -38,18 +38,55 @@ describeDb('submitMessage', () => {
     })
   })
 
-  it('keeps writing into the same conversation on a second message', async () => {
+  // This used to exercise "the same conversation keeps taking messages."
+  // `turns_one_active_per_conversation` now refuses the second submit while the
+  // first turn is still `queued`, so from this lesson on this is a busy-path
+  // test, not a second-turn test.
+  it('keeps her second message on the same conversation, with the first turn still busy', async () => {
     await withTestDb(async (sql) => {
       const d = deps(sql)
-      const first = await submitMessage(d, { userId: USER, conversationId: null, message: 'one' })
+      const first = await submitMessage(d, {
+        userId: USER, conversationId: null, message: 'one', idempotencyKey: 'i1',
+      })
       const second = await submitMessage(d, {
-        userId: USER, conversationId: first.conversationId, message: 'two',
+        userId: USER, conversationId: first.conversationId, message: 'two', idempotencyKey: 'i2',
       })
       expect(second.conversationId).toBe(first.conversationId)
-      // By seq, never by created_at: both rows are written inside withTestDb's
-      // single transaction and share one transaction_timestamp().
+      expect(second.status).toBe('busy')
+      expect(second.turnId).toBeNull()
       const msgs = await sql`select content from course.messages where conversation_id = ${first.conversationId} order by seq`
       expect(msgs.map((m) => m.content)).toEqual(['one', 'two'])
+    })
+  })
+
+  it('returns the same turn for a duplicate idempotency key', async () => {
+    await withTestDb(async (sql) => {
+      const d = deps(sql)
+      const a = await submitMessage(d, {
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'same',
+      })
+      const b = await submitMessage(d, {
+        userId: USER, conversationId: a.conversationId, message: 'hi', idempotencyKey: 'same',
+      })
+      expect(b.status).toBe('duplicate')
+      expect(b.turnId).toBe(a.turnId)
+      // And her sentence is in the thread once, not twice.
+      const msgs = await sql`select id from course.messages where conversation_id = ${a.conversationId}`
+      expect(msgs).toHaveLength(1)
+    })
+  })
+
+  it('refuses a second turn while one is in flight', async () => {
+    await withTestDb(async (sql) => {
+      const d = deps(sql)
+      const a = await submitMessage(d, {
+        userId: USER, conversationId: null, message: 'one', idempotencyKey: 'i1',
+      })
+      const b = await submitMessage(d, {
+        userId: USER, conversationId: a.conversationId, message: 'two', idempotencyKey: 'i2',
+      })
+      expect(b.status).toBe('busy')
+      expect(b.turnId).toBeNull()
     })
   })
 
@@ -61,7 +98,7 @@ describeDb('submitMessage', () => {
       try {
         const invoke = vi.fn().mockRejectedValue(new Error('502 from Netlify'))
         const result = await submitMessage(deps(sql, invoke), {
-          userId: USER, conversationId: null, message: 'hi',
+          userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'i1',
         })
         expect(result.status).toBe('queued')
         expect(result.turnId).not.toBeNull()
@@ -83,7 +120,7 @@ describeDb('submitMessage', () => {
                 values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
       const invoke = vi.fn()
       const r = await submitMessage(deps(sql, invoke), {
-        userId: USER, conversationId: null, message: 'hi',
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('limit_reached')
       expect(invoke).not.toHaveBeenCalled()
@@ -97,7 +134,7 @@ describeDb('submitMessage', () => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
                 values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
       const r = await submitMessage(deps(sql), {
-        userId: USER, conversationId: null, message: 'a very expensive trip to Japan',
+        userId: USER, conversationId: null, message: 'a very expensive trip to Japan', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('limit_reached')
       const msgs = await sql`select role, content, turn_id from course.messages where conversation_id = ${r.conversationId}`
@@ -121,7 +158,7 @@ describeDb('submitMessage', () => {
         (${OTHER_B}, (now() at time zone 'utc')::date, ${half})`
       const invoke = vi.fn()
       const r = await submitMessage(deps(sql, invoke), {
-        userId: USER, conversationId: null, message: 'two weeks in Peru',
+        userId: USER, conversationId: null, message: 'two weeks in Peru', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('limit_reached')
       expect(r.turnId).toBeNull()
@@ -145,7 +182,7 @@ describeDb('submitMessage', () => {
       const OTHER = '44444444-4444-4444-4444-444444444444'
       const [theirs] = await sql`insert into course.conversations (user_id) values (${OTHER}) returning id`
       await expect(
-        submitMessage(deps(sql), { userId: USER, conversationId: theirs!.id, message: 'hi' }),
+        submitMessage(deps(sql), { userId: USER, conversationId: theirs!.id, message: 'hi', idempotencyKey: 'i1' }),
       ).rejects.toThrow(/fail closed/i)
       const msgs = await sql`select * from course.messages where conversation_id = ${theirs!.id}`
       expect(msgs).toHaveLength(0)
@@ -162,7 +199,7 @@ describeDb('submitMessage', () => {
         (${OTHER_B}, (now() at time zone 'utc')::date, ${b})`
       const invoke = vi.fn().mockResolvedValue(undefined)
       const r = await submitMessage(deps(sql, invoke), {
-        userId: USER, conversationId: null, message: 'two weeks in Peru',
+        userId: USER, conversationId: null, message: 'two weeks in Peru', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('queued')
       expect(invoke).toHaveBeenCalledWith(r.turnId)

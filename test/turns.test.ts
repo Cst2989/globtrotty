@@ -9,7 +9,7 @@ describeDb('loadTurnInput', () => {
   it('returns the message the turn was queued for', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: 'a week in Portugal',
+        userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'turns-1',
       })
       // the queued path always names a turn; only limit_reached returns null
       const input = await loadTurnInput(sql, submitted.turnId!)
@@ -21,7 +21,7 @@ describeDb('loadTurnInput', () => {
   it('returns null for a turn that has already run', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: 'hi',
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-2',
       })
       const input = (await loadTurnInput(sql, submitted.turnId!))!
       await finishTurn(sql, input, 'Two options near Faro.')
@@ -33,7 +33,7 @@ describeDb('loadTurnInput', () => {
   it('ignores a later message on the same conversation', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: 'a week in Portugal',
+        userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'turns-3',
       })
       // She types again while the turn is still queued. Lesson 2.7 makes this
       // the 'busy' path; today it is just another row with no turn of its own.
@@ -49,7 +49,7 @@ describeDb('finishTurn', () => {
   it('writes the reply and closes the turn together', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: 'hi',
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-4',
       })
       const input = (await loadTurnInput(sql, submitted.turnId!))!
       await finishTurn(sql, input, 'Two options near Faro.')

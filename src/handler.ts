@@ -13,6 +13,7 @@ export type SubmitInput = {
   userId: string
   conversationId: string | null
   message: string
+  idempotencyKey: string
 }
 
 export type SubmitResult = {
@@ -21,7 +22,7 @@ export type SubmitResult = {
   // indistinguishable from a truncated id at a glance and invites a check that
   // silently does the wrong thing.
   turnId: string | null
-  status: 'queued' | 'limit_reached'
+  status: 'queued' | 'duplicate' | 'limit_reached' | 'busy'
 }
 
 /**
@@ -94,11 +95,42 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
     return { conversationId, turnId: null, status: 'limit_reached' }
   }
 
+  /**
+   * The insert races the unique constraint on (conversation_id,
+   * idempotency_key) and the partial unique index on one live turn per
+   * conversation, in one statement. There is no conflict target: the partial
+   * index cannot be named as one, so a bare `do nothing` is the only form that
+   * tolerates either rejection. Checking first and inserting second would be two
+   * statements with a gap, and the gap is exactly what fifty simultaneous
+   * presses find.
+   */
   const inserted = await sql`
-    insert into course.turns (conversation_id, user_id) values (${conversationId}, ${input.userId})
+    insert into course.turns (conversation_id, user_id, idempotency_key)
+    values (${conversationId}, ${input.userId}, ${input.idempotencyKey})
+    on conflict do nothing
     returning id`
-  const turnId = inserted[0]!.id as string
 
+  if (inserted.length === 0) {
+    // Zero rows means one of the two constraints refused, and they mean different
+    // things to her. Reading back on the idempotency key says which: a match is
+    // the same press arriving again, and no match means some other turn holds the
+    // active slot.
+    const dupe = await sql`
+      select id from course.turns
+       where conversation_id = ${conversationId} and idempotency_key = ${input.idempotencyKey}`
+    if (dupe.length > 0) {
+      // The press that won already wrote her message. Writing it again here is
+      // how fifty presses buy one turn and fifty copies of one sentence, so this
+      // path writes nothing at all.
+      return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
+    }
+    // Busy is a genuinely new message that arrived while another turn holds the
+    // slot, so it is kept, with no turn of its own until module 3 picks it up.
+    await writeHerMessage(sql, input, conversationId, null)
+    return { conversationId, turnId: null, status: 'busy' }
+  }
+
+  const turnId = inserted[0]!.id as string
   await writeHerMessage(sql, input, conversationId, turnId)
 
   await sql`update course.conversations set status = 'working', updated_at = now()

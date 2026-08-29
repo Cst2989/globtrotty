@@ -86,7 +86,7 @@ describeDb('pgSink', () => {
   it('writes the four token counts and the cost against her turn', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
-        userId: USER, conversationId: null, message: HER_MESSAGE,
+        userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'calls-1',
       })
       const record = pgSink(sql, {
         userId: USER, conversationId: submitted.conversationId, turnId: submitted.turnId!,
