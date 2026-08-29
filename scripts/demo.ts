@@ -13,6 +13,7 @@
  */
 import { config } from 'dotenv'
 import postgres from 'postgres'
+import Anthropic from '@anthropic-ai/sdk'
 
 config({ path: '.env.local', quiet: true })
 if (!process.env.DATABASE_URL) {
@@ -27,6 +28,9 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import type { TurnState } from '../src/engine.js'
+import { makeDriver } from '../src/agents/driver.js'
+import { MockSupplier } from '../src/supplier/mock.js'
+import type { Transport } from '../src/model/client.js'
 
 const DEMO_USER = '00000000-0000-4000-8000-00000000dec0'
 
@@ -47,6 +51,7 @@ const head = (title: string, claim: string) => {
 const step = (s: string) => console.log(`   ${c.cyan('→')} ${s}`)
 const ok = (s: string) => console.log(`   ${c.green('✓')} ${s}`)
 const note = (s: string) => console.log(`   ${c.dim(s)}`)
+const usd = (micros: string) => `$${(Number(micros) / 1_000_000).toFixed(6)}`
 
 const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} })
 
@@ -101,6 +106,91 @@ async function convRow(id: string) {
 async function cleanup() {
   await sql`delete from conversations where user_id = ${DEMO_USER}`
   await sql`delete from daily_usage where user_id = ${DEMO_USER}`
+}
+
+/**
+ * The one scenario in this file that calls the real API. Every other scenario
+ * exercises the durable-execution harness against a fake or absent agent; this
+ * one drives `makeDriver` for real, against `MockSupplier`, so a request-shape
+ * regression (a removed parameter, a renamed field, a 400) shows up here rather
+ * than only in production. Gated by the caller on LIVE_MODEL, same as
+ * `test/driver.live.test.ts`.
+ *
+ * The point being demonstrated is the ledger, not the model's words: the
+ * reservation `reserve()` debits BEFORE dispatch, the reconciled figure
+ * `reconcile()` leaves AFTER the response, and the `model_calls` row's
+ * `cost_micros` must equal the delta reconcile actually applied to
+ * `conversations.spend_usd_micros` — that equality is the defect this plan's
+ * second draft exists to prevent (see the driver's "who charges for the model
+ * call" doc comment).
+ */
+async function liveDriverScenario(apiKey: string) {
+  const anthropic = new Anthropic({ apiKey })
+  const message = 'A cheap week in Faro this September for two adults, flights only.'
+
+  const first = await submitMessage(
+    { sql, limits: DEFAULT_LIMITS, invoke: noopInvoke },
+    { userId: DEMO_USER, conversationId: null, message, idempotencyKey: 'live-1' },
+  )
+  const convId = first.conversationId
+  const turnId = first.turnId!
+  const before = await convRow(convId)
+
+  // Sampled from inside `transport.create`, AFTER `reserve()` has already
+  // debited but before the real response comes back — the same technique
+  // test/driver.test.ts's "reserves BEFORE the call and reconciles after" test
+  // uses, applied to a live call instead of a mock.
+  let spendDuringCall: bigint | null = null
+  const transport: Transport = {
+    create: async (req, options) => {
+      const [c] = await sql`select spend_usd_micros from conversations where id = ${convId}`
+      spendDuringCall = BigInt((c as { spend_usd_micros: string }).spend_usd_micros)
+      return anthropic.messages.create(req as never, options) as Promise<unknown>
+    },
+    countTokens: (req) =>
+      anthropic.messages.countTokens(req as never) as Promise<{ input_tokens: number }>,
+  }
+
+  const driver = makeDriver({
+    sql, transport,
+    flights: new MockSupplier({ kind: 'flight' }),
+    hotels: new MockSupplier({ kind: 'hotel' }),
+    limits: DEFAULT_LIMITS,
+    now: () => Date.now(),
+  })
+
+  step('calling the real driver (one live API call)...')
+  const result = await driver({
+    state: { step: 0, reviewRounds: 0,
+              messages: [{ role: 'user', content: [{ type: 'text', text: message }] }] },
+    conversationId: convId, userId: DEMO_USER, turnId,
+  })
+  const after = await convRow(convId)
+
+  const reservedDelta = spendDuringCall! - BigInt(before.spend_usd_micros)
+  const reconciledDelta = BigInt(after.spend_usd_micros) - BigInt(before.spend_usd_micros)
+  ok(`driver step: kind=${result.kind}`)
+  ok(`reservation (upper bound, debited before dispatch): ${usd(reservedDelta.toString())}`)
+  ok(`reconciled (actual, after the response landed):     ${usd(reconciledDelta.toString())}`)
+
+  const [call] = await sql`
+    select cost_micros, seat, model from model_calls
+     where turn_id = ${turnId} order by created_at desc limit 1`
+  const row = call as { cost_micros: string; seat: string; model: string } | undefined
+  if (!row) {
+    console.log(`   ${c.red('✗')} ${c.red('no model_calls row was written')}`)
+  } else {
+    ok(`model_calls row: seat=${row.seat}  model=${row.model}  cost_micros=${usd(row.cost_micros)}`)
+    if (BigInt(row.cost_micros) === reconciledDelta) {
+      console.log(`   ${c.green('✓')} ${c.bold(c.green(
+        `conversation.spend_usd_micros delta (${usd(reconciledDelta.toString())}) `
+        + `== model_calls.cost_micros (${usd(row.cost_micros)})`))}`)
+    } else {
+      console.log(`   ${c.red('✗')} ${c.red(
+        `MISMATCH: conversation delta ${usd(reconciledDelta.toString())} `
+        + `!= model_calls.cost_micros ${usd(row.cost_micros)}`)}`)
+    }
+  }
 }
 
 async function main() {
@@ -237,7 +327,6 @@ async function main() {
   const [all] = await sql`
     select coalesce(sum(cost_micros), 0)::text as total from daily_usage
      where day = (now() at time zone 'utc')::date`
-  const usd = (micros: string) => `$${(Number(micros) / 1_000_000).toFixed(6)}`
   ok(`conversation spend: ${usd(conv.spend_usd_micros)}  (ceiling ${usd(DEFAULT_LIMITS.conversationCeilingMicros.toString())})`)
   ok(`today's spend:      ${usd((day as { cost_micros: string }).cost_micros)}  (ceiling ${usd(DEFAULT_LIMITS.dailyCeilingMicros.toString())})`)
   ok(`every user today:   ${usd((all as { total: string }).total)}  (ceiling ${usd(DEFAULT_LIMITS.globalCeilingMicros.toString())})`)
@@ -249,6 +338,23 @@ async function main() {
   // spent" from "no answer" — see readSpendFailClosed's doc comment.
   note('the conversation read fails closed: if the database cannot confirm that')
   note('number the request is denied, and the daily and global reads ride on it.')
+
+  // ─────────────────────────────────────────────────────────────────────────
+  head('The live proof',
+       'one real driver turn against MockSupplier — reserved before dispatch, reconciled after, '
+       + 'and the ledger balances exactly')
+
+  if (process.env.LIVE_MODEL !== '1') {
+    note('LIVE_MODEL is not "1" — skipping (this scenario calls the real Anthropic API).')
+    note('Run `LIVE_MODEL=1 pnpm demo` to execute it.')
+  } else {
+    const key = process.env.ANTHROPIC_API_KEY
+    if (!key || key.startsWith('placeholder')) {
+      note('ANTHROPIC_API_KEY looks like a placeholder — skipping. A real key is required.')
+    } else {
+      await liveDriverScenario(key)
+    }
+  }
 
   console.log(`\n${c.bold('── done ')}${'─'.repeat(64)}`)
   note('cleaning up demo rows...')
