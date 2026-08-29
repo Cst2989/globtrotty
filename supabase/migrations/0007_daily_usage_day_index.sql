@@ -1,0 +1,26 @@
+-- The global daily ceiling (src/repo/spend.ts, readSpendFailClosed) runs
+--
+--   select coalesce(sum(cost_micros), 0) from daily_usage
+--    where day = (now() at time zone 'utc')::date
+--
+-- on every ceiling check, and src/worker.ts re-reads spend once per loop
+-- iteration — so this is once per model call, on the money-critical hot path.
+-- `daily_usage`'s only index is its primary key (user_id, day). With `day`
+-- SECOND in that key there is no usable prefix for a `day`-only predicate, so
+-- the query is a full scan of a table that grows by one row per user per day
+-- forever. It is fast today because the table is tiny; it gets linearly slower
+-- and never gets better.
+--
+-- Deliberately WITHOUT `include (cost_micros)`, which was considered and
+-- rejected. The INCLUDE would only pay off via an index-only scan, and an
+-- index-only scan needs the visibility map to mark the pages all-visible — but
+-- the rows this query reads are exactly TODAY's, which are the rows being
+-- upserted all day long by recordSpend and are therefore rarely all-visible.
+-- The read would fall back to heap fetches anyway. Meanwhile the cost is real
+-- and lands on the write path: cost_micros is the column every spend record
+-- mutates, and carrying it in an index means each increment must maintain that
+-- index too (no longer a heap-only update), adding write amplification and
+-- bloat to the hot row. Paying on every write to speed up a read that would not
+-- actually get faster is the wrong trade. A plain key on `day` gives the seek,
+-- which is the part that was missing.
+create index daily_usage_day on daily_usage (day);

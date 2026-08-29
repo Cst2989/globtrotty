@@ -6,6 +6,9 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const LIMITS = DEFAULT_LIMITS
+// Two OTHER users, whose spend only the global ceiling can see.
+const OTHER_A = '22222222-2222-2222-2222-222222222222'
+const OTHER_B = '33333333-3333-3333-3333-333333333333'
 const deps = (sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined)) => ({
   sql, limits: LIMITS, invoke,
 })
@@ -55,7 +58,7 @@ describeDb('submitMessage', () => {
   it('denies when the daily ceiling is reached, before spending anything', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into daily_usage (user_id, day, cost_micros)
-                values (${USER}, current_date, ${LIMITS.dailyCeilingMicros.toString()})`
+                values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
       const invoke = vi.fn()
       const r = await submitMessage(deps(sql, invoke), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'i1',
@@ -70,7 +73,7 @@ describeDb('submitMessage', () => {
   it('still preserves her message when the ceiling is reached', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into daily_usage (user_id, day, cost_micros)
-                values (${USER}, current_date, ${LIMITS.dailyCeilingMicros.toString()})`
+                values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
       const r = await submitMessage(deps(sql), {
         userId: USER, conversationId: null, message: 'a very expensive trip to Japan',
         idempotencyKey: 'i1',
@@ -93,6 +96,52 @@ describeDb('submitMessage', () => {
       expect(r.status).toBe('queued')
       const [t] = await sql`select status from turns where id = ${r.turnId}`
       expect(t!.status).toBe('queued')
+    })
+  })
+
+  // The global ceiling protects the ACCOUNT, not the user: she has spent nothing
+  // at all here, so neither per-user counter could possibly refuse her. Without
+  // this check tier 2 would wave a capped account through and the refusal would
+  // land one step into the turn instead — after a model call has been paid for.
+  it('denies at tier 2 when the global ceiling is reached, though this user spent nothing', async () => {
+    await withTestDb(async (sql) => {
+      await sql`delete from daily_usage where day = (now() at time zone 'utc')::date`
+      const half = (LIMITS.globalCeilingMicros / 2n).toString()
+      await sql`insert into daily_usage (user_id, day, cost_micros) values
+        (${OTHER_A}, (now() at time zone 'utc')::date, ${half}),
+        (${OTHER_B}, (now() at time zone 'utc')::date, ${half})`
+      const invoke = vi.fn()
+      const r = await submitMessage(deps(sql, invoke), {
+        userId: USER, conversationId: null, message: 'two weeks in Peru',
+        idempotencyKey: 'i1',
+      })
+      expect(r.status).toBe('limit_reached')
+      expect(r.turnId).toBeNull()
+      expect(invoke).not.toHaveBeenCalled()
+      const [conv] = await sql`select status from conversations where id = ${r.conversationId}`
+      expect(conv!.status).toBe('limit_reached')
+      // IMPORTANT 5's guarantee holds on this path too: her words are kept.
+      const msgs = await sql`select content from messages where conversation_id = ${r.conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.content).toBe('two weeks in Peru')
+    })
+  })
+
+  it('still queues the turn one micro BELOW the global ceiling', async () => {
+    await withTestDb(async (sql) => {
+      await sql`delete from daily_usage where day = (now() at time zone 'utc')::date`
+      const a = (LIMITS.globalCeilingMicros / 2n).toString()
+      const b = (LIMITS.globalCeilingMicros - LIMITS.globalCeilingMicros / 2n - 1n).toString()
+      await sql`insert into daily_usage (user_id, day, cost_micros) values
+        (${OTHER_A}, (now() at time zone 'utc')::date, ${a}),
+        (${OTHER_B}, (now() at time zone 'utc')::date, ${b})`
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const r = await submitMessage(deps(sql, invoke), {
+        userId: USER, conversationId: null, message: 'two weeks in Peru',
+        idempotencyKey: 'i1',
+      })
+      expect(r.status).toBe('queued')
+      expect(invoke).toHaveBeenCalledWith(r.turnId)
     })
   })
 })

@@ -1,4 +1,5 @@
 import type postgres from 'postgres'
+import { exceedsAnyCeiling } from './engine.js'
 import type { Limits } from './engine.js'
 import { readSpendFailClosed } from './repo/spend.js'
 
@@ -34,6 +35,9 @@ export type SubmitResult = {
  *     message or turn is written. It throws rather than returning 0 when it
  *     cannot confirm current usage, so a database hiccup denies rather than
  *     silently disabling the ceiling at the exact moment it's needed most.
+ *     Read that function's doc comment for how far the guarantee reaches: the
+ *     conversation read is the one that throws, and the daily and global reads
+ *     ride on it rather than adding a guarantee of their own.
  *  2. Durable before scheduled — the turn row is inserted (and, since this
  *     statement is not wrapped in an explicit multi-statement transaction,
  *     committed) before `invoke` is ever called. `invoke`'s rejection is
@@ -88,8 +92,15 @@ export async function submitMessage(
   await sql`insert into messages (conversation_id, user_id, role, content)
             values (${conversationId}, ${input.userId}, 'user', ${input.message})`
 
-  if (spend.dailyMicros >= limits.dailyCeilingMicros ||
-      spend.conversationMicros >= limits.conversationCeilingMicros) {
+  // All three ceilings, not two — and via `exceedsAnyCeiling`, the same
+  // predicate `decideNext` uses, rather than a second copy of the same three
+  // comparisons. The global one is checked at this tier rather than left to the
+  // worker because a capped ACCOUNT must be refused before a turn is queued at
+  // all — otherwise the refusal arrives one step into the turn, after a model
+  // call has already been paid for, which is precisely the spend the ceiling
+  // exists to prevent. Note it can fire while both of this user's own counters
+  // read zero: it protects the account, not the user.
+  if (exceedsAnyCeiling(spend, limits)) {
     await sql`update conversations set status = 'limit_reached', updated_at = now()
                where id = ${conversationId} and user_id = ${input.userId}`
     return { conversationId, turnId: null, status: 'limit_reached' }

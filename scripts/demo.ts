@@ -223,12 +223,23 @@ async function main() {
 
   const conv = await convRow(convId)
   const [day] = await sql`
-    select cost_micros from daily_usage where user_id = ${DEMO_USER} and day = current_date`
+    select cost_micros from daily_usage
+     where user_id = ${DEMO_USER} and day = (now() at time zone 'utc')::date`
+  const [all] = await sql`
+    select coalesce(sum(cost_micros), 0)::text as total from daily_usage
+     where day = (now() at time zone 'utc')::date`
   const usd = (micros: string) => `$${(Number(micros) / 1_000_000).toFixed(6)}`
   ok(`conversation spend: ${usd(conv.spend_usd_micros)}  (ceiling ${usd(DEFAULT_LIMITS.conversationCeilingMicros.toString())})`)
   ok(`today's spend:      ${usd((day as { cost_micros: string }).cost_micros)}  (ceiling ${usd(DEFAULT_LIMITS.dailyCeilingMicros.toString())})`)
-  note('both are checked before every model call, and the read fails closed —')
-  note('if the database cannot confirm the number, the request is denied, not allowed.')
+  ok(`every user today:   ${usd((all as { total: string }).total)}  (ceiling ${usd(DEFAULT_LIMITS.globalCeilingMicros.toString())})`)
+  note('all three are checked before every model call — the last one caps the whole')
+  note('account, so it can refuse a user who has personally spent nothing.')
+  // Stated precisely, because the demo is what people read instead of the code:
+  // only the CONVERSATION read fails closed. A missing daily row and a sum over
+  // zero rows are both legitimately zero, so neither can distinguish "nothing
+  // spent" from "no answer" — see readSpendFailClosed's doc comment.
+  note('the conversation read fails closed: if the database cannot confirm that')
+  note('number the request is denied, and the daily and global reads ride on it.')
 
   console.log(`\n${c.bold('── done ')}${'─'.repeat(64)}`)
   note('cleaning up demo rows...')

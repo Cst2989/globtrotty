@@ -23,6 +23,17 @@ revoke all privileges on all tables in schema public from anon, authenticated;
 -- in a later plan, once there is an actual anon/authenticated access pattern
 -- to write policies for. Do not add `force row level security` or any policy
 -- here ahead of that.
+--
+-- WHEN YOU DO: `daily_usage` is not an ordinary per-user table. The global daily
+-- ceiling (src/repo/spend.ts, readSpendFailClosed) sums cost_micros across ALL
+-- users for the current UTC day. Under forced RLS with a per-user policy that
+-- sum would silently return only the caller's own rows, the account-wide total
+-- would read far below the cap, and the ceiling that exists to stop the whole
+-- system spending unbounded money in a day would simply stop firing — with no
+-- error and no failing test, because an under-count is indistinguishable from a
+-- legitimately small total. That sum must remain owner-visible (or run as a
+-- `bypassrls` role), or move to a maintained per-day counter, BEFORE any policy
+-- is attached to this table.
 
 alter table conversations   enable row level security;
 alter table turns           enable row level security;
