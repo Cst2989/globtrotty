@@ -4,6 +4,7 @@ import {
   claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, releaseForContinuation,
   FencedError, type Claim,
 } from './repo/turns.js'
+import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 
@@ -61,10 +62,26 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     await loop(deps, claim, turnSpend)
   } catch (err) {
     if (err instanceof FencedError) return // superseded: write nothing
-    // Accepted limitation (plan 1): every error maps to 'provider_down'. The echo agent
-    // cannot produce a real provider error, and the classifier arrives with the model
-    // client in a later plan — see progress.md Ruling E.
-    await failTurn(sql, claim, 'provider_down', turnSpend.total).catch(() => {})
+    // FencedError above returns FIRST and is never classified: a superseded worker
+    // must write nothing at all, and stamping a fail_reason on a turn it no longer
+    // owns would overwrite the run that took it over.
+    //
+    // Everything else is classified rather than blanket-recorded as 'provider_down'
+    // (plan 1's accepted limitation, now removed). `reason` is what distinguishes a
+    // permanent fault from a transient one on the row itself; `retryable` is the
+    // model client's business (plan 3: honour Retry-After, back off, give up), not
+    // this handler's, because failTurn is terminal either way. That terminality IS
+    // the guard the brief asks for: a 'failed' turn matches neither arm of the
+    // sweeper's `status in ('queued','running')` predicate, so a non-retryable
+    // failure can never be requeued until it is reaped as a crash loop, however
+    // stale its heartbeat gets. Pinned by test/worker.test.ts.
+    //
+    // The assignment below is also the compile-time check that every
+    // ClassifiedReason (src/errors.ts) is a real FailReason (src/engine.ts) --
+    // errors.ts deliberately does not import the engine, so this is where the two
+    // unions are proven to agree.
+    const { reason } = classifyError(err)
+    await failTurn(sql, claim, reason, turnSpend.total).catch(() => {})
     throw err
   }
 }

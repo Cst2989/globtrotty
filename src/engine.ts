@@ -2,9 +2,23 @@ export type LoopMessage = { role: 'user' | 'assistant' | 'tool'; content: string
 
 export type TurnState = { step: number; messages: LoopMessage[]; reviewRounds: number }
 
+/**
+ * Every terminal state a turn can be recorded in. Mirrored exactly by the
+ * `turns.fail_reason` check constraint (supabase/migrations/0010) -- the type and
+ * the constraint are pinned against each other, in both directions, by
+ * test/schema.test.ts.
+ *
+ * The last three arrived with the classifier (src/errors.ts, T0.2). `refused` is
+ * the failure that returns HTTP 200; `provider_rejected` is the permanent request
+ * fault that must never be retried, split out from `provider_down` so "try again"
+ * and "an operator must fix something" stop being the same word; `unclassified` is
+ * an error we could not name, which is deliberately not disguised as a provider
+ * outage. See src/errors.ts for why each exists.
+ */
 export type FailReason =
   | 'provider_down' | 'fetch_failed' | 'limit_reached' | 'step_cap'
   | 'deadline_exceeded' | 'crash_loop' | 'fenced' | 'stalled'
+  | 'refused' | 'provider_rejected' | 'unclassified'
 
 export type Limits = {
   conversationCeilingMicros: bigint

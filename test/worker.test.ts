@@ -3,7 +3,10 @@ import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
 import { runTurn, echoAgent, type Agent, type WorkerDeps } from '../src/worker.js'
-import { claimTurn } from '../src/repo/turns.js'
+import { APIError } from '@anthropic-ai/sdk'
+import { claimTurn, FencedError } from '../src/repo/turns.js'
+import { RefusalError } from '../src/errors.js'
+import { sweep } from '../src/sweeper.js'
 import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 
@@ -207,6 +210,111 @@ describeDb('runTurn end to end', () => {
       // conversation status has to match what submitMessage sets for the same
       // condition pre-turn.
       expect(convo!.status).toBe('limit_reached')
+    })
+  })
+})
+
+/**
+ * T0.2. The crash handler used to write `provider_down` for every error, so a
+ * permanent 400 and a transient 429 were recorded identically — and a model
+ * refusal, which is an HTTP 200 and never throws at all, had no value to be
+ * recorded as. These pin the classifier at the seam where the worker uses it.
+ */
+describeDb('runTurn error classification', () => {
+  const throwing = (err: unknown): Agent => async () => { throw err }
+
+  const apiError = (status: number): unknown =>
+    APIError.generate(
+      status,
+      { type: 'error', error: { type: 'invalid_request_error', message: 'boom' } },
+      undefined,
+      new Headers(),
+    )
+
+  it('records a permanent request fault as provider_rejected, not provider_down', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await expect(runTurn(workerDeps(sql, throwing(apiError(400))), r.turnId!)).rejects.toThrow()
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('provider_rejected')
+    })
+  })
+
+  it('records a rate limit as provider_down — the retryable one', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await expect(runTurn(workerDeps(sql, throwing(apiError(429))), r.turnId!)).rejects.toThrow()
+      const [turn] = await sql<TurnRow[]>`select fail_reason, status, spend_usd_micros from turns where id = ${r.turnId}`
+      expect(turn!.fail_reason).toBe('provider_down')
+    })
+  })
+
+  it('records a model refusal as refused, and writes no agent message', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await expect(
+        runTurn(workerDeps(sql, throwing(new RefusalError('cyber', 'no'))), r.turnId!),
+      ).rejects.toThrow(RefusalError)
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      const msgs = await sql<MessageRow[]>`
+        select role from messages where conversation_id = ${r.conversationId}`
+      expect(turn!.fail_reason).toBe('refused')
+      // The failure the old code would have read as "a successful turn that
+      // produced no content": the user must not be handed an empty answer.
+      expect(msgs.map((m) => m.role)).toEqual(['user'])
+    })
+  })
+
+  it('records an error it cannot name as unclassified, never provider_down', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await expect(
+        runTurn(workerDeps(sql, throwing(new Error('x is not a function'))), r.turnId!),
+      ).rejects.toThrow()
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      expect(turn!.fail_reason).toBe('unclassified')
+    })
+  })
+
+  /**
+   * Requirement 2 of the brief: a non-retryable failure must not sit in a state
+   * the sweeper will requeue until it reaps the turn as a crash loop. The
+   * heartbeat is pushed well past HEARTBEAT_STALE first, so the turn would be
+   * swept if `status` were anything the sweeper looks at.
+   */
+  it('leaves a non-retryable failure terminal — the sweeper will not requeue it', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await expect(runTurn(workerDeps(sql, throwing(apiError(401))), r.turnId!)).rejects.toThrow()
+
+      await sql`update turns set heartbeat_at = now() - interval '10 minutes'
+                 where id = ${r.turnId}`
+      const out = await sweep(sql, {})
+      expect(out.requeued).not.toContain(r.turnId)
+      expect(out.reaped).not.toContain(r.turnId)
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('provider_rejected')
+    })
+  })
+
+  /**
+   * A fenced worker writes NOTHING. FencedError must short-circuit BEFORE the
+   * classifier: classifying it would write a fail_reason for a turn this worker
+   * no longer owns, stamping `failed` over the run that superseded it.
+   */
+  it('never classifies a FencedError — a superseded worker writes nothing', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      await runTurn(workerDeps(sql, throwing(new FencedError(r.turnId!))), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('running')
+      expect(turn!.fail_reason).toBeNull()
     })
   })
 })
