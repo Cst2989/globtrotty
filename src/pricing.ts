@@ -27,9 +27,9 @@ type Price = {
  * The multipliers are kept per-model rather than as shared constants so a future
  * model whose cache pricing diverges is a one-line edit here, not a new concept.
  * They are named for their TTL because there is no such thing as "the"
- * cache-write rate: Task 6 will write the system+tools prefix at 1h on every
- * driver call (src/model/cache.ts, not yet created), and a field named
- * `cacheWriteMult` is exactly the field someone reaches for while pricing it.
+ * cache-write rate: `src/model/cache.ts` writes the system+tools prefix at 1h
+ * on every call (`SYSTEM_CACHE_TTL`), and a field named `cacheWriteMult` is
+ * exactly the field someone reaches for while pricing it.
  */
 export const PRICES: Record<string, Price> = {
   'claude-opus-5': {

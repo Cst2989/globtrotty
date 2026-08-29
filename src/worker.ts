@@ -164,11 +164,13 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // non-retryable failure cannot be requeued until the sweeper reaps it as a
     // crash loop, however stale its heartbeat gets. Pinned by test/worker.test.ts.
     //
-    // `retryable` is advice for the model client plan 3 brings (honour Retry-After,
-    // back off, give up), and for whoever decides — deliberately — whether a
-    // transient failure should ever be requeued instead of failed. Branching on it
-    // here would be inventing turn-level retry semantics with no client to justify
-    // their shape.
+    // Plan 3 brought the model client and `retryable` still has zero production
+    // consumers: the SDK's own `maxRetries` (default 2) already retries 429s and
+    // 5xx beneath us before an error reaches `classifyError` here. What is left
+    // unbuilt is turn-level retry — whoever decides, deliberately, whether a
+    // transient failure should ever be requeued instead of failed. Branching on
+    // `retryable` here would be inventing that semantics with nothing to justify
+    // its shape.
     //
     // The assignment below is also the compile-time check that every
     // ClassifiedReason (src/errors.ts) is a real FailReason (src/engine.ts) --

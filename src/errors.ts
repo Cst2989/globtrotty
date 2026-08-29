@@ -71,10 +71,14 @@ export type ClassifiedReason = 'provider_down' | 'provider_rejected' | 'refused'
  * whatever this flag says. `retryable: true` on a row means "this error was the
  * kind worth retrying", NOT "this turn was retried".
  *
- * The flag is advice for the model client plan 3 brings (honour Retry-After,
- * back off, give up) and for whoever decides — deliberately, and not by
- * inheriting an assumption from this comment — whether the harness should ever
- * requeue a failed turn. The taxonomy exists so that decision CAN be made; it
+ * Plan 3 is the model client this flag was written for, and it has zero
+ * production consumers: nothing in `src/agents/driver.ts` or elsewhere reads
+ * `.retryable`. The SDK client itself already retries 429s and 5xx beneath us
+ * (`maxRetries`, default 2, honouring `Retry-After`) before an error ever
+ * reaches `classifyError` — so "honour Retry-After, back off" is handled one
+ * layer down, not by this flag. What is left unbuilt is turn-level retry: no
+ * caller decides whether the HARNESS should ever requeue a failed turn, which
+ * is deliberate — the taxonomy exists so that decision CAN be made later; it
  * does not make it.
  */
 /**
@@ -145,9 +149,10 @@ const REFUSED: Classification = { retryable: false, reason: 'refused', billed: '
 /**
  * FAIL CLOSED. An error we cannot name is NOT retryable.
  *
- * Read `retryable` as advice to a caller that does not exist yet — see the note
- * on WHAT `retryable` DOES NOT MEAN, below. The question this answers is what a
- * future retry mechanism should be told about an error nobody has classified.
+ * Read `retryable` as advice to a caller that still does not exist — see the
+ * note on WHAT `retryable` DOES NOT MEAN, above (it has zero production
+ * consumers). The question this answers is what a future retry mechanism
+ * should be told about an error nobody has classified.
  *
  * Both directions cost something, so the choice is which cost to prefer. This
  * bucket is the one that catches OUR OWN bugs: a TypeError is deterministic, so
@@ -293,14 +298,15 @@ export function classifyError(err: unknown): Classification {
   }
 
   /**
-   * NOTE for plan 3, deliberately not handled here: the SDK also exports
-   * `RetryableError`, an explicit "retry this" signal thrown by middleware. It
-   * extends `AnthropicError`, NOT `APIError`, so it falls through every branch
-   * above and lands here as `unclassified`/non-retryable. Unreachable today —
-   * nothing in this repo constructs an SDK client, let alone middleware — and
-   * adding a branch for it now would be a rule no test could exercise against
-   * a real thrower. Whoever wires the client either registers middleware and
-   * adds the branch WITH a test, or does not, in which case nothing changes.
+   * Deliberately not handled here: the SDK also exports `RetryableError`, an
+   * explicit "retry this" signal thrown by middleware. It extends
+   * `AnthropicError`, NOT `APIError`, so it falls through every branch above
+   * and lands here as `unclassified`/non-retryable. `scripts/demo.ts` and
+   * `test/driver.live.test.ts` do construct a real SDK client now, but neither
+   * registers middleware, so the conclusion still holds — this stays
+   * unreachable, and adding a branch for it would be a rule no test could
+   * exercise against a real thrower. Whoever registers middleware adds the
+   * branch WITH a test, or does not, in which case nothing changes.
    */
   return UNKNOWN
 }

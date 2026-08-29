@@ -77,7 +77,14 @@ export async function recordModelCall(
   try {
     const system = redactCredentials(args.systemPrompt)
     const user = redactCredentials(args.userPrompt)
-    const policy = capturePolicyFor(args.seat, system.length, user.length)
+    // UTF-8 BYTES, not `.length` (UTF-16 code units) — `capturePolicyFor`'s
+    // parameters are named `systemBytes`/`userBytes` and the 8KB truncation
+    // threshold is a byte count. A code-unit count undercounts multi-byte text
+    // (CJK, emoji) by up to ~3x, which is exactly how estimateInputTokens's own
+    // earlier bug happened (src/model/client.ts).
+    const policy = capturePolicyFor(
+      args.seat, Buffer.byteLength(system, 'utf8'), Buffer.byteLength(user, 'utf8'),
+    )
     const clip = (s: string) => (policy === 'truncated' ? s.slice(0, MAX_STORED) : s)
 
     const r = args.result

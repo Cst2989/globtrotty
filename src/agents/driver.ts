@@ -244,9 +244,10 @@ export function makeDriver(deps: DriverDeps): Agent {
 
     if (check.def.name === 'ask_user') {
       // Terminal by construction: the answer comes from her, not from a tool.
-      // Nothing is written to `turns.state` on this path: `loop()` returns from
-      // the park branch before the state mutation, so the tool_use the model
-      // just emitted never enters the saved transcript at all.
+      // `completeTurn` still writes `turns.state` unconditionally on the park
+      // path — what is true is narrower: `loop()` returns from the park branch
+      // before appending this step's content to `state.messages`, so the
+      // `tool_use` the model just emitted never enters the saved transcript.
       const { questions } = check.input as { questions: string[] }
       return {
         kind: 'park', message: questions.join('\n\n'),

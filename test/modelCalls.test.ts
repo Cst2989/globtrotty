@@ -132,6 +132,64 @@ describeDb('recordModelCall', () => {
     })
   })
 
+  it('sizes the truncation threshold in UTF-8 bytes, not UTF-16 code units', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await seed(sql, '04')
+      // 3000 CJK characters: `.length` (UTF-16 code units) is 3000, well under
+      // the 8192-byte truncation threshold — a code-unit count would wrongly
+      // call this 'full'. Each is 3 bytes in UTF-8, so the real byte length is
+      // 9000, which IS over the threshold. `capturePolicyFor` only sees
+      // whatever byte count its caller computes; this pins that the caller
+      // (recordModelCall) computes a real UTF-8 byte count, not `.length`.
+      const cjk = 'あ'.repeat(3000)
+      await recordModelCall(sql, {
+        conversationId, turnId: null, userId,
+        seat: 'scout', seatConfig: SEATS.scout, result: ok,
+        systemPrompt: cjk, userPrompt: '', thinkingMode: null, costMicros: 1n,
+      })
+      const [row] = await sql`
+        select capture_policy from model_calls where conversation_id = ${conversationId}`
+      expect(row!.capture_policy).toBe('truncated')
+    })
+  })
+
+  it('redacts a credential nested inside the response content, not just top-level prompts', async () => {
+    // The design this exists for: `response` is redacted by stringifying it,
+    // running the same regex pass used on the flat prompt strings, then
+    // parsing back to an object (recordModelCall's `redactedResponse`) — so a
+    // credential buried in a `tool_use` block or the model's own text must
+    // survive a round trip through JSON, not just a plain string.
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await seed(sql, '06')
+      const leaky: ModelResult = {
+        kind: 'ok',
+        content: [
+          { type: 'text', text: 'irrelevant' },
+          {
+            type: 'tool_use', id: 'call_1', name: 'explore_hotels',
+            input: { note: 'use sk-ant-api03-NESTEDNESTEDNESTED to retry' },
+          },
+        ],
+        stopReason: 'tool_use', model: 'claude-opus-5', requestId: 'req_n', usage, latencyMs: 10,
+      }
+      await recordModelCall(sql, {
+        conversationId, turnId: null, userId,
+        seat: 'driver', seatConfig: SEATS.driver, result: leaky,
+        systemPrompt: 'sys', userPrompt: 'usr', thinkingMode: 'adaptive', costMicros: 1n,
+      })
+      const [row] = await sql`
+        select response from model_calls where conversation_id = ${conversationId}`
+      const serialized = JSON.stringify(row!.response)
+      expect(serialized).not.toContain('sk-ant-api03-NESTEDNESTEDNESTED')
+      expect(serialized).toContain('[REDACTED]')
+      // Structural, not flattened to a string scalar: the nested shape must
+      // still be queryable with `->` after redaction.
+      expect(row!.response).toMatchObject({
+        content: [{ type: 'text' }, { type: 'tool_use', name: 'explore_hotels' }],
+      })
+    })
+  })
+
   it('never fails the work it observes', async () => {
     // A span is best-effort. The spend is not — that is reserve/reconcile.
     const broken = {

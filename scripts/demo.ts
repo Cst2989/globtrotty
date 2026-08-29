@@ -1,12 +1,13 @@
 /**
  * A narrated tour of the harness, run against the real database.
  *
- * There is no model and no supplier yet — this exercises the durable-execution
- * layer that everything else will sit on. Each scenario prints what it is about
+ * Most scenarios exercise the durable-execution layer against a fake or absent
+ * agent; the last one (`liveDriverScenario`) drives the real planning-desk
+ * driver against the real Anthropic API. Each scenario prints what it is about
  * to do, does it, and prints the rows that resulted, so the guarantees are
  * visible rather than merely asserted.
  *
- *   npm run demo
+ *   pnpm demo
  *
  * Safe to re-run: everything is scoped to one fixed demo user id and deleted at
  * both ends of the run.
