@@ -1,0 +1,52 @@
+[
+  {
+    "request": {
+      "max_tokens": 8000,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Do I need a visa for Portugal with a German passport?"
+        }
+      ],
+      "model": "claude-opus-5",
+      "output_config": {
+        "effort": "high"
+      }
+    },
+    "response": {
+      "model": "claude-opus-5",
+      "id": "msg_011CeXPm34pauaNM5PP5ZJvm",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "CAIS7QQKjgEIERgCKkDEaPbSP0Tb5lYc306AvbA11JCQQwfE+D9jf91jQ76aD+fSzUmehrJNkWLhWO0cXV13coJyJVKHK8mGjIObjOUeMg1jbGF1ZGUtb3B1cy01OAFCCHRoaW5raW5nWiRhOTMwNjY4NC0yNGM0LTQ0OTItOWRmNS01YThlMDNmODAyOTioAe2ezNQGEgxR7h9zQnNscREVZh4aDNovemePfXj+DgoQ7yIw62hw0REhADp3flAmIGuAoH1QNI3VkGWuYfcoUyq7paa+4T5SdCcxAGA+l9mXde9ZKosD+00ot1DNC2/f+HqpuC0+GIMnyGCzfzwf1zuja4qjvAy3axtWQfJH/d907AEFzbKlYZ7DgSzJ5rq4H0F/1c/2o7etp/G1zuWxUTHSJ5OP7oRF0Y6hhj2vt/yafoeqGfQ6AkQmpeF7QVnnHNfsmnFRnzpOExE6pxpMoMnWog0GKRv2ZYuXOMoTQZSgrNMeDJOoOXAqWRQYMc2VRgfBxBYSqcxotFQoqxDPCDEGxK1kbSDbSAzRgsHb7Tz6ItxwpXgnUXFAg9IvbCKEVQQQvui6vxN6/UpF5s+uDiAg8LywZToKexJ7WdEfnB9AAHybhoXE5WqhwCrLcz3HugvoLUnSzHRpZlMNyk3MFDrw8pbF371yoWPC7pTaVb/99TGv8y1rqqE4p02bWoUHzN6ppEbCrC1zy4H5JE4mnmzdmsc4zg4uENLQzLzMEENsjMAu+hGXdRz4TXP8k+Z2LcLNOKSRCqj84JTAD8SZcSv1nQE0PsXgtMSDw67Jb+4QRRLOAhgpabeh5ZZGXF7kIosYAQ=="
+        },
+        {
+          "type": "text",
+          "text": "No — as a German citizen you don't need a visa to enter or stay in Portugal. Both countries are EU and Schengen members, so you have freedom of movement.\n\n**Short stays (up to 3 months):** Just bring a valid German passport or national ID card (Personalausweis). Either works; no visa, no registration required.\n\n**Stays longer than 3 months:** You have the right to reside, but you're expected to register with the local town hall (câmara municipal) within 30 days after the 3-month mark and get a *Certificado de Registo de Cidadão da União Europeia*. It's a simple process — you show your ID and declare that you're working, studying, self-sufficient, or a family member of someone who is. The fee is small (around €15).\n\n**Other practical things for a longer stay:**\n- A **NIF** (Número de Identificação Fiscal, tax number) is needed for almost anything — renting, opening a bank account, utilities, sometimes even a phone contract.\n- A **NISS** (social security number) if you'll be working.\n- Register with a local health centre; bring your EHIC card for short visits, or an S1 form if you're a pensioner.\n\nOne caveat: the EU's new **EES (Entry/Exit System)** and **ETIAS** don't apply to you — those are for non-EU nationals.\n\nIf you're a German *resident* but not a German *citizen*, the rules are different — let me know if that's the case."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 24,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 582,
+        "output_tokens_details": {
+          "thinking_tokens": 126
+        },
+        "service_tier": "standard",
+        "inference_geo": "global"
+      }
+    }
+  }
+]

@@ -1,0 +1,106 @@
+[
+  {
+    "request": {
+      "max_tokens": 64,
+      "system": "You label one message from a traveller writing to a travel agency. new_trip: she wants a trip planned. change: she wants an existing plan or booking changed. faq: a short factual question with no planning in it. other: anything else. Answer with the label only.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Do I need a visa for Portugal with a German passport?"
+        }
+      ],
+      "output_config": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "enum": [
+                  "new_trip",
+                  "change",
+                  "faq",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "response": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011CeXPktPBogv6VRrC5jzS9",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"label\": \"faq\"}"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 275,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 10,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "request": {
+      "max_tokens": 300,
+      "system": "You answer short factual travel questions for a travel agency in three sentences at most. If the answer depends on nationality or dates, say what it depends on instead of guessing.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Do I need a visa for Portugal with a German passport?"
+        }
+      ],
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "response": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011CeXPkwgNaB1aCUrDYNW9j",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "No, you don't need a visa for Portugal with a German passport. As a German citizen, you can enter and stay in Portugal visa-free as part of the Schengen Area. You only need a valid German passport or ID card."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 55,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 54,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  }
+]
