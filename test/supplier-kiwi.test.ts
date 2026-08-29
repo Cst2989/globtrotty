@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parseKiwiResponse, toKiwiDate, KiwiSupplier } from '../src/supplier/kiwi.js'
 import type { FlightSearch } from '../src/supplier/types.js'
@@ -155,5 +155,48 @@ describe('KiwiSupplier capabilities', () => {
     expect(s.capabilities.live).toBe(true)
     expect(s.capabilities.mayRequote).toBe(true)
     expect(s.capabilities.maxAgeSeconds).toBeGreaterThan(0)
+  })
+})
+
+describe('KiwiSupplier request wiring', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Task 5's review flagged this as untested: nothing exercised the request
+  // body construction, so a regression that dropped the `toKiwiDate(...)`
+  // wrapper and sent `p.departureDate`/`p.returnDate` as ISO yyyy-mm-dd would
+  // pass every other test in the repo while silently breaking every live
+  // search (Kiwi expects dd/mm/yyyy). Intercept fetch and pin the exact
+  // request body it sends.
+  it('sends departureDate and returnDate to Kiwi in dd/mm/yyyy, not ISO', async () => {
+    const empty = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({ currency: 'EUR', itineraries: [] }) }] },
+    })
+    let capturedBody: unknown
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body))
+      return { ok: true, text: async () => empty } as Response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await new KiwiSupplier().search(params)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const args = (capturedBody as {
+      params: { arguments: { departureDate: string; returnDate: string } }
+    }).params.arguments
+
+    // params.departureDate/returnDate are ISO '2026-09-12'/'2026-09-19'.
+    // toKiwiDate converts to dd/mm/yyyy: '12/09/2026'/'19/09/2026'.
+    expect(args.departureDate).toBe('12/09/2026')
+    expect(args.returnDate).toBe('19/09/2026')
+
+    // Belt-and-braces: explicitly rule out the ISO string leaking through,
+    // which is exactly the regression this test exists to catch.
+    expect(args.departureDate).not.toBe(params.departureDate)
+    expect(args.returnDate).not.toBe(params.returnDate)
+    expect(args.departureDate).not.toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
