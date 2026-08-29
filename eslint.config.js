@@ -26,12 +26,42 @@
 // rule needs only a syntax-level TS-aware parser (no type information), and
 // Babel's TypeScript support parses TS syntax on its own without touching
 // the `typescript` package at all, so it is unaffected by that version gap.
+//
+// Coverage notes on the selector below, recorded so nobody re-derives these
+// by hand later:
+//
+// - `?? 0n` (BigInt zero) IS caught, verified empirically with
+//   `count ?? 0n` under this exact parser/config — it reports. This matters
+//   because `bigint` is the actual money type here (`Spend`'s three fields,
+//   `readSpendFailClosed`'s return), so `?? 0n` is the realistic dangerous
+//   spelling, not `?? 0`. The match is incidental, not a designed feature of
+//   `right.value=0`: Babel gives a BigInt literal node a real `bigint`-typed
+//   `value` (`0n === 0` is `false` in JS), but esquery's `[attr=value]`
+//   comparator (esquery/dist/esquery.js, the `case '='` / `case 'literal'`
+//   branch) does not compare types — it does
+//   `"".concat(selectorValue) === "".concat(nodeValue)`, i.e. it stringifies
+//   both sides and compares strings. `String(0n)` and `String(0)` are both
+//   `"0"`, so they match. This errs safe (it catches more than the spec's
+//   literal wording), but it is a side effect of how esquery happens to
+//   compare literals, not a guarantee — a future esquery/parser change could
+//   alter it. Don't remove the BigInt case from a future regression check
+//   just because the selector "shouldn't" match it by type.
+//
+// - The selector does NOT catch a disguised right-hand literal, e.g.
+//   `count ?? (0 as number)`, `count ?? (0)!`, or `count ?? +0` — each wraps
+//   or reshapes the `0` so `right.type` is no longer exactly `'Literal'`.
+//   This is inherent to matching `right.type === 'Literal'` precisely, holds
+//   under any parser, and matches no code in this repo today. Noted so the
+//   selector is not assumed watertight against every right-hand disguise.
 import babelParser from '@babel/eslint-parser'
 
 export default [
   {
     files: ['src/repo/**/*.ts'],
     languageOptions: {
+      // `ecmaVersion` is left unset (defaults apply) — harmless at this
+      // syntax-only scope; revisit if this config is ever extended beyond
+      // the one rule above.
       parser: babelParser,
       sourceType: 'module',
       parserOptions: {
