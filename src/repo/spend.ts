@@ -96,17 +96,14 @@ export async function recordSpend(
  * one concurrent call, which does not matter for a ceiling that only needs to
  * be roughly current; it would matter for a receipt.
  */
-export async function readSpendFailClosed(
-  sql: postgres.Sql,
-  userId: string,
-  conversationId: string,
-): Promise<Spend> {
-  const conv = await sql`
-    select spend_usd_micros from course.conversations
-     where id = ${conversationId} and user_id = ${userId}`
-  if (conv.length === 0) {
-    throw new SpendUnconfirmedError('Cannot confirm conversation spend, fail closed, denying the request')
-  }
+/**
+ * The two reads `readSpendFailClosed` and `readSpendForNewConversation` share:
+ * her daily total and every user's total today. Factored out so the two
+ * queries exist once rather than twice, since it is exactly the "the three
+ * copies below are the whole of it" promise in the file docstring above that
+ * a silent second copy would break.
+ */
+async function readDailyAndGlobal(sql: postgres.Sql, userId: string): Promise<{ dailyMicros: bigint; globalMicros: bigint }> {
   const day = await sql`
     select cost_micros from course.daily_usage
      where user_id = ${userId} and day = (now() at time zone 'utc')::date`
@@ -119,10 +116,37 @@ export async function readSpendFailClosed(
       from course.daily_usage where day = (now() at time zone 'utc')::date`
 
   return {
-    conversationMicros: BigInt(conv[0]!.spend_usd_micros as string),
     dailyMicros: day.length ? BigInt(day[0]!.cost_micros as string) : 0n,
     globalMicros: BigInt(all[0]!.total as string),
   }
+}
+
+export async function readSpendFailClosed(
+  sql: postgres.Sql,
+  userId: string,
+  conversationId: string,
+): Promise<Spend> {
+  const conv = await sql`
+    select spend_usd_micros from course.conversations
+     where id = ${conversationId} and user_id = ${userId}`
+  if (conv.length === 0) {
+    throw new SpendUnconfirmedError('Cannot confirm conversation spend, fail closed, denying the request')
+  }
+  const { dailyMicros, globalMicros } = await readDailyAndGlobal(sql, userId)
+  return { conversationMicros: BigInt(conv[0]!.spend_usd_micros as string), dailyMicros, globalMicros }
+}
+
+/**
+ * The same read, for a press with no conversation yet to confirm (fix round
+ * 3: a first press's ceiling is checked before any row exists, so there is
+ * nothing to fail closed on the way `readSpendFailClosed`'s conversation read
+ * does). A conversation that does not exist yet has spent nothing, so its own
+ * ceiling can never be the one that denies a first press; `conversationMicros`
+ * is `0n` outright rather than a read, because there is nothing to read.
+ */
+export async function readSpendForNewConversation(sql: postgres.Sql, userId: string): Promise<Spend> {
+  const { dailyMicros, globalMicros } = await readDailyAndGlobal(sql, userId)
+  return { conversationMicros: 0n, dailyMicros, globalMicros }
 }
 
 /**

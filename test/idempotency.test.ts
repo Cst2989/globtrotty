@@ -10,6 +10,63 @@ import { describeDb, withRealDb } from './helpers/db.js'
 // raised out of the way rather than cleared for every other user's rows.
 const LIMITS = { ...DEFAULT_LIMITS, globalCeilingMicros: 2n ** 62n }
 
+describeDb('fifty first presses of Send', () => {
+  // The bug fix round 3 closes: before it, the key was scoped to
+  // (conversation_id, idempotency_key), and a first press has no
+  // conversation yet, so submitMessage created a fresh one before the key
+  // was ever compared. Fifty concurrent first presses of the SAME key must
+  // now buy exactly one conversation, the same "one" the test below already
+  // pins for an existing conversation.
+  it('buy exactly one conversation, one turn and one message', async () => {
+    await withRealDb(async (sql, userId) => {
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const deps = { sql, limits: LIMITS, invoke }
+      const press = () => submitMessage(deps, {
+        userId, conversationId: null, message: 'a week in Portugal in September',
+        idempotencyKey: 'first-press',
+      })
+
+      const results = await Promise.all(Array.from({ length: 50 }, press))
+
+      const conversationIds = new Set(results.map((r) => r.conversationId))
+      expect(conversationIds.size).toBe(1)
+      const conversationId = [...conversationIds][0]!
+      const turns = await sql`select id from course.turns where conversation_id = ${conversationId}`
+      expect(turns).toHaveLength(1)
+      expect(results.filter((r) => r.status === 'queued')).toHaveLength(1)
+      expect(results.filter((r) => r.status === 'duplicate')).toHaveLength(49)
+      expect(invoke).toHaveBeenCalledTimes(1)
+      const msgs = await sql`select turn_id from course.messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.turn_id).toBe(turns[0]!.id)
+
+      // The one conversation the fifty presses agreed on is this user's own,
+      // not some other invented id a bug in the resolution might have handed
+      // back.
+      const conv = await sql`select user_id from course.conversations where id = ${conversationId}`
+      expect(conv[0]!.user_id).toBe(userId)
+    })
+  })
+
+  // A DIFFERENT key from the same user, still with no conversation given,
+  // is a different first press, not a retry: it must start its own
+  // conversation rather than being folded into the one above.
+  it('start a second conversation for a second key from the same user', async () => {
+    await withRealDb(async (sql, userId) => {
+      const deps = { sql, limits: LIMITS, invoke: vi.fn().mockResolvedValue(undefined) }
+      const first = await submitMessage(deps, {
+        userId, conversationId: null, message: 'one', idempotencyKey: 'press-a',
+      })
+      const second = await submitMessage(deps, {
+        userId, conversationId: null, message: 'two', idempotencyKey: 'press-b',
+      })
+      expect(second.conversationId).not.toBe(first.conversationId)
+      expect(first.status).toBe('queued')
+      expect(second.status).toBe('queued')
+    })
+  })
+})
+
 describeDb('fifty presses of Send', () => {
   it('buy exactly one turn', async () => {
     await withRealDb(async (sql, userId) => {

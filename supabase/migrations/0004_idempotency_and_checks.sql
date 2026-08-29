@@ -4,17 +4,22 @@ alter table course.turns add column idempotency_key text;
 update course.turns set idempotency_key = id::text where idempotency_key is null;
 alter table course.turns alter column idempotency_key set not null;
 
--- The same press, retried, is the same turn.
-alter table course.turns add constraint turns_conversation_idempotency
-  unique (conversation_id, idempotency_key);
+-- The same press, retried, is the same turn. Scoped to the USER, not the
+-- conversation (fix round 3): a first press arrives with no conversation yet,
+-- so a key compared only against a conversation could never recognise a retry
+-- of that very press, and fifty concurrent first presses of one key would
+-- each buy their own conversation before the key was ever compared to
+-- anything.
+alter table course.turns add constraint turns_user_idempotency
+  unique (user_id, idempotency_key);
 
 -- Busy and limit_reached open no turn, so the constraint above cannot dedupe a
 -- retry of either. Her message row is the only durable trace those two paths
 -- leave, so the same key goes on it too; null stays allowed, since only
 -- `submitMessage` ever sets it and nothing else in the course writes here.
 alter table course.messages add column idempotency_key text;
-alter table course.messages add constraint messages_conversation_idempotency
-  unique (conversation_id, idempotency_key);
+alter table course.messages add constraint messages_user_idempotency
+  unique (user_id, idempotency_key);
 
 -- One active turn per conversation. This is the fifty presses guard, and it is a
 -- partial index because it must not stop her from ever having a second turn,

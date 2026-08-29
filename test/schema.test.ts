@@ -57,7 +57,10 @@ describeDb('the constraints and the types', () => {
   // duplicate from busy by checking only the first by name. A third unique
   // index added to this table later would make some other refusal look like
   // one of these two, silently, so this pins the whole set rather than just
-  // that each one individually still throws.
+  // that each one individually still throws. Renamed in fix round 3:
+  // `turns_user_idempotency` is scoped to (user_id, idempotency_key), not
+  // (conversation_id, idempotency_key), so a first press with no conversation
+  // yet can still be recognised (src/handler.ts's `firstPress`).
   it('carries exactly the two unique indexes the on-conflict read-back tells apart', async () => {
     await withTestDb(async (sql) => {
       const idx = await sql`
@@ -66,24 +69,26 @@ describeDb('the constraints and the types', () => {
            and indexdef ilike '%unique%' and indexname <> 'turns_pkey'
          order by indexname`
       expect(idx.map((r) => r.indexname)).toEqual([
-        'turns_conversation_idempotency', 'turns_one_active_per_conversation',
+        'turns_one_active_per_conversation', 'turns_user_idempotency',
       ])
     })
   })
 
-  // Same key, different conversations, both turns land: the pair is what is
-  // unique, not the key alone. A client's key only has to be unique against
-  // its own retries of one conversation, not against every press it ever
-  // makes.
-  it('scopes the idempotency key to the conversation, not to the key alone', async () => {
+  // Fix round 3: the pair is (user_id, idempotency_key), not
+  // (conversation_id, idempotency_key), because a first press has no
+  // conversation yet to scope the key to. Same key, same user, two DIFFERENT
+  // conversations: the second insert must be refused, the opposite of what
+  // this constraint did before this round.
+  it('scopes the idempotency key to the user, not to one conversation', async () => {
     await withTestDb(async (sql) => {
       const [c1] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
       const [c2] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
-      const [t1] = await sql`insert into course.turns (conversation_id, user_id, idempotency_key)
-                              values (${c1!.id}, ${USER}, 'same-key') returning id`
-      const [t2] = await sql`insert into course.turns (conversation_id, user_id, idempotency_key)
-                              values (${c2!.id}, ${USER}, 'same-key') returning id`
-      expect(t1!.id).not.toBe(t2!.id)
+      await sql`insert into course.turns (conversation_id, user_id, idempotency_key)
+                values (${c1!.id}, ${USER}, 'same-key')`
+      await expect(
+        sql`insert into course.turns (conversation_id, user_id, idempotency_key)
+            values (${c2!.id}, ${USER}, 'same-key')`,
+      ).rejects.toThrow(/turns_user_idempotency/)
     })
   })
 })

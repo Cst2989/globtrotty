@@ -1,7 +1,7 @@
 import type postgres from 'postgres'
 import { exceedsAnyCeiling, type Limits } from './engine.js'
 import { limitReachedMessage } from './limit-message.js'
-import { readSpendFailClosed } from './repo/spend.js'
+import { readSpendFailClosed, readSpendForNewConversation } from './repo/spend.js'
 
 export type SubmitDeps = {
   sql: postgres.Sql
@@ -27,17 +27,29 @@ export type SubmitResult = {
 }
 
 /**
+ * Thrown only inside `firstPress`'s own transaction, when the turn claim
+ * below conflicts. On a conversation created moments earlier in that same
+ * transaction, a conflict can only mean another press's key got there first
+ * (nothing else could already hold that brand new conversation's one
+ * live-turn slot), never a busy slot on some other live turn. Caught by
+ * `firstPress` itself; no caller ever sees it.
+ */
+class KeyClaimedElsewhere extends Error {}
+
+/**
  * Her words, kept whatever else happens. `turnId` is null on the paths where no
  * turn was opened for them: lesson 2.2's worker loads a turn's message by this
  * id, so a message with no turn is simply a message nothing is running for yet.
  *
- * `on conflict do nothing`, keyed on the same (conversation, idempotency key)
- * pair as `course.turns`: busy and limit_reached open no turn, so the
- * constraint on turns cannot dedupe a retried press on either path, and
- * without this one a retry would write a second copy of the same sentence.
- * Returns whether a row was actually written, so a caller that also writes a
- * reply for this press (the ceiling denial below) can skip that too on a
- * retry rather than answer the same press twice.
+ * `on conflict do nothing`, keyed on the same (user, idempotency key) pair as
+ * `course.turns` (fix round 3: scoped to the user, not the conversation, so a
+ * first press with no conversation yet can still be recognised): busy and
+ * limit_reached open no turn, so the constraint on turns cannot dedupe a
+ * retried press on either path, and without this one a retry would write a
+ * second copy of the same sentence. Returns whether a row was actually
+ * written, so a caller that also writes a reply for this press (the ceiling
+ * denial below) can skip that too on a retry rather than answer the same
+ * press twice.
  */
 async function writeHerMessage(
   sql: postgres.Sql | postgres.TransactionSql, input: SubmitInput, conversationId: string, turnId: string | null,
@@ -51,8 +63,37 @@ async function writeHerMessage(
 }
 
 /**
- * Tier 2: the synchronous handler. It accepts her message and returns fast,
- * doing no model work itself.
+ * Persist first, then schedule. A failed invoke leaves a durable queued turn,
+ * so it is not her problem and she still gets 'queued'. It is our problem, so
+ * it is logged with the turn id and never rethrown: swallowing it into an
+ * empty catch would make `npm run trip`, whose invoke is the whole program,
+ * print a conversation id and nothing else when the run died. Called only
+ * after any transaction that produced the turn has committed: invoking a
+ * worker that loads this turn from the database before it is durable there
+ * would race the commit.
+ */
+async function invokeAndLog(deps: SubmitDeps, turnId: string): Promise<void> {
+  await deps.invoke(turnId).catch((err: unknown) => {
+    console.error(`invoke failed for turn ${turnId}`, err)
+  })
+}
+
+/** The tail every "queued" outcome shares, whichever path claimed the turn. */
+async function finishQueuing(
+  deps: SubmitDeps, input: SubmitInput, conversationId: string, turnId: string,
+): Promise<SubmitResult> {
+  const { sql } = deps
+  await writeHerMessage(sql, input, conversationId, turnId)
+  await sql`update course.conversations set status = 'working', updated_at = now()
+             where id = ${conversationId} and user_id = ${input.userId}`
+  await invokeAndLog(deps, turnId)
+  return { conversationId, turnId, status: 'queued' }
+}
+
+/**
+ * A repeated press, or a first press whose key lost the race in `firstPress`
+ * below: `conversationId` already exists, so this is the path every press had
+ * before fix round 3.
  *
  * The order of the writes is the whole lesson. Her message row and the turn row
  * are committed BEFORE `invoke` is ever called: the turn is already durable at
@@ -67,12 +108,8 @@ async function writeHerMessage(
  * again while a turn is running, and the worker must still run the message it
  * was given, not the one that arrived after it.
  */
-export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promise<SubmitResult> {
+async function withConversation(deps: SubmitDeps, input: SubmitInput, conversationId: string): Promise<SubmitResult> {
   const { sql } = deps
-
-  const conversationId = input.conversationId ?? (
-    await sql`insert into course.conversations (user_id) values (${input.userId}) returning id`
-  )[0]!.id as string
 
   // Fail closed: this throws rather than returning zero when it cannot confirm.
   // Deliberately before the turn is written, so a database hiccup denies the
@@ -121,11 +158,11 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   }
 
   /**
-   * The insert races the unique constraint on (conversation_id,
-   * idempotency_key) and the partial unique index on one live turn per
-   * conversation, in one statement. There is no conflict target: the partial
-   * index cannot be named as one, so a bare `do nothing` is the only form that
-   * tolerates either rejection. Checking first and inserting second would be two
+   * The insert races the unique constraint on (user_id, idempotency_key) and
+   * the partial unique index on one live turn per conversation, in one
+   * statement. There is no conflict target: the partial index cannot be
+   * named as one, so a bare `do nothing` is the only form that tolerates
+   * either rejection. Checking first and inserting second would be two
    * statements with a gap, and the gap is exactly what fifty simultaneous
    * presses find.
    */
@@ -136,18 +173,20 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
     returning id`
 
   if (inserted.length === 0) {
-    // Zero rows means one of the two constraints refused, and they mean different
-    // things to her. Reading back on the idempotency key says which: a match is
-    // the same press arriving again, and no match means some other turn holds the
-    // active slot.
+    // Zero rows means one of the two constraints refused, and they mean
+    // different things to her. Reading back on (user, idempotency key), the
+    // pair the constraint itself is keyed on, says which: a match is the same
+    // press arriving again (on whichever conversation it actually landed on,
+    // which the row itself names), and no match means some other turn holds
+    // this conversation's active slot.
     const dupe = await sql`
-      select id from course.turns
-       where conversation_id = ${conversationId} and idempotency_key = ${input.idempotencyKey}`
+      select id, conversation_id from course.turns
+       where user_id = ${input.userId} and idempotency_key = ${input.idempotencyKey}`
     if (dupe.length > 0) {
       // The press that won already wrote her message. Writing it again here is
       // how fifty presses buy one turn and fifty copies of one sentence, so this
       // path writes nothing at all.
-      return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
+      return { conversationId: dupe[0]!.conversation_id as string, turnId: dupe[0]!.id as string, status: 'duplicate' }
     }
     // Busy is a new message that arrived while another turn holds the slot,
     // so it is kept, with no turn of its own until module 3 picks it up.
@@ -157,20 +196,79 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
     return { conversationId, turnId: null, status: 'busy' }
   }
 
-  const turnId = inserted[0]!.id as string
-  await writeHerMessage(sql, input, conversationId, turnId)
+  return finishQueuing(deps, input, conversationId, inserted[0]!.id as string)
+}
 
-  await sql`update course.conversations set status = 'working', updated_at = now()
-             where id = ${conversationId} and user_id = ${input.userId}`
+/**
+ * A first press: no conversation exists yet to compare the key against, and
+ * the key is scoped to (user_id, idempotency_key), not to a conversation that
+ * does not exist (fix round 3). Before that fix, a first press's key was
+ * compared against a conversation created moments earlier for it alone, so
+ * fifty concurrent first presses of one key each got their own conversation,
+ * turn and message before the key was ever compared to anything.
+ *
+ * The ceiling is read with `readSpendForNewConversation`, her daily and
+ * global totals only: a conversation that does not exist yet has spent
+ * nothing, so its own ceiling can never be the one that fires here, and there
+ * is nothing to fail closed on the way `withConversation`'s read does.
+ *
+ * Under the ceiling, creating the conversation and claiming the key happen in
+ * one transaction, so two concurrent first presses of the SAME key cannot
+ * each buy their own conversation: fifty of them must buy exactly one, same
+ * as fifty presses on an existing conversation already do above. A claim
+ * conflict inside the transaction means some other press's key won first; the
+ * whole attempt, conversation included, is thrown away, and this press
+ * replays against the winner's conversation through `withConversation`,
+ * exactly like a repeated press with a known id.
+ */
+async function firstPress(deps: SubmitDeps, input: SubmitInput): Promise<SubmitResult> {
+  const { sql } = deps
+  const spend = await readSpendForNewConversation(sql, input.userId)
 
-  // Persist first, then schedule. A failed invoke leaves a durable queued turn,
-  // so it is not her problem and she still gets 'queued'. It is our problem, so
-  // it is logged with the turn id and never rethrown: swallowing it into an
-  // empty catch would make `npm run trip`, whose invoke is the whole program,
-  // print a conversation id and nothing else when the run died.
-  await deps.invoke(turnId).catch((err: unknown) => {
-    console.error(`invoke failed for turn ${turnId}`, err)
-  })
+  if (exceedsAnyCeiling(spend, deps.limits)) {
+    const [conv] = await sql`insert into course.conversations (user_id) values (${input.userId}) returning id`
+    const conversationId = conv!.id as string
+    await sql.begin(async (tx) => {
+      const wroteHerMessage = await writeHerMessage(tx, input, conversationId, null)
+      if (wroteHerMessage) {
+        await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+                  values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
+      }
+      await tx`update course.conversations set status = 'limit_reached', updated_at = now()
+                 where id = ${conversationId} and user_id = ${input.userId}`
+    })
+    return { conversationId, turnId: null, status: 'limit_reached' }
+  }
 
-  return { conversationId, turnId, status: 'queued' }
+  try {
+    const claimed = await sql.begin(async (tx) => {
+      const [conv] = await tx`insert into course.conversations (user_id) values (${input.userId}) returning id`
+      const inserted = await tx`
+        insert into course.turns (conversation_id, user_id, idempotency_key)
+        values (${conv!.id}, ${input.userId}, ${input.idempotencyKey})
+        on conflict do nothing
+        returning id`
+      if (inserted.length === 0) throw new KeyClaimedElsewhere()
+      return { conversationId: conv!.id as string, turnId: inserted[0]!.id as string }
+    })
+    return finishQueuing(deps, input, claimed.conversationId, claimed.turnId)
+  } catch (err) {
+    if (!(err instanceof KeyClaimedElsewhere)) throw err
+    const [claimedByOther] = await sql`
+      select conversation_id from course.turns
+       where user_id = ${input.userId} and idempotency_key = ${input.idempotencyKey}`
+    return withConversation(deps, input, claimedByOther!.conversation_id as string)
+  }
+}
+
+/**
+ * Tier 2: the synchronous handler. It accepts her message and returns fast,
+ * doing no model work itself. A known conversation and a first press take
+ * different paths (`withConversation`, `firstPress`) because only the first
+ * has an existing row to compare the key against and read the ceiling from.
+ */
+export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promise<SubmitResult> {
+  return input.conversationId === null
+    ? firstPress(deps, input)
+    : withConversation(deps, input, input.conversationId)
 }
