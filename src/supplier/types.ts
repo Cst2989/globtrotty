@@ -68,6 +68,15 @@ export type SupplierCapabilities = {
   pricePersistence: 'none' | 'session' | '24h' | 'indefinite'
 }
 
+/**
+ * The one shared home for the mock item freshness window. Both `MockSupplier`
+ * and the later Kiwi adapter quote a `maxAgeSeconds`/`ttlSeconds` of 900; two
+ * consumers hard-coding the same number independently is how they drift out
+ * of sync the first time one of them changes. Same precedent as
+ * `DEFAULT_LIMITS` in `src/limits.ts`.
+ */
+export const DEFAULT_MAX_AGE_SECONDS = 900
+
 export type QuoteOutcome =
   | { status: 'ok'; item: SupplierItem }
   | { status: 'gone' }                          // searched and absent → genuinely unavailable
