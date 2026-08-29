@@ -2,11 +2,19 @@ import { classify, type Label } from './classify.js'
 import type { ModelClient } from './client.js'
 import { extract, type Requirements } from './extract.js'
 import { answerFaq } from './faq.js'
-import { toolLoop, type ToolTrace } from './loop.js'
+import { toolLoop, type Outcome, type ToolTrace } from './loop.js'
 import { SEATS } from './seats.js'
 import { TOOLS, type ToolRunner } from './tools.js'
 
-export type Handled = { label: Label; text: string; costMicros: bigint; requirements: Requirements | null; toolTrace: ToolTrace[] }
+export type Handled = {
+  label: Label
+  text: string
+  costMicros: bigint
+  requirements: Requirements | null
+  toolTrace: ToolTrace[]
+  outcome: Outcome
+  steps: number
+}
 
 /**
  * Builds the driver's planning system prompt out of what extract() read from
@@ -42,16 +50,22 @@ export async function handle(
   const classified = await classify(text, client)
   if (classified.label === 'faq') {
     const answer = await answerFaq(text, client)
-    return { label: 'faq', text: answer.text, costMicros: classified.costMicros + answer.costMicros, requirements: null, toolTrace: [] }
+    return {
+      label: 'faq', text: answer.text, costMicros: classified.costMicros + answer.costMicros,
+      requirements: null, toolTrace: [], outcome: 'done', steps: 0,
+    }
   }
   const extracted = await extract(text, client)
   const system = planningSystem(extracted.requirements, extracted.dropped)
   const result = await toolLoop({ seat: SEATS.driver, system, userText: text, tools: TOOLS, run, client })
+  const reply = result.outcome === 'done' ? result.text : `We could not finish planning: ${result.outcome}`
   return {
     label: classified.label,
-    text: result.text,
+    text: reply,
     costMicros: classified.costMicros + extracted.costMicros + result.costMicros,
     requirements: extracted.requirements,
     toolTrace: result.toolTrace,
+    outcome: result.outcome,
+    steps: result.steps,
   }
 }

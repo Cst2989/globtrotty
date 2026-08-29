@@ -15,4 +15,5 @@ if (handled.requirements) console.log(JSON.stringify(handled.requirements, null,
 for (const call of handled.toolTrace) console.log(`${call.name}(${JSON.stringify(call.input)})`)
 console.log(handled.text)
 console.log('')
+console.log(`outcome: ${handled.outcome} (${handled.steps} step${handled.steps === 1 ? '' : 's'})`)
 console.log(dollars(handled.costMicros))

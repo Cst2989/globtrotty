@@ -1,5 +1,6 @@
 import { checkAgainstMessage, EMPTY_REQUIREMENTS, extract } from '../src/extract.js'
 import { HER_MESSAGE } from '../src/her.js'
+import { fakeClient, textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
 
 describe('checkAgainstMessage', () => {
@@ -34,6 +35,15 @@ describe('extract', () => {
     expect(result.requirements.partySize).toEqual({ adults: 2, children: 1, infants: 0 })
     expect(result.requirements.needsCrib).toBe(true)
     expect(result.requirements.nearBeach).toBe(true)
+    expect(result.dropped).toEqual([])
+  })
+})
+
+describe('extract, when the model answers with something that is not the schema', () => {
+  it('falls back to empty requirements instead of throwing', async () => {
+    const client = fakeClient([textMessage('I would love to help plan this trip!')])
+    const result = await extract(HER_MESSAGE, client)
+    expect(result.requirements).toEqual(EMPTY_REQUIREMENTS)
     expect(result.dropped).toEqual([])
   })
 })

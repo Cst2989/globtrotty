@@ -1,12 +1,18 @@
 import type { ContentBlockParam, MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages'
 import { textOf, type ModelClient } from './client.js'
+import { classifyError, isRefusal, type ClassifiedReason } from './errors.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
 import { withSeat, type Seat } from './seats.js'
 import type { ToolRunner } from './tools.js'
 
 export type ToolTrace = { name: string; input: unknown; content: string; isError: boolean }
 
+export type Outcome = 'done' | 'step_cap' | 'refused' | 'max_tokens' | ClassifiedReason
+
+export const MAX_STEPS = 12
+
 export type LoopResult = {
+  outcome: Outcome
   text: string
   steps: number
   toolTrace: ToolTrace[]
@@ -21,6 +27,8 @@ export type LoopOptions = {
   tools: Tool[]
   run: ToolRunner
   client: ModelClient
+  /** A run that asks for its thirteenth tool is circling; twelve is a first guess we will measure. */
+  maxSteps?: number
 }
 
 function addUsage(a: Usage, b: Usage): Usage {
@@ -35,24 +43,40 @@ function addUsage(a: Usage, b: Usage): Usage {
 /**
  * The model asks for a tool, we run it, the result goes back in the next user
  * turn, and the model chooses again. The loop ends when the model stops
- * asking. Nothing bounds it yet; lesson 1.5 adds that.
+ * asking, when it hits the step cap, when it refuses, or when the provider
+ * itself fails; every ending is a `LoopResult` with an `outcome`, never a
+ * thrown exception (lesson 1.5).
  */
 export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
+  const maxSteps = options.maxSteps ?? MAX_STEPS
   const messages: MessageParam[] = [{ role: 'user', content: options.userText }]
   const toolTrace: ToolTrace[] = []
   let usage: Usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   let steps = 0
+
+  const finish = (outcome: Outcome, text: string): LoopResult =>
+    ({ outcome, text, steps, toolTrace, usage, costMicros: costMicros(options.seat.model, usage) })
+
   for (;;) {
+    if (steps >= maxSteps) return finish('step_cap', '')
     steps += 1
+
     // Thinking tokens count against max_tokens on the Opus seat, so the
     // ceiling leaves room for the thinking and the answer both (lesson 1.1).
-    const message = await options.client.create(
-      withSeat(options.seat, { max_tokens: 8000, system: options.system, messages, tools: options.tools }),
-    )
-    usage = addUsage(usage, usageOf(message))
-    if (message.stop_reason !== 'tool_use') {
-      return { text: textOf(message), steps, toolTrace, usage, costMicros: costMicros(options.seat.model, usage) }
+    let message
+    try {
+      message = await options.client.create(
+        withSeat(options.seat, { max_tokens: 8000, system: options.system, messages, tools: options.tools }),
+      )
+    } catch (err) {
+      return finish(classifyError(err).reason, '')
     }
+    usage = addUsage(usage, usageOf(message))
+
+    if (isRefusal(message)) return finish('refused', textOf(message))
+    if (message.stop_reason === 'max_tokens') return finish('max_tokens', textOf(message))
+    if (message.stop_reason !== 'tool_use') return finish('done', textOf(message))
+
     messages.push({ role: 'assistant', content: message.content })
     const results: ContentBlockParam[] = []
     for (const block of message.content) {
