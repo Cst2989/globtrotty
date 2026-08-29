@@ -5,9 +5,11 @@ import { recordGateResults, type GateResultRow } from '../repo/gateResults.js'
 import type { Money } from '../money.js'
 import type { GateName, GateOutcome, RehydratedItem, Violation } from './types.js'
 
+import type { NotebookConstraints } from './notebookConstraints.js'
+
+// Re-exported so the gates' one consumer imports its whole contract from here.
 export type { NotebookConstraints } from './notebookConstraints.js'
 export { constraintsFromNotebook } from './notebookConstraints.js'
-import type { NotebookConstraints } from './notebookConstraints.js'
 
 /**
  * Every gate this function runs, in the order it runs them. The list is
@@ -90,9 +92,13 @@ export async function runGates(
 
   const hydrated = await rehydrateRefs(sql, args.conversationId, parsed.data.refs)
   if (!hydrated.ok) {
-    // Bucketed the same way as the full run below, for the same reason: the
-    // gate name on the violation is what decides the row, never the call site.
-    await write(rowsFor(['provenance'], hydrated.violations, null, null))
+    // The gate list is derived from the violations here, not hard-coded to
+    // ['provenance'], for the same reason the rows below are bucketed by
+    // `v.gate`: the gate name on the violation decides the row, never the call
+    // site. A hard-coded list would silently DROP any fault `rehydrateRefs`
+    // grows a new name for.
+    await write(rowsFor([...new Set(hydrated.violations.map((v) => v.gate))],
+                        hydrated.violations, null, null))
     return { ok: false, violations: hydrated.violations }
   }
   const items = hydrated.items
@@ -107,10 +113,9 @@ export async function runGates(
   ]
 
   // `checkTotals` returns `total === null` only for an empty set (the schema
-  // requires >= 1 ref, so it cannot happen here) or alongside a violation of its
-  // own. The guard exists so that a future change to `checkTotals` cannot make
-  // this function return `ok: false` with nothing to tell the model, or reach
-  // the non-null assertion below with a null.
+  // requires >= 1 ref, so it cannot happen here) or alongside a violation of
+  // its own. The guard exists so that a future change to `checkTotals` cannot
+  // make this function return `ok: false` with nothing to tell the model.
   if (totals.total === null && violations.length === 0) {
     violations.push({
       gate: 'totals',
@@ -121,8 +126,13 @@ export async function runGates(
 
   await write(rowsFor(RAN_GATES, violations, items, totals.total))
 
-  if (violations.length > 0) return { ok: false, violations }
-  return { ok: true, items, total: totals.total! }
+  // Written as a positive condition on `total` rather than `total!` after a
+  // violations check: `ok: true` must be unable to carry a fabricated total,
+  // and a non-null assertion is exactly the construct that would let it.
+  if (violations.length === 0 && totals.total !== null) {
+    return { ok: true, items, total: totals.total }
+  }
+  return { ok: false, violations }
 }
 
 /**
