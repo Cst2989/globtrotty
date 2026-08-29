@@ -62,9 +62,16 @@ describe('checkFreshness', () => {
     expect(v).toHaveLength(1)
     expect(v[0]!.sourceIds).toEqual(['FUTURE'])
   })
+
+  it('treats an unparseable fetchedAt as stale rather than silently fresh', () => {
+    const corrupt = item({ sourceId: 'CORRUPT', fetchedAt: new Date('not-a-date') })
+    const v = checkFreshness([corrupt], NOW)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds).toEqual(['CORRUPT'])
+  })
 })
 
-describe('checkCurrency', () => {
+describe('checkCurrency (expected currency given)', () => {
   it('passes when every item matches the expected currency', () => {
     expect(checkCurrency([item(), item({ sourceId: 'S2' })], 'EUR')).toEqual([])
   })
@@ -78,13 +85,58 @@ describe('checkCurrency', () => {
     expect(v[0]!.detail).not.toMatch(/convert|exchange|rate/i)
   })
 
-  it('fails a mixed-currency set even when the expected currency is absent', () => {
+  // Discriminates from an implementation that only checks items against EACH
+  // OTHER (internal consistency) and never against `expected`: every item here
+  // shares one currency, so a self-consistency-only check would pass this and
+  // return []. The real behaviour must still flag every item as wrong,
+  // because none of them is in the expected trip currency.
+  it('fails every item when they all agree with each other but not with expected', () => {
+    const a = item({ sourceId: 'A', price: money(1_000n, 'GBP') })
+    const b = item({ sourceId: 'B', price: money(2_000n, 'GBP') })
+    const c = item({ sourceId: 'C', price: money(3_000n, 'GBP') })
+    const v = checkCurrency([a, b, c], 'EUR')
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds.sort()).toEqual(['A', 'B', 'C'])
+  })
+
+  it('fails a 3+ item mixed-currency set with the exact offending ids, even when expected is absent from all of them', () => {
     const a = item({ sourceId: 'A', price: money(1n, 'GBP') })
     const b = item({ sourceId: 'B', price: money(1n, 'USD') })
-    expect(checkCurrency([a, b], 'EUR')).not.toEqual([])
+    const c = item({ sourceId: 'C', price: money(1n, 'CHF') })
+    const v = checkCurrency([a, b, c], 'EUR')
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds.sort()).toEqual(['A', 'B', 'C'])
+  })
+
+  it('matches expected case-insensitively, same as money() normalises to upper case', () => {
+    expect(checkCurrency([item()], 'eur')).toEqual([])
   })
 
   it('passes an empty set', () => {
     expect(checkCurrency([], 'EUR')).toEqual([])
+  })
+})
+
+describe('checkCurrency (no trip currency set yet: internal consistency only)', () => {
+  it('passes when all items already agree, even though no expected currency exists', () => {
+    const a = item({ sourceId: 'A', price: money(1_000n, 'GBP') })
+    const b = item({ sourceId: 'B', price: money(2_000n, 'GBP') })
+    expect(checkCurrency([a, b], null)).toEqual([])
+  })
+
+  it('fails a mixed set with every distinct currency and every offending sourceId named', () => {
+    const a = item({ sourceId: 'A', price: money(1n, 'GBP') })
+    const b = item({ sourceId: 'B', price: money(1n, 'USD') })
+    const v = checkCurrency([a, b], null)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('currency')
+    expect(v[0]!.sourceIds.sort()).toEqual(['A', 'B'])
+    expect(v[0]!.detail).toMatch(/GBP/)
+    expect(v[0]!.detail).toMatch(/USD/)
+    expect(v[0]!.detail).not.toMatch(/convert|exchange|rate/i)
+  })
+
+  it('passes an empty set', () => {
+    expect(checkCurrency([], null)).toEqual([])
   })
 })
