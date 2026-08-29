@@ -1,16 +1,36 @@
 import { APIConnectionError, APIError } from '@anthropic-ai/sdk/core/error'
 import type { ContentBlockParam, MessageParam, Tool } from '@anthropic-ai/sdk/resources/messages'
 import { textOf, type ModelClient } from './client.js'
-import { classifyError, isRefusal, type ClassifiedReason } from './errors.js'
+import { classifyError, isRefusal } from './errors.js'
+import { decideNext, type Limits, type Spend } from './engine.js'
+import type { FailReason } from './engine.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
 import { withSeat, type Seat } from './seats.js'
 import type { ToolRunner } from './tools.js'
 
 export type ToolTrace = { name: string; input: unknown; content: string; isError: boolean }
 
-export type Outcome = 'done' | 'step_cap' | 'refused' | 'max_tokens' | ClassifiedReason
+/**
+ * A turn ends in exactly one of these. Everything but `done`, `max_tokens` and
+ * `continue_later` is a `FailReason`, which is the same list lesson 2.7 writes
+ * into the database constraint.
+ */
+export type Outcome = 'done' | 'max_tokens' | 'continue_later' | FailReason
 
+/** A run that asks for its thirteenth tool is circling. Twelve is what lesson 1.5 measured. */
 export const MAX_STEPS = 12
+
+/**
+ * Nothing meters spend yet, so the loop is handed zeroes and ceilings it cannot
+ * reach. Lesson 2.6 deletes both of these and hands it the real ledger.
+ */
+export const NO_SPEND: Spend = { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
+export const UNMETERED_LIMITS: Limits = {
+  conversationCeilingMicros: 2n ** 62n,
+  dailyCeilingMicros: 2n ** 62n,
+  globalCeilingMicros: 2n ** 62n,
+  maxSteps: MAX_STEPS,
+}
 
 export type LoopResult = {
   outcome: Outcome
@@ -28,8 +48,16 @@ export type LoopOptions = {
   tools: Tool[]
   run: ToolRunner
   client: ModelClient
-  /** A run that asks for its thirteenth tool is circling; twelve is a first guess we will measure. */
-  maxSteps?: number
+  /** The ceilings this run answers to. */
+  limits?: Limits
+  /** What has been spent so far, as the caller last read it. */
+  spend?: Spend
+  /** The clock, handed in rather than read, so the engine stays pure. */
+  now?: () => number
+  /** When the process that runs this loop expects to be killed. */
+  deadlineMs?: number
+  /** How long one step is assumed to take, so we stop before we are cut off. */
+  estStepMs?: number
 }
 
 /** Token-by-token sum, with no opinion on whether `a` and `b` came from the same model. */
@@ -50,17 +78,39 @@ export function addUsage(a: Usage, b: Usage): Usage {
  * thrown exception (lesson 1.5).
  */
 export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
-  const maxSteps = options.maxSteps ?? MAX_STEPS
   const messages: MessageParam[] = [{ role: 'user', content: options.userText }]
   const toolTrace: ToolTrace[] = []
   let usage: Usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   let steps = 0
 
+  const limits = options.limits ?? UNMETERED_LIMITS
+  const now = options.now ?? Date.now
+  // A run with no deadline of its own is given one an hour away, which is longer
+  // than any tier that hosts it; tier 3 passes its real fifteen minute budget.
+  const deadlineMs = options.deadlineMs ?? now() + 60 * 60_000
+  const estStepMs = options.estStepMs ?? 20_000
+
   const finish = (outcome: Outcome, text: string): LoopResult =>
     ({ outcome, text, steps, toolTrace, usage, costMicros: costMicros(options.seat.model, usage) })
 
   for (;;) {
-    if (steps >= maxSteps) return finish('step_cap', '')
+    const decision = decideNext({
+      state: { step: steps },
+      spend: options.spend ?? NO_SPEND,
+      limits,
+      nowMs: now(),
+      deadlineMs,
+      estStepMs,
+      pendingUserMessage: null,
+    })
+    if (decision.kind === 'stop') return finish(decision.reason, '')
+    // Nowhere to continue to inside one process. Module 3 saves the state here
+    // and lets a fresh invocation pick the turn up.
+    if (decision.kind === 'continue_later') return finish('continue_later', '')
+    // Not reachable yet: nothing returns 'park' until a desk can ask her a
+    // question and wait. The branch exists so a new decision kind cannot be
+    // silently ignored here.
+    if (decision.kind === 'park') return finish('done', decision.message)
     steps += 1
 
     // Thinking tokens count against max_tokens on the Opus seat, so the

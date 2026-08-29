@@ -1,5 +1,5 @@
 import { RateLimitError } from '@anthropic-ai/sdk'
-import { MAX_STEPS, toolLoop } from '../src/loop.js'
+import { MAX_STEPS, UNMETERED_LIMITS, toolLoop } from '../src/loop.js'
 import { SEATS } from '../src/seats.js'
 import { TOOLS } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
@@ -17,9 +17,28 @@ describe('toolLoop', () => {
   })
   it('honours a smaller cap', async () => {
     const client = fakeClient([toolUseMessage('search_hotels', { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 })])
-    const result = await toolLoop({ ...base, client, maxSteps: 3 })
+    const result = await toolLoop({ ...base, client, limits: { ...UNMETERED_LIMITS, maxSteps: 3 } })
+    expect(result.outcome).toBe('step_cap')
     expect(result.steps).toBe(3)
     expect(result.toolTrace).toHaveLength(3)
+  })
+  it('hands off instead of starting a step it cannot finish', async () => {
+    const client = fakeClient([textMessage('Here is a plan.')])
+    const result = await toolLoop({
+      ...base, client,
+      now: () => 550_000, deadlineMs: 600_000, estStepMs: 60_000,
+    })
+    expect(result.outcome).toBe('continue_later')
+    expect(client.calls).toBe(0)          // not one token was spent
+  })
+  it('stops for money before it stops for steps', async () => {
+    const client = fakeClient([textMessage('Here is a plan.')])
+    const result = await toolLoop({
+      ...base, client,
+      limits: { ...UNMETERED_LIMITS, maxSteps: 0, globalCeilingMicros: 1n },
+      spend: { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 1n },
+    })
+    expect(result.outcome).toBe('limit_reached')   // not step_cap
   })
   it('treats a refusal as an outcome, not an exception', async () => {
     const client = fakeClient([textMessage('I cannot help with that.', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'other' } } as never)])

@@ -25,6 +25,9 @@ describeDb('submitMessage', () => {
       expect(msgs[0]!.turn_id).toBe(result.turnId)
       const [t] = await sql`select status from course.turns where id = ${result.turnId}`
       expect(t!.status).toBe('queued')
+      // The conversation row records that a turn is in flight.
+      const [c] = await sql`select status from course.conversations where id = ${result.conversationId}`
+      expect(c!.status).toBe('working')
     })
   })
 

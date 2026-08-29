@@ -22,6 +22,16 @@ export function newConversation(id = 'conv-1'): Conversation {
 export type TurnResult = LoopResult & { conversation: Conversation; desk: 'front' | 'planning' }
 
 /**
+ * Everything a caller can tell one turn beyond her message. Fields are added by
+ * later lessons (2.5 a recorder, 2.6 a spend reader); the parameter list does
+ * not change again.
+ */
+export type TurnOptions = {
+  /** When the process running this turn expects to be killed. */
+  deadlineMs?: number
+}
+
+/**
  * One message from her, one reply from us. Extraction writes her words into
  * the notebook before the desk reads it, so the desk plans from what she
  * said across every turn and not only this one. `costMicros` is the sum of
@@ -29,11 +39,25 @@ export type TurnResult = LoopResult & { conversation: Conversation; desk: 'front
  * extract included, because a bill that only counted the loop would be one
  * she never actually paid.
  */
-export async function turn(conversation: Conversation, text: string, client: ModelClient, run: ToolRunner): Promise<TurnResult> {
+export async function turn(
+  conversation: Conversation,
+  text: string,
+  client: ModelClient,
+  run: ToolRunner,
+  options: TurnOptions = {},
+): Promise<TurnResult> {
   const classified = await classify(text, client)
   if (classified.label === 'faq') {
     const desk = loadDesk('front')
-    const result = await toolLoop({ seat: desk.seat, system: renderPrompt(desk, {}), userText: text, tools: toolsFor(desk), run, client })
+    const result = await toolLoop({
+      seat: desk.seat,
+      system: renderPrompt(desk, {}),
+      userText: text,
+      tools: toolsFor(desk),
+      run,
+      client,
+      deadlineMs: options.deadlineMs,
+    })
     const next = { ...conversation, replies: [...conversation.replies, result.text] }
     return {
       ...result,
@@ -52,7 +76,15 @@ export async function turn(conversation: Conversation, text: string, client: Mod
     requirements: notebookForPrompt(notebook),
     dropped: extracted.dropped.length ? extracted.dropped.join(', ') : 'none',
   })
-  const result = await toolLoop({ seat: desk.seat, system, userText: text, tools: toolsFor(desk), run, client })
+  const result = await toolLoop({
+    seat: desk.seat,
+    system,
+    userText: text,
+    tools: toolsFor(desk),
+    run,
+    client,
+    deadlineMs: options.deadlineMs,
+  })
   const next = { ...conversation, notebook, replies: [...conversation.replies, result.text] }
   return {
     ...result,

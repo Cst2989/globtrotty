@@ -43,6 +43,7 @@ export default async (req: Request): Promise<Response> => {
       input.message,
       liveClient(),
       mockRunner(new MockSupplier()),
+      { deadlineMs: startedMs + BACKGROUND_BUDGET_MS },
     )
     await finishTurn(sql, input, result.text)
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)

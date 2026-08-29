@@ -50,6 +50,9 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
             values (${conversationId}, ${input.userId}, ${turnId}, 'user', ${input.message})`
 
+  // Marks the conversation row as having a turn in flight, so anything reading
+  // it (her, or an operator) can tell a reply is being worked on rather than
+  // reading stale silence as nothing having happened.
   await sql`update course.conversations set status = 'working', updated_at = now()
              where id = ${conversationId} and user_id = ${input.userId}`
 
