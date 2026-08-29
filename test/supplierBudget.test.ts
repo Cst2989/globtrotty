@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
-import { countSupplierCalls, assertSupplierBudget } from '../src/tools/supplierBudget.js'
+import { countSupplierCalls, assertSupplierBudget, SUPPLIER_DOORS } from '../src/tools/supplierBudget.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { TOOLS } from '../src/tools/registry.js'
 
 describe('DEFAULT_LIMITS', () => {
   it('carries a per-turn supplier-call ceiling', () => {
@@ -18,9 +19,9 @@ describeDb('supplier budget', () => {
       values (${c!.id}, ${userId}, ${'sb' + n}, 'running') returning id`
     return { turnId: t!.id as string }
   }
-  const addCall = (sql: any, turnId: string, id: string, name: string) => sql`
+  const addCall = (sql: any, turnId: string, id: string, name: string, status = 'done') => sql`
     insert into tool_calls (turn_id, call_id, name, status)
-    values (${turnId}, ${id}, ${name}, 'done')`
+    values (${turnId}, ${id}, ${name}, ${status})`
 
   it('counts only api-door tools, not code-door ones', async () => {
     await withTestDb(async (sql) => {
@@ -51,10 +52,50 @@ describeDb('supplier budget', () => {
     })
   })
 
+  it('counts a pending call — the worker writes the row BEFORE executing, so a call that died mid-flight still costs quota', async () => {
+    // This is the load-bearing bias documented on countSupplierCalls: the
+    // query is deliberately unfiltered by status. Seeding only 'done' rows
+    // (as every other test in this file does) would let a regression that
+    // adds `and status = 'done'` to the query pass every other test here —
+    // this is the one that catches it.
+    await withTestDb(async (sql) => {
+      const { turnId } = await seedTurn(sql, '05')
+      await addCall(sql, turnId, 'a', 'explore_flights', 'done')
+      await addCall(sql, turnId, 'b', 'explore_hotels', 'pending')
+      expect(await countSupplierCalls(sql, turnId)).toBe(2)
+    })
+  })
+
 })
 
-// Outside describeDb on purpose: neither of these needs a database, and the
+// Outside describeDb on purpose: none of these need a database, and the
 // first draft's version was skipped offline for no reason.
+describe('SUPPLIER_DOORS tracks the registry\'s api-door tools', () => {
+  it('lists exactly the tools registered with door: "api" — no more, no fewer', () => {
+    // SUPPLIER_DOORS is maintained BY HAND, deliberately separate from TOOLS'
+    // `door` field (src/tools/supplierBudget.ts): `door` answers a
+    // fencing/provenance question, this list answers a cost/rate-limit
+    // question, and coupling them by default was reviewed and rejected. That
+    // means nothing derives one from the other, so nothing catches them
+    // drifting apart — a new api-door tool (car rental, activities search...)
+    // would be fenced correctly and cost NOTHING against the budget, with no
+    // error, just an unmetered hammering of the supplier.
+    //
+    // If this test fails: do NOT "fix" it by deriving SUPPLIER_DOORS from
+    // TOOLS' door field — that coupling was deliberately rejected. Instead,
+    // decide whether the new/changed api-door tool actually reaches a
+    // metered, rate-limited third party, and if so add it BY HAND to
+    // SUPPLIER_DOORS in src/tools/supplierBudget.ts.
+    const apiDoorTools = Object.values(TOOLS)
+      .filter((t) => t.door === 'api')
+      .map((t) => t.name)
+
+    expect(new Set(SUPPLIER_DOORS)).toEqual(new Set(apiDoorTools))
+    // Also pin there are no duplicates in the hand-maintained list itself.
+    expect(SUPPLIER_DOORS.length).toBe(new Set(SUPPLIER_DOORS).size)
+  })
+})
+
 describe('countSupplierCalls fails closed', () => {
   it('refuses to assume zero when the count query returns no row', async () => {
     // The discriminating case. `sql` here is CALLABLE — a tagged template that

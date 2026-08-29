@@ -49,6 +49,55 @@ describe('registry', () => {
   })
 })
 
+describe('provenance is assigned by the harness, never by the model', () => {
+  // Guards the invariant documented on UpdateRequirements in
+  // src/tools/registry.ts: applyRequirements (src/notebook.ts) takes
+  // `source` as a parameter from its CALLER, so no tool schema may accept a
+  // provenance field FROM THE MODEL. Widening a schema to
+  // `z.strictObject({patch: ..., source: z.string().optional()})` — as the
+  // task brief's example shows — would pass every other test in this file.
+  // Looping over the code-door tools (rather than hand-picking
+  // update_requirements) means a future code-door tool is covered for free.
+  const VALID_INPUT: Record<string, unknown> = {
+    update_requirements: { patch: { destination: 'Lisbon' } },
+    ask_user: { questions: ['When do you want to travel?'] },
+    propose_itinerary: { refs: [{ sourceId: 'KIWI-1', quantity: 1, slot: 'outbound' }] },
+  }
+
+  const codeDoorTools = Object.values(TOOLS).filter((t) => t.door === 'code')
+
+  it('has a valid-input fixture for every code-door tool (fixture stays in sync)', () => {
+    // If this fails, a new code-door tool was added without a fixture above,
+    // and the loop below would silently test nothing for it.
+    expect(codeDoorTools.map((t) => t.name).sort())
+      .toEqual(Object.keys(VALID_INPUT).sort())
+  })
+
+  const PROVENANCE_FIELDS = ['source', 'stated_by', 'price', 'currency', 'fetchedAt', 'url']
+
+  for (const tool of codeDoorTools) {
+    const base = VALID_INPUT[tool.name]
+    it(`${tool.name}: accepts its own valid input unchanged`, () => {
+      expect(tool.schema.safeParse(base).success).toBe(true)
+    })
+
+    for (const field of PROVENANCE_FIELDS) {
+      it(`${tool.name}: rejects a model-supplied "${field}" field`, () => {
+        const tainted = { ...(base as Record<string, unknown>), [field]: 'model-supplied' }
+        const result = tool.schema.safeParse(tainted)
+        expect(result.success).toBe(false)
+        if (result.success) throw new Error('unreachable')
+        // zod v4 reports an extra key via `issue.keys`, not `issue.path[0]` —
+        // assert the offending key is actually NAMED, not merely that
+        // validation failed for some unrelated reason.
+        const namedKeys = result.error.issues.flatMap((issue) =>
+          issue.code === 'unrecognized_keys' ? issue.keys : [])
+        expect(namedKeys).toContain(field)
+      })
+    }
+  }
+})
+
 describe('validateToolCall', () => {
   it('rejects a tool the desk does not carry, as a readable result not a throw', () => {
     const out = validateToolCall('front', 'ask_user', {})
