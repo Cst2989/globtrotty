@@ -1,7 +1,13 @@
+import { newConversation, turn } from '../src/conversation.js'
+import { isFailReason } from '../src/engine.js'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { finishTurn, loadTurnInput } from '../src/repo/turns.js'
+import { MockSupplier } from '../src/supplier/mock.js'
+import { mockRunner } from '../src/tools.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { fakeClient, textMessage } from './model/fake.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 
@@ -78,6 +84,48 @@ describeDb('finishTurn', () => {
       })
       const input = (await loadTurnInput(sql, submitted.turnId!))!
       await finishTurn(sql, input, '', 'limit_reached')
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('done')
+      expect(t!.fail_reason).toBe('limit_reached')
+      const [c] = await sql`select status from course.conversations where id = ${submitted.conversationId}`
+      expect(c!.status).toBe('limit_reached')
+    })
+  })
+
+  // Defect D from the fix1 re-review: the test above hands finishTurn a bare
+  // '' and 'limit_reached' directly, so it would still pass unchanged if the
+  // sentence in src/limit-message.ts were deleted. This one runs the real
+  // tier-3 path instead: `turn()` (src/conversation.ts) sees a tripped
+  // ceiling before the client is ever called, and its own `result.text` and
+  // `result.outcome` are what reach finishTurn, exactly as
+  // netlify/functions/run-turn-background.mts hands them over. It also picks
+  // the CONVERSATION ceiling specifically: nothing else in the suite
+  // exercises LIMIT_REACHED_MESSAGE.conversation or whichCeiling's
+  // 'conversation' arm.
+  it('writes the exact capped sentence and fail_reason through the real tier-3 path', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+        userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-6',
+      })
+      const input = (await loadTurnInput(sql, submitted.turnId!))!
+      const client = fakeClient([textMessage('should never be reached')])
+      const result = await turn(
+        newConversation(submitted.conversationId), input.message, client, mockRunner(new MockSupplier()),
+        {
+          readSpend: async () => (
+            { conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros, dailyMicros: 0n, globalMicros: 0n }
+          ),
+        },
+      )
+      expect(result.outcome).toBe('limit_reached')
+      expect(client.calls).toBe(0)      // denied before classify, never mind the loop
+
+      await finishTurn(sql, input, result.text, isFailReason(result.outcome) ? result.outcome : undefined)
+
+      const msgs = await sql`select role, content from course.messages
+                              where conversation_id = ${submitted.conversationId} order by seq`
+      expect(msgs[1]!.role).toBe('agent')
+      expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.conversation)
       const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('done')
       expect(t!.fail_reason).toBe('limit_reached')

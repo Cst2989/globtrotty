@@ -2,6 +2,7 @@ import { liveClient } from '../../src/client.js'
 import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
+import { isFailReason } from '../../src/engine.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { finishTurn, loadTurnInput } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
@@ -50,9 +51,12 @@ export default async (req: Request): Promise<Response> => {
         readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
       },
     )
-    // Tier 3's ceiling denial leaves the same record behind tier 2's does
-    // (src/handler.ts), not the record a normal reply leaves.
-    await finishTurn(sql, input, result.text, result.outcome === 'limit_reached' ? 'limit_reached' : undefined)
+    // Every outcome the engine can name (src/engine.ts's FAIL_REASONS) is
+    // passed through to `turns.fail_reason`; 'done', 'max_tokens' and
+    // 'continue_later' are not fail reasons and finishTurn records nothing
+    // for them, exactly as before. The ceiling denial is the one reason that
+    // also leaves the same record behind tier 2's own (src/handler.ts).
+    await finishTurn(sql, input, result.text, isFailReason(result.outcome) ? result.outcome : undefined)
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)
   } finally {
     await sql.end({ timeout: 5 })

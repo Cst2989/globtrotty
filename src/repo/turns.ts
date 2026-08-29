@@ -1,4 +1,5 @@
 import type postgres from 'postgres'
+import type { FailReason } from '../engine.js'
 
 export type TurnInput = {
   turnId: string
@@ -42,21 +43,20 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
  * crash between them cannot leave a finished turn with no reply. Lesson 3.3
  * takes this much further; the transaction is the part that matters today.
  *
- * `failReason`, when passed, is written to `turns.fail_reason` and the
- * conversation is left at that status instead of 'active'. Today the only
- * value ever passed is 'limit_reached', so that tier 3's ceiling denial
- * leaves the same record behind that tier 2's does (src/handler.ts sets
- * `conversations.status = 'limit_reached'` on its own denial). It is typed
- * narrowly rather than as the full `FailReason` union on purpose: lesson 2.7
- * mirrors that whole list into a `turns.fail_reason` check constraint and is
- * where every other outcome earns the same treatment; until then a normal
- * turn keeps recording nothing here, exactly as before.
+ * `failReason`, when passed, is written to `turns.fail_reason`: every outcome
+ * the engine can record (src/engine.ts's `FAIL_REASONS`) carries its own
+ * reason here, not just a capped turn. Only `'limit_reached'` also moves the
+ * conversation off `'active'`, because it is the one reason tier 2 already
+ * has its own status for (src/handler.ts sets `conversations.status =
+ * 'limit_reached'` on its own denial, with no turn row at all); the others
+ * are a turn ending without a real answer, which module 3's retry handles,
+ * not a state the conversation itself needs to reflect yet.
  */
 export async function finishTurn(
   sql: postgres.Sql,
   input: TurnInput,
   reply: string,
-  failReason?: 'limit_reached',
+  failReason?: FailReason,
 ): Promise<void> {
   const status = failReason === 'limit_reached' ? 'limit_reached' : 'active'
   await sql.begin(async (tx) => {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
@@ -6,11 +7,16 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
-const USER = '11111111-1111-1111-1111-111111111111'
+// Fresh per run, the same reason withRealDb invents one (test/helpers/db.ts):
+// a fixed id is also `scripts/trip.ts`'s demo user, so a reader's own live
+// trip commits a real `daily_usage` row for it that outlives any one test's
+// rolled-back transaction and is still there for the rest of the UTC day.
+const USER = randomUUID()
 const LIMITS = DEFAULT_LIMITS
-// Two OTHER users, whose spend only the global ceiling can see.
-const OTHER_A = '22222222-2222-2222-2222-222222222222'
-const OTHER_B = '33333333-3333-3333-3333-333333333333'
+// Two OTHER users, whose spend only the global ceiling can see. Fresh per run
+// for the same reason USER is.
+const OTHER_A = randomUUID()
+const OTHER_B = randomUUID()
 const deps = (sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined)) => ({
   sql, limits: LIMITS, invoke,
 })
@@ -137,17 +143,52 @@ describeDb('submitMessage', () => {
     })
   })
 
+  // Defect D from the fix1 re-review: writeHerMessage's on-conflict guard
+  // only proved a retry skips HER line; nothing pinned that the reply beside
+  // it is skipped too. A retried capped press must leave exactly one of each,
+  // not a second reply glued onto her one kept sentence.
+  it('leaves one message row and one reply row when a capped press is sent twice with the same key', async () => {
+    await withTestDb(async (sql) => {
+      await sql`insert into course.daily_usage (user_id, day, cost_micros)
+                values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
+      const d = deps(sql)
+      const first = await submitMessage(d, {
+        userId: USER, conversationId: null, message: 'a very expensive trip to Japan', idempotencyKey: 'same-capped-press',
+      })
+      const second = await submitMessage(d, {
+        userId: USER, conversationId: first.conversationId, message: 'a very expensive trip to Japan',
+        idempotencyKey: 'same-capped-press',
+      })
+      expect(second.status).toBe('limit_reached')
+      const msgs = await sql`select role, content from course.messages
+                              where conversation_id = ${first.conversationId} order by seq`
+      expect(msgs).toHaveLength(2)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[1]!.role).toBe('agent')
+      expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.daily)
+    })
+  })
+
   // The global ceiling protects the ACCOUNT, not the user: she has spent nothing
   // at all here, so neither per-user counter could possibly refuse her. Without
   // this check tier 2 would wave a capped account through and the refusal would
   // land one step into the turn instead, after a model call has been paid for.
+  //
+  // OTHER_A and OTHER_B's spend is computed as an offset from today's ACTUAL
+  // global total, read first, rather than assuming the table starts empty:
+  // `daily_usage` is shared, and deleting every row for today to force a
+  // clean slate would delete a row this test does not own (a reader's own
+  // live trip, or another test's fixed-day row).
   it('denies at tier 2 when the global ceiling is reached, though this user spent nothing', async () => {
     await withTestDb(async (sql) => {
-      await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`
-      const half = (LIMITS.globalCeilingMicros / 2n).toString()
+      const totalRows = await sql`select coalesce(sum(cost_micros), 0)::text as total
+                                    from course.daily_usage where day = (now() at time zone 'utc')::date`
+      const remaining = LIMITS.globalCeilingMicros - BigInt(totalRows[0]!.total as string)
+      const half = (remaining / 2n).toString()
+      const rest = (remaining - remaining / 2n).toString()
       await sql`insert into course.daily_usage (user_id, day, cost_micros) values
         (${OTHER_A}, (now() at time zone 'utc')::date, ${half}),
-        (${OTHER_B}, (now() at time zone 'utc')::date, ${half})`
+        (${OTHER_B}, (now() at time zone 'utc')::date, ${rest})`
       const invoke = vi.fn()
       const r = await submitMessage(deps(sql, invoke), {
         userId: USER, conversationId: null, message: 'two weeks in Peru', idempotencyKey: 'i1',
@@ -186,11 +227,15 @@ describeDb('submitMessage', () => {
     })
   })
 
+  // Same offset-from-the-actual-total reasoning as the test above, one micro
+  // short of the ceiling instead of exactly on it.
   it('still queues the turn one micro BELOW the global ceiling', async () => {
     await withTestDb(async (sql) => {
-      await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`
-      const a = (LIMITS.globalCeilingMicros / 2n).toString()
-      const b = (LIMITS.globalCeilingMicros - LIMITS.globalCeilingMicros / 2n - 1n).toString()
+      const totalRows = await sql`select coalesce(sum(cost_micros), 0)::text as total
+                                    from course.daily_usage where day = (now() at time zone 'utc')::date`
+      const remaining = LIMITS.globalCeilingMicros - BigInt(totalRows[0]!.total as string) - 1n
+      const a = (remaining / 2n).toString()
+      const b = (remaining - remaining / 2n).toString()
       await sql`insert into course.daily_usage (user_id, day, cost_micros) values
         (${OTHER_A}, (now() at time zone 'utc')::date, ${a}),
         (${OTHER_B}, (now() at time zone 'utc')::date, ${b})`

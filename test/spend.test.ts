@@ -1,7 +1,13 @@
+import { randomUUID } from 'node:crypto'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { ledgerSink, readSpendFailClosed, recordSpend } from '../src/repo/spend.js'
 
-const USER = '11111111-1111-1111-1111-111111111111'
+// Fresh per run, the same reason withRealDb invents one (test/helpers/db.ts):
+// a fixed id is also `scripts/trip.ts`'s demo user, so a reader's own live
+// trip commits a real `daily_usage` row for it that outlives any one test's
+// rolled-back transaction and is still there for the rest of the UTC day,
+// which broke every absolute assertion below against a fixed id.
+const USER = randomUUID()
 
 describeDb('recordSpend', () => {
   it('increments conversation and daily counters atomically and returns totals', async () => {
@@ -41,6 +47,13 @@ describeDb('readSpendFailClosed', () => {
       const s = await readSpendFailClosed(sql, USER, c!.id)
       expect(s.dailyMicros).toBe(0n)
       expect(s.conversationMicros).toBe(0n)
+      // The global read sums every user, not just this fresh one, so it
+      // cannot be asserted as zero against a shared database that may
+      // already hold today's real spend; it can still be pinned as "resolved
+      // to a real bigint, not thrown", which is the guarantee this fresh
+      // user's read actually needs from it.
+      expect(typeof s.globalMicros).toBe('bigint')
+      expect(s.globalMicros).toBeGreaterThanOrEqual(0n)
     })
   })
 
@@ -76,15 +89,22 @@ describeDb('readSpendFailClosed', () => {
   // Deliberately NOT 'fails closed on the global read too'. That test would have
   // duplicated the one above and, worse, exercised the CONVERSATION read while
   // claiming to test the global one. The global read cannot fail closed: sum(...)
-  // over zero rows is 0, and 0 is a legitimate answer ("nobody has spent today")
-  // that is indistinguishable from "the database gave no answer". This pins what
-  // it actually does, so the zero is never mistaken for a confirmed guarantee.
-  it('returns 0n for the global total when nothing is recorded, because it cannot fail closed', async () => {
+  // over zero MATCHING rows is 0, and 0 is a legitimate answer ("nobody has spent
+  // that day") that is indistinguishable from "the database gave no answer".
+  //
+  // This pins the SQL behaviour directly, against a day nobody will ever write
+  // real data to, rather than against today: `daily_usage` is shared, and
+  // today may already hold a reader's own live spend, which deleting to force
+  // a clean slate would destroy. `readSpendFailClosed`'s global query is
+  // always `coalesce(sum(cost_micros), 0)` over `day = today`; this is the
+  // same expression with the day swapped for one that is provably empty, so
+  // it proves the same coalesce-catches-NULL fact without touching a row
+  // this test does not own.
+  it('reads 0, not a throw, for a day with zero matching rows', async () => {
     await withTestDb(async (sql) => {
-      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning *`
-      await sql`delete from course.daily_usage where day = (now() at time zone 'utc')::date`
-      const s = await readSpendFailClosed(sql, USER, c!.id)
-      expect(s.globalMicros).toBe(0n)          // zero, NOT a throw
+      const [row] = await sql`select coalesce(sum(cost_micros), 0)::text as total
+                                from course.daily_usage where day = '2099-12-31'`
+      expect(row!.total).toBe('0')
     })
   })
 

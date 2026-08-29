@@ -40,7 +40,7 @@ export type SubmitResult = {
  * retry rather than answer the same press twice.
  */
 async function writeHerMessage(
-  sql: postgres.Sql, input: SubmitInput, conversationId: string, turnId: string | null,
+  sql: postgres.Sql | postgres.TransactionSql, input: SubmitInput, conversationId: string, turnId: string | null,
 ): Promise<boolean> {
   const rows = await sql`
     insert into course.messages (conversation_id, user_id, turn_id, role, content, idempotency_key)
@@ -102,18 +102,21 @@ export async function submitMessage(deps: SubmitDeps, input: SubmitInput): Promi
   // actually enforces the ceiling, because nothing can be spent between its
   // read and its decision without another step (and another read) in between.
   if (exceedsAnyCeiling(spend, deps.limits)) {
-    const wroteHerMessage = await writeHerMessage(sql, input, conversationId, null)
-    // A capped press still gets a real reply, naming which limit she hit
-    // (src/limit-message.ts), the same sentence tier 3 writes for the same
-    // denial (src/loop.ts, src/repo/turns.ts). Skipped on a retry of a press
-    // already answered: writeHerMessage returning false means this key has
-    // already written both her line and this one.
-    if (wroteHerMessage) {
-      await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-                values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
-    }
-    await sql`update course.conversations set status = 'limit_reached', updated_at = now()
-               where id = ${conversationId} and user_id = ${input.userId}`
+    // One transaction: a capped press still gets a real reply, naming which
+    // limit she hit (src/limit-message.ts), the same sentence tier 3 writes
+    // for the same denial (src/loop.ts, src/repo/turns.ts). Without the
+    // transaction, a crash between the two inserts would leave her line with
+    // no reply that any retry could ever add, since a retry reads
+    // writeHerMessage's on-conflict as false and skips straight past it.
+    await sql.begin(async (tx) => {
+      const wroteHerMessage = await writeHerMessage(tx, input, conversationId, null)
+      if (wroteHerMessage) {
+        await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+                  values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
+      }
+      await tx`update course.conversations set status = 'limit_reached', updated_at = now()
+                 where id = ${conversationId} and user_id = ${input.userId}`
+    })
     return { conversationId, turnId: null, status: 'limit_reached' }
   }
 
