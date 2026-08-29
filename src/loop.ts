@@ -32,7 +32,8 @@ export type LoopOptions = {
   maxSteps?: number
 }
 
-function addUsage(a: Usage, b: Usage): Usage {
+/** Token-by-token sum, with no opinion on whether `a` and `b` came from the same model. */
+export function addUsage(a: Usage, b: Usage): Usage {
   return {
     input_tokens: a.input_tokens + b.input_tokens,
     output_tokens: a.output_tokens + b.output_tokens,
