@@ -22,6 +22,18 @@ describe('costMicros', () => {
       { ...ZERO, cache_creation_input_tokens: 1_000_000 }, '5m')).toBe(6_250_000n)
   })
 
+  it('rounds a genuinely fractional pre-round value UP, not down or to nearest', () => {
+    // 3 tokens * 5 micros/token * 1.25 = 18.75 micros exactly — verified in
+    // `node -e` before pinning this. Every other fixture in this file happens
+    // to land on a whole number, so Math.ceil, Math.round and Math.floor would
+    // all agree with them; only this one actually exercises the round-UP rule
+    // the doc comment promises. Math.floor here would yield 18n, Math.round
+    // would yield 19n too (coincidentally, since .75 rounds up) — so this
+    // value was chosen specifically to also catch a flip to Math.floor.
+    expect(costMicros('claude-opus-5',
+      { ...ZERO, cache_creation_input_tokens: 3 }, '5m')).toBe(19n)
+  })
+
   it('bills a 1-hour cache write at exactly 2x base input', () => {
     // The rate Task 6's `ttl: '1h'` actually incurs. Pinned as a figure, not as
     // a ratio: a multiplier that drifts to 1.25 must fail here, loudly.
