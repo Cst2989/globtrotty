@@ -116,14 +116,30 @@ export const SLOT_KINDS = {
 
 /** Implements the spec's `mismatched(items, offer)` pre-gate (§5). */
 export function checkSlots(items: RehydratedItem[]): Violation[] {
-  const vocabulary: Record<string, SupplierKind | undefined> = SLOT_KINDS
-
   const unknown: RehydratedItem[] = []
-  const mismatched: RehydratedItem[] = []
+  const mismatched: { r: RehydratedItem; wants: SupplierKind }[] = []
+
   for (const r of items) {
-    const wants = vocabulary[r.ref.slot]
-    if (wants === undefined) unknown.push(r)
-    else if (r.item.kind !== wants) mismatched.push(r)
+    // `Object.hasOwn`, never a bare index. `slot` is model-controlled and the
+    // tool schema only bounds its LENGTH, so `slot: 'toString'`, 'constructor'
+    // or '__proto__' would otherwise resolve through `Object.prototype`, return
+    // something truthy, skip the unknown-name branch, and render
+    // `slot "toString" takes a function toString() { [native code] }`. That
+    // still fails closed, but it misclassifies an unknown-NAME fault as a
+    // wrong-KIND one and hands the model a message it cannot act on.
+    if (!Object.hasOwn(SLOT_KINDS, r.ref.slot)) {
+      unknown.push(r)
+      continue
+    }
+    const wants: SupplierKind = SLOT_KINDS[r.ref.slot as keyof typeof SLOT_KINDS]
+
+    // `detail.kind`, not the sibling `item.kind`. `SupplierItem` does not couple
+    // the two fields, and the corpus round-trip reads `detail` back as
+    // unvalidated JSON, so a row where they disagree is possible. `checkDates`
+    // already keys off `detail.kind` through `isFlight`/`isHotel`; keying this
+    // gate off the other field would let one inconsistent row be slot-checked
+    // as a flight and date-checked as a hotel. Recompute, never trust.
+    if (r.item.detail.kind !== wants) mismatched.push({ r, wants })
   }
 
   // Two distinct faults, so two violations — but each one groups every
@@ -141,11 +157,11 @@ export function checkSlots(items: RehydratedItem[]): Violation[] {
   if (mismatched.length > 0) {
     violations.push({
       gate: 'slots',
-      sourceIds: mismatched.map((r) => r.item.sourceId),
+      sourceIds: mismatched.map(({ r }) => r.item.sourceId),
       detail: `These items do not match the slot they were proposed for: `
-            + `${mismatched.map((r) =>
-                  `${r.item.sourceId} is a ${r.item.kind} but slot "${r.ref.slot}" `
-                + `takes a ${vocabulary[r.ref.slot]}`).join('; ')}.`,
+            + `${mismatched.map(({ r, wants }) =>
+                  `${r.item.sourceId} is a ${r.item.detail.kind} but slot `
+                + `"${r.ref.slot}" takes a ${wants}`).join('; ')}.`,
     })
   }
   return violations
@@ -173,6 +189,21 @@ export type TotalsResult = { violations: Violation[]; total: Money | null }
  * `expected` is required rather than defaulted so a caller has to decide. A
  * silently-defaulted `null` is how "we forgot to pass the trip currency" turns
  * into "the trip currency was never checked".
+ *
+ * ## RECORDING THE OUTCOME — the rule, stated once
+ *
+ * **When `total === null`, BOTH the `totals` gate AND the `budget` gate are
+ * `not_evaluated`. Never `pass`. The discriminator is `total`, NOT the
+ * violation list.**
+ *
+ * This matters because the violation list does not partition by gate the way a
+ * writer bucketing rows by `Violation.gate` would assume. A mixed-currency
+ * proposal returns `{violations: [<currency>], total: null}` — ZERO violations
+ * tagged `totals`, and `checkBudget` returns `[]`. A writer that reads "no
+ * violations with my gate name" as "my gate passed" records
+ * `currency: fail, totals: pass, budget: pass`. That audit record asserts a
+ * trip total was computed and checked when none exists, from the one gate whose
+ * entire job was to refuse to compute it.
  *
  * Returns violations; never throws. The two throwing calls it could make are
  * guarded:
@@ -231,14 +262,29 @@ export function checkTotals(items: RehydratedItem[], expected: string | null): T
  * reports every totals fault a second time in its own words.
  *
  * So when there is no trustworthy total this returns NOTHING rather than a
- * second violation. That is not failing open: `total === null` only happens
- * when `checkTotals` itself filed a violation (or the set was empty), the
- * proposal is already rejected by it, and restating the same fault under a
- * different gate name is the noise the gate stack is supposed to avoid. Budget
- * never invents a total, and never passes a proposal that had one.
+ * second violation. That is a deliberate generalization and worth naming as
+ * one: the requirement was that a MIXED-CURRENCY proposal yield a single
+ * violation, and this suppresses for EVERY cause of a null total — mixed
+ * currencies, mixed price bases, and a bad quantity alike. The reason it
+ * generalizes is that the causes are indistinguishable in the only respect
+ * budget cares about: there is no number to compare. `total === null` only
+ * happens when `checkTotals` itself filed a violation (or the set was empty),
+ * so the proposal is already rejected and restating the same fault under a
+ * different gate name is the noise the gate stack exists to avoid.
+ *
+ * It is not failing open. Budget never invents a total, and never returns `[]`
+ * for a proposal that HAD a total and exceeded it — but see the recording rule
+ * below, because `[]` alone does not distinguish "passed" from "not run".
  *
  * `items` is here only to name the offenders in the message; the number under
- * test comes from `totals`.
+ * test comes from `totals`. Note what this does NOT buy: `TotalsResult` is a
+ * structural type, so a hand-built `{violations: [], total: money(999n,'EUR')}`
+ * type-checks fine and nothing ties `totals` to `items`. Passing the
+ * `TotalsResult` computed from THESE items is the caller's responsibility; the
+ * signature makes it the obvious thing to do, not the only possible thing.
+ *
+ * See `checkTotals` for the recording rule: a `[]` from here means `pass` ONLY
+ * when `totals.total` is non-null. Otherwise it means `not_evaluated`.
  *
  * Never throws. `compareMoney` throws on a currency mismatch, and the explicit
  * currency comparison immediately above it is the guard — the mismatch is

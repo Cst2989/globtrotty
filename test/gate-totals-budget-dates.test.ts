@@ -132,10 +132,11 @@ describe('checkBudget', () => {
     expect(v).toHaveLength(1)
     expect(v[0]!.gate).toBe('budget')
     expect(v[0]!.sourceIds).toEqual(['A'])
-    // Pin BOTH figures. A message that names any other number is wrong even
-    // when it is euro-formatted and reads convincingly.
-    expect(v[0]!.detail).toContain('€100.01')
-    expect(v[0]!.detail).toContain('€100.00')
+    // Pin both figures AND their roles. Two bare `toContain` calls would also
+    // pass against "totals €100.00, over the €100.01 budget", which names the
+    // right two numbers and swaps them.
+    expect(v[0]!.detail).toContain('totals €100.01')
+    expect(v[0]!.detail).toContain('over the €100.00 budget')
   })
 
   it('passes a total one minor unit under', () => {
@@ -222,7 +223,13 @@ describe('checkDates', () => {
     // zoneless string applies the SERVER's zone, and in a negative-offset zone
     // (this suite pins America/Los_Angeles) the resulting instant is
     // 2026-09-21T06:59Z — a day later than the traveller's own calendar says.
-    // Same trap on the lower bound with 00:00 on the first day.
+    //
+    // The 00:00 lower bound is the MIRROR of that trap, not the same one: it
+    // rolls backwards only under a POSITIVE offset, which this suite does not
+    // pin, so it is inert here. It is in this fixture to keep the case honest,
+    // not because it discriminates. The 23:59 upper bound is what bites under
+    // the pinned zone — see the sibling `checkDates` failures the discrimination
+    // probe produces when `day()` parses instead of slicing.
     expect(checkDates([flight('EDGE', '2026-09-10T00:00:00', '2026-09-20T23:59:00')], win))
       .toEqual([])
   })
@@ -295,6 +302,41 @@ describe('checkSlots', () => {
     expect(v[0]!.sourceIds).toEqual(['S'])
     expect(v[0]!.detail).toContain('penthouse')
     for (const name of Object.keys(SLOT_KINDS)) expect(v[0]!.detail).toContain(name)
+  })
+
+  it('rejects Object.prototype keys as slot names rather than resolving them', () => {
+    // `slot` is model-controlled and the schema bounds only its length, so a
+    // bare `SLOT_KINDS[slot]` returns a function for 'toString' and an object
+    // for '__proto__'. Both are truthy, so they skip the unknown-name branch
+    // and get misreported as a wrong-KIND fault with an unactionable message
+    // ('slot "toString" takes a function toString() { [native code] }').
+    for (const key of ['__proto__', 'toString', 'constructor', 'valueOf']) {
+      const v = checkSlots([inSlot(hotel('P', 100n), key)])
+      expect(v).toHaveLength(1)
+      expect(v[0]!.gate).toBe('slots')
+      expect(v[0]!.sourceIds).toEqual(['P'])
+      // Classified as an unknown NAME, not a kind mismatch: the unknown-name
+      // message is the one that lists the vocabulary.
+      expect(v[0]!.detail).toContain('does not exist')
+      expect(v[0]!.detail).toContain('outbound, inbound, flight, stay')
+      expect(v[0]!.detail).not.toContain('native code')
+    }
+  })
+
+  it('keys off detail.kind, not the sibling item.kind field', () => {
+    // `SupplierItem` does not couple `kind` and `detail.kind`, and the corpus
+    // round-trip reads `detail` back as unvalidated JSON. `checkDates` trusts
+    // `detail.kind`; this gate must agree, or one inconsistent row is
+    // slot-checked as a flight and date-checked as a hotel.
+    const h = inSlot(hotel('SPOOF', 100n), 'stay')
+    const spoofed = { ...h, item: { ...h.item, kind: 'flight' as const } }
+    expect(checkSlots([spoofed])).toEqual([])
+
+    const f = inSlot(flight('SPOOF2', '2026-09-12T10:00:00', '2026-09-19T10:00:00'), 'stay')
+    const spoofed2 = { ...f, item: { ...f.item, kind: 'hotel' as const } }
+    const v = checkSlots([spoofed2])
+    expect(v).toHaveLength(1)
+    expect(v[0]!.detail).toContain('SPOOF2 is a flight')
   })
 
   it('is case-sensitive: the vocabulary is exactly the documented names', () => {
