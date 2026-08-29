@@ -95,6 +95,26 @@ describe('buildRequest suffix', () => {
   })
 })
 
+describe('buildRequest cache breakpoints', () => {
+  it('puts the 1h system breakpoint on the request it will actually send', () => {
+    const req = buildRequest(base)
+    const system = req.system as Array<{ type: string; cache_control?: unknown }>
+    expect(Array.isArray(system)).toBe(true)
+    expect(system.at(-1)!.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  it('sends volatile context AFTER the rolling breakpoint, never carrying it', () => {
+    const req = buildRequest({ ...base, suffix: '- destination: Faro (user)' })
+    const sent = req.messages as Array<{ content: Array<Record<string, unknown>> }>
+    const blocks = sent.at(-1)!.content
+    // The transcript block keeps the rolling breakpoint...
+    expect(blocks.at(-2)!.cache_control).toEqual({ type: 'ephemeral' })
+    // ...and the notebook sits behind it, uncached, because it changes every turn.
+    expect(blocks.at(-1)!.text).toBe('- destination: Faro (user)')
+    expect(blocks.at(-1)!.cache_control).toBeUndefined()
+  })
+})
+
 describe('estimateInputTokens', () => {
   it('rounds a genuinely fractional byte count UP, not down', () => {
     // buildRequest({...base, system:'abcdefghij', messages:[], tools:[]}) stringifies
@@ -103,8 +123,14 @@ describe('estimateInputTokens', () => {
     // disagree on this fixture — unlike a fixture that happens to divide evenly,
     // this one actually catches a flip to Math.floor. Same pattern as
     // test/spend.test.ts's "rounds a genuinely fractional pre-round value UP".
+    // Task 6 note: buildRequest now wraps `system` in a cache_control-bearing
+    // block (cacheableSystem), which adds fixed JSON overhead ahead of the
+    // "abcdefghij" text — 145 bytes became 218. 218 / 3 = 72.66..., still
+    // genuinely fractional, so ceil (73) and floor (72) still disagree; this
+    // pinned value moved from 49 to 73 for that reason, not because the
+    // ceil-vs-floor property this test checks changed.
     const one = estimateInputTokens({ ...base, system: 'abcdefghij', messages: [], tools: [] })
-    expect(one).toBe(49)
+    expect(one).toBe(73)
   })
 
   it('includes the suffix — excluding it is an unbounded undercount of a money reservation', () => {
@@ -149,8 +175,13 @@ describe('estimateInputTokens', () => {
     // computed the same way the reverted implementation did.
     const req = buildRequest({ ...base, system: cjk, messages: [], tools: [] })
     const codeUnitBased = Math.ceil(JSON.stringify(req).length / 3)
-    expect(codeUnitBased).toBe(379)  // verified with `node -e` before pinning
-    expect(byteBased).toBe(1045)     // verified with Buffer.byteLength, same way
+    // Task 6 note: buildRequest now wraps `system` in a cache_control-bearing
+    // block, adding fixed JSON overhead present in BOTH the code-unit and
+    // byte-based counts alike, so these two pinned values moved from 379/1045
+    // to 403/1070. The ratio this test actually checks — byte-based well over
+    // 2.5x code-unit-based for CJK-heavy text — is unaffected.
+    expect(codeUnitBased).toBe(403)  // verified with `node -e` before pinning
+    expect(byteBased).toBe(1070)     // verified with Buffer.byteLength, same way
     expect(byteBased).toBeGreaterThan(codeUnitBased * 2.5)
   })
 })

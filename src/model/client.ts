@@ -5,6 +5,7 @@
 import type { RefusalStopDetails, StopReason } from '@anthropic-ai/sdk/resources/messages'
 import type { ContentBlock, LoopMessage } from '../engine.js'
 import { isRefusal } from '../errors.js'
+import { cacheableSystem, placeBreakpoints } from './cache.js'
 import type { Seat } from './seats.js'
 
 export type ModelUsage = {
@@ -116,14 +117,17 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
   const outputConfig: Record<string, unknown> = {}
   if (seat.effort !== null) outputConfig.effort = seat.effort
 
+  const head = cacheableSystem(system, tools)
   const req: Record<string, unknown> = {
     model: seat.model,
     max_tokens: seat.maxTokens,
-    system,
-    messages: withSuffix(messages, args.suffix),
+    system: head.system,
+    // Breakpoints FIRST, suffix second: the volatile notebook must land after
+    // the rolling breakpoint, never carry it.
+    messages: withSuffix(placeBreakpoints(messages), args.suffix),
     thinking: { type: 'adaptive' },
   }
-  if (tools.length > 0) req.tools = tools
+  if (head.tools.length > 0) req.tools = head.tools
   if (Object.keys(outputConfig).length > 0) req.output_config = outputConfig
   return req
 }
