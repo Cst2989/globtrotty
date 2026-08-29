@@ -137,10 +137,10 @@ export async function readSpendFailClosed(
 }
 
 /**
- * The same read, for a press with no conversation yet to confirm (fix round
- * 3: a first press's ceiling is checked before any row exists, so there is
- * nothing to fail closed on the way `readSpendFailClosed`'s conversation read
- * does). A conversation that does not exist yet has spent nothing, so its own
+ * The same read, for a press with no conversation yet to confirm: a first
+ * press's ceiling is checked before any row exists, so there is nothing to
+ * fail closed on the way `readSpendFailClosed`'s conversation read does. A
+ * conversation that does not exist yet has spent nothing, so its own
  * ceiling can never be the one that denies a first press; `conversationMicros`
  * is `0n` outright rather than a read, because there is nothing to read.
  */

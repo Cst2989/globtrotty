@@ -70,6 +70,9 @@ export async function finishTurn(
       await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
                values (${input.conversationId}, ${input.userId}, ${input.turnId}, 'agent', ${reply})`
     }
+    // Every turn this module closes ends 'done', with `fail_reason` beside it
+    // naming why when there was one; `'failed'` in turns_status_check is
+    // reserved for module 3's crash handling, not written here yet.
     await tx`update course.turns set status = 'done', finished_at = now(), fail_reason = ${failReason ?? null}
               where id = ${input.turnId}`
     await tx`update course.conversations set status = ${status}, updated_at = now()

@@ -12,12 +12,11 @@ import { describeDb, withRealDb } from './helpers/db.js'
 const LIMITS = { ...DEFAULT_LIMITS, globalCeilingMicros: 2n ** 62n }
 
 describeDb('fifty first presses of Send', () => {
-  // The bug fix round 3 closes: before it, the key was scoped to
-  // (conversation_id, idempotency_key), and a first press has no
-  // conversation yet, so submitMessage created a fresh one before the key
-  // was ever compared. Fifty concurrent first presses of the SAME key must
-  // now buy exactly one conversation, the same "one" the test below already
-  // pins for an existing conversation.
+  // Scoping the key to (conversation_id, idempotency_key) would fail here: a
+  // first press has no conversation yet, so submitMessage would create a
+  // fresh one before the key was ever compared. Fifty concurrent first
+  // presses of the SAME key must buy exactly one conversation, the same
+  // "one" the test below already pins for an existing conversation.
   it('buy exactly one conversation, one turn and one message', async () => {
     await withRealDb(async (sql, userId) => {
       const invoke = vi.fn().mockResolvedValue(undefined)
@@ -84,11 +83,11 @@ describeDb('fifty first presses of Send', () => {
 // Zero means every account is over it, which is the branch under test.
 const CAPPED_LIMITS = { ...DEFAULT_LIMITS, globalCeilingMicros: 0n }
 
-// Defect A from the fix3 re-review. The capped branch of a first press opens no
-// turn (turnId stays null, which is the documented contract), so course.turns
-// cannot serialise two of them; before fix round 4, fifty concurrent capped
-// first presses of one key bought fifty conversations, forty-nine of them empty,
-// and handed back a different conversationId every time. Her message key,
+// The capped branch of a first press opens no turn (turnId stays null, which
+// is the documented contract), so course.turns cannot serialise two of them:
+// without something else claiming the key, fifty concurrent capped first
+// presses of one key would buy fifty conversations, forty-nine of them empty,
+// and hand back a different conversationId every time. Her message key,
 // claimed inside the same transaction that creates the conversation, is what
 // makes them one press.
 describeDb('fifty capped first presses of Send', () => {
@@ -197,9 +196,9 @@ describeDb('fifty presses of Send', () => {
 
   // Busy opens no turn, so course.turns has nothing to dedupe a retry of the
   // second message against. Without the same idempotency key on
-  // course.messages too (this fix round), fifty retries of a message that
-  // landed busy would write fifty copies of it, the exact failure this
-  // lesson's headline claims to prevent for the first message.
+  // course.messages too, fifty retries of a message that landed busy would
+  // write fifty copies of it, the exact failure this lesson's headline
+  // claims to prevent for the first message.
   it('does not write fifty copies of the second message while it is busy', async () => {
     await withRealDb(async (sql, userId) => {
       const invoke = vi.fn().mockResolvedValue(undefined)

@@ -1,6 +1,3 @@
-// What replaces this comparison is not built here: a behavioural check that
-// replays a fixed prompt set on a schedule and alarms on the output
-// distribution, rather than on the model string a response happens to echo.
 import { readFileSync } from 'node:fs'
 import { callAndRecord } from '../src/metered.js'
 import { memorySink } from '../src/repo/model-calls.js'
@@ -23,6 +20,10 @@ function firstExchange(name: string): Exchange {
  * For a dated id the string is stable because the weights are, which is the only
  * case where the comparison means anything, and it is the case that did not need
  * a detector.
+ *
+ * What replaces this comparison is not built here: a behavioural check that
+ * replays a fixed prompt set on a schedule and alarms on the output
+ * distribution, rather than on the model string a response happens to echo.
  */
 describe('a model alias echoes itself', () => {
   it('returns the alias verbatim for the driver seat', () => {

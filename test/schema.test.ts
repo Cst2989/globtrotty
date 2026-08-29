@@ -57,10 +57,10 @@ describeDb('the constraints and the types', () => {
   // duplicate from busy by checking only the first by name. A third unique
   // index added to this table later would make some other refusal look like
   // one of these two, silently, so this pins the whole set rather than just
-  // that each one individually still throws. Renamed in fix round 3:
-  // `turns_user_idempotency` is scoped to (user_id, idempotency_key), not
-  // (conversation_id, idempotency_key), so a first press with no conversation
-  // yet can still be recognised (src/handler.ts's `firstPress`).
+  // that each one individually still throws. `turns_user_idempotency` is
+  // scoped to (user_id, idempotency_key), not (conversation_id,
+  // idempotency_key), so a first press with no conversation yet can still be
+  // recognised (src/handler.ts's `firstPress`).
   it('carries exactly the two unique indexes the on-conflict read-back tells apart', async () => {
     await withTestDb(async (sql) => {
       const idx = await sql`
@@ -74,11 +74,10 @@ describeDb('the constraints and the types', () => {
     })
   })
 
-  // Fix round 3: the pair is (user_id, idempotency_key), not
-  // (conversation_id, idempotency_key), because a first press has no
-  // conversation yet to scope the key to. Same key, same user, two DIFFERENT
-  // conversations: the second insert must be refused, the opposite of what
-  // this constraint did before this round.
+  // The pair is (user_id, idempotency_key), not (conversation_id,
+  // idempotency_key), because a first press has no conversation yet to scope
+  // the key to. Same key, same user, two DIFFERENT conversations: the second
+  // insert must be refused.
   it('scopes the idempotency key to the user, not to one conversation', async () => {
     await withTestDb(async (sql) => {
       const [c1] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`

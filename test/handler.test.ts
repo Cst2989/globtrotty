@@ -123,7 +123,7 @@ describeDb('submitMessage', () => {
   // The version of this handler that returned on the limit_reached path above
   // the message insert dropped a capped user's words on the floor. She now
   // also gets a real reply back, naming the limit she hit, rather than
-  // silence after what she typed (fix round 1).
+  // silence after what she typed.
   it('still preserves her message when the ceiling is reached, and answers her', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
@@ -143,10 +143,10 @@ describeDb('submitMessage', () => {
     })
   })
 
-  // Defect D from the fix1 re-review: writeHerMessage's on-conflict guard
-  // only proved a retry skips HER line; nothing pinned that the reply beside
-  // it is skipped too. A retried capped press must leave exactly one of each,
-  // not a second reply glued onto her one kept sentence.
+  // writeHerMessage's on-conflict guard only proved a retry skips HER line;
+  // nothing pinned that the reply beside it is skipped too. A retried capped
+  // press must leave exactly one of each, not a second reply glued onto her
+  // one kept sentence.
   it('leaves one message row and one reply row when a capped press is sent twice with the same key', async () => {
     await withTestDb(async (sql) => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
@@ -179,11 +179,16 @@ describeDb('submitMessage', () => {
   // `daily_usage` is shared, and deleting every row for today to force a
   // clean slate would delete a row this test does not own (a reader's own
   // live trip, or another test's fixed-day row).
-  it('denies at tier 2 when the global ceiling is reached, though this user spent nothing', async () => {
+  it('denies at tier 2 when the global ceiling is reached, though this user spent nothing', async (ctx) => {
     await withTestDb(async (sql) => {
       const totalRows = await sql`select coalesce(sum(cost_micros), 0)::text as total
                                     from course.daily_usage where day = (now() at time zone 'utc')::date`
       const remaining = LIMITS.globalCeilingMicros - BigInt(totalRows[0]!.total as string)
+      // A live database's own daily_usage can already be at or over the global
+      // ceiling for today, which would make `remaining` negative and the
+      // insert below violate daily_usage_cost_micros_check instead of testing
+      // anything: skip rather than fail on an account genuinely over ceiling.
+      ctx.skip(remaining <= 0n, 'the account is genuinely over its global ceiling today')
       const half = (remaining / 2n).toString()
       const rest = (remaining - remaining / 2n).toString()
       await sql`insert into course.daily_usage (user_id, day, cost_micros) values
@@ -229,11 +234,16 @@ describeDb('submitMessage', () => {
 
   // Same offset-from-the-actual-total reasoning as the test above, one micro
   // short of the ceiling instead of exactly on it.
-  it('still queues the turn one micro BELOW the global ceiling', async () => {
+  it('still queues the turn one micro BELOW the global ceiling', async (ctx) => {
     await withTestDb(async (sql) => {
       const totalRows = await sql`select coalesce(sum(cost_micros), 0)::text as total
                                     from course.daily_usage where day = (now() at time zone 'utc')::date`
       const remaining = LIMITS.globalCeilingMicros - BigInt(totalRows[0]!.total as string) - 1n
+      // Same reasoning as the test above: a real account already at or over
+      // the global ceiling today makes `remaining` negative, which has
+      // nothing to prove here and would otherwise fail on the check
+      // constraint instead of the assertion this test is actually about.
+      ctx.skip(remaining <= 0n, 'the account is genuinely over its global ceiling today')
       const a = (remaining / 2n).toString()
       const b = (remaining - remaining / 2n).toString()
       await sql`insert into course.daily_usage (user_id, day, cost_micros) values

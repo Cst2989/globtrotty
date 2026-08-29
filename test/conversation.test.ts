@@ -60,10 +60,10 @@ describe('a conversation', () => {
     expect(client.calls).toBe(0)
   })
 
-  // New defect A from the fix1 re-review: this top-of-turn read is the FIRST
-  // read of every tier-3 turn, so on a database that cannot confirm spend, an
-  // uncaught throw here would escape turn() itself and strand the turn at
-  // 'queued', before the loop's own per-step guard ever gets a chance to run.
+  // This top-of-turn read is the FIRST read of every tier-3 turn, so on a
+  // database that cannot confirm spend, an uncaught throw here would escape
+  // turn() itself and strand the turn at 'queued', before the loop's own
+  // per-step guard ever gets a chance to run.
   // `turn()` resolving here, rather than rejecting, is the assertion that
   // matters: run-turn-background.mts awaits turn() in a try/finally with no
   // catch, so anything but a resolved TurnResult would leave finishTurn
@@ -77,9 +77,9 @@ describe('a conversation', () => {
     expect(client.calls).toBe(0)
   })
 
-  // Defect B: only SpendUnconfirmedError is denied on. A plain Error, a bug in
-  // our own code rather than a read that chose to fail closed, must still
-  // reach the caller as a rejection.
+  // Only SpendUnconfirmedError is denied on. A plain Error, a bug in our own
+  // code rather than a read that chose to fail closed, must still reach the
+  // caller as a rejection.
   it('lets a plain Error from the first spend read propagate rather than denying on it', async () => {
     const client = fakeClient([textMessage('should never be reached')])
     await expect(

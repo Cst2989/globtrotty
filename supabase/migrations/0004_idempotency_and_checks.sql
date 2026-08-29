@@ -5,11 +5,10 @@ update course.turns set idempotency_key = id::text where idempotency_key is null
 alter table course.turns alter column idempotency_key set not null;
 
 -- The same press, retried, is the same turn. Scoped to the USER, not the
--- conversation (fix round 3): a first press arrives with no conversation yet,
--- so a key compared only against a conversation could never recognise a retry
--- of that very press, and fifty concurrent first presses of one key would
--- each buy their own conversation before the key was ever compared to
--- anything.
+-- conversation: a first press arrives with no conversation yet, so a key
+-- compared only against a conversation could never recognise a retry of that
+-- very press, and fifty concurrent first presses of one key would each buy
+-- their own conversation before the key was ever compared to anything.
 alter table course.turns add constraint turns_user_idempotency
   unique (user_id, idempotency_key);
 
@@ -36,6 +35,8 @@ create index turns_sweeper on course.turns (coalesce(heartbeat_at, queued_at))
 
 -- Statuses were plain text until now, so 'workin' was a status and nothing said
 -- otherwise. Each list below is the whole set of values its column may hold.
+-- 'failed' is reserved for module 3's crash handling: every turn this module
+-- closes ends 'done', with fail_reason beside it naming why when there was one.
 alter table course.turns add constraint turns_status_check
   check (status in ('queued', 'running', 'done', 'failed'));
 

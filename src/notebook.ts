@@ -34,6 +34,9 @@ function relaxes(field: (typeof CONSTRAINT_FIELDS)[number], current: Notebook, n
     // A tool that answers in another currency cannot be compared with her
     // budget, so it is refused rather than converted. Converting is a decision
     // someone has to take on purpose, and a hotel search is not that someone.
+    // No production caller reaches this branch yet: src/conversation.ts always
+    // passes 'user'. This is the rule waiting for module 4's supplier lesson,
+    // when a tool starts writing the notebook.
     if (a.currency !== b.currency) return true
     return compareMoney(a, b) === 1
   }

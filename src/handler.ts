@@ -45,8 +45,8 @@ class KeyClaimedElsewhere extends Error {}
  * id, so a message with no turn is simply a message nothing is running for yet.
  *
  * `on conflict do nothing`, keyed on the same (user, idempotency key) pair as
- * `course.turns` (fix round 3: scoped to the user, not the conversation, so a
- * first press with no conversation yet can still be recognised): busy and
+ * `course.turns`, scoped to the user rather than the conversation so a first
+ * press with no conversation yet can still be recognised: busy and
  * limit_reached open no turn, so the constraint on turns cannot dedupe a
  * retried press on either path, and without this one a retry would write a
  * second copy of the same sentence. Returns whether a row was actually
@@ -129,8 +129,8 @@ async function denyForCeiling(
 
 /**
  * A repeated press, or a first press whose key lost the race in `firstPress`
- * below: `conversationId` already exists, so this is the path every press had
- * before fix round 3.
+ * below: `conversationId` already exists, so this is the path a press takes
+ * whenever a conversation already exists.
  *
  * The order of the writes is the whole lesson. Her message row and the turn row
  * are committed BEFORE `invoke` is ever called: the turn is already durable at
@@ -187,11 +187,12 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
   /**
    * The insert races the unique constraint on (user_id, idempotency_key) and
    * the partial unique index on one live turn per conversation, in one
-   * statement. There is no conflict target: the partial index cannot be
-   * named as one, so a bare `do nothing` is the only form that tolerates
-   * either rejection. Checking first and inserting second would be two
-   * statements with a gap, and the gap is exactly what fifty simultaneous
-   * presses find.
+   * statement. There is no conflict target: one arbiter set cannot cover
+   * both `turns_user_idempotency` and `turns_one_active_per_conversation`, so
+   * naming either would turn the other's violation into a raised error
+   * instead of a tolerated `do nothing`. Checking first and inserting second
+   * would be two statements with a gap, and the gap is exactly what fifty
+   * simultaneous presses find.
    */
   const inserted = await sql`
     insert into course.turns (conversation_id, user_id, idempotency_key)
@@ -227,12 +228,13 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
 }
 
 /**
- * A first press: no conversation exists yet to compare the key against, and
- * the key is scoped to (user_id, idempotency_key), not to a conversation that
- * does not exist (fix round 3). Before that fix, a first press's key was
- * compared against a conversation created moments earlier for it alone, so
- * fifty concurrent first presses of one key each got their own conversation,
- * turn and message before the key was ever compared to anything.
+ * A first press: no conversation exists yet to compare the key against, so
+ * the key is scoped to (user_id, idempotency_key) rather than to a
+ * conversation that does not exist. Scoped the other way, a first press's
+ * key would be compared against a conversation created moments earlier for
+ * it alone, so fifty concurrent first presses of one key would each get
+ * their own conversation, turn and message before the key was ever compared
+ * to anything.
  *
  * The ceiling is read with `readSpendForNewConversation`, her daily and
  * global totals only: a conversation that does not exist yet has spent
@@ -248,8 +250,8 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
  * winner's conversation instead. What each branch has to claim with differs,
  * which is the only reason they are not one block: under the ceiling a turn
  * row is claimed and the press replays through `withConversation` exactly like
- * a repeated press with a known id, while a capped press opens no turn (fix
- * round 4), so her message row is the claim and the denial is already complete
+ * a repeated press with a known id, while a capped press opens no turn, so
+ * her message row is the claim and the denial is already complete
  * once the winner has written it. That last part is only true of a capped
  * winner: a capped loser short-circuits straight to `limit_reached` on
  * purpose, because replaying it through `withConversation` would let this

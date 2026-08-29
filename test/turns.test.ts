@@ -71,12 +71,12 @@ describeDb('finishTurn', () => {
     })
   })
 
-  // New defect C from the fix1 re-review: before this, a tier-3 ceiling
-  // denial left the turn 'done' with no fail_reason and the conversation
-  // 'active', indistinguishable from a normal reply, while tier 2's own
-  // ceiling denial (src/handler.ts) leaves the conversation 'limit_reached'.
-  // Passing 'limit_reached' here is how run-turn-background.mts now makes the
-  // two tiers describe the same denial the same way.
+  // Without a fail reason passed here, a tier-3 ceiling denial would leave the
+  // turn 'done' with no fail_reason and the conversation 'active',
+  // indistinguishable from a normal reply, while tier 2's own ceiling denial
+  // (src/handler.ts) leaves the conversation 'limit_reached'. Passing
+  // 'limit_reached' here is how run-turn-background.mts makes the two tiers
+  // describe the same denial the same way.
   it('records the same limit_reached reason tier 2 does, when passed one', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
@@ -92,10 +92,10 @@ describeDb('finishTurn', () => {
     })
   })
 
-  // Defect D from the fix1 re-review: the test above hands finishTurn a bare
-  // '' and 'limit_reached' directly, so it would still pass unchanged if the
-  // sentence in src/limit-message.ts were deleted. This one runs the real
-  // tier-3 path instead: `turn()` (src/conversation.ts) sees a tripped
+  // The test above hands finishTurn a bare '' and 'limit_reached' directly,
+  // so it would still pass unchanged if the sentence in src/limit-message.ts
+  // were deleted. This one runs the real tier-3 path instead: `turn()`
+  // (src/conversation.ts) sees a tripped
   // ceiling before the client is ever called, and its own `result.text` and
   // `result.outcome` are what reach finishTurn, exactly as
   // netlify/functions/run-turn-background.mts hands them over. It also picks

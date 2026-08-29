@@ -17,9 +17,10 @@ export type TierDecision =
 
 /**
  * Constant-time secret comparison. `timingSafeEqual` throws on a length
- * mismatch rather than returning false, and a naive length check in front of it
- * leaks the secret's length through timing, so the length check has to fail into
- * the same rejection as a content mismatch, never a distinguishable path.
+ * mismatch rather than returning false, so the length is checked first and
+ * this function returns early on a mismatch. That early return is not
+ * constant-time: it leaks, through timing, whether a guess has the right
+ * length, and nothing more.
  */
 export function secretsMatch(provided: string | null, expected: string): boolean {
   if (provided === null) return false

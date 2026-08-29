@@ -67,8 +67,7 @@ describe('toolLoop', () => {
   // plain bug in our own code or a caller-supplied reader, is not a failed
   // read and must not be swallowed into a quiet 'limit_reached': this is the
   // same rule the loop's own model-call catch applies to a non-APIError a few
-  // lines below, and new defect B in the fix1 re-review named this catch as
-  // the one place that did not yet honour it.
+  // lines below.
   it('lets a plain Error from readSpend propagate rather than denying on it', async () => {
     const client = fakeClient([textMessage('Here is a plan.')])
     await expect(
