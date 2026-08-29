@@ -1,0 +1,129 @@
+import { expect, it, describe } from 'vitest'
+import { withTestDb, describeDb } from './helpers/db.js'
+import { recordResults } from '../src/repo/toolResults.js'
+import { rehydrateRefs, ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
+import { MockSupplier } from '../src/supplier/mock.js'
+import type { FlightSearch } from '../src/supplier/types.js'
+
+const params: FlightSearch = {
+  kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
+  returnDate: null, flexDays: 0, adults: 2, children: 0, infants: 0,
+  cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+}
+
+// CORRECTION (task-8 dispatch): MockSupplier derives every sourceId from
+// `hash(JSON.stringify(params))` alone — never from the conversation. The
+// brief's `seed(sql, n)` called `.search(params)` with the SAME literal
+// `params` object for every conversation, so two conversations seeded from
+// the same params independently recorded the identical set of sourceIds
+// into their own conversation-scoped rows. The "does not accept an id
+// belonging to another conversation" test then found the id in the second
+// conversation's OWN rows — not leaked from the first — so it passed (or
+// failed) without regard to whether `rehydrateRefs` actually scopes by
+// conversation_id. That is exactly the "CORRECTION (task-4 dispatch)"
+// class of bug already fixed in test/toolResults.test.ts. Fixed by giving
+// each seed() call distinct params (`flexDays: Number(n)`), so distinct
+// conversations get distinct, non-colliding sourceIds.
+async function seed(sql: any, n: string) {
+  const userId = `00000000-0000-4000-8000-0000000002${n}`
+  const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+  const conversationId = c!.id as string
+  const seededParams: FlightSearch = { ...params, flexDays: Number(n) }
+  const items = await new MockSupplier({ kind: 'flight' }).search(seededParams)
+  await recordResults(sql, { conversationId, userId, turnId: null, params: seededParams, items })
+  return { userId, conversationId, items }
+}
+
+describe('ProposalRefsSchema — the model cannot send values', () => {
+  it('accepts a bare reference', () => {
+    const r = ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'K1', quantity: 1, slot: 'outbound' }],
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('REJECTS a payload carrying a price — the tampering case', () => {
+    const r = ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'K1', quantity: 1, slot: 'outbound', price: 8900, currency: 'EUR' }],
+    })
+    expect(r.success).toBe(false)
+    // zod v4 reports unrecognised keys on issue.keys, NOT issue.path[0].
+    const keys = r.success ? [] : r.error.issues.flatMap((i: any) => i.keys ?? [])
+    expect(keys).toContain('price')
+  })
+
+  it('rejects a non-positive or non-integer quantity', () => {
+    for (const quantity of [0, -1, 1.5]) {
+      expect(ProposalRefsSchema.safeParse({
+        refs: [{ sourceId: 'K1', quantity, slot: 'x' }],
+      }).success).toBe(false)
+    }
+  })
+
+  it('rejects an empty ref list', () => {
+    expect(ProposalRefsSchema.safeParse({ refs: [] }).success).toBe(false)
+  })
+
+  it('rejects duplicate sourceIds in one proposal', () => {
+    expect(ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'A', quantity: 1, slot: 'x' },
+             { sourceId: 'A', quantity: 1, slot: 'y' }],
+    }).success).toBe(false)
+  })
+})
+
+describeDb('rehydrateRefs', () => {
+  it('returns corpus values, not anything the caller supplied', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, '01')
+      const res = await rehydrateRefs(sql, conversationId, [
+        { sourceId: items[0]!.sourceId, quantity: 2, slot: 'outbound' },
+      ])
+      expect(res.ok).toBe(true)
+      if (!res.ok) throw new Error('unreachable')
+      expect(res.items[0]!.item.price.minor).toBe(items[0]!.price.minor)
+      expect(res.items[0]!.lineTotal.minor).toBe(items[0]!.price.minor * 2n)
+    })
+  })
+
+  it('fails provenance for an id the corpus never saw', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, '02')
+      const res = await rehydrateRefs(sql, conversationId, [
+        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'a' },
+        { sourceId: 'HALLUCINATED-42', quantity: 1, slot: 'b' },
+      ])
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations).toHaveLength(1)
+      expect(res.violations[0]!.gate).toBe('provenance')
+      expect(res.violations[0]!.sourceIds).toEqual(['HALLUCINATED-42'])
+      // The message must name the offending id so the model can act on it.
+      expect(res.violations[0]!.detail).toContain('HALLUCINATED-42')
+    })
+  })
+
+  it('does not accept an id belonging to another conversation', async () => {
+    await withTestDb(async (sql) => {
+      const a = await seed(sql, '03')
+      const b = await seed(sql, '04')
+      const res = await rehydrateRefs(sql, b.conversationId, [
+        { sourceId: a.items[0]!.sourceId, quantity: 1, slot: 'a' },
+      ])
+      expect(res.ok).toBe(false)
+    })
+  })
+
+  it('reports every missing id at once, not just the first', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId } = await seed(sql, '05')
+      const res = await rehydrateRefs(sql, conversationId, [
+        { sourceId: 'X1', quantity: 1, slot: 'a' },
+        { sourceId: 'X2', quantity: 1, slot: 'b' },
+      ])
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.violations[0]!.sourceIds.sort()).toEqual(['X1', 'X2'])
+    })
+  })
+})
