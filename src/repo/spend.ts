@@ -20,10 +20,21 @@ import type { Spend } from '../engine.js'
 
 /**
  * Records spend against a conversation and against the caller's daily total,
- * atomically, and returns the post-increment values. This is the ONLY writer
- * of `conversations.spend_usd_micros` and `daily_usage.cost_micros` — Task 7's
- * `completeTurn` deliberately writes only `turns.spend_usd_micros` so this
- * function's job is never duplicated.
+ * atomically, and returns the post-increment values.
+ *
+ * NOT the only writer of these two columns: `src/repo/reservation.ts`'s
+ * `reserve`/`reconcile` (Task 4) also write both `conversations.spend_usd_micros`
+ * and `daily_usage.cost_micros`. The two are split by WHO already debited the
+ * spend, not by which table they touch — `recordSpend` owns micros nobody has
+ * debited yet (a supplier call, a tool call, anything the worker pays on the
+ * agent's behalf); `reserve`/`reconcile` own micros the agent debits itself
+ * before and after its own model call. `AgentStep.recordedMicros`
+ * (src/worker.ts) is how a step tells the worker "this amount is already
+ * reserved/reconciled — do not call `recordSpend` on it too", because naming
+ * the same micros through both doors double-charges the same call. Task 7's
+ * `completeTurn` deliberately writes only `turns.spend_usd_micros`, on top of
+ * whichever of these two paths already moved the conversation/daily totals, so
+ * that job is never duplicated either.
  *
  * The daily upsert is a single `insert ... on conflict ... do update set
  * cost_micros = daily_usage.cost_micros + excluded.cost_micros`, not a

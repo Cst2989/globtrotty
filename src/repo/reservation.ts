@@ -13,6 +13,13 @@ import type { Seat } from '../model/seats.js'
  * The bound assumes the worst realistic case: every input token billed at list
  * (no cache discount) and a full `max_tokens` of output. Real calls almost
  * always cost less, so `reconcile` usually refunds.
+ *
+ * Rounded UP with `Math.ceil` before the `BigInt` conversion for two reasons,
+ * not one: a guardrail must never undercount, AND `BigInt()` does not truncate
+ * a non-integer — `BigInt(1.5)` throws a `RangeError`. If a price is ever added
+ * whose per-token rate is fractional (every multiplier in `costMicros` already
+ * is: 1.25x, 2x, 0.1x), an un-rounded `micros` here would crash the pre-dispatch
+ * path outright, not just misprice it.
  */
 export function estimateMicros(seat: Seat, inputTokens: number): bigint {
   const p = PRICES[seat.model]
@@ -22,20 +29,26 @@ export function estimateMicros(seat: Seat, inputTokens: number): bigint {
 }
 
 /**
- * Debits the reservation and returns the NEW conversation total. The caller's
- * ceiling check must compare against this returned value — reading the counter
- * before the turn began is exactly the staleness spec section 8 names.
+ * Debits the reservation and returns the NEW conversation total, plus the day
+ * and new daily total the reservation landed on. The caller's ceiling check
+ * must compare against the returned `conversationMicros`/`dailyMicros` —
+ * reading either counter before the turn began is exactly the staleness spec
+ * section 8 names.
  *
  * daily_usage is written in the same statement group, on a UTC day boundary
  * (`(now() at time zone 'utc')::date`, never `current_date`, which is
  * session-timezone dependent and can bucket the writer and reader into
- * different days).
+ * different days). The returned `day` is not decorative: `reconcile` must be
+ * called with it rather than recomputing "today", because a long driver call
+ * (extended thinking included) can straddle UTC midnight between `reserve` and
+ * `reconcile` — see the doc comment on `reconcile` for what goes wrong if it
+ * recomputes instead.
  */
 export async function reserve(
   sql: postgres.Sql,
   args: { userId: string; conversationId: string; micros: bigint },
-): Promise<{ conversationMicros: bigint }> {
-  return sql.begin(async (tx) => {
+): Promise<{ conversationMicros: bigint; dailyMicros: bigint; day: string }> {
+  return await sql.begin(async (tx) => {
     const rows = await tx<{ spend_usd_micros: string }[]>`
       update conversations
          set spend_usd_micros = spend_usd_micros + ${args.micros.toString()},
@@ -45,14 +58,19 @@ export async function reserve(
     if (rows.length === 0) {
       throw new Error(`reserve: conversation ${args.conversationId} not found for this user`)
     }
-    await tx`
+    const daily = await tx<{ day: string; cost_micros: string }[]>`
       insert into daily_usage (user_id, day, cost_micros)
       values (${args.userId}, (now() at time zone 'utc')::date, ${args.micros.toString()})
       on conflict (user_id, day) do update
         set cost_micros = daily_usage.cost_micros + excluded.cost_micros,
-            updated_at = now()`
-    return { conversationMicros: BigInt(rows[0]!.spend_usd_micros) }
-  }) as Promise<{ conversationMicros: bigint }>
+            updated_at = now()
+      returning day::text as day, cost_micros`
+    return {
+      conversationMicros: BigInt(rows[0]!.spend_usd_micros),
+      dailyMicros: BigInt(daily[0]!.cost_micros),
+      day: daily[0]!.day,
+    }
+  })
 }
 
 /**
@@ -60,18 +78,43 @@ export async function reserve(
  * actually cost. Normally a REFUND, because the reservation assumes a full
  * max_tokens of output that most responses never reach.
  *
- * Clamped at zero: `conversations.spend_usd_micros` carries a `>= 0` check
- * constraint, and a refund larger than the balance can only mean a bug
- * upstream. Aborting the turn on a constraint violation would turn an
- * accounting bug into a lost turn; clamping keeps the ceiling alive and leaves
- * the bug visible in the ledger, where model_calls records what was really spent.
+ * `args.day` MUST be the `day` `reserve` returned for this same reservation,
+ * not a value this function derives from "today". An earlier version of this
+ * file recomputed `(now() at time zone 'utc')::date` here instead, which is
+ * correct only when `reserve` and `reconcile` land on the same UTC day — and
+ * silently WRONG, in the undercounting direction, the moment they don't:
+ *   - Charge case, no row yet for "today": the conversation total is still
+ *     correctly updated (it isn't day-bucketed), but the daily upsert's INSERT
+ *     branch fires with a bare `0`, so the charge's delta is dropped from
+ *     daily_usage entirely — the two counters diverge permanently.
+ *   - Refund case, no row yet for "today": same INSERT branch, same dropped
+ *     delta, plus a spurious zero row left behind for a day nothing happened on.
+ *   - Refund case where "today" already has an unrelated row: the refund is
+ *     subtracted from a DIFFERENT day's total than the one it was reserved
+ *     against, undercounting that day by up to the full reservation.
+ * In the common case `reserve` creates today's row moments before `reconcile`
+ * runs, which is exactly why this bug hid: it only bites when the UTC day
+ * rolls over between the two calls, e.g. a driver call with extended thinking
+ * in flight across midnight UTC — up to ~400,000 micros per crossing for a
+ * driver seat. Taking `day` as an argument instead of recomputing it removes
+ * the possibility structurally: there is no "today" left to disagree with.
+ *
+ * Clamped at zero: `conversations.spend_usd_micros` and `daily_usage.cost_micros`
+ * both carry a `>= 0` check constraint, and a refund larger than the balance can
+ * only mean a bug upstream. Aborting the turn on a constraint violation would
+ * turn an accounting bug into a lost turn; clamping (via SQL `greatest(0, ...)`
+ * inside the `SET`/`INSERT` expression itself, not a JS read-clamp-write) keeps
+ * the ceiling alive, leaves no race window, and leaves the bug visible in the
+ * ledger, where model_calls records what was really spent.
  */
 export async function reconcile(
   sql: postgres.Sql,
-  args: { userId: string; conversationId: string; reserved: bigint; actual: bigint },
-): Promise<{ conversationMicros: bigint }> {
+  args: {
+    userId: string; conversationId: string; reserved: bigint; actual: bigint; day: string
+  },
+): Promise<{ conversationMicros: bigint; dailyMicros: bigint }> {
   const delta = args.actual - args.reserved
-  return sql.begin(async (tx) => {
+  return await sql.begin(async (tx) => {
     const rows = await tx<{ spend_usd_micros: string }[]>`
       update conversations
          set spend_usd_micros = greatest(0, spend_usd_micros + ${delta.toString()}),
@@ -81,12 +124,16 @@ export async function reconcile(
     if (rows.length === 0) {
       throw new Error(`reconcile: conversation ${args.conversationId} not found for this user`)
     }
-    await tx`
+    const daily = await tx<{ cost_micros: string }[]>`
       insert into daily_usage (user_id, day, cost_micros)
-      values (${args.userId}, (now() at time zone 'utc')::date, 0)
+      values (${args.userId}, ${args.day}, greatest(0, ${delta.toString()}::bigint))
       on conflict (user_id, day) do update
         set cost_micros = greatest(0, daily_usage.cost_micros + ${delta.toString()}),
-            updated_at = now()`
-    return { conversationMicros: BigInt(rows[0]!.spend_usd_micros) }
-  }) as Promise<{ conversationMicros: bigint }>
+            updated_at = now()
+      returning cost_micros`
+    return {
+      conversationMicros: BigInt(rows[0]!.spend_usd_micros),
+      dailyMicros: BigInt(daily[0]!.cost_micros),
+    }
+  })
 }
