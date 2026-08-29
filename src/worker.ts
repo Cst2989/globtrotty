@@ -38,8 +38,16 @@ export type AgentStep =
        * ledger; the worker's job is to believe it.
        *
        * `costMicros` keeps its original meaning: spend nobody has debited yet,
-       * which the worker debits on the agent's behalf. An agent sets one or the
-       * other — never the same micros in both.
+       * which the worker debits on the agent's behalf.
+       *
+       * THE RULE IS ABOUT MICROS, NOT ABOUT FIELDS: the same micros must never
+       * be named in both. Setting both fields is legitimate and expected — a
+       * `tool` step whose model call was self-debited and whose supplier call
+       * the worker still owes are two different sets of micros on one step.
+       * `loop()` charges each field through its own door exactly once, so both
+       * being present is safe; naming one amount twice is not, because
+       * `recordSpend` would apply it to `conversations.spend_usd_micros` and
+       * `daily_usage` on top of the debit the agent already made.
        */
       recordedMicros?: bigint
     }
@@ -261,6 +269,21 @@ async function loop(
     // rule enforces it, so the discipline has to be deliberate here.
     const alreadyDebited = step.recordedMicros === undefined ? 0n : step.recordedMicros
 
+    // Added BEFORE the switch, not inside each branch. The agent's own debit is
+    // an accomplished fact the moment the step is in our hands: it has already
+    // hit conversations.spend_usd_micros and daily_usage. Adding it later — after
+    // the tool path's heartbeat and beginToolCall, as this first did — means a
+    // database error in either await sends control to runTurn's catch, and the
+    // failTurn there records a turn total missing the agent's spend. No money is
+    // lost that way, but the turn row under-reports what the turn cost, which is
+    // the one number a human reads to find out. Every path below now inherits it
+    // uniformly, including the ones that never reach a happy ending.
+    //
+    // It is added to the turn total and NEVER passed to recordSpend, on any
+    // branch: that is the whole of the no-double-charge invariant, visible here
+    // rather than spread across three branches.
+    turnSpend.total += alreadyDebited
+
     switch (step.kind) {
       case 'message': {
         // heartbeat() as a cheap ownership assertion: recordSpend and completeTurn
@@ -272,9 +295,7 @@ async function loop(
           userId: claim.userId, conversationId: claim.conversationId,
           costMicros: step.costMicros,
         })
-        // alreadyDebited is ADDED to the turn total but never passed to
-        // recordSpend: the agent already applied that increment itself.
-        turnSpend.total += step.costMicros + alreadyDebited
+        turnSpend.total += step.costMicros
         await completeTurn(sql, claim, {
           state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
         })
@@ -286,7 +307,6 @@ async function loop(
         // a failed turn is never a blank thread — spec section 8's "words she
         // can act on".
         await heartbeat(sql, claim)
-        turnSpend.total += alreadyDebited
         await failTurn(sql, claim, step.reason, turnSpend.total, step.message)
         return
       }
@@ -306,9 +326,6 @@ async function loop(
     // not be the one deciding whether this tool call is fresh.
     await heartbeat(sql, claim)
     const outcome = await beginToolCall(sql, claim.turnId, step.callId, step.name)
-    // Added on EVERY path, including replay and ambiguity: the agent's own model
-    // call happened and was debited before this tool call was ever considered.
-    turnSpend.total += alreadyDebited
     let result: unknown
     if (outcome.status === 'replayed') {
       result = outcome.result

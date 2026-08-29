@@ -71,9 +71,16 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  * rejects it is postgres.js's `JSONValue`, a structural type with no room for
  * `unknown` — and `ToolUseBlock.input` (src/engine.ts) is deliberately
  * `unknown`, because a tool call's arguments are the model's to shape, not ours
- * to enumerate. The cast asserts what the column already guarantees; it hides
- * no runtime risk, because anything reaching here has been through
- * `JSON.stringify` semantics either way.
+ * to enumerate.
+ *
+ * WHAT THE CAST REQUIRES OF CALLERS, stated because it is a real obligation and
+ * not a formality: `ToolUseBlock.input` must hold only JSON-derived values.
+ * `sql.json` throws on a `bigint`, a `Date`, a `Map` or a cycle — and at
+ * `saveTurnState` it throws AFTER `finishToolCall` and `recordSpend` have
+ * already committed, so the tool call is recorded and paid for while the
+ * transcript that mentions it is not. Today's only writer is a provider
+ * response parsed from JSON, which cannot contain any of those; anything that
+ * constructs `input` by hand must keep it that way.
  */
 export async function saveTurnState(
   sql: postgres.Sql,

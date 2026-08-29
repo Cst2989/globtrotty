@@ -262,6 +262,53 @@ describeDb('runTurn end to end', () => {
   })
 
   /**
+   * The tool path's half of the same invariant, which the `message` and `fail`
+   * tests above cannot reach. Two things are pinned here that nothing else pins:
+   *
+   *  - a tool step's `recordedMicros` reaches `turns.spend_usd_micros`. Delete
+   *    the `turnSpend.total += alreadyDebited` line and this test reads 6_000n
+   *    instead of 106_000n.
+   *  - BOTH fields on ONE step is legitimate, not a mistake. A driver's model
+   *    call is self-debited (`recordedMicros`) while the supplier call the tool
+   *    then makes is still owed by the worker (`costMicros`) — two different
+   *    sets of micros. The rule is that the same micros must never be named
+   *    twice, which is why the conversation ledger below must show the
+   *    `costMicros` only.
+   */
+  it('reports a tool step\'s already-debited micros without recharging them', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async () => {
+        if (handedOut) {
+          return {
+            kind: 'message' as const, text: 'done',
+            costMicros: 1_000n, recordedMicros: 60_000n,
+          }
+        }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_billed', name: 'explore_flights',
+          run: async () => ({ offers: 1 }),
+          costMicros: 5_000n,          // the supplier call: the worker still owes it
+          recordedMicros: 40_000n,     // the model call: the agent already debited it
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      // Everything the turn cost: 40_000 + 5_000 (tool step) + 60_000 + 1_000.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(106_000n)
+      // ...but only the micros nobody had debited yet went through recordSpend.
+      // 106_000n here would mean every self-debited driver call is billed twice.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(6_000n)
+    })
+  })
+
+  /**
    * Defect 4. `loop()` appended the tool RESULT to the transcript but never the
    * assistant turn that ASKED for the tool. A `tool_result` block with no
    * matching `tool_use` is a 400 from the provider on the very next request, so

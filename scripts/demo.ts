@@ -158,6 +158,10 @@ async function main() {
     step(`tool search_flights EXECUTED (execution #${sideEffects})`)
     await finishToolCall(sql, turnId, 'search-0', { offers: [{ id: 'KIWI-1', price: 18400, currency: 'EUR' }] })
   }
+  // demo data: deliberately not a valid provider transcript. The tool_result
+  // below has no matching tool_use — exactly the shape AgentStep.assistantContent
+  // exists to prevent — because nothing here is ever sent to a model. Do not copy
+  // this as an example of how to build a transcript.
   const partial: TurnState = {
     step: 1,
     messages: [
