@@ -9,6 +9,8 @@ import { RefusalError } from '../src/errors.js'
 import { sweep } from '../src/sweeper.js'
 import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { recordSpend } from '../src/repo/spend.js'
+import type { TurnState } from '../src/engine.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const LIMITS = DEFAULT_LIMITS
@@ -212,6 +214,110 @@ describeDb('runTurn end to end', () => {
       expect(convo!.status).toBe('limit_reached')
     })
   })
+
+  it('hands the agent the id of the turn it is running', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Faro')
+      let seen: string | null = null
+      const spy: Agent = async (ctx) => {
+        seen = ctx.turnId
+        return { kind: 'message', text: 'ok', costMicros: 1_000n }
+      }
+      await runTurn(workerDeps(sql, spy), r.turnId!)
+      // Task 10's driver cannot reach the supplier budget, the model_calls ledger
+      // or runGates without this. Before this task the literal above is a TS2353.
+      expect(seen).toBe(r.turnId)
+    })
+  })
+
+  it('does not charge again for spend the agent has already debited', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hello')
+      const DEBIT = 250_000n
+      // Stands in for Task 10's driver, which reserves and reconciles its own
+      // model call. `recordSpend` performs the IDENTICAL conversations
+      // increment and daily_usage upsert that Task 4's `reserve` does, and it
+      // exists today — so this defect can be pinned here, three tasks before the
+      // driver that would have shipped it.
+      const selfDebiting: Agent = async (ctx) => {
+        await recordSpend(sql, {
+          userId: USER, conversationId: ctx.conversationId, costMicros: DEBIT,
+        })
+        return { kind: 'message', text: 'ok', costMicros: 0n, recordedMicros: DEBIT }
+      }
+      await runTurn(workerDeps(sql, selfDebiting), r.turnId!)
+
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      // ONCE. A worker that also called recordSpend(step.costMicros) here would
+      // read 500_000n, and every driver model call in production would cost twice
+      // what the ledger says it did.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(DEBIT)
+      // ...and the turn still reports what the turn really spent, so the
+      // already-debited micros are not simply dropped.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(DEBIT)
+    })
+  })
+
+  /**
+   * Defect 4. `loop()` appended the tool RESULT to the transcript but never the
+   * assistant turn that ASKED for the tool. A `tool_result` block with no
+   * matching `tool_use` is a 400 from the provider on the very next request, so
+   * a multi-step driver would die on its second step — with a transcript that
+   * looks perfectly reasonable in the database.
+   */
+  it('appends the assistant tool_use turn ahead of the matching tool_result', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async () => {
+        if (handedOut) return { kind: 'message' as const, text: 'done', costMicros: 10n }
+        handedOut = true
+        return {
+          kind: 'tool' as const,
+          callId: 'toolu_pair',
+          name: 'explore_flights',
+          run: async () => '{"offers":1}',
+          costMicros: 10n,
+          assistantContent: [
+            { type: 'thinking' as const, thinking: 'BER to FAO', signature: 'sig-1' },
+            { type: 'tool_use' as const, id: 'toolu_pair', name: 'explore_flights',
+              input: { from: 'BER', to: 'FAO' } },
+          ],
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [row] = await sql<{ state: TurnState }[]>`
+        select state from turns where id = ${r.turnId}`
+      const messages = row!.state.messages
+      const useIdx = messages.findIndex(
+        (m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))
+      const resultIdx = messages.findIndex(
+        (m) => m.role === 'user' && m.content.some((b) => b.type === 'tool_result'))
+      expect(useIdx).toBeGreaterThanOrEqual(0)
+      // ORDER, pinned exactly: the request comes immediately before its answer.
+      expect(resultIdx).toBe(useIdx + 1)
+
+      const use = messages[useIdx]!.content.find((b) => b.type === 'tool_use')
+      const res = messages[resultIdx]!.content.find((b) => b.type === 'tool_result')
+      if (use?.type !== 'tool_use' || res?.type !== 'tool_result') {
+        throw new Error('unreachable')
+      }
+      // ...and the ids PAIR. An unpaired id is the same 400 as a missing turn.
+      expect(use.id).toBe('toolu_pair')
+      expect(res.tool_use_id).toBe('toolu_pair')
+      // The thinking block rides along verbatim, signature included: a thinking
+      // block that is not echoed back byte-for-byte is rejected too.
+      expect(messages[useIdx]!.content[0]).toEqual(
+        { type: 'thinking', thinking: 'BER to FAO', signature: 'sig-1' })
+      // run() returned a string, so it is appended verbatim rather than
+      // JSON.stringify-d into an escaped string literal.
+      expect(res.content).toBe('{"offers":1}')
+    })
+  })
 })
 
 /**
@@ -315,6 +421,48 @@ describeDb('runTurn error classification', () => {
       const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
       expect(turn!.status).toBe('running')
       expect(turn!.fail_reason).toBeNull()
+    })
+  })
+
+  /**
+   * The `fail` AgentStep — spec section 8's refused driver call. A refusal is an
+   * HTTP 200 that never throws, so it cannot reach the crash handler above; and
+   * parking it would write status 'done' with fail_reason null, making a refusal
+   * indistinguishable from a normal question. This step is what finally gives
+   * `refused` (src/engine.ts) a writer on the non-throwing path, and it must end
+   * the turn NAMED *and* leave her words she can act on.
+   */
+  it('records a fail step as a named failure, with words she can act on', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      const refusing: Agent = async () => ({
+        kind: 'fail',
+        reason: 'refused',
+        message: 'I cannot help with that. Try asking about flights or hotels.',
+        recordedMicros: 7_000n,
+      })
+      // Returns normally: a refusal is a recorded outcome, not a crash.
+      await runTurn(workerDeps(sql, refusing), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      const [convo] = await sql<ConversationRow[]>`
+        select * from conversations where id = ${r.conversationId}`
+      const msgs = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} order by created_at`
+
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('refused')
+      expect(convo!.status).toBe('failed')
+      // Not a blank thread: the message is written inside failTurn's own fenced
+      // transaction, so it can never land on a turn we no longer own.
+      expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
+      expect(msgs[1]!.content).toContain('Try asking about flights or hotels')
+      // The micros the agent already debited are reported on the turn...
+      expect(BigInt(turn!.spend_usd_micros)).toBe(7_000n)
+      // ...and are NOT charged to the conversation a second time. This agent
+      // called recordSpend never, so a fail path that did would read 7_000n.
+      expect(BigInt(convo!.spend_usd_micros)).toBe(0n)
     })
   })
 })

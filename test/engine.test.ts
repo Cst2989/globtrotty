@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decideNext, exceedsAnyCeiling, type DecideInput } from '../src/engine.js'
+import { decideNext, exceedsAnyCeiling, type DecideInput, type TurnState } from '../src/engine.js'
 
 const LIMITS = {
   conversationCeilingMicros: 8_000_000n,   // $8
@@ -182,5 +182,46 @@ describe('exceedsAnyCeiling', () => {
     expect(exceedsAnyCeiling(spend({ conversationMicros: 20_000_000n }), LIMITS)).toBe(true)
     expect(exceedsAnyCeiling(spend({ dailyMicros: 9_000_000n }), LIMITS)).toBe(false)
     expect(exceedsAnyCeiling(spend({ globalMicros: 20_000_000n }), LIMITS)).toBe(false)
+  })
+})
+
+/**
+ * The transcript shape itself. `LoopMessage` used to be
+ * `{ role: 'user' | 'assistant' | 'tool'; content: string }`, which cannot carry
+ * an Anthropic transcript: a tool result rides inside a USER message as a
+ * `tool_result` block referencing the `id` of the `tool_use` that asked for it,
+ * and a `thinking` block must be echoed back with its signature byte-for-byte.
+ * Flattening either to a string destroys the id and the signature.
+ */
+describe('TurnState transcript blocks', () => {
+  it('carries a tool_use block with its id and structured input intact', () => {
+    const state: TurnState = {
+      step: 1, reviewRounds: 0,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'find me flights' }] },
+        { role: 'assistant', content: [
+          { type: 'thinking', thinking: 'she wants BER to FAO', signature: 'sig-abc' },
+          { type: 'tool_use', id: 'toolu_01', name: 'explore_flights',
+            input: { from: 'BER', to: 'FAO' } },
+        ] },
+        { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: 'toolu_01', content: '{"results":3}' },
+        ] },
+      ],
+    }
+    const assistant = state.messages[1]!
+    const use = assistant.content[1]
+    expect(use).toMatchObject({ type: 'tool_use', id: 'toolu_01' })
+    if (use?.type !== 'tool_use') throw new Error('unreachable')
+    // The id must survive a jsonb round trip: turns.state is persisted as JSON.
+    const roundTripped = JSON.parse(JSON.stringify(state)) as TurnState
+    const back = roundTripped.messages[1]!.content[1]
+    if (back?.type !== 'tool_use') throw new Error('unreachable')
+    expect(back.id).toBe('toolu_01')
+    expect(back.input).toEqual({ from: 'BER', to: 'FAO' })
+    // A thinking block's signature must survive too — it is echoed back to the model.
+    const think = roundTripped.messages[1]!.content[0]
+    if (think?.type !== 'thinking') throw new Error('unreachable')
+    expect(think.signature).toBe('sig-abc')
   })
 })

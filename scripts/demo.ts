@@ -73,7 +73,9 @@ const demoAgent: Agent = async ({ state }) => {
       },
     }
   }
-  const found = state.messages.filter((m) => m.role === 'tool').length
+  const found = state.messages.filter(
+    (m) => m.content.some((b) => b.type === 'tool_result'),
+  ).length
   return {
     kind: 'message',
     text: `Found ${found} result set. Cheapest is €184.`,
@@ -158,8 +160,11 @@ async function main() {
   }
   const partial: TurnState = {
     step: 1,
-    messages: [{ role: 'user', content: 'Cheap week in Faro in September?' },
-               { role: 'tool', content: '{"offers":[{"id":"KIWI-1"}]}' }],
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: 'Cheap week in Faro in September?' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'search-0',
+                                 content: '{"offers":[{"id":"KIWI-1"}]}' }] },
+    ],
     reviewRounds: 0,
   }
   await saveTurnState(sql, claim, partial)

@@ -1,4 +1,31 @@
-export type LoopMessage = { role: 'user' | 'assistant' | 'tool'; content: string }
+/**
+ * The transcript, in the shape a provider actually accepts.
+ *
+ * THERE IS NO `'tool'` ROLE. An Anthropic transcript carries a tool result as a
+ * `tool_result` block inside a **user** message, referencing by `tool_use_id`
+ * the `id` of the `tool_use` block in the preceding **assistant** message. Two
+ * things die if this is flattened to a string, as it was before:
+ *
+ *  - the `tool_use` id and its structured `input`. Without the id, a result
+ *    cannot be paired with the call it answers, and an unpaired `tool_result`
+ *    is a 400 on the next request rather than a degraded answer.
+ *  - a `thinking` block's `signature`. Extended thinking must be echoed back to
+ *    the same model byte-for-byte across a multi-step loop; a stringified
+ *    thinking block is rejected.
+ *
+ * `turns.state` is already `jsonb`, so widening this needed no migration — but
+ * it does mean every block here must survive a JSON round trip unchanged, which
+ * test/engine.test.ts pins.
+ */
+export type TextBlock = { type: 'text'; text: string }
+export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
+export type ThinkingBlock = { type: 'thinking'; thinking: string; signature: string }
+export type ToolResultBlock = {
+  type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean
+}
+export type ContentBlock = TextBlock | ToolUseBlock | ThinkingBlock | ToolResultBlock
+
+export type LoopMessage = { role: 'user' | 'assistant'; content: ContentBlock[] }
 
 export type TurnState = { step: number; messages: LoopMessage[]; reviewRounds: number }
 
