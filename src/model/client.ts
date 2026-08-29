@@ -1,4 +1,10 @@
+// Types only, erased at compile time — see the note in src/errors.ts for why the
+// SDK dependency is worth taking here too: `RefusalStopDetails['category']` is
+// the SDK's real five-literal union, so a hand-rolled `string | null` here can't
+// silently drift from what `isRefusal`/`RefusalError` are typed against.
+import type { RefusalStopDetails, StopReason } from '@anthropic-ai/sdk/resources/messages'
 import type { ContentBlock, LoopMessage } from '../engine.js'
+import { isRefusal } from '../errors.js'
 import type { Seat } from './seats.js'
 
 export type ModelUsage = {
@@ -55,7 +61,14 @@ export type CallArgs = {
  * the specified fallback.
  */
 export type Transport = {
-  create: (req: unknown) => Promise<unknown>
+  /**
+   * `options` mirrors the real SDK's `messages.create(params, options)` second
+   * argument (`RequestOptions`, which carries `signal`) rather than folding the
+   * abort signal into `req`: `req` is exactly the JSON body `buildRequest`
+   * assembles, and `signal` is a transport-level concern that was never part of
+   * that body on the wire.
+   */
+  create: (req: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>
   countTokens?: (req: unknown) => Promise<{ input_tokens: number }>
 }
 
@@ -115,6 +128,13 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
   return req
 }
 
+/** Shallow copy of `obj` with `key` dropped. */
+function omit(obj: Record<string, unknown>, key: string): Record<string, unknown> {
+  const rest: Record<string, unknown> = { ...obj }
+  delete rest[key]
+  return rest
+}
+
 /**
  * The same request, minus `max_tokens`: the counting endpoint is not being asked
  * to produce output and rejects an output ceiling.
@@ -124,38 +144,47 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
  * different prompt than the one dispatched is not a bound on anything.
  */
 export function buildCountTokensRequest(args: CallArgs): Record<string, unknown> {
-  const { max_tokens: _unused, ...rest } = buildRequest(args)
-  void _unused
-  return rest
+  return omit(buildRequest(args), 'max_tokens')
 }
 
-/** Chars per token. Below the ~3.5-4 English average, on purpose — see below. */
-const CHARS_PER_TOKEN = 3
+/**
+ * Bytes per token. UTF-8 BYTES, not `.length` (UTF-16 code units): a CJK
+ * character is ~1 token but 3 bytes and 1 code unit, so dividing `.length` by 3
+ * (as an earlier version of this function did) undercounted CJK input by roughly
+ * 3x — measured, not assumed. At 3 bytes/token, CJK lands close to its real
+ * ~1 token/char, and English (~4 bytes/token in practice) over-reserves by
+ * 15-30%. That is the direction a guardrail is allowed to be wrong in.
+ */
+const BYTES_PER_TOKEN = 3
 
 /**
  * The fallback when a transport offers no `countTokens`.
  *
- * Biased HIGH and rounded UP in both directions: this number feeds the
- * reservation, which is the guardrail's ceiling. Over-estimating costs a larger
- * refund at reconcile; under-estimating lifts the ceiling for exactly the call
- * it was supposed to bound. Only one of those two errors is recoverable.
+ * DERIVED FROM `buildRequest`, not from `args` directly — an earlier version of
+ * this function read `args.system`/`args.messages`/`args.tools` and skipped
+ * `args.suffix` entirely. The suffix is the notebook and memory (spec §7's
+ * volatile, uncached context), routinely the largest block in the prompt, and
+ * it grows every turn — so that version's undercount was unbounded, not a fixed
+ * offset. `buildRequest` is the single place the suffix gets folded into the
+ * transcript (via `withSuffix`); counting anything else is exactly the mistake
+ * `buildCountTokensRequest`'s doc comment above warns against: "a reservation
+ * computed from a different prompt than the one dispatched is not a bound on
+ * anything."
+ *
+ * Biased HIGH and rounded UP: this number feeds the reservation, which is the
+ * guardrail's ceiling. Over-estimating costs a larger refund at reconcile;
+ * under-estimating lifts the ceiling for exactly the call it was supposed to
+ * bound. Only one of those two errors is recoverable.
  */
 export function estimateInputTokens(args: CallArgs): number {
-  // Summed per-item rather than `JSON.stringify(args.messages).length` on the
-  // whole array: the outer `[]` an empty array still stringifies to would add
-  // structural chars that have no tokens behind them, biasing the *floor*
-  // (an empty transcript) up rather than biasing every estimate up uniformly.
-  const chars =
-    args.system.length +
-    args.messages.reduce<number>((n, m) => n + JSON.stringify(m).length, 0) +
-    args.tools.reduce<number>((n, t) => n + JSON.stringify(t).length, 0)
-  return Math.ceil(chars / CHARS_PER_TOKEN)
+  const bytes = Buffer.byteLength(JSON.stringify(buildRequest(args)), 'utf8')
+  return Math.ceil(bytes / BYTES_PER_TOKEN)
 }
 
 type RawResponse = {
   content?: ContentBlock[]
-  stop_reason?: string
-  stop_details?: { category?: string | null; explanation?: string | null } | null
+  stop_reason?: StopReason | null
+  stop_details?: RefusalStopDetails | null
   model?: string
   _request_id?: string | null
   usage?: ModelUsage
@@ -170,14 +199,36 @@ export async function callModel(
   transport: Transport, args: CallArgs, now: () => number,
 ): Promise<ModelResult> {
   const started = now()
-  const raw = (await transport.create(buildRequest(args))) as RawResponse
+  const raw = (await transport.create(buildRequest(args), { signal: args.signal })) as RawResponse
   const latencyMs = Math.max(0, now() - started)
   const usage = raw.usage ?? ZERO_USAGE
   const model = raw.model ?? args.seat.model
   const requestId = raw._request_id ?? null
 
-  // Checked BEFORE content is touched. This ordering is the whole contract.
-  if (raw.stop_reason === 'refusal') {
+  // The SDK guarantees a non-null stop_reason in non-streaming mode
+  // (messages.d.ts: "In non-streaming mode this value is always non-null").
+  // Its absence here means the `as RawResponse` cast above is wrong for this
+  // response — a wrapped shape, a `.withResponse()` object, a future rename —
+  // and that is exactly the situation this module exists to never paper over.
+  // Defaulting to 'end_turn' would turn an unrecognized shape (which may well
+  // BE a refusal we failed to parse) into a confident, silent false success.
+  // Fail loud instead: throw, and let the transport-error path above the
+  // module handle it exactly like any other malformed response.
+  if (raw.stop_reason == null) {
+    throw new Error(
+      `callModel: response has no stop_reason (${JSON.stringify(raw.stop_reason)}). ` +
+        "Refusing to default it to 'end_turn' — non-streaming responses guarantee " +
+        'this field, so its absence means the response shape was not what we expected.',
+    )
+  }
+
+  // Checked BEFORE content is touched. This ordering is the whole contract, and
+  // it is delegated to src/errors.ts's `isRefusal` rather than re-implemented
+  // here so there is exactly one definition of "this is a refusal" in the repo.
+  // A refusal can carry a non-empty `content` (the SDK's own docs: streaming
+  // classifiers may intervene mid-response, after text was already generated),
+  // so this check must never be reached by first inspecting `content.length`.
+  if (isRefusal({ stop_reason: raw.stop_reason, stop_details: raw.stop_details ?? null })) {
     return {
       kind: 'refused',
       category: raw.stop_details?.category ?? null,
@@ -188,7 +239,7 @@ export async function callModel(
   return {
     kind: 'ok',
     content: raw.content ?? [],
-    stopReason: raw.stop_reason ?? 'end_turn',
+    stopReason: raw.stop_reason,
     model, requestId, usage, latencyMs,
   }
 }

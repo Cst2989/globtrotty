@@ -124,10 +124,22 @@ function byStatus(status: number | undefined): Classification {
  * `stop_reason: "refusal"` is an HTTP 200 with a populated `stop_details`. It does
  * not throw, so a harness that only inspects exceptions reads it as a successful
  * turn that produced no content and hands the user an empty answer with no failure
- * recorded anywhere. The model client (plan 3) checks `stop_reason` BEFORE reading
- * `content` and throws this; that keeps runTurn's single failure path — the catch
- * around the loop — the only place a turn is failed, instead of bolting a second,
- * parallel one beside it.
+ * recorded anywhere.
+ *
+ * UPDATED, plan 3 review round 1 — this comment previously said the model client
+ * "checks `stop_reason` BEFORE reading `content` and throws this", on the
+ * reasoning that it kept runTurn's catch the only place a turn is failed. That is
+ * no longer how it works, and the reasoning itself did not survive contact with
+ * Task 1: `AgentStep.fail` is a second, deliberate, reviewed non-throwing
+ * terminal path, so "the catch is the only place a turn fails" was not actually
+ * true by the time this shipped. `src/model/client.ts`'s `callModel` checks
+ * `stop_reason` before touching `content` (the ordering this comment always cared
+ * about is unchanged) but returns a `ModelResult` discriminated union
+ * (`kind: 'ok' | 'refused'`) rather than throwing `RefusalError`. The driver maps
+ * `kind: 'refused'` onto a `fail` step with `reason: 'refused'`, which is that
+ * value's actual writer. `isRefusal` below IS reused directly by `callModel`, so
+ * it has a real caller outside its own tests; `RefusalError` and `throwIfRefused`
+ * currently do not (see the note on `throwIfRefused`).
  */
 export class RefusalError extends Error {
   readonly category: RefusalStopDetails['category']
@@ -152,6 +164,15 @@ export function isRefusal(message: StopSignal): boolean {
  * Call this on every response, BEFORE reading `content`. `stop_details` is
  * documented as populated for a refusal, but its absence does not make the turn
  * any less refused — the category is then simply unknown.
+ *
+ * NO PRODUCTION CALLER as of plan 3 review round 1. `src/model/client.ts`'s
+ * `callModel` reuses `isRefusal` directly and returns a `ModelResult` rather
+ * than throwing, so nothing under `src/` calls this function — only
+ * `test/errors.test.ts` does. `RefusalError` is still reachable in production
+ * via `classifyError`'s `instanceof RefusalError` branch, but nothing currently
+ * constructs one outside that same test file and `test/worker.test.ts`'s
+ * hand-thrown fixture. Left in place pending a decision on whether either
+ * function should be removed.
  */
 export function throwIfRefused(message: StopSignal): void {
   if (!isRefusal(message)) return
