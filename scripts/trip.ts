@@ -10,7 +10,7 @@ import { mockRunner } from '../src/tools.js'
 config({ path: '.env.local', override: false })
 
 const handled = await handle(process.argv[2] ?? HER_MESSAGE, liveClient(), mockRunner(new MockSupplier()))
-console.log(handled.label)
+console.log(`${handled.label} -> ${handled.desk} desk (prompt ${handled.promptVersion})`)
 if (handled.requirements) console.log(JSON.stringify(handled.requirements, null, 2))
 for (const call of handled.toolTrace) console.log(`${call.name}(${JSON.stringify(call.input)})`)
 console.log(handled.text)
