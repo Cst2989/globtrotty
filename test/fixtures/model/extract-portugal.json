@@ -1,0 +1,167 @@
+[
+  {
+    "request": {
+      "max_tokens": 400,
+      "system": "Extract trip requirements from one message. Fill a field only when the message states it; leave every other field null. Never guess a number. Currency is the ISO code, EUR for euros.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros."
+        }
+      ],
+      "output_config": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "budget": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "amount": {
+                        "type": "number"
+                      },
+                      "currency": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 3
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "currency"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "destination": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "originCity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nights": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "month": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "partySize": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "adults": {
+                        "type": "number"
+                      },
+                      "children": {
+                        "type": "number"
+                      },
+                      "infants": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "adults",
+                      "children",
+                      "infants"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nearBeach": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "needsCrib": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "budget",
+              "destination",
+              "originCity",
+              "nights",
+              "month",
+              "partySize",
+              "nearBeach",
+              "needsCrib"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "response": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_011CeXQGK9mSS1fBJWzcqsJE",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"budget\":{\"amount\":1500,\"currency\":\"EUR\"},\"destination\":\"Portugal\",\"originCity\":\"Berlin\",\"nights\":7,\"month\":\"September\",\"partySize\":{\"adults\":2,\"children\":1,\"infants\":0},\"nearBeach\":true,\"needsCrib\":true}"
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 819,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 65,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  }
+]

@@ -5,17 +5,19 @@ import { SEATS, withSeat, type Seat } from './seats.js'
 export type Answer = { text: string; model: string; usage: Usage; costMicros: bigint }
 
 /**
- * One message in, one reply out. No system prompt, no tools, no memory: the
- * model answers her from what it already knows, which is the problem the
- * next lessons work on.
+ * One message in, one reply out. No tools, no memory: the model answers her
+ * from what it already knows and, from lesson 1.3 on, from an optional
+ * system prompt the router builds out of what extract() read from her
+ * message.
  */
-export async function ask(text: string, client: ModelClient = liveClient(), seat: Seat = SEATS.driver): Promise<Answer> {
+export async function ask(text: string, client: ModelClient = liveClient(), seat: Seat = SEATS.driver, system?: string): Promise<Answer> {
   // Opus 5 thinks before it answers by default, and those tokens count
   // against max_tokens at the output rate. A 2,048 budget left 75 characters
   // of reply on our first run, so the ceiling is high enough for both.
   const message = await client.create(
     withSeat(seat, {
       max_tokens: 8000,
+      ...(system !== undefined ? { system } : {}),
       messages: [{ role: 'user', content: text }],
     }),
   )
