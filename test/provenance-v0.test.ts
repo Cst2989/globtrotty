@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
+import { minorUnitExponent } from '../src/money.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { handle } from '../src/router.js'
-import { MockSupplier, type Offer } from '../src/supplier/mock.js'
+import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { replayClient } from './model/replay.js'
 
@@ -15,11 +16,16 @@ export function quotedAmounts(text: string): number[] {
   return amounts
 }
 
+type WireOffer = { price: { minor: string; currency: string } }
+
 function offeredAmounts(trace: { content: string; isError: boolean }[]): Set<number> {
   const amounts = new Set<number>()
   for (const entry of trace) {
     if (entry.isError) continue
-    for (const offer of JSON.parse(entry.content) as Offer[]) amounts.add(offer.price.amount)
+    for (const offer of JSON.parse(entry.content) as WireOffer[]) {
+      // The reply quotes whole units, the wire carries minor units.
+      amounts.add(Number(offer.price.minor) / 10 ** minorUnitExponent(offer.price.currency))
+    }
   }
   return amounts
 }

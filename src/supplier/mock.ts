@@ -1,11 +1,10 @@
-/** The version we write first: a price is a number and a currency code side by side. */
-export type Price = { amount: number; currency: string }
+import { formatMoney, money, type Money } from '../money.js'
 
 export type Offer = {
   sourceId: string
   kind: 'flight' | 'hotel'
   name: string
-  price: Price
+  price: Money
   detail: string
 }
 
@@ -23,9 +22,10 @@ function hash(input: string): number {
 }
 
 /**
- * A stand-in for Kiwi and Google Hotels that never calls the network, so
- * tests and recordings see the same fares every time. Flights price in USD
- * and hotels in EUR on purpose: that mismatch is a bug we meet in module two.
+ * A stand-in for Kiwi and Google Hotels that never calls the network, so tests
+ * and recordings see the same fares every time. Flights price in USD and hotels
+ * in EUR on purpose: that mismatch is the bug this lesson closes. Amounts are
+ * whole units in the mock, so they are multiplied by 100 into minor units.
  */
 export class MockSupplier {
   constructor(private readonly seed = 1) {}
@@ -39,7 +39,7 @@ export class MockSupplier {
         sourceId: `flight-${carrier.toLowerCase()}-${(base % 9000) + i}`,
         kind: 'flight',
         name: `${carrier} ${query.from} to ${query.to}`,
-        price: { amount, currency: 'USD' },
+        price: money(amount * 100, 'USD'),
         detail: `${i === 0 ? 'direct' : `${i} stop`}, departs ${query.departureDate} ${6 + i * 4}:${i === 1 ? '30' : '00'}, return ${query.returnDate ?? 'one way'}`,
       }
     })
@@ -55,9 +55,26 @@ export class MockSupplier {
         sourceId: `hotel-${i}-${base % 9000}`,
         kind: 'hotel',
         name: `${name}, ${query.city}`,
-        price: { amount: perNight * nights, currency: 'EUR' },
+        price: money(perNight * nights * 100, 'EUR'),
         detail: `${nights} nights, ${i === 2 ? 'crib on request' : 'crib available'}, ${i === 0 ? '200 m' : `${(i + 1) * 900} m`} from the beach`,
       }
     })
+  }
+}
+
+/**
+ * What a tool result looks like on the wire. `Money` holds a bigint, and
+ * JSON.stringify throws on those, which is a useful accident: it forces one
+ * deliberate answer to "what does the model see?" instead of a silent one. The
+ * model sees the formatted price and the exact minor units beside it.
+ */
+export function offerForModel(offer: Offer): Record<string, unknown> {
+  return {
+    ...offer,
+    price: {
+      minor: offer.price.minor.toString(),
+      currency: offer.price.currency,
+      formatted: formatMoney(offer.price),
+    },
   }
 }

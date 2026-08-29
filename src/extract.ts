@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { textOf, type ModelClient } from './client.js'
+import { money, minorUnitExponent, type Money } from './money.js'
 import { costMicros, usageOf, type Usage } from './pricing.js'
 import { SEATS, withSeat } from './seats.js'
 
@@ -22,11 +23,26 @@ export const RequirementsSchema = z.object({
   nearBeach: z.boolean().nullable(),
   needsCrib: z.boolean().nullable(),
 })
-export type Requirements = z.infer<typeof RequirementsSchema>
+/** What the model is asked for: whole units, the way she typed them. */
+export type RawRequirements = z.infer<typeof RequirementsSchema>
 
-export const EMPTY_REQUIREMENTS: Requirements = {
+/** What the rest of the system uses. One conversion, at the boundary. */
+export type Requirements = Omit<RawRequirements, 'budget'> & { budget: Money | null }
+
+export const EMPTY_RAW: RawRequirements = {
   budget: null, destination: null, originCity: null, nights: null, month: null,
   partySize: null, nearBeach: null, needsCrib: null,
+}
+export const EMPTY_REQUIREMENTS: Requirements = { ...EMPTY_RAW, budget: null }
+
+/**
+ * 1,500 euros becomes 150000 minor units. Rounded, not truncated, because a
+ * model that answers 1499.999 must not become 1,499.99.
+ */
+export function toRequirements(raw: RawRequirements): Requirements {
+  if (raw.budget === null) return { ...raw, budget: null }
+  const exponent = minorUnitExponent(raw.budget.currency)
+  return { ...raw, budget: money(Math.round(raw.budget.amount * 10 ** exponent), raw.budget.currency) }
 }
 
 const SYSTEM =
@@ -52,11 +68,11 @@ function wordsIn(text: string): Set<string> {
  * with the message. Booleans and party sizes are judgments about her words,
  * so they pass through and the desk confirms them with her.
  */
-export function checkAgainstMessage(requirements: Requirements, text: string): { kept: Requirements; dropped: (keyof Requirements)[] } {
+export function checkAgainstMessage(requirements: RawRequirements, text: string): { kept: RawRequirements; dropped: (keyof RawRequirements)[] } {
   const digits = digitsIn(text)
   const words = wordsIn(text)
-  const kept: Requirements = { ...requirements }
-  const dropped: (keyof Requirements)[] = []
+  const kept: RawRequirements = { ...requirements }
+  const dropped: (keyof RawRequirements)[] = []
   if (kept.budget && !digits.has(String(kept.budget.amount))) { kept.budget = null; dropped.push('budget') }
   if (kept.nights !== null && !digits.has(String(kept.nights)) && !mentionsAWeek(kept.nights, words)) { kept.nights = null; dropped.push('nights') }
   for (const field of ['destination', 'originCity', 'month'] as const) {
@@ -70,7 +86,7 @@ function mentionsAWeek(nights: number, words: Set<string>): boolean {
   return nights === 7 && (words.has('week') || words.has('seven'))
 }
 
-export type Extracted = { requirements: Requirements; dropped: (keyof Requirements)[]; usage: Usage; costMicros: bigint }
+export type Extracted = { requirements: Requirements; dropped: (keyof RawRequirements)[]; usage: Usage; costMicros: bigint }
 
 export async function extract(text: string, client: ModelClient): Promise<Extracted> {
   const message = await client.create(
@@ -83,13 +99,13 @@ export async function extract(text: string, client: ModelClient): Promise<Extrac
   )
   const usage = usageOf(message)
   const cost = costMicros(SEATS.cheap.model, usage)
-  let parsed: Requirements = EMPTY_REQUIREMENTS
+  let parsed: RawRequirements = EMPTY_RAW
   try {
     const result = RequirementsSchema.safeParse(JSON.parse(textOf(message)))
     if (result.success) parsed = result.data
   } catch {
-    parsed = EMPTY_REQUIREMENTS
+    parsed = EMPTY_RAW
   }
   const { kept, dropped } = checkAgainstMessage(parsed, text)
-  return { requirements: kept, dropped, usage, costMicros: cost }
+  return { requirements: toRequirements(kept), dropped, usage, costMicros: cost }
 }

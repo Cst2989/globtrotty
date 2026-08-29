@@ -24,7 +24,7 @@ describe('a conversation', () => {
     const client = replayClient('conversation-budget-drop')
     const run = mockRunner(new MockSupplier())
     const first = await turn(newConversation(), HER_MESSAGE, client, run)
-    expect(first.conversation.notebook.budget?.value.amount).toBe(1500)
+    expect(first.conversation.notebook.budget?.value.minor).toBe(150000n)
     // costMicros must cover every call this turn made: classify and extract
     // (both on the cheap seat) plus the two-step planning loop (on the
     // driver seat), not the loop alone.
@@ -35,7 +35,7 @@ describe('a conversation', () => {
     expect(first.costMicros).toBeGreaterThan(loopOnly)
     const second = await turn(first.conversation, 'Actually, let us keep it under 1,200 euros.', client, run)
     client.done()
-    expect(second.conversation.notebook.budget?.value.amount).toBe(1200)
+    expect(second.conversation.notebook.budget?.value.minor).toBe(120000n)
     expect(second.conversation.notebook.budget?.source).toBe('user')
     expect(second.conversation.notebook.destination?.value.toLowerCase()).toContain('portugal')
     expect(second.conversation.replies).toHaveLength(2)

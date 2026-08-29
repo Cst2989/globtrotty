@@ -1,12 +1,12 @@
 import type { Requirements } from './extract.js'
-import type { Price } from './supplier/mock.js'
+import { compareMoney, formatMoney, type Money } from './money.js'
 
 /** Who wrote a field: she did, we inferred it, or a tool returned it. */
 export type Provenance = 'user' | 'inferred' | 'tool'
 export type Field<T> = { value: T; source: Provenance; at: string } | null
 
 export type Notebook = {
-  budget: Field<Price>
+  budget: Field<Money>
   destination: Field<string>
   originCity: Field<string>
   nights: Field<number>
@@ -28,7 +28,15 @@ type Patch = Partial<{ [K in keyof Requirements]: NonNullable<Requirements[K]> }
 function relaxes(field: (typeof CONSTRAINT_FIELDS)[number], current: Notebook, next: unknown): boolean {
   const existing = current[field]
   if (!existing) return false
-  if (field === 'budget') return (next as Price).amount > (existing.value as Price).amount
+  if (field === 'budget') {
+    const a = next as Money
+    const b = existing.value as Money
+    // A tool that answers in another currency cannot be compared with her
+    // budget, so it is refused rather than converted. Converting is a decision
+    // someone has to take on purpose, and a hotel search is not that someone.
+    if (a.currency !== b.currency) return true
+    return compareMoney(a, b) === 1
+  }
   return (next as number) > (existing.value as number)
 }
 
@@ -49,9 +57,16 @@ export function applyRequirements(current: Notebook, patch: Patch, source: Prove
   return next
 }
 
+function describeValue(value: unknown): string {
+  if (typeof value === 'object' && value !== null && 'minor' in value && 'currency' in value) {
+    return formatMoney(value as Money)
+  }
+  return JSON.stringify(value)
+}
+
 export function notebookForPrompt(notebook: Notebook): string {
   const lines = Object.entries(notebook)
     .filter(([, field]) => field !== null)
-    .map(([key, field]) => `${key}: ${JSON.stringify((field as { value: unknown }).value)} (${(field as { source: string }).source})`)
+    .map(([key, field]) => `${key}: ${describeValue((field as { value: unknown }).value)} (${(field as { source: string }).source})`)
   return lines.length ? lines.join('\n') : 'nothing yet'
 }

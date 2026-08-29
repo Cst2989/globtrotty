@@ -1,5 +1,6 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import { z } from 'zod'
+import { offerForModel } from './supplier/mock.js'
 import type { MockSupplier } from './supplier/mock.js'
 
 const FlightInput = z.object({
@@ -39,8 +40,12 @@ export type ToolRunner = (name: string, input: unknown) => Promise<ToolOutcome>
 export function mockRunner(supplier: MockSupplier): ToolRunner {
   return async (name, input) => {
     try {
-      if (name === 'search_flights') return { content: JSON.stringify(supplier.searchFlights(FlightInput.parse(input))), isError: false }
-      if (name === 'search_hotels') return { content: JSON.stringify(supplier.searchHotels(HotelInput.parse(input))), isError: false }
+      if (name === 'search_flights') {
+        return { content: JSON.stringify(supplier.searchFlights(FlightInput.parse(input)).map(offerForModel)), isError: false }
+      }
+      if (name === 'search_hotels') {
+        return { content: JSON.stringify(supplier.searchHotels(HotelInput.parse(input)).map(offerForModel)), isError: false }
+      }
       return { content: `Unknown tool ${name}`, isError: true }
     } catch (err) {
       return { content: `Invalid input for ${name}: ${err instanceof Error ? err.message : String(err)}`, isError: true }
