@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
+import { NOT_EVALUATED } from '../src/gates/pipeline.js'
 
 describeDb('0004 corpus schema', () => {
   it('stores a tool result and reads it back by (conversation_id, source_id)', async () => {
@@ -180,6 +181,57 @@ describeDb('0005 gate_results integrity', () => {
         values (null, ${c!.id}, 'budget', null)
         returning passed`
       expect(row!.passed).toBeNull()
+    })
+  })
+})
+
+/**
+ * The column comment on `gate_results.passed` is an audit CONTRACT: the next
+ * slice reads this table and will trust the comment instead of re-deriving the
+ * rule from the pipeline. 0005's version said NULL meant "not evaluated because
+ * a prerequisite gate failed" — a row the pipeline never writes, since a gate
+ * skipped by an earlier failure writes no row at all — so a reader following it
+ * would have mis-read every NULL row in the table.
+ *
+ * A wrong comment is worse than none, because it is trusted instead of checked.
+ * These tests are the drift guard in both directions: change a `NOT_EVALUATED`
+ * string in the code without a new migration, or revert the comment, and they
+ * fail.
+ */
+describeDb('0006 gate_results.passed comment — the audit contract', () => {
+  async function comment(sql: any, column: string): Promise<string> {
+    const [row] = await sql<{ comment: string | null }[]>`
+      select col_description(a.attrelid, a.attnum) as comment
+        from pg_attribute a
+       where a.attrelid = 'public.gate_results'::regclass and a.attname = ${column}`
+    return row?.comment ?? ''
+  }
+
+  it('names every not-evaluated reason the pipeline can actually write', async () => {
+    await withTestDb(async (sql) => {
+      const passed = await comment(sql, 'passed')
+      for (const reason of Object.values(NOT_EVALUATED)) {
+        expect(passed).toContain(reason)
+      }
+      // Exactly three, so a fourth added in code without a migration is caught.
+      expect(Object.values(NOT_EVALUATED)).toHaveLength(3)
+    })
+  })
+
+  it('states that a skipped gate writes NO row, not a NULL one', async () => {
+    await withTestDb(async (sql) => {
+      const passed = await comment(sql, 'passed')
+      expect(passed).toContain('NO ROW')
+      // 0005's wording described a row that is never written.
+      expect(passed).not.toContain('prerequisite')
+    })
+  })
+
+  it('documents all three verdicts, and detail\'s dependence on them', async () => {
+    await withTestDb(async (sql) => {
+      const passed = await comment(sql, 'passed')
+      for (const verdict of ['TRUE:', 'FALSE:', 'NULL:']) expect(passed).toContain(verdict)
+      expect(await comment(sql, 'detail')).toContain('Always NULL when passed = TRUE')
     })
   })
 })

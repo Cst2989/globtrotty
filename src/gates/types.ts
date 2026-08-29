@@ -12,6 +12,22 @@ import type { SupplierItem } from '../supplier/types.js'
  * produces NO row, and "no row" is indistinguishable from "the gate never ran".
  * A type union alone cannot carry that guarantee, because types are erased.
  *
+ * ## What this does NOT guarantee — read before "simplifying" a test
+ *
+ * Deriving the list guarantees every gate gets a ROW. It does NOT guarantee the
+ * row holds a real verdict: a name added here but never actually called files no
+ * violation and is named in no `notEvaluated` reason, so it falls through to
+ * `passed: true` — an unwired gate silently recording a pass on every proposal.
+ * Nothing in the type system catches that.
+ *
+ * What catches it is the pair of assertions that pin the full seven-name row set
+ * against literal expected values, in `test/gate-pipeline.test.ts`: 'writes a
+ * gate_results row for every gate it ran, including the passes' (which asserts
+ * `[true x 7]` by exact array equality) and 'writes a row for EVERY name in
+ * GateName'. Those literals look redundant next to this constant and they are
+ * not — replacing either with something derived from `GATE_NAMES` would make the
+ * test assert only that the code agrees with itself. Leave them literal.
+ *
  * 'reviewer' is deliberately NOT here. It needs a model and arrives in plan 3;
  * `gate_results.gate` already accepts the value, so the seam costs nothing, and
  * keeping it out of `GateName` is what stops the pipeline from writing a row

@@ -50,13 +50,26 @@ export const NOT_EVALUATED = {
  * `v.gate` across the WHOLE violation list rather than by which call produced
  * which array.
  *
- * ## Never throws
+ * ## Never throws on model-controlled input
  *
  * Every check returns violations. The throwing calls underneath (`sumMoney` on
  * an empty list, `addMoney`/`compareMoney` on a currency mismatch, `itemTotal`
- * on a fractional quantity) are guarded inside the checks themselves. What can
- * still throw is the database write, which is a real failure of the turn and
- * must not be swallowed.
+ * on a fractional quantity) are guarded inside the checks themselves, so nothing
+ * the MODEL can put in a proposal reaches one — which is the property that
+ * matters, since the model's output is the untrusted input here.
+ *
+ * The qualifier is deliberate rather than decorative, because the claim is not
+ * absolute one hop out. Rehydration reads the corpus back, and a `tool_results`
+ * row with a corrupt `price_minor` or an unknown `currency` throws inside
+ * `money()` before any gate sees it, while `checkDates` dereferences `payload`
+ * jsonb that was written as `SupplierItem.detail` but is read back unvalidated.
+ * Neither is reachable today: every corpus row is written by a supplier port
+ * through `recordResults`, from an already-typed `SupplierItem`. Both would
+ * become reachable the moment anything else writes that table, and the fix then
+ * is to validate on the way OUT of `rehydrate`, not to wrap gates in try/catch.
+ *
+ * What can also throw is the database write, which is a real failure of the turn
+ * and must not be swallowed.
  */
 export async function runGates(
   sql: postgres.Sql,
