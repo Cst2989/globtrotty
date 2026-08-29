@@ -514,6 +514,54 @@ describeDb('driver', () => {
     })
   })
 
+  // IMPORTANT 2: driver.md instructs the model to "fix exactly what it names
+  // and propose again" on rejection, so a second propose_itinerary in the same
+  // turn is not an edge case. round used to be hardcoded to 0 on every call,
+  // so two proposals in a turn wrote two identical seven-row gate_results sets
+  // under round 0, double-counting any `group by gate` fire-rate query.
+  it('derives round from the count of PRIOR propose_itinerary calls this turn, not a hardcoded 0', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '23')
+      // Stands in for a first propose_itinerary call this turn: `loop()`
+      // writes exactly this row (beginToolCall) BEFORE the tool runs, so by the
+      // time a real second call reaches this handler, a prior round's row
+      // already exists under a DIFFERENT call_id.
+      await sql`
+        insert into tool_calls (turn_id, call_id, name, status)
+        values (${s.turnId}, 'toolu_0', 'propose_itinerary', 'done')`
+      const create = vi.fn().mockResolvedValue(toolResponse('propose_itinerary',
+        { refs: [{ sourceId: 'INVENTED-1', quantity: 1, slot: 'outbound' }] }))
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      await step.run()
+      const rows = await sql`
+        select distinct round from gate_results where conversation_id = ${s.conversationId}`
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.round).toBe(1)
+    })
+  })
+
+  // The one call_id this handler must NOT count against itself: `loop()`
+  // (src/worker.ts) writes THIS call's own tool_calls row via beginToolCall
+  // before execute() runs, so without the `call_id != callId` exclusion every
+  // proposal — even the first — would count itself and start at round 1.
+  it('does not count its OWN in-progress tool_calls row as a prior proposal', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '24')
+      await sql`
+        insert into tool_calls (turn_id, call_id, name, status)
+        values (${s.turnId}, 'toolu_1', 'propose_itinerary', 'pending')`
+      const create = vi.fn().mockResolvedValue(toolResponse('propose_itinerary',
+        { refs: [{ sourceId: 'INVENTED-1', quantity: 1, slot: 'outbound' }] }))
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      await step.run()
+      const [row] = await sql`
+        select distinct round from gate_results where conversation_id = ${s.conversationId}`
+      expect(row!.round).toBe(0)
+    })
+  })
+
   it('reports a provenance failure back to the model in words it can act on', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '13')

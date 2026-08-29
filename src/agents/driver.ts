@@ -12,6 +12,7 @@ import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { costMicros } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
+import { countPriorProposals } from '../repo/toolCalls.js'
 import { toolsForDesk } from '../tools/registry.js'
 import { fenceResult, trimForContext, validateToolCall } from '../tools/validate.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
@@ -268,7 +269,7 @@ export function makeDriver(deps: DriverDeps): Agent {
     }
 
     return asToolStep(async () => {
-      const raw = await execute(deps, ctx, notebook, check.def.name, check.input)
+      const raw = await execute(deps, ctx, notebook, check.def.name, check.input, toolUse.id)
       // TRIM, then FENCE. Fencing first and trimming second would cut the
       // closing delimiter off a long result and hand the model an unterminated
       // fence — the exact structure the fence exists to make unambiguous.
@@ -356,6 +357,7 @@ function provenanceFor(ctx: AgentContext): Provenance {
  */
 async function execute(
   deps: DriverDeps, ctx: AgentContext, notebook: Notebook, name: string, input: unknown,
+  callId: string,
 ): Promise<string> {
   const { sql } = deps
   switch (name) {
@@ -424,16 +426,19 @@ async function execute(
       // the array, because a bare array is not a legal top-level tool schema. So
       // the validated input must be unwrapped: runGates wants the array.
       const { refs } = input as { refs: unknown[] }
+      // Derived, not hardcoded: driver.md instructs the model to fix and
+      // propose again, so a SECOND proposal in this turn must land as round 1,
+      // not a second round-0 row set. `gate_results.round` still has no
+      // uniqueness constraint (docs/backlog-plan.md Tier 1) — that is left to
+      // a later plan; this only makes the value itself honest.
+      const round = await countPriorProposals(sql, ctx.turnId, callId)
       const outcome = await runGates(sql, {
         conversationId: ctx.conversationId,
         turnId: ctx.turnId,
         refs,
         notebook: constraintsFromNotebook(notebook),
         now: new Date(deps.now()),
-        // Set deliberately. `gate_results.round` has no uniqueness constraint yet
-        // and the reviewer's multi-round loop is plan 3b; until then every
-        // proposal in a turn is round 0, which is honest rather than invented.
-        round: 0,
+        round,
       })
       if (outcome.ok) {
         return `Proposal accepted. Total ${formatMoney(outcome.total)}. `
