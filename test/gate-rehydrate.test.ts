@@ -2,6 +2,7 @@ import { expect, it, describe } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { rehydrateRefs, ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
+import { SLOT_KINDS } from '../src/gates/checks.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import type { FlightSearch } from '../src/supplier/types.js'
 
@@ -55,18 +56,40 @@ describe('ProposalRefsSchema — the model cannot send values', () => {
   it('rejects a non-positive or non-integer quantity', () => {
     for (const quantity of [0, -1, 1.5]) {
       expect(ProposalRefsSchema.safeParse({
-        refs: [{ sourceId: 'K1', quantity, slot: 'x' }],
+        refs: [{ sourceId: 'K1', quantity, slot: 'outbound' }],
       }).success).toBe(false)
     }
   })
 
   it('rejects a quantity above the per-line cap', () => {
     expect(ProposalRefsSchema.safeParse({
-      refs: [{ sourceId: 'K1', quantity: 16, slot: 'x' }],
+      refs: [{ sourceId: 'K1', quantity: 16, slot: 'outbound' }],
     }).success).toBe(true)
     expect(ProposalRefsSchema.safeParse({
-      refs: [{ sourceId: 'K1', quantity: 17, slot: 'x' }],
+      refs: [{ sourceId: 'K1', quantity: 17, slot: 'outbound' }],
     }).success).toBe(false)
+  })
+
+  // CORRECTION (task-11 dispatch): the schema used to accept any string up to
+  // 64 chars as a `slot` while `checkSlots` rejected everything outside
+  // `SLOT_KINDS`, so the vocabulary was published NOWHERE the model could see
+  // it and the only way to learn it was to guess and read the violation. The
+  // enum is derived from `SLOT_KINDS`, so there is one definition of the set.
+  it('rejects a slot outside the published vocabulary and names the options', () => {
+    const r = ProposalRefsSchema.safeParse({
+      refs: [{ sourceId: 'K1', quantity: 1, slot: 'x' }],
+    })
+    expect(r.success).toBe(false)
+    const message = r.success ? '' : r.error.issues.map((i) => i.message).join(' ')
+    for (const slot of Object.keys(SLOT_KINDS)) expect(message).toContain(slot)
+  })
+
+  it('accepts every name in the slot vocabulary', () => {
+    for (const slot of Object.keys(SLOT_KINDS)) {
+      expect(ProposalRefsSchema.safeParse({
+        refs: [{ sourceId: 'K1', quantity: 1, slot }],
+      }).success).toBe(true)
+    }
   })
 
   it('rejects an empty ref list', () => {
@@ -75,8 +98,8 @@ describe('ProposalRefsSchema — the model cannot send values', () => {
 
   it('rejects duplicate sourceIds in one proposal', () => {
     expect(ProposalRefsSchema.safeParse({
-      refs: [{ sourceId: 'A', quantity: 1, slot: 'x' },
-             { sourceId: 'A', quantity: 1, slot: 'y' }],
+      refs: [{ sourceId: 'A', quantity: 1, slot: 'outbound' },
+             { sourceId: 'A', quantity: 1, slot: 'inbound' }],
     }).success).toBe(false)
   })
 })
@@ -99,8 +122,8 @@ describeDb('rehydrateRefs', () => {
     await withTestDb(async (sql) => {
       const { conversationId, items } = await seed(sql, '02')
       const res = await rehydrateRefs(sql, conversationId, [
-        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'a' },
-        { sourceId: 'HALLUCINATED-42', quantity: 1, slot: 'b' },
+        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' },
+        { sourceId: 'HALLUCINATED-42', quantity: 1, slot: 'inbound' },
       ])
       expect(res.ok).toBe(false)
       if (res.ok) throw new Error('unreachable')
@@ -117,7 +140,7 @@ describeDb('rehydrateRefs', () => {
       const a = await seed(sql, '03')
       const b = await seed(sql, '04')
       const res = await rehydrateRefs(sql, b.conversationId, [
-        { sourceId: a.items[0]!.sourceId, quantity: 1, slot: 'a' },
+        { sourceId: a.items[0]!.sourceId, quantity: 1, slot: 'outbound' },
       ])
       expect(res.ok).toBe(false)
       if (res.ok) throw new Error('unreachable')
@@ -136,8 +159,8 @@ describeDb('rehydrateRefs', () => {
     await withTestDb(async (sql) => {
       const { conversationId } = await seed(sql, '05')
       const res = await rehydrateRefs(sql, conversationId, [
-        { sourceId: 'X1', quantity: 1, slot: 'a' },
-        { sourceId: 'X2', quantity: 1, slot: 'b' },
+        { sourceId: 'X1', quantity: 1, slot: 'outbound' },
+        { sourceId: 'X2', quantity: 1, slot: 'inbound' },
       ])
       expect(res.ok).toBe(false)
       if (res.ok) throw new Error('unreachable')
@@ -156,7 +179,7 @@ describeDb('rehydrateRefs', () => {
     await withTestDb(async (sql) => {
       const { conversationId, items } = await seed(sql, '06')
       const tampered = [
-        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'a', price: 1 },
+        { sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound', price: 1 },
       ] as unknown as Parameters<typeof rehydrateRefs>[2]
       const res = await rehydrateRefs(sql, conversationId, tampered)
       expect(res.ok).toBe(false)

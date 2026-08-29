@@ -2,7 +2,22 @@ import { z } from 'zod'
 import type postgres from 'postgres'
 import { rehydrate } from '../repo/toolResults.js'
 import { itemTotal } from '../supplier/types.js'
+import { SLOT_KINDS } from './checks.js'
 import type { ItemRef, RehydratedItem, Violation } from './types.js'
+
+/**
+ * The slot vocabulary as the model sees it, derived from `SLOT_KINDS` so the
+ * set has exactly ONE definition. Before this, the schema accepted any string
+ * up to 64 chars while `checkSlots` rejected everything outside `SLOT_KINDS`,
+ * which meant the only way for a model to learn the vocabulary was to guess a
+ * name, get a violation back, and read the list out of the error — a wasted
+ * round trip per conversation, on a closed set we could simply have published.
+ * A `z.enum` rejects the bad name at the boundary AND names the valid options
+ * in the parse error, so the first reply already carries the answer.
+ */
+const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
+  keyof typeof SLOT_KINDS, ...(keyof typeof SLOT_KINDS)[],
+]
 
 /**
  * The model may send references and NOTHING ELSE.
@@ -25,7 +40,7 @@ export const ProposalRefsSchema = z.strictObject({
   refs: z.array(z.strictObject({
     sourceId: z.string().min(1).max(512),
     quantity: z.int().positive().max(16),
-    slot: z.string().min(1).max(64),
+    slot: z.enum(SLOT_NAMES),
   })).min(1).max(24)
     .refine(
       (refs) => new Set(refs.map((r) => r.sourceId)).size === refs.length,

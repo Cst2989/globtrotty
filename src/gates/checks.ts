@@ -83,8 +83,11 @@ export function checkCurrency(items: RehydratedItem[], expected: string | null):
 }
 
 /**
- * The slot vocabulary, in ONE place. `ItemRef.slot` is a free-form string at
- * the tool boundary (the schema only bounds its length), so without this every
+ * The slot vocabulary, in ONE place, and the source `ProposalRefsSchema`
+ * derives its `slot` enum from — so the set the tool publishes to the model and
+ * the set this gate enforces cannot drift apart. `ItemRef.slot` stays typed as
+ * a plain `string`, because this function is exported and a caller that reached
+ * it without going through the schema must still be checked; without this every
  * slot name in the system is an unchecked literal and a hotel proposed for the
  * 'outbound' leg sails through every other gate.
  *
@@ -120,9 +123,10 @@ export function checkSlots(items: RehydratedItem[]): Violation[] {
   const mismatched: { r: RehydratedItem; wants: SupplierKind }[] = []
 
   for (const r of items) {
-    // `Object.hasOwn`, never a bare index. `slot` is model-controlled and the
-    // tool schema only bounds its LENGTH, so `slot: 'toString'`, 'constructor'
-    // or '__proto__' would otherwise resolve through `Object.prototype`, return
+    // `Object.hasOwn`, never a bare index. `slot` is model-controlled and this
+    // function is reachable without the tool schema's enum, so `slot: 'toString'`,
+    // 'constructor' or '__proto__' would otherwise resolve through
+    // `Object.prototype`, return
     // something truthy, skip the unknown-name branch, and render
     // `slot "toString" takes a function toString() { [native code] }`. That
     // still fails closed, but it misclassifies an unknown-NAME fault as a
