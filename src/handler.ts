@@ -86,6 +86,11 @@ async function finishQueuing(
   deps: SubmitDeps, input: SubmitInput, conversationId: string, turnId: string,
 ): Promise<SubmitResult> {
   const { sql } = deps
+  // The boolean here is dropped on purpose in every normal case, but there is
+  // one rare case it hides: two presses of one key straddling the moment a
+  // ceiling trips can leave this turn queued with no message, because the
+  // other press's key claimed the message row first. That stuck queued turn
+  // is the residual module 3's stalled-turn sweeper is there to clear.
   await writeHerMessage(sql, input, conversationId, turnId)
   await sql`update course.conversations set status = 'working', updated_at = now()
              where id = ${conversationId} and user_id = ${input.userId}`
@@ -245,7 +250,10 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
  * row is claimed and the press replays through `withConversation` exactly like
  * a repeated press with a known id, while a capped press opens no turn (fix
  * round 4), so her message row is the claim and the denial is already complete
- * once the winner has written it.
+ * once the winner has written it. That last part is only true of a capped
+ * winner: a capped loser short-circuits straight to `limit_reached` on
+ * purpose, because replaying it through `withConversation` would let this
+ * denial overwrite the status of a turn a queued sibling already holds.
  */
 async function firstPress(deps: SubmitDeps, input: SubmitInput): Promise<SubmitResult> {
   const { sql } = deps

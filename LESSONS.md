@@ -18,3 +18,5 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-2-5 | Record every call | npm run migrate, then npm test (test/model-calls.test.ts, test/alias-echo.test.ts) |
 | lesson-2-6 | Control the money | npm run migrate, then npm test (test/spend.test.ts) |
 | lesson-2-7 | Fifty presses, one turn | npm run migrate, then npm test (test/idempotency.test.ts) |
+
+Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a `queued` turn with no message. The stalled-turn sweeper module 3 builds must also reap that case, not just a turn with no heartbeat.
