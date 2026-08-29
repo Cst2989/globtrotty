@@ -582,6 +582,37 @@ describeDb('driver', () => {
     })
   })
 
+  // IMPORTANT 10: `sourceId` is echoed back into the model's own context
+  // verbatim on a rejection, and `ProposalRefsSchema` allows up to 512
+  // arbitrary characters — including a newline, which would otherwise let a
+  // crafted id inject what reads as a new line of instructions into the tool
+  // result. Escaping and capping the id must not fence the surrounding "fix
+  // exactly what it names and propose again" instruction.
+  it('escapes and caps a hostile sourceId before echoing it back, without fencing the instruction', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '25')
+      const hostile = `INV\n${'X'.repeat(200)}`   // a newline, and over the 128-char cap
+      const create = vi.fn().mockResolvedValue(toolResponse('propose_itinerary',
+        { refs: [{ sourceId: hostile, quantity: 1, slot: 'outbound' }] }))
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const out = String(await step.run())
+      expect(out).toMatch(/rejected/i)
+      expect(out).toMatch(/fix exactly these and propose again/i)
+      // The sanitized ids sit in the "(...)" segment driver.ts itself builds
+      // (`v.sourceIds.map(sanitizeSourceId).join(', ')`), which is what this
+      // finding scopes — NOT the violation's `detail` text, built upstream in
+      // src/gates/rehydrateGate.ts, which still echoes the raw id and is a
+      // separate, out-of-scope surface.
+      const idsSegment = out.match(/\(([\s\S]*?)\):/)?.[1]
+      expect(idsSegment).toBeDefined()
+      expect(idsSegment).not.toContain('\n')      // the raw newline must not survive
+      expect(idsSegment).toContain('INV?')        // escaped, not dropped
+      expect(idsSegment).toContain('…')            // truncated past 128 chars, marker intact
+      expect(idsSegment!.length).toBeLessThan(hostile.length)
+    })
+  })
+
   it('fails the turn when the reservation carries the conversation past its ceiling', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '14')

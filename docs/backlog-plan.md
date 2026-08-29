@@ -95,6 +95,27 @@ exist is worse than an acknowledged convention, because everything downstream as
 **Fix:** add ESLint with a `no-restricted-syntax` rule matching `?? 0` on a spend read, or delete
 the claim from the spec. Either is honest; the current state is not.
 
+### 2.3 `model_calls` cannot reconstruct a driver call, though `capture_policy` says `full`
+`src/agents/driver.ts` (the `recordModelCall` call), `src/repo/modelCalls.ts:80,106`. §7 makes
+driver rows always `full` *"because they are the eval corpus part 3 reads and the fine-tuning
+corpus part 4 reads"* — but what is actually stored is the raw `system` string and
+`lastUserText(...)`, the last thing SHE said. On step 3 of a multi-step turn, `user_prompt` is
+still her opening message, byte-for-byte identical to the step-0 row: the assembled request the
+model actually saw — the transcript, the tool results folded in, the notebook suffix, the cache
+breakpoints — is captured nowhere.
+
+**This is real debt whose cost grows with every driver call recorded from here on**, the same
+shape as 2.1: a row written today with `capture_policy = 'full'` cannot later be backfilled with
+the request it silently failed to capture, because that request was never durable anywhere else
+either. Every multi-step turn recorded between now and the fix is a permanent gap in the eval and
+fine-tuning corpora §7 promises.
+
+**No migration for this in the final-fix-report wave that found it** — the schema has no column
+for "the full assembled request", and adding one is exactly the kind of schema change that wave
+was scoped to avoid. **Fix:** add a `request_shape` (or similarly named) `jsonb` column and write
+the actual `buildRequest(args)` payload (redacted the same way `response` is) rather than deriving
+`user_prompt` from the transcript after the fact.
+
 ---
 
 ## Tier 3 — latent, cheap, no cost while waiting
@@ -116,6 +137,7 @@ the claim from the spec. Either is honest; the current state is not.
 |---|---|
 | **RLS is enabled but bypassed** | The worker connects as table owner, so non-forced RLS is a no-op. There is no row-level isolation today, only "no other role can touch these tables". Forcing RLS needs real policies, which need a browser client — plan 4. **`0003_lockdown.sql` and `src/repo/spend.ts` carry a written warning** that a per-user policy on `daily_usage` would silently disable the global ceiling: the sum would return only the caller's rows, read far below the cap, and stop firing with no error and no failing test. That hazard cannot be tested from inside the owner privilege level, which is why it is a comment where the policy author will be looking. |
 | **`netlify.toml` points at a build that does not exist** | Declares `command = "pnpm build"` and `publish = ".next"`; there is no `build` script and no Next.js in the repo. A deploy would fail today. Harmless until there is something to deploy — plan 4. |
+| **The production entry point still runs `echoAgent`** | `netlify/functions/run-turn-background.mts:5,72`. Assessed during the final-fix-report wave and deliberately NOT wired: `makeDriver` needs a transport (straightforward — `scripts/demo.ts`'s `liveDriverScenario` shows the shape) and two suppliers. `KiwiSupplier` needs no key, but `SearchApiHotels` needs an API key (`GOOGLE_SEARCH_API` in `.env.local` — note the name does not match the class), which is **not** in `src/env.ts`'s `KEYS` list. `loadEnv` is all-or-nothing across every caller: adding the key there would force `netlify/functions/sweep.mts` — an unrelated function that never touches a supplier — to also require it, and there is no test harness for either Netlify function (`run-turn-background.mts`'s own header: "exercised only by manual/staging verification, never by `pnpm test`") to catch a wiring mistake before it ships. Harmless today for the same reason the `netlify.toml` item above is: nothing deploys. Whoever does this wave should extend `env.ts` with a supplier-specific optional key (not folded into the required `KEYS` list) rather than widening what every Netlify function must have set, and construct the transport/suppliers the way `liveDriverScenario` does. |
 | **`gate_results` has no `user_id`** | Every sibling table has one. Under a per-user RLS policy this table needs an `EXISTS` join to `conversations` rather than a direct predicate. Expressible, so not a blocker; belongs with the policy work. |
 | **`conversions` is empty by design** | Created with the join key because that is what cannot be added retroactively. Rows arrive months after a click. Nothing to do. |
 
