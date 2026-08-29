@@ -6,6 +6,7 @@ const LIMITS = {
   dailyCeilingMicros: 15_000_000n,         // $15
   globalCeilingMicros: 50_000_000n,        // $50
   maxSteps: 24,
+  maxSupplierCallsPerTurn: 12,
 }
 
 const base = (over: Partial<DecideInput> = {}): DecideInput => ({

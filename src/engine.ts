@@ -52,6 +52,7 @@ export type Limits = {
   dailyCeilingMicros: bigint
   globalCeilingMicros: bigint
   maxSteps: number
+  maxSupplierCallsPerTurn: number
 }
 
 /**
