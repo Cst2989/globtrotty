@@ -44,6 +44,52 @@ describe('parseKiwiResponse', () => {
     }
   })
 
+  // The captured fixture's prices are all whole euros (464.0, 472.0, ...), so
+  // `Math.round` and `Math.trunc` agree on every one of them — a Math.trunc
+  // regression would slip through undetected against the fixture alone. This
+  // test uses a crafted synthetic response with prices that genuinely go
+  // inexact under a binary-float `*100` multiply, to actually discriminate
+  // round vs. trunc. Do not "simplify" this away as redundant with the
+  // fixture-driven test above; it covers a different, real IEEE-754 case.
+  it('rounds (not truncates) prices that go inexact under a float *100 multiply', () => {
+    // 8.29 * 100 === 828.9999999999999 in IEEE-754 double precision (round -> 829, trunc -> 828)
+    // 70.07 * 100 === 7006.999999999999 (round -> 7007, trunc -> 7006)
+    // Verified live via `node -e` before relying on them.
+    const inexact = 'data: ' + JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        currency: 'EUR',
+        itineraries: [
+          {
+            id: 'synthetic-inexact-1', price: 8.29, totalDurationSeconds: 100,
+            bookingUrl: null,
+            baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+            outbound: {
+              from: 'BER', to: 'FAO',
+              departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+              stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+            },
+            inbound: null,
+          },
+          {
+            id: 'synthetic-inexact-2', price: 70.07, totalDurationSeconds: 100,
+            bookingUrl: null,
+            baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+            outbound: {
+              from: 'BER', to: 'FAO',
+              departureTime: '2026-09-12T10:00:00', arrivalTime: '2026-09-12T12:00:00',
+              stops: 0, route: ['BER', 'FAO'], cabinClass: 'Economy', segments: [],
+            },
+            inbound: null,
+          },
+        ],
+      }) }] },
+    })
+    const inexactItems = parseKiwiResponse(inexact, params, NOW)
+    expect(inexactItems[0]!.price.minor).toBe(829n)
+    expect(inexactItems[1]!.price.minor).toBe(7007n)
+  })
+
   it('keeps leg times as naive strings, never Dates', () => {
     const d = items[0]!.detail
     expect(d.kind).toBe('flight')
