@@ -1,0 +1,22 @@
+-- 0008 fixed the three unindexed `turn_id` FK child columns the whole-branch
+-- review named: tool_results, proposals, gate_results. Re-running the audit
+-- against the LIVE catalogue afterwards — rather than against the list in the
+-- finding — turned up a fourth in the same migration (0004) with the same
+-- defect: `link_clicks.turn_id references turns(id) on delete set null`, no
+-- index. The finding enumerated three of four; the enumeration was the bug, not
+-- the rule.
+--
+-- Same cost as 0008's three: postgres does not use an index to enforce a
+-- foreign key on the referencing side, but the parent-side `on delete set null`
+-- must find the referencing rows, so every `delete from turns` (which is what a
+-- conversation cascade performs) is a sequential scan of this table without one.
+--
+-- Separate migration rather than an edit to 0008 because 0008 is already
+-- applied to the live project, and an applied migration's statements are never
+-- edited.
+--
+-- NOT fixed here, and reported instead: `messages.turn_id` and
+-- `agent_events.turn_id` have the same defect but belong to migration 0001
+-- (plan 1's harness tables), outside this branch's scope. `link_clicks` is
+-- fixed because 0004 — this branch's own migration — created it.
+create index link_clicks_by_turn on link_clicks (turn_id);

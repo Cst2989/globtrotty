@@ -169,7 +169,14 @@ describeDb('0005 gate_results integrity', () => {
     })
   })
 
-  it('accepts passed = null, meaning "not evaluated because a prerequisite gate failed"', async () => {
+  // Retitled. The old title was 'accepts passed = null, meaning "not evaluated
+  // because a prerequisite gate failed"' -- the exact phrase migration 0006
+  // exists to REMOVE, and which the sibling test below asserts is absent from
+  // the live column comment. A test title is documentation too, and this one
+  // was documenting the wording it is part of a pair to eliminate. The column
+  // is nullable so the pipeline can record "the gate ran but could not reach a
+  // verdict"; a gate SKIPPED by an earlier failure writes no row at all.
+  it('accepts passed = null, for a gate that ran but could not reach a verdict', async () => {
     await withTestDb(async (sql) => {
       const userId = '00000000-0000-4000-8000-000000000008'
       const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
@@ -232,6 +239,93 @@ describeDb('0006 gate_results.passed comment — the audit contract', () => {
       const passed = await comment(sql, 'passed')
       for (const verdict of ['TRUE:', 'FALSE:', 'NULL:']) expect(passed).toContain(verdict)
       expect(await comment(sql, 'detail')).toContain('Always NULL when passed = TRUE')
+    })
+  })
+})
+
+/**
+ * 0008. Two whole-branch defects: three foreign-key child columns with no
+ * index, and a hazard documented only in migration history.
+ */
+describeDb('0008 turn_id indexes and the daily_usage RLS warning', () => {
+  /**
+   * §6 requires an index on every FK child column. 0005 fixed this class of
+   * defect for `gate_results.conversation_id` but the audit stopped there, so
+   * all three tables 0004 created still referenced `turns(id)` with nothing to
+   * serve the parent-side `on delete set null`.
+   *
+   * Asserted per table rather than as a count, so a migration that indexed one
+   * and forgot two fails naming the ones it missed.
+   */
+  it.each(['tool_results', 'proposals', 'gate_results', 'link_clicks'])(
+    'indexes %s.turn_id, the FK child column', async (table) => {
+      await withTestDb(async (sql) => {
+        const rows = await sql<{ indexdef: string }[]>`
+          select indexdef from pg_indexes
+           where schemaname = 'public' and tablename = ${table}`
+        // Leading column must be turn_id: an index that merely MENTIONS the
+        // column (say `(conversation_id, turn_id)`) cannot serve a turn_id-only
+        // lookup, which is exactly the defect 0005's own note warned about for
+        // `turns_sweeper`.
+        expect(rows.some((r) => /\(turn_id[),]/.test(r.indexdef))).toBe(true)
+      })
+    })
+
+  /**
+   * The catalogue-wide audit, rather than a hand-kept list of tables.
+   *
+   * The finding this migration answers named THREE tables; re-running the audit
+   * against the live catalogue afterwards turned up a fourth (`link_clicks`) in
+   * the same migration with the same defect. The enumeration was the bug. So
+   * this asserts the whole set, and the two known exceptions are named
+   * explicitly with a reason — an unindexed FK child column added anywhere from
+   * here on fails this test rather than waiting for someone to think to look.
+   *
+   * Exact-set equality, deliberately. If the two plan-1 columns below are ever
+   * indexed, this fails and the list must be shortened — which is the correct
+   * outcome, because a stale "known exceptions" list is how a fixed defect goes
+   * on being described as accepted.
+   */
+  it('leaves no foreign-key child column unindexed except the two known plan-1 ones', async () => {
+    await withTestDb(async (sql) => {
+      const rows = await sql<{ child: string }[]>`
+        select c.conrelid::regclass::text || '.' || a.attname as child
+          from pg_constraint c
+          join unnest(c.conkey) with ordinality k(attnum, ord) on true
+          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+         where c.contype = 'f'
+           and c.connamespace = 'public'::regnamespace
+           and k.ord = 1
+           and not exists (
+             select 1 from pg_index i
+              where i.indrelid = c.conrelid and i.indkey[0] = a.attnum
+           )
+         order by child`
+      // `messages.turn_id` and `agent_events.turn_id` are migration 0001's
+      // (plan 1's harness tables), outside this branch's scope. Same defect,
+      // reported rather than silently changed.
+      expect(rows.map((r) => r.child)).toEqual(['agent_events.turn_id', 'messages.turn_id'])
+    })
+  })
+
+  /**
+   * The table comment is a CONTRACT, on the same precedent as
+   * `gate_results.passed` in 0006: a policy author reads the table, not the
+   * migration history, and 0003's warning about this exact hazard lives only in
+   * a migration nobody opens. Pinned on the load-bearing words, so a comment
+   * rewritten into something vaguer fails.
+   */
+  it('warns on the daily_usage TABLE that a per-user RLS policy silently breaks the global ceiling', async () => {
+    await withTestDb(async (sql) => {
+      const [row] = await sql<{ comment: string | null }[]>`
+        select obj_description('public.daily_usage'::regclass, 'pg_class') as comment`
+      const c = row?.comment ?? ''
+      expect(c).toContain('row level security')
+      expect(c).toContain('ALL users')
+      expect(c).toContain('SILENTLY')
+      // Names the mechanism, not just the risk: without the remedy the warning
+      // tells a reader to worry and not what to do.
+      expect(c).toContain('bypassrls')
     })
   })
 })
