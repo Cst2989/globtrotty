@@ -67,6 +67,18 @@ export type AgentStep =
       /** Already debited by the agent — see the `message` variant above. */
       recordedMicros?: bigint
     }
+  /**
+   * Terminal for the turn, but not a failure: she has been asked something and
+   * the conversation is waiting on her. Spec section 4 makes it a terminal turn
+   * status (`done`) with the conversation `awaiting_user`, precisely so the
+   * sweeper cannot resurrect it and re-bill a model call for a conversation that
+   * is simply idle.
+   *
+   * Carries `message`, not `text`, so it cannot be routed through the message
+   * branch by accident: a question and an answer are not the same event, even
+   * though both end the turn.
+   */
+  | { kind: 'park'; message: string; costMicros: bigint; recordedMicros?: bigint }
   | {
       kind: 'tool'; callId: string; name: string
       run: () => Promise<unknown>
@@ -238,11 +250,12 @@ async function loop(
         await deps.reinvoke(claim.turnId)
         return
       case 'park':
-        // decideNext never returns this today (Task 1 ruling — parking isn't wired
-        // up yet). Handled explicitly, rather than silently falling through to
-        // calling the agent, so a later plan that wires this up must replace this
-        // throw with real behavior instead of finding it already "working" by
-        // accident.
+        // NOT the same gap as the AgentStep 'park' below, which is now
+        // implemented and is the path `ask_user` uses. decideNext returns this
+        // only for a PENDING USER MESSAGE that needs answering mid-turn, which
+        // nothing in this plan wires. Kept as a throw rather than a silent
+        // fall-through so the plan that wires it must replace real behaviour
+        // rather than find it accidentally "working".
         throw new Error(`worker: 'park' decision is not implemented (message: ${decision.message})`)
       case 'call_model':
         break // fall through to invoking the agent below
@@ -298,6 +311,23 @@ async function loop(
         turnSpend.total += step.costMicros
         await completeTurn(sql, claim, {
           state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
+        })
+        return
+      }
+      case 'park': {
+        // Same ownership assertion as the message path: recordSpend and
+        // completeTurn take bare ids and carry no fencing token of their own.
+        await heartbeat(sql, claim)
+        await recordSpend(sql, {
+          userId: claim.userId, conversationId: claim.conversationId,
+          costMicros: step.costMicros,
+        })
+        turnSpend.total += step.costMicros
+        // `parked: true` moves the conversation to 'awaiting_user'. fail_reason
+        // stays null: parking is not a failure, and recording it as one would
+        // make "how often does the driver actually fail?" unanswerable.
+        await completeTurn(sql, claim, {
+          state, agentMessage: step.message, parked: true, spendMicros: turnSpend.total,
         })
         return
       }

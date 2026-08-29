@@ -365,6 +365,93 @@ describeDb('runTurn end to end', () => {
       expect(res.content).toBe('{"offers":1}')
     })
   })
+
+  it('parks the turn when the agent asks her a question', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const asking: Agent = async () => ({
+        kind: 'park', message: 'Which week in September works for you?', costMicros: 500n,
+      })
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select status, fail_reason, spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select status, spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [msg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+
+      // Terminal for the turn, so the sweeper cannot resurrect and re-bill it.
+      // (That the sweeper skips it is already pinned by test/sweeper.test.ts.)
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBeNull()      // parking is not a failure
+      expect(conv!.status).toBe('awaiting_user')
+      // Her question must actually reach the thread — a parked turn that showed
+      // nothing is a conversation that silently stops.
+      expect(msg!.content).toContain('Which week in September')
+      // And the park still bills: an agent that parks after a model call has
+      // spent money, and a park branch that forgot recordSpend would read 0 here.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(500n)
+      expect(BigInt(conv!.spend_usd_micros)).toBe(500n)
+    })
+  })
+
+  it('parking does not re-charge spend the agent already debited', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const DEBIT = 120_000n
+      const asking: Agent = async (ctx) => {
+        await recordSpend(sql, {
+          userId: USER, conversationId: ctx.conversationId, costMicros: DEBIT,
+        })
+        return { kind: 'park', message: 'Which week?', costMicros: 0n, recordedMicros: DEBIT }
+      }
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      // The park branch is a second copy of the message branch's ledger handling,
+      // and a copy is exactly where the double charge comes back.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(DEBIT)
+      expect(BigInt(turn!.spend_usd_micros)).toBe(DEBIT)
+    })
+  })
+
+  it('fails the turn with a named reason and tells her why', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'something the model will refuse')
+      const refusing: Agent = async () => ({
+        kind: 'fail',
+        reason: 'refused',
+        message: 'I can’t help with that request. Tell me what you are trying to book '
+               + 'and I will pick it up from there.',
+      })
+      await runTurn(workerDeps(sql, refusing), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select status, fail_reason from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      const [msg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+
+      // Every assertion here separates a failure from a park. An implementation
+      // that routed 'fail' through completeTurn would read done/null/awaiting_user
+      // and fail all three.
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('refused')
+      expect(conv!.status).toBe('failed')
+      // ...and she is not left with a blank thread. Spec section 8: "fails the turn
+      // with words she can act on".
+      expect(msg!.content).toContain('what you are trying to book')
+    })
+  })
 })
 
 /**
