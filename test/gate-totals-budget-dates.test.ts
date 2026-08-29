@@ -1,0 +1,334 @@
+import { describe, expect, it } from 'vitest'
+import { checkTotals, checkBudget, checkDates, checkSlots, SLOT_KINDS } from '../src/gates/checks.js'
+import { money } from '../src/money.js'
+import type { RehydratedItem } from '../src/gates/types.js'
+import type { SupplierItem, PriceBasis } from '../src/supplier/types.js'
+
+function hotel(id: string, minor: bigint, quantity = 1, basis: PriceBasis = 'total'): RehydratedItem {
+  const item: SupplierItem = {
+    sourceId: id, supplier: 'mock', kind: 'hotel', name: id,
+    price: money(minor, 'EUR'), priceBasis: basis,
+    fetchedAt: new Date('2026-08-16T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
+    detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19',
+              nights: 7, rating: null, coordinates: null, offerSource: null },
+  }
+  return { ref: { sourceId: id, quantity, slot: 'stay' }, item,
+           lineTotal: money(minor * BigInt(quantity), 'EUR') }
+}
+
+function flight(id: string, dep: string, arr: string): RehydratedItem {
+  const item: SupplierItem = {
+    sourceId: id, supplier: 'kiwi', kind: 'flight', name: id,
+    price: money(10_000n, 'EUR'), priceBasis: 'total',
+    fetchedAt: new Date('2026-08-16T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
+    detail: {
+      kind: 'flight',
+      outbound: { from: 'BER', to: 'FAO', departureLocal: dep, arrivalLocal: dep,
+                  stops: 0, route: [], cabinClass: 'Economy', carriers: [] },
+      inbound: { from: 'FAO', to: 'BER', departureLocal: arr, arrivalLocal: arr,
+                 stops: 0, route: [], cabinClass: 'Economy', carriers: [] },
+      baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
+      totalDurationSeconds: 1, selfTransfer: false,
+    },
+  }
+  return { ref: { sourceId: id, quantity: 1, slot: 'flight' }, item, lineTotal: item.price }
+}
+
+/** Re-slot an item without touching anything else. */
+function inSlot(r: RehydratedItem, slot: string): RehydratedItem {
+  return { ...r, ref: { ...r.ref, slot } }
+}
+
+describe('checkTotals', () => {
+  it('sums line totals server-side', () => {
+    const r = checkTotals([hotel('A', 10_000n, 7), hotel('B', 5_000n)], 'EUR')
+    expect(r.violations).toEqual([])
+    expect(r.total!.minor).toBe(75_000n)
+    expect(r.total!.currency).toBe('EUR')
+  })
+
+  it('refuses to sum mixed price bases', () => {
+    const r = checkTotals([hotel('A', 10_000n, 1, 'total'), hotel('B', 5_000n, 1, 'pre_tax')], 'EUR')
+    expect(r.violations).toHaveLength(1)
+    expect(r.violations[0]!.gate).toBe('totals')
+    expect(r.total).toBeNull()
+    expect(r.violations[0]!.detail).toMatch(/tax/i)
+    expect(r.violations[0]!.sourceIds.sort()).toEqual(['A', 'B'])
+  })
+
+  it('refuses to sum mixed currencies rather than throwing', () => {
+    const gbp = hotel('G', 1_000n)
+    const mixed = { ...gbp, item: { ...gbp.item, price: money(1_000n, 'GBP') },
+                    lineTotal: money(1_000n, 'GBP') }
+    const r = checkTotals([hotel('A', 10_000n), mixed], null)
+    expect(r.violations).toHaveLength(1)
+    expect(r.total).toBeNull()
+  })
+
+  it('delegates mixed-currency detection to checkCurrency instead of re-detecting it', () => {
+    const gbp = hotel('G', 1_000n)
+    const mixed = { ...gbp, item: { ...gbp.item, price: money(1_000n, 'GBP') },
+                    lineTotal: money(1_000n, 'GBP') }
+    const r = checkTotals([hotel('A', 10_000n), mixed], null)
+    // The gate that owns currency reports it. `totals` must not file a second
+    // description of the same fault.
+    expect(r.violations.map((v) => v.gate)).toEqual(['currency'])
+  })
+
+  it('fails an item whose currency is not the trip currency, even when the set agrees with itself', () => {
+    const r = checkTotals([hotel('A', 10_000n), hotel('B', 5_000n)], 'GBP')
+    expect(r.violations).toHaveLength(1)
+    expect(r.violations[0]!.gate).toBe('currency')
+    expect(r.total).toBeNull()
+  })
+
+  it('returns a null total and no violation for an empty set', () => {
+    expect(checkTotals([], 'EUR')).toEqual({ violations: [], total: null })
+    expect(checkTotals([], null)).toEqual({ violations: [], total: null })
+  })
+
+  it('recomputes rather than trusting a tampered lineTotal', () => {
+    const lying = { ...hotel('L', 10_000n, 2), lineTotal: money(1n, 'EUR') }
+    expect(checkTotals([lying], 'EUR').total!.minor).toBe(20_000n)
+  })
+
+  it('reports both faults when a set mixes bases AND currencies', () => {
+    const gbp = hotel('G', 1_000n, 1, 'pre_tax')
+    const mixed = { ...gbp, item: { ...gbp.item, price: money(1_000n, 'GBP') },
+                    lineTotal: money(1_000n, 'GBP') }
+    const r = checkTotals([hotel('A', 10_000n, 1, 'total'), mixed], null)
+    expect(r.violations.map((v) => v.gate).sort()).toEqual(['currency', 'totals'])
+    expect(r.total).toBeNull()
+  })
+
+  it('returns a violation rather than throwing on a non-integer quantity', () => {
+    const bad = { ...hotel('Q', 10_000n), ref: { sourceId: 'Q', quantity: 1.5, slot: 'stay' } }
+    const r = checkTotals([bad], 'EUR')
+    expect(r.violations).toHaveLength(1)
+    expect(r.violations[0]!.gate).toBe('totals')
+    expect(r.violations[0]!.sourceIds).toEqual(['Q'])
+    expect(r.violations[0]!.detail).toMatch(/quantit/i)
+    expect(r.total).toBeNull()
+  })
+
+  it('returns a violation rather than throwing on a zero quantity', () => {
+    const bad = { ...hotel('Z', 10_000n), ref: { sourceId: 'Z', quantity: 0, slot: 'stay' } }
+    const r = checkTotals([bad], 'EUR')
+    expect(r.violations).toHaveLength(1)
+    expect(r.violations[0]!.sourceIds).toEqual(['Z'])
+    expect(r.total).toBeNull()
+  })
+})
+
+describe('checkBudget', () => {
+  it('passes a total at exactly the budget', () => {
+    const items = [hotel('A', 10_000n)]
+    expect(checkBudget(items, checkTotals(items, 'EUR'), money(10_000n, 'EUR'))).toEqual([])
+  })
+
+  it('fails a total one minor unit over', () => {
+    const items = [hotel('A', 10_001n)]
+    const v = checkBudget(items, checkTotals(items, 'EUR'), money(10_000n, 'EUR'))
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('budget')
+    expect(v[0]!.sourceIds).toEqual(['A'])
+    // Pin BOTH figures. A message that names any other number is wrong even
+    // when it is euro-formatted and reads convincingly.
+    expect(v[0]!.detail).toContain('€100.01')
+    expect(v[0]!.detail).toContain('€100.00')
+  })
+
+  it('passes a total one minor unit under', () => {
+    const items = [hotel('A', 9_999n)]
+    expect(checkBudget(items, checkTotals(items, 'EUR'), money(10_000n, 'EUR'))).toEqual([])
+  })
+
+  it('passes when no budget is set', () => {
+    const items = [hotel('A', 999_999n)]
+    expect(checkBudget(items, checkTotals(items, null), null)).toEqual([])
+  })
+
+  it('fails closed when the budget currency differs from the items', () => {
+    const items = [hotel('A', 100n)]
+    // The items agree with each other, so `checkTotals` produces a total; the
+    // mismatch is between that total and the budget, and comparing them would
+    // throw `CurrencyMismatchError`. It must be a violation instead.
+    const totals = checkTotals(items, null)
+    expect(totals.total!.currency).toBe('EUR')
+    const v = checkBudget(items, totals, money(999_999n, 'GBP'))
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('budget')
+    expect(v[0]!.detail).toContain('GBP')
+    expect(v[0]!.detail).toContain('EUR')
+  })
+
+  it('does not run its own sum when totals already failed', () => {
+    const items = [hotel('A', 10n, 1, 'total'), hotel('B', 10n, 1, 'pre_tax')]
+    const totals = checkTotals(items, 'EUR')
+    expect(totals.total).toBeNull()
+    expect(totals.violations).toHaveLength(1)
+    // Mixed bases mean there is no trustworthy total; budget must not invent
+    // one, and must not file a second description of a fault `totals` already
+    // reported. The proposal is already rejected by that violation.
+    expect(checkBudget(items, totals, money(1n, 'EUR'))).toEqual([])
+  })
+
+  it('passes an empty set rather than throwing on an empty sum', () => {
+    expect(checkBudget([], checkTotals([], 'EUR'), money(1n, 'EUR'))).toEqual([])
+  })
+
+  it('produces exactly ONE violation for one mixed-currency proposal', () => {
+    const gbp = hotel('G', 1_000n)
+    const mixed = { ...gbp, item: { ...gbp.item, price: money(1_000n, 'GBP') },
+                    lineTotal: money(1_000n, 'GBP') }
+    const items = [hotel('A', 10_000n), mixed]
+
+    const totals = checkTotals(items, null)
+    const all = [...totals.violations, ...checkBudget(items, totals, money(50_000n, 'EUR'))]
+
+    // One fault, one violation. The pre-correction shape produced three:
+    // `currency` from checkCurrency, `totals` re-detecting it, and `budget`
+    // re-detecting it a third time via an internal checkTotals call.
+    expect(all).toHaveLength(1)
+    expect(all[0]!.gate).toBe('currency')
+    expect(all.filter((v) => v.gate === 'totals')).toEqual([])
+    expect(all.filter((v) => v.gate === 'budget')).toEqual([])
+  })
+})
+
+describe('checkDates', () => {
+  const win = { earliest: '2026-09-10', latest: '2026-09-20' }
+
+  it('passes flights inside the window', () => {
+    expect(checkDates([flight('F', '2026-09-12T16:40:00', '2026-09-19T08:00:00')], win))
+      .toEqual([])
+  })
+
+  it('fails a departure before the window', () => {
+    const v = checkDates([flight('EARLY', '2026-09-09T23:59:00', '2026-09-19T08:00:00')], win)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('dates')
+    expect(v[0]!.sourceIds).toEqual(['EARLY'])
+  })
+
+  it('fails a return after the window', () => {
+    expect(checkDates([flight('LATE', '2026-09-12T10:00:00', '2026-09-21T00:01:00')], win))
+      .toHaveLength(1)
+  })
+
+  it('compares date prefixes, so a late local time on the last day still passes', () => {
+    // 23:59 on the final day is inside the window: the window is expressed in
+    // whole local days and the timestamp carries no offset. `new Date()` on a
+    // zoneless string applies the SERVER's zone, and in a negative-offset zone
+    // (this suite pins America/Los_Angeles) the resulting instant is
+    // 2026-09-21T06:59Z — a day later than the traveller's own calendar says.
+    // Same trap on the lower bound with 00:00 on the first day.
+    expect(checkDates([flight('EDGE', '2026-09-10T00:00:00', '2026-09-20T23:59:00')], win))
+      .toEqual([])
+  })
+
+  it('is exact at both boundaries', () => {
+    expect(checkDates([flight('IN', '2026-09-10T12:00:00', '2026-09-20T12:00:00')], win))
+      .toEqual([])
+    expect(checkDates([flight('OUT_LO', '2026-09-09T12:00:00', '2026-09-20T12:00:00')], win))
+      .toHaveLength(1)
+    expect(checkDates([flight('OUT_HI', '2026-09-10T12:00:00', '2026-09-21T12:00:00')], win))
+      .toHaveLength(1)
+  })
+
+  it('checks hotel check-in and check-out too', () => {
+    const late = hotel('H', 1n)
+    const shifted = { ...late, item: { ...late.item, detail: {
+      ...late.item.detail, kind: 'hotel' as const, checkIn: '2026-09-12',
+      checkOut: '2026-09-30', nights: 18, rating: null, coordinates: null, offerSource: null } } }
+    const v = checkDates([shifted], win)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds).toEqual(['H'])
+  })
+
+  it('groups every out-of-window item into one violation', () => {
+    const v = checkDates([
+      flight('E1', '2026-09-01T10:00:00', '2026-09-12T10:00:00'),
+      flight('OK', '2026-09-12T10:00:00', '2026-09-13T10:00:00'),
+      flight('E2', '2026-09-12T10:00:00', '2026-09-30T10:00:00'),
+    ], win)
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds).toEqual(['E1', 'E2'])
+  })
+
+  it('passes when no window is set', () => {
+    expect(checkDates([flight('F', '2020-01-01T00:00:00', '2030-01-01T00:00:00')], null))
+      .toEqual([])
+  })
+})
+
+describe('checkSlots', () => {
+  it('accepts a flight in a flight slot and a hotel in the stay slot', () => {
+    expect(checkSlots([
+      inSlot(flight('F', '2026-09-12T10:00:00', '2026-09-19T10:00:00'), 'outbound'),
+      inSlot(flight('G', '2026-09-12T10:00:00', '2026-09-19T10:00:00'), 'inbound'),
+      inSlot(flight('H', '2026-09-12T10:00:00', '2026-09-19T10:00:00'), 'flight'),
+      inSlot(hotel('S', 100n), 'stay'),
+    ])).toEqual([])
+  })
+
+  it('rejects a hotel proposed for a flight slot', () => {
+    const v = checkSlots([inSlot(hotel('S', 100n), 'outbound')])
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('slots')
+    expect(v[0]!.sourceIds).toEqual(['S'])
+    expect(v[0]!.detail).toContain('outbound')
+    expect(v[0]!.detail).toContain('hotel')
+  })
+
+  it('rejects a flight proposed for the stay slot', () => {
+    const v = checkSlots([inSlot(flight('F', '2026-09-12T10:00:00', '2026-09-19T10:00:00'), 'stay')])
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('slots')
+    expect(v[0]!.sourceIds).toEqual(['F'])
+  })
+
+  it('rejects an unknown slot name and lists the vocabulary', () => {
+    const v = checkSlots([inSlot(hotel('S', 100n), 'penthouse')])
+    expect(v).toHaveLength(1)
+    expect(v[0]!.gate).toBe('slots')
+    expect(v[0]!.sourceIds).toEqual(['S'])
+    expect(v[0]!.detail).toContain('penthouse')
+    for (const name of Object.keys(SLOT_KINDS)) expect(v[0]!.detail).toContain(name)
+  })
+
+  it('is case-sensitive: the vocabulary is exactly the documented names', () => {
+    expect(checkSlots([inSlot(hotel('S', 100n), 'Stay')])).toHaveLength(1)
+  })
+
+  it('reports unknown names and kind mismatches as separate violations', () => {
+    const v = checkSlots([
+      inSlot(hotel('BADNAME', 100n), 'nowhere'),
+      inSlot(hotel('BADKIND', 100n), 'inbound'),
+      inSlot(hotel('FINE', 100n), 'stay'),
+    ])
+    expect(v).toHaveLength(2)
+    expect(v.map((x) => x.gate)).toEqual(['slots', 'slots'])
+    const byOffender = new Map(v.map((x) => [x.sourceIds.join(','), x.detail]))
+    expect([...byOffender.keys()].sort()).toEqual(['BADKIND', 'BADNAME'])
+  })
+
+  it('groups every offender of the same kind into one violation', () => {
+    const v = checkSlots([
+      inSlot(hotel('A', 100n), 'outbound'),
+      inSlot(hotel('B', 100n), 'inbound'),
+    ])
+    expect(v).toHaveLength(1)
+    expect(v[0]!.sourceIds).toEqual(['A', 'B'])
+  })
+
+  it('passes an empty set', () => {
+    expect(checkSlots([])).toEqual([])
+  })
+
+  it('exposes the slot vocabulary as one constant, not scattered literals', () => {
+    expect(SLOT_KINDS).toEqual({
+      outbound: 'flight', inbound: 'flight', flight: 'flight', stay: 'hotel',
+    })
+  })
+})

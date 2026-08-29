@@ -1,3 +1,5 @@
+import { compareMoney, formatMoney, sumMoney, type Money } from '../money.js'
+import { isFlight, isHotel, itemTotal, type SupplierKind } from '../supplier/types.js'
 import type { RehydratedItem, Violation } from './types.js'
 
 /**
@@ -78,4 +80,238 @@ export function checkCurrency(items: RehydratedItem[], expected: string | null):
           + `${items.map((i) => `${i.item.sourceId} (${i.item.price.currency})`).join(', ')}. `
           + `Currencies present: ${currencies.join(', ')}. Pick one currency and re-search the rest.`,
   }]
+}
+
+/**
+ * The slot vocabulary, in ONE place. `ItemRef.slot` is a free-form string at
+ * the tool boundary (the schema only bounds its length), so without this every
+ * slot name in the system is an unchecked literal and a hotel proposed for the
+ * 'outbound' leg sails through every other gate.
+ *
+ * The names come from what the codebase already models, not from invention:
+ * `SupplierKind` is 'flight' | 'hotel', and `FlightDetail` carries `outbound`
+ * and `inbound` legs. So:
+ *
+ *  - 'outbound' / 'inbound' — a one-way item standing for a single leg, named
+ *    after the two legs `FlightDetail` already names.
+ *  - 'flight' — one item covering the whole journey. Kiwi returns a return
+ *    trip as a SINGLE `SupplierItem` whose `detail` holds both legs, so there
+ *    has to be a slot for "the flights" as one line.
+ *  - 'stay' — the hotel.
+ *
+ * The check is deliberately only name-validity and kind-compatibility. It does
+ * NOT verify that the set of slots is complete, that 'outbound' and 'flight'
+ * are not both used, or that 'inbound' is present when a return was requested.
+ * Those are itinerary-shape rules; they need the notebook, and they belong to a
+ * later plan. Matching is exact and case-sensitive: the vocabulary is a closed
+ * set the tool description publishes, and quietly accepting 'Outbound' would
+ * make the published set a lie.
+ */
+export const SLOT_KINDS = {
+  outbound: 'flight',
+  inbound:  'flight',
+  flight:   'flight',
+  stay:     'hotel',
+} as const satisfies Record<string, SupplierKind>
+
+/** Implements the spec's `mismatched(items, offer)` pre-gate (§5). */
+export function checkSlots(items: RehydratedItem[]): Violation[] {
+  const vocabulary: Record<string, SupplierKind | undefined> = SLOT_KINDS
+
+  const unknown: RehydratedItem[] = []
+  const mismatched: RehydratedItem[] = []
+  for (const r of items) {
+    const wants = vocabulary[r.ref.slot]
+    if (wants === undefined) unknown.push(r)
+    else if (r.item.kind !== wants) mismatched.push(r)
+  }
+
+  // Two distinct faults, so two violations — but each one groups every
+  // offender, so the model gets one round trip per fault rather than per item.
+  const violations: Violation[] = []
+  if (unknown.length > 0) {
+    violations.push({
+      gate: 'slots',
+      sourceIds: unknown.map((r) => r.item.sourceId),
+      detail: `These items were proposed for a slot that does not exist: `
+            + `${unknown.map((r) => `${r.item.sourceId} (slot "${r.ref.slot}")`).join(', ')}. `
+            + `The only slots are: ${Object.keys(SLOT_KINDS).join(', ')}.`,
+    })
+  }
+  if (mismatched.length > 0) {
+    violations.push({
+      gate: 'slots',
+      sourceIds: mismatched.map((r) => r.item.sourceId),
+      detail: `These items do not match the slot they were proposed for: `
+            + `${mismatched.map((r) =>
+                  `${r.item.sourceId} is a ${r.item.kind} but slot "${r.ref.slot}" `
+                + `takes a ${vocabulary[r.ref.slot]}`).join('; ')}.`,
+    })
+  }
+  return violations
+}
+
+export type DateWindow = { earliest: string; latest: string }
+export type TotalsResult = { violations: Violation[]; total: Money | null }
+
+/**
+ * The ONLY producer of a trip total. Recomputes from `price × quantity` rather
+ * than trusting the `lineTotal` it was handed, so a caller that mutated one
+ * cannot move the total.
+ *
+ * Mixed price bases are refused rather than summed. Adding a pre-tax hotel to
+ * an all-in flight yields a number that is neither, and quoting it is precisely
+ * the confidently-wrong-total failure the gate stack exists to prevent.
+ *
+ * Currency is NOT re-detected here. `checkCurrency` above already owns that
+ * question and is exported for exactly this reuse; re-implementing it would
+ * mean one mixed-currency proposal came back described twice, in two different
+ * sentences, from two gates. Pass the notebook's budget currency as `expected`,
+ * or `null` when no budget is set yet — `null` still enforces that the items
+ * agree with EACH OTHER, which is the precondition `sumMoney` needs.
+ *
+ * `expected` is required rather than defaulted so a caller has to decide. A
+ * silently-defaulted `null` is how "we forgot to pass the trip currency" turns
+ * into "the trip currency was never checked".
+ *
+ * Returns violations; never throws. The two throwing calls it could make are
+ * guarded:
+ *  - `sumMoney` throws on an empty array — the `items.length === 0` early
+ *    return above is the guard, and nothing between them can empty the list.
+ *  - `addMoney` (inside `sumMoney`) throws on a currency mismatch — a clean
+ *    `checkCurrency` result is the guard: with `expected` set every item equals
+ *    it, and with `expected` null there is at most one distinct currency. Both
+ *    branches leave the set uniform.
+ *  - `itemTotal` throws on a quantity that is not a positive integer, so
+ *    quantities are validated into a violation first.
+ */
+export function checkTotals(items: RehydratedItem[], expected: string | null): TotalsResult {
+  if (items.length === 0) return { violations: [], total: null }
+
+  const violations: Violation[] = [...checkCurrency(items, expected)]
+
+  // Every item is named, not a subset: with two bases present there is no
+  // single odd one out, and picking the minority would tell the model to
+  // re-search the wrong half. Same reasoning as `checkCurrency`'s null branch.
+  const bases = [...new Set(items.map((i) => i.item.priceBasis))]
+  if (bases.length > 1) {
+    violations.push({
+      gate: 'totals',
+      sourceIds: items.map((i) => i.item.sourceId),
+      detail: `These items mix all-in and pre-tax prices (${bases.join(', ')}), so they `
+            + `cannot be summed into one total. Re-search so every item quotes the same basis.`,
+    })
+  }
+
+  // `itemTotal` throws on a non-positive or fractional quantity, and a gate
+  // that throws is a gate that takes the whole turn down. The tool schema
+  // already bounds quantity, but this function is exported and callable
+  // without it, so the bound is re-checked here rather than assumed.
+  const badQuantity = items.filter(
+    (i) => !Number.isSafeInteger(i.ref.quantity) || i.ref.quantity <= 0,
+  )
+  if (badQuantity.length > 0) {
+    violations.push({
+      gate: 'totals',
+      sourceIds: badQuantity.map((i) => i.item.sourceId),
+      detail: `These items have a quantity that is not a whole positive number: `
+            + `${badQuantity.map((i) => `${i.item.sourceId} (${i.ref.quantity})`).join(', ')}. `
+            + `Quantity counts identical units — 3 seats, 7 nights — so it cannot be fractional.`,
+    })
+  }
+
+  if (violations.length > 0) return { violations, total: null }
+  return { violations: [], total: sumMoney(items.map((i) => itemTotal(i.item, i.ref.quantity))) }
+}
+
+/**
+ * Takes the total `checkTotals` already computed instead of recomputing it.
+ * Two reasons, and neither is performance: a second sum is a second chance to
+ * disagree with the first, and a budget gate that re-runs the totals gate
+ * reports every totals fault a second time in its own words.
+ *
+ * So when there is no trustworthy total this returns NOTHING rather than a
+ * second violation. That is not failing open: `total === null` only happens
+ * when `checkTotals` itself filed a violation (or the set was empty), the
+ * proposal is already rejected by it, and restating the same fault under a
+ * different gate name is the noise the gate stack is supposed to avoid. Budget
+ * never invents a total, and never passes a proposal that had one.
+ *
+ * `items` is here only to name the offenders in the message; the number under
+ * test comes from `totals`.
+ *
+ * Never throws. `compareMoney` throws on a currency mismatch, and the explicit
+ * currency comparison immediately above it is the guard — the mismatch is
+ * reported as a violation rather than raised. We refuse; we never convert,
+ * because there is no FX rate in this codebase on purpose.
+ */
+export function checkBudget(
+  items: RehydratedItem[],
+  totals: TotalsResult,
+  budget: Money | null,
+): Violation[] {
+  if (!budget || !totals.total) return []
+  const total = totals.total
+
+  if (total.currency !== budget.currency) {
+    return [{
+      gate: 'budget',
+      sourceIds: items.map((i) => i.item.sourceId),
+      detail: `The budget is set in ${budget.currency} but this trip totals in `
+            + `${total.currency}. We do not convert; search in ${budget.currency}.`,
+    }]
+  }
+  if (compareMoney(total, budget) > 0) {
+    return [{
+      gate: 'budget',
+      sourceIds: items.map((i) => i.item.sourceId),
+      detail: `This trip totals ${formatMoney(total)}, over the ${formatMoney(budget)} budget.`,
+    }]
+  }
+  return []
+}
+
+/**
+ * Compares DATE PREFIXES as strings. Kiwi returns naive local ISO with no
+ * offset ("2026-09-12T16:40:00"); `new Date()` on one of those applies the
+ * server's timezone and can roll a 23:59 departure into the next day, failing a
+ * window the traveller's own calendar says is fine. Lexicographic comparison of
+ * `yyyy-mm-dd` is exactly date ordering, so no parsing is needed at all.
+ *
+ * The test suite pins `TZ=America/Los_Angeles` precisely so that this stays
+ * true under review: under `TZ=UTC` the offset is zero and a `new Date(...)`
+ * implementation passes every one of these tests.
+ *
+ * Flights are windowed on their DEPARTURE dates only. An overnight leg that
+ * departs on the last day of the window and lands the next morning is a normal
+ * return, not a violation, and windowing arrivals too would reject it. Hotels
+ * are windowed on both ends because a stay is bounded by both.
+ */
+export function checkDates(items: RehydratedItem[], window: DateWindow | null): Violation[] {
+  if (!window) return []
+  const offenders: string[] = []
+  for (const { item } of items) {
+    const dates: string[] = []
+    if (isFlight(item)) {
+      dates.push(day(item.detail.outbound.departureLocal))
+      if (item.detail.inbound) dates.push(day(item.detail.inbound.departureLocal))
+    } else if (isHotel(item)) {
+      dates.push(day(item.detail.checkIn), day(item.detail.checkOut))
+    }
+    if (dates.some((d) => d < window.earliest || d > window.latest)) {
+      offenders.push(item.sourceId)
+    }
+  }
+  if (offenders.length === 0) return []
+  return [{
+    gate: 'dates',
+    sourceIds: offenders,
+    detail: `These items fall outside the ${window.earliest} to ${window.latest} travel window: `
+          + `${offenders.join(', ')}.`,
+  }]
+}
+
+/** First 10 chars of an ISO timestamp — the date, with no parsing and no zone. */
+function day(iso: string): string {
+  return iso.slice(0, 10)
 }
