@@ -62,6 +62,12 @@ export type LoopOptions = {
   estStepMs?: number
   /** Which prompt this run used, so a row can be attributed to it. */
   promptVersion?: string
+  /**
+   * Where this run's model calls get written. Omitted, nothing is recorded and
+   * nothing fails: a call site that forgets this loses its rows silently
+   * rather than throwing, which is why every call site that should record is
+   * checked by a test rather than by a type.
+   */
   record?: ModelCallSink
 }
 
@@ -125,7 +131,15 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       message = await callAndRecord(
         options.client,
         withSeat(options.seat, { max_tokens: 8000, system: options.system, messages, tools: options.tools }),
-        { seat: options.seat, promptVersion: options.promptVersion ?? 'unversioned', record: options.record },
+        {
+          seat: options.seat,
+          // 'unversioned' means a caller forgot to pass one, not that the
+          // prompt has no version: every desk and every prompt in this
+          // codebase computes one from its own text, so a row that carries
+          // this string names a call site to go fix, not a fact about a call.
+          promptVersion: options.promptVersion ?? 'unversioned',
+          record: options.record,
+        },
       )
     } catch (err) {
       // classifyError's `unclassified` bucket is meant for a provider error we

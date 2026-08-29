@@ -5,9 +5,10 @@ import type { ModelCallSink } from './repo/model-calls.js'
 import { seatNameOf, type Seat } from './seats.js'
 
 /**
- * The one place a model call becomes a row. Every caller in the codebase goes
- * through it, so "did this call get recorded?" has one answer instead of one per
- * call site.
+ * The one place a model call becomes a row. Every call a turn makes goes
+ * through it, so "did this call get recorded?" has one answer instead of one
+ * per call site. The exception is src/ask.ts, lesson 1.1's one-shot demo: it
+ * predates this file, calls client.create directly, and has no sink.
  *
  * The call is priced on the model we asked for, not the one the response echoed:
  * the price table is keyed by the name we chose, and a response that echoed

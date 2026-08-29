@@ -27,18 +27,26 @@ export type ModelCallSink = (facts: CallFacts) => Promise<void>
 /** Writes one row per call. One insert, no transaction: a row is a whole fact. */
 export function pgSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
   return async (facts) => {
-    await sql`insert into course.model_calls (
-      conversation_id, turn_id, user_id, seat, prompt_version,
-      model_requested, model_returned,
-      input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens,
-      cost_micros, latency_ms
-    ) values (
-      ${ctx.conversationId}, ${ctx.turnId}, ${ctx.userId}, ${facts.seat}, ${facts.promptVersion},
-      ${facts.modelRequested}, ${facts.modelReturned},
-      ${facts.usage.input_tokens}, ${facts.usage.cache_creation_input_tokens},
-      ${facts.usage.cache_read_input_tokens}, ${facts.usage.output_tokens},
-      ${facts.costMicros.toString()}, ${facts.latencyMs}
-    )`
+    try {
+      await sql`insert into course.model_calls (
+        conversation_id, turn_id, user_id, seat, prompt_version,
+        model_requested, model_returned,
+        input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens,
+        cost_micros, latency_ms
+      ) values (
+        ${ctx.conversationId}, ${ctx.turnId}, ${ctx.userId}, ${facts.seat}, ${facts.promptVersion},
+        ${facts.modelRequested}, ${facts.modelReturned},
+        ${facts.usage.input_tokens}, ${facts.usage.cache_creation_input_tokens},
+        ${facts.usage.cache_read_input_tokens}, ${facts.usage.output_tokens},
+        ${facts.costMicros.toString()}, ${facts.latencyMs}
+      )`
+    } catch (err) {
+      // The call already happened and she already paid for it: a row that
+      // fails to write must not take a finished turn down with it. A lost row
+      // is cheaper than a lost turn, and this is still logged with the turn id
+      // so an operator can find what broke rather than the loss being silent.
+      console.error(`model_calls insert failed for turn ${ctx.turnId}`, err)
+    }
   }
 }
 

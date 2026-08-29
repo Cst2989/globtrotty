@@ -4,8 +4,12 @@ create table course.model_calls (
   -- one: a test that reads these rows back runs inside a single transaction,
   -- where every created_at is the same transaction_timestamp().
   seq             bigint generated always as identity,
+  -- Null when a call runs outside a turn (a call made before submitMessage has
+  -- created one, for instance). MATCH SIMPLE, Postgres's default, does not
+  -- enforce the composite foreign key below when conversation_id is null, so
+  -- that case still inserts.
   conversation_id uuid,
-  turn_id         uuid,
+  turn_id         uuid references course.turns(id) on delete set null,
   user_id         uuid not null,
   seat            text not null check (seat in ('driver', 'cheap')),
   prompt_version  text not null,
@@ -23,7 +27,11 @@ create table course.model_calls (
   output_tokens               int not null default 0,
   cost_micros     bigint not null default 0 check (cost_micros >= 0),
   latency_ms      int,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- Same composite key as turns and messages, so a row can never be attached
+  -- to another user's conversation, and it is cleared out with the
+  -- conversation rather than surviving to quietly defeat the retention index.
+  foreign key (conversation_id, user_id) references course.conversations (id, user_id) on delete cascade
 );
 -- What did this conversation cost, and where did it go.
 create index model_calls_cost on course.model_calls (conversation_id, seat);

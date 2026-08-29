@@ -14,9 +14,14 @@ export const SEATS = {
 
 export type SeatName = keyof typeof SEATS
 
-/** The seat a call was made from, as a name a row can hold. */
+/**
+ * The seat a call was made from, as a name a row can hold. Matches on the
+ * seat's own identity, never on its model string: two seats could share a
+ * model with different settings, and a lookup keyed on the model alone would
+ * label both calls with whichever name happened to be checked first.
+ */
 export function seatNameOf(seat: Seat): SeatName {
-  const found = (Object.keys(SEATS) as SeatName[]).find((name) => SEATS[name].model === seat.model)
+  const found = (Object.keys(SEATS) as SeatName[]).find((name) => SEATS[name] === seat)
   if (!found) throw new Error(`No seat named for model ${seat.model}`)
   return found
 }
