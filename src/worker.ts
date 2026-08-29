@@ -67,14 +67,24 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // owns would overwrite the run that took it over.
     //
     // Everything else is classified rather than blanket-recorded as 'provider_down'
-    // (plan 1's accepted limitation, now removed). `reason` is what distinguishes a
-    // permanent fault from a transient one on the row itself; `retryable` is the
-    // model client's business (plan 3: honour Retry-After, back off, give up), not
-    // this handler's, because failTurn is terminal either way. That terminality IS
-    // the guard the brief asks for: a 'failed' turn matches neither arm of the
-    // sweeper's `status in ('queued','running')` predicate, so a non-retryable
-    // failure can never be requeued until it is reaped as a crash loop, however
-    // stale its heartbeat gets. Pinned by test/worker.test.ts.
+    // (plan 1's accepted limitation, now removed). Only `reason` is used, and that
+    // is not a signal being withheld from anything: THERE IS NO RETRY MECHANISM TO
+    // FEED. failTurn sets status = 'failed', and the sweeper only ever considers
+    // 'queued' or 'running' rows — so every failure below is terminal, and
+    // `retryable: true` from the classifier would not mean the turn was retried.
+    // Nothing here has changed about that; the classifier changed what the row
+    // SAYS, not what happens to it.
+    //
+    // That terminality is also, by construction, the guard the brief asks for: a
+    // 'failed' turn matches neither arm of `status in ('queued','running')`, so a
+    // non-retryable failure cannot be requeued until the sweeper reaps it as a
+    // crash loop, however stale its heartbeat gets. Pinned by test/worker.test.ts.
+    //
+    // `retryable` is advice for the model client plan 3 brings (honour Retry-After,
+    // back off, give up), and for whoever decides — deliberately — whether a
+    // transient failure should ever be requeued instead of failed. Branching on it
+    // here would be inventing turn-level retry semantics with no client to justify
+    // their shape.
     //
     // The assignment below is also the compile-time check that every
     // ClassifiedReason (src/errors.ts) is a real FailReason (src/engine.ts) --

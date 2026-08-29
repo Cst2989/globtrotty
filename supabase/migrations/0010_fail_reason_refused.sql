@@ -19,12 +19,20 @@
 --                        'provider_down' on purpose, and this is the distinction
 --                        the whole task exists for: 'provider_down' means "try
 --                        again", and a fault that can never succeed recorded under
---                        that name tells an operator to wait for a provider to
---                        recover from a problem the provider does not have, while
---                        every retry burns another of the turn's five attempts and
---                        real money. One value covers all four statuses: the
---                        operator's fix differs, but the harness's decision --
---                        never retry -- is identical.
+--                        that name tells an operator -- and any later dashboard --
+--                        to wait for a provider to recover from a problem the
+--                        provider does not have. One value covers all four
+--                        statuses: the operator's fix differs, but what the
+--                        harness should do -- never retry -- is identical.
+--
+--                        Note what this does NOT describe. Nothing retries a
+--                        failed turn today: failTurn writes status = 'failed'
+--                        (src/repo/turns.ts) and the sweeper only considers
+--                        'queued' and 'running' rows (src/sweeper.ts), so every
+--                        classified failure is terminal, before this migration and
+--                        after it. The taxonomy exists so plan 3 can introduce
+--                        retry DELIBERATELY, with the retryable/non-retryable
+--                        split already recorded on the row.
 --
 --   'unclassified'       An error the classifier does not recognise. Recorded as
 --                        itself rather than folded into 'provider_down', because

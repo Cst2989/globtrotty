@@ -1,7 +1,8 @@
 import {
   APIConnectionError, APIError, APIUserAbortError, AuthenticationError, BadRequestError,
   NotFoundError, PermissionDeniedError, RateLimitError,
-} from '@anthropic-ai/sdk'
+} from '@anthropic-ai/sdk/core/error'
+// Types only, erased at compile time: this import contributes nothing to the bundle.
 import type { Message, RefusalStopDetails } from '@anthropic-ai/sdk/resources/messages'
 
 /**
@@ -47,7 +48,7 @@ import type { Message, RefusalStopDetails } from '@anthropic-ai/sdk/resources/me
  *  - `provider_rejected`  permanent. The provider looked at THIS request and said
  *                         no, and will say no again: 400 malformed, 401 bad key,
  *                         403 not permitted, 404 wrong model. An operator must
- *                         change something; a retry only burns attempts and money.
+ *                         change something before it can succeed.
  *  - `refused`            the model declined on policy grounds. HTTP 200, not an
  *                         exception — see `throwIfRefused` below.
  *  - `unclassified`       we do not recognise this error. Recorded as itself
@@ -60,21 +61,42 @@ import type { Message, RefusalStopDetails } from '@anthropic-ai/sdk/resources/me
  */
 export type ClassifiedReason = 'provider_down' | 'provider_rejected' | 'refused' | 'unclassified'
 
+/**
+ * WHAT `retryable` DOES NOT MEAN.
+ *
+ * Nothing in this harness retries a classified failure, and nothing did before
+ * this classifier existed. `failTurn` sets `status = 'failed'`
+ * (src/repo/turns.ts), and the sweeper only ever considers `'queued'` or
+ * `'running'` rows (src/sweeper.ts) — so every classified failure is terminal,
+ * whatever this flag says. `retryable: true` on a row means "this error was the
+ * kind worth retrying", NOT "this turn was retried".
+ *
+ * The flag is advice for the model client plan 3 brings (honour Retry-After,
+ * back off, give up) and for whoever decides — deliberately, and not by
+ * inheriting an assumption from this comment — whether the harness should ever
+ * requeue a failed turn. The taxonomy exists so that decision CAN be made; it
+ * does not make it.
+ */
 export type Classification = { retryable: boolean; reason: ClassifiedReason }
 
 const TRANSIENT: Classification = { retryable: true, reason: 'provider_down' }
 const PERMANENT: Classification = { retryable: false, reason: 'provider_rejected' }
 const REFUSED: Classification = { retryable: false, reason: 'refused' }
 /**
- * FAIL CLOSED. An error we cannot name is NOT retried.
+ * FAIL CLOSED. An error we cannot name is NOT retryable.
  *
- * Both directions cost something, so the choice is which cost to prefer. Retrying
- * what we do not understand burns the turn's `attempts` and real money on every
- * one of them, and ends with the sweeper reaping the turn as a crash loop —
- * repeatedly, for as long as the unknown error persists. Declining to retry costs
- * at most one turn, which is visible (`unclassified` on the row) and which the
- * user can resend. Same instinct as `readSpendFailClosed`: when we cannot confirm,
- * we take the conservative side rather than the optimistic one.
+ * Read `retryable` as advice to a caller that does not exist yet — see the note
+ * on WHAT `retryable` DOES NOT MEAN, below. The question this answers is what a
+ * future retry mechanism should be told about an error nobody has classified.
+ *
+ * Both directions cost something, so the choice is which cost to prefer. This
+ * bucket is the one that catches OUR OWN bugs: a TypeError is deterministic, so
+ * retrying it is guaranteed waste, and an unknown error's recurrence properties
+ * are by definition unmodelled — retrying is an unbounded-cost bet on behaviour
+ * we have not characterised. Declining costs at most one turn, which is visible
+ * (`unclassified` on the row) and which the user can resend. Same instinct as
+ * `readSpendFailClosed`: when we cannot confirm, we take the conservative side
+ * rather than the optimistic one.
  */
 const UNKNOWN: Classification = { retryable: false, reason: 'unclassified' }
 
@@ -142,8 +164,8 @@ export function throwIfRefused(message: StopSignal): void {
  *
  * Ordered most specific FIRST. A single broad `instanceof APIError` would collapse
  * the retryable/non-retryable distinction, which is the entire point of the
- * function: it is what stops a permanent 400 from being retried on the same
- * schedule as a transient 429 until the turn is reaped as a crash loop.
+ * function: a permanent 400 and a transient 429 must not be recorded — or, when
+ * plan 3 gives retry a home, treated — as the same thing.
  */
 export function classifyError(err: unknown): Classification {
   // Not an exception the provider raised: the model answered 200 and declined.
@@ -187,5 +209,15 @@ export function classifyError(err: unknown): Classification {
     if (typeof status === 'number') return byStatus(status)
   }
 
+  /**
+   * NOTE for plan 3, deliberately not handled here: the SDK also exports
+   * `RetryableError`, an explicit "retry this" signal thrown by middleware. It
+   * extends `AnthropicError`, NOT `APIError`, so it falls through every branch
+   * above and lands here as `unclassified`/non-retryable. Unreachable today —
+   * nothing in this repo constructs an SDK client, let alone middleware — and
+   * adding a branch for it now would be a rule no test could exercise against
+   * a real thrower. Whoever wires the client either registers middleware and
+   * adds the branch WITH a test, or does not, in which case nothing changes.
+   */
   return UNKNOWN
 }

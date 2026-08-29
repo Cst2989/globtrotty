@@ -178,7 +178,12 @@ describe('isRefusal / throwIfRefused — the failure that returns HTTP 200', () 
     expect(isRefusal(refusal)).toBe(true)
   })
 
-  it.each(['end_turn', 'max_tokens', 'tool_use', 'pause_turn', 'stop_sequence'] as const)(
+  // Every other member of the SDK's `StopReason` union, so the list is exhaustive
+  // in fact and not merely in appearance.
+  it.each([
+    'end_turn', 'max_tokens', 'tool_use', 'pause_turn', 'stop_sequence',
+    'model_context_window_exceeded',
+  ] as const)(
     'does not treat stop_reason %s as a refusal', (stop_reason) => {
       expect(isRefusal({ stop_reason, stop_details: null })).toBe(false)
     })
