@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { describeDb, withRealDb } from './helpers/db.js'
 
 // Raised so a busy development database's own spend today cannot turn any of
@@ -45,6 +46,16 @@ describeDb('fifty first presses of Send', () => {
       // back.
       const conv = await sql`select user_id from course.conversations where id = ${conversationId}`
       expect(conv[0]!.user_id).toBe(userId)
+
+      // And it is the ONLY conversation row this user has. Everything above
+      // reads the results the presses returned, so all fifty could agree on one
+      // id while forty-nine losers left a committed conversation nobody will
+      // ever see: the rollback of the losing transaction is exactly the thing
+      // the fix depends on, and this counts it. withRealDb's cleanup deletes
+      // the evidence afterwards, so it has to be counted here or not at all.
+      const [convCount] = await sql`select count(*)::int as n from course.conversations
+                                     where user_id = ${userId}`
+      expect(convCount!.n).toBe(1)
     })
   })
 
@@ -63,6 +74,63 @@ describeDb('fifty first presses of Send', () => {
       expect(second.conversationId).not.toBe(first.conversationId)
       expect(first.status).toBe('queued')
       expect(second.status).toBe('queued')
+    })
+  })
+})
+
+// The global ceiling is lowered instead of raising this account's committed
+// spend: withRealDb commits for real, and a real $50 daily_usage row would be
+// visible to every other test's global read for the rest of the UTC day.
+// Zero means every account is over it, which is the branch under test.
+const CAPPED_LIMITS = { ...DEFAULT_LIMITS, globalCeilingMicros: 0n }
+
+// Defect A from the fix3 re-review. The capped branch of a first press opens no
+// turn (turnId stays null, which is the documented contract), so course.turns
+// cannot serialise two of them; before fix round 4, fifty concurrent capped
+// first presses of one key bought fifty conversations, forty-nine of them empty,
+// and handed back a different conversationId every time. Her message key,
+// claimed inside the same transaction that creates the conversation, is what
+// makes them one press.
+describeDb('fifty capped first presses of Send', () => {
+  it('buy one denied conversation, one message and one reply, and no turn', async () => {
+    await withRealDb(async (sql, userId) => {
+      const invoke = vi.fn()
+      const deps = { sql, limits: CAPPED_LIMITS, invoke }
+      const press = () => submitMessage(deps, {
+        userId, conversationId: null, message: 'a week in Portugal in September',
+        idempotencyKey: 'capped-first-press',
+      })
+
+      const results = await Promise.all(Array.from({ length: 50 }, press))
+
+      expect(results.every((r) => r.status === 'limit_reached')).toBe(true)
+      // No turn was opened, on any of the fifty, so none of them can name one.
+      expect(results.every((r) => r.turnId === null)).toBe(true)
+      const conversationIds = new Set(results.map((r) => r.conversationId))
+      expect(conversationIds.size).toBe(1)
+
+      // One conversation row, not fifty: forty-nine of these presses created
+      // one inside a transaction that rolled back.
+      const convs = await sql`select id, status from course.conversations where user_id = ${userId}`
+      expect(convs).toHaveLength(1)
+      expect(convs[0]!.id).toBe([...conversationIds][0]!)
+      expect(convs[0]!.status).toBe('limit_reached')
+
+      const turns = await sql`select id from course.turns where user_id = ${userId}`
+      expect(turns).toHaveLength(0)
+
+      // Her sentence once, and one reply naming the ceiling that stopped it:
+      // the same two rows a single capped press leaves.
+      const msgs = await sql`select role, content, turn_id from course.messages
+                              where user_id = ${userId} order by seq`
+      expect(msgs).toHaveLength(2)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[0]!.content).toBe('a week in Portugal in September')
+      expect(msgs[0]!.turn_id).toBeNull()
+      expect(msgs[1]!.role).toBe('agent')
+      expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.account)
+      // Nothing ran, so nothing was spent: the point of denying before a turn.
+      expect(invoke).not.toHaveBeenCalled()
     })
   })
 })

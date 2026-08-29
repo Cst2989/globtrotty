@@ -1,5 +1,5 @@
 import type postgres from 'postgres'
-import { exceedsAnyCeiling, type Limits } from './engine.js'
+import { exceedsAnyCeiling, type Limits, type Spend } from './engine.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendFailClosed, readSpendForNewConversation } from './repo/spend.js'
 
@@ -27,12 +27,15 @@ export type SubmitResult = {
 }
 
 /**
- * Thrown only inside `firstPress`'s own transaction, when the turn claim
- * below conflicts. On a conversation created moments earlier in that same
- * transaction, a conflict can only mean another press's key got there first
- * (nothing else could already hold that brand new conversation's one
- * live-turn slot), never a busy slot on some other live turn. Caught by
- * `firstPress` itself; no caller ever sees it.
+ * Thrown only inside `firstPress`'s own transactions, when the claim it makes
+ * for her key conflicts: the turn row under the ceiling, or, on the capped
+ * branch that opens no turn at all, her message row. On a conversation created
+ * moments earlier in that same transaction, either conflict can only mean
+ * another press's key got there first (nothing else could already hold that
+ * brand new conversation's one live-turn slot, and `submitMessage` is the only
+ * writer of course.messages.idempotency_key in the whole course), never a busy
+ * slot on some other live turn. Caught by `firstPress` itself; no caller ever
+ * sees it.
  */
 class KeyClaimedElsewhere extends Error {}
 
@@ -91,6 +94,35 @@ async function finishQueuing(
 }
 
 /**
+ * Everything a ceiling denial writes, in one place rather than once per path.
+ * Always called inside a transaction: a capped press still gets a real reply,
+ * naming which limit she hit (src/limit-message.ts), the same sentence tier 3
+ * writes for the same denial (src/loop.ts, src/repo/turns.ts), and without the
+ * transaction a crash between the two inserts would leave her line with no
+ * reply that any retry could ever add, since a retry reads writeHerMessage's
+ * on-conflict as false and skips straight past it.
+ *
+ * Returns whether her message row was actually written, which on this path is
+ * the same fact as "this press claimed (user_id, idempotency_key) on
+ * course.messages". A retry reads false and is answered once rather than
+ * twice; `firstPress` reads false as "a sibling press of the same key claimed
+ * it first" and throws, because no turn row exists on this path to tell it
+ * that any other way.
+ */
+async function denyForCeiling(
+  tx: postgres.TransactionSql, input: SubmitInput, conversationId: string, spend: Spend, limits: Limits,
+): Promise<boolean> {
+  const wroteHerMessage = await writeHerMessage(tx, input, conversationId, null)
+  if (wroteHerMessage) {
+    await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+              values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, limits)})`
+  }
+  await tx`update course.conversations set status = 'limit_reached', updated_at = now()
+             where id = ${conversationId} and user_id = ${input.userId}`
+  return wroteHerMessage
+}
+
+/**
  * A repeated press, or a first press whose key lost the race in `firstPress`
  * below: `conversationId` already exists, so this is the path every press had
  * before fix round 3.
@@ -139,21 +171,11 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
   // actually enforces the ceiling, because nothing can be spent between its
   // read and its decision without another step (and another read) in between.
   if (exceedsAnyCeiling(spend, deps.limits)) {
-    // One transaction: a capped press still gets a real reply, naming which
-    // limit she hit (src/limit-message.ts), the same sentence tier 3 writes
-    // for the same denial (src/loop.ts, src/repo/turns.ts). Without the
-    // transaction, a crash between the two inserts would leave her line with
-    // no reply that any retry could ever add, since a retry reads
-    // writeHerMessage's on-conflict as false and skips straight past it.
-    await sql.begin(async (tx) => {
-      const wroteHerMessage = await writeHerMessage(tx, input, conversationId, null)
-      if (wroteHerMessage) {
-        await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-                  values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
-      }
-      await tx`update course.conversations set status = 'limit_reached', updated_at = now()
-                 where id = ${conversationId} and user_id = ${input.userId}`
-    })
+    // The conversation already exists, so nothing here has to be claimed: a
+    // retry of this same key is recognised by denyForCeiling's own on-conflict
+    // (its false result, ignored here, is what stops her being answered
+    // twice), and this path never creates a row a loser would have to undo.
+    await sql.begin((tx) => denyForCeiling(tx, input, conversationId, spend, deps.limits))
     return { conversationId, turnId: null, status: 'limit_reached' }
   }
 
@@ -212,32 +234,54 @@ async function withConversation(deps: SubmitDeps, input: SubmitInput, conversati
  * nothing, so its own ceiling can never be the one that fires here, and there
  * is nothing to fail closed on the way `withConversation`'s read does.
  *
- * Under the ceiling, creating the conversation and claiming the key happen in
- * one transaction, so two concurrent first presses of the SAME key cannot
- * each buy their own conversation: fifty of them must buy exactly one, same
- * as fifty presses on an existing conversation already do above. A claim
- * conflict inside the transaction means some other press's key won first; the
- * whole attempt, conversation included, is thrown away, and this press
- * replays against the winner's conversation through `withConversation`,
- * exactly like a repeated press with a known id.
+ * Both branches create the conversation and claim her key in ONE transaction,
+ * so two concurrent first presses of the SAME key cannot each buy their own
+ * conversation: fifty of them must buy exactly one, same as fifty presses on
+ * an existing conversation already do above. A claim conflict inside the
+ * transaction means some other press's key won first; the whole attempt,
+ * conversation included, is thrown away, and this press answers with the
+ * winner's conversation instead. What each branch has to claim with differs,
+ * which is the only reason they are not one block: under the ceiling a turn
+ * row is claimed and the press replays through `withConversation` exactly like
+ * a repeated press with a known id, while a capped press opens no turn (fix
+ * round 4), so her message row is the claim and the denial is already complete
+ * once the winner has written it.
  */
 async function firstPress(deps: SubmitDeps, input: SubmitInput): Promise<SubmitResult> {
   const { sql } = deps
   const spend = await readSpendForNewConversation(sql, input.userId)
 
   if (exceedsAnyCeiling(spend, deps.limits)) {
-    const [conv] = await sql`insert into course.conversations (user_id) values (${input.userId}) returning id`
-    const conversationId = conv!.id as string
-    await sql.begin(async (tx) => {
-      const wroteHerMessage = await writeHerMessage(tx, input, conversationId, null)
-      if (wroteHerMessage) {
-        await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-                  values (${conversationId}, ${input.userId}, null, 'agent', ${limitReachedMessage(spend, deps.limits)})`
-      }
-      await tx`update course.conversations set status = 'limit_reached', updated_at = now()
-                 where id = ${conversationId} and user_id = ${input.userId}`
-    })
-    return { conversationId, turnId: null, status: 'limit_reached' }
+    try {
+      const conversationId = await sql.begin(async (tx) => {
+        const [conv] = await tx`insert into course.conversations (user_id) values (${input.userId}) returning id`
+        const id = conv!.id as string
+        // This branch opens no turn, so course.turns cannot serialise two
+        // simultaneous capped first presses of one key the way it does for the
+        // queued path below. Her message row does it instead: the per-user
+        // unique on course.messages means exactly one of them gets `true` back
+        // here, and the rest roll the whole attempt back, the conversation they
+        // just created included, rather than leaving her a pile of empty
+        // conversations one press bought.
+        const claimedHerKey = await denyForCeiling(tx, input, id, spend, deps.limits)
+        if (!claimedHerKey) throw new KeyClaimedElsewhere()
+        return id
+      })
+      return { conversationId, turnId: null, status: 'limit_reached' }
+    } catch (err) {
+      if (!(err instanceof KeyClaimedElsewhere)) throw err
+      // By the time the claim above was refused, the press that won it had
+      // committed: an insert that collides with a row some other transaction
+      // has not committed yet waits for that transaction rather than reading
+      // through it. So this read always finds the winner, and every repeat of
+      // one capped press answers with the one conversation the first of them
+      // created, which is what a retried capped press on a known conversation
+      // already gets.
+      const [winner] = await sql`
+        select conversation_id from course.messages
+         where user_id = ${input.userId} and idempotency_key = ${input.idempotencyKey}`
+      return { conversationId: winner!.conversation_id as string, turnId: null, status: 'limit_reached' }
+    }
   }
 
   try {

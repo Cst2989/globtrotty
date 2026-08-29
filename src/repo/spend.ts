@@ -74,29 +74,6 @@ export async function recordSpend(
 }
 
 /**
- * Reads current spend for the ceiling check. THROWS rather than returning zero
- * when it cannot confirm usage: a `?? 0` here means the guardrail disables
- * itself exactly when the database is unhealthy, which is the one failure this
- * function exists to prevent. A fresh user with no course.daily_usage row yet
- * is not a failure and legitimately reads as 0n.
- *
- * How far the guarantee reaches, stated plainly, because a guard everyone
- * believes in and nobody has checked is worse than no guard. The conversation
- * read is the one that fails closed: a conversation row that cannot be found is
- * unambiguously no answer, and it throws. The daily and global reads cannot make
- * the same promise, because a missing row and a sum over zero rows both
- * legitimately mean nothing was spent today and neither is distinguishable from
- * an answer the database failed to give. So their 0n is a real reading, not a
- * confirmed one, and neither may ever be the only guard on a request. An
- * unreachable database throws out of the first query anyway.
- *
- * The three reads are also three separate round trips, not one snapshot: with
- * no shared transaction, the conversation total, the daily row and the global
- * sum can each land at a slightly different instant. That drift is at most
- * one concurrent call, which does not matter for a ceiling that only needs to
- * be roughly current; it would matter for a receipt.
- */
-/**
  * The two reads `readSpendFailClosed` and `readSpendForNewConversation` share:
  * her daily total and every user's total today. Factored out so the two
  * queries exist once rather than twice, since it is exactly the "the three
@@ -121,6 +98,29 @@ async function readDailyAndGlobal(sql: postgres.Sql, userId: string): Promise<{ 
   }
 }
 
+/**
+ * Reads current spend for the ceiling check. THROWS rather than returning zero
+ * when it cannot confirm usage: a `?? 0` here means the guardrail disables
+ * itself exactly when the database is unhealthy, which is the one failure this
+ * function exists to prevent. A fresh user with no course.daily_usage row yet
+ * is not a failure and legitimately reads as 0n.
+ *
+ * How far the guarantee reaches, stated plainly, because a guard everyone
+ * believes in and nobody has checked is worse than no guard. The conversation
+ * read is the one that fails closed: a conversation row that cannot be found is
+ * unambiguously no answer, and it throws. The daily and global reads cannot make
+ * the same promise, because a missing row and a sum over zero rows both
+ * legitimately mean nothing was spent today and neither is distinguishable from
+ * an answer the database failed to give. So their 0n is a real reading, not a
+ * confirmed one, and neither may ever be the only guard on a request. An
+ * unreachable database throws out of the first query anyway.
+ *
+ * The three reads are also three separate round trips, not one snapshot: with
+ * no shared transaction, the conversation total, the daily row and the global
+ * sum can each land at a slightly different instant. That drift is at most
+ * one concurrent call, which does not matter for a ceiling that only needs to
+ * be roughly current; it would matter for a receipt.
+ */
 export async function readSpendFailClosed(
   sql: postgres.Sql,
   userId: string,
