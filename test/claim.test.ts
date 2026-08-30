@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { claimTurn, loadTurnInput, saveTurnState, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { describeDb, withRealDb, withTestDb } from './helpers/db.js'
-import { claimTurn, saveTurnState, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 
 // Fresh per run: a fixed literal is also the id scripts/trip.ts commits real
 // rows for, and those rows outlive this test's rolled-back transaction.
@@ -99,6 +99,19 @@ describeDb('claimTurn', () => {
       expect(await claimTurn(sql, submitted.turnId!)).toBeNull()
     })
   })
+
+  it('a claimed turn is still loadable, which is why the worker may claim first', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(deps(sql), {
+        userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'c7',
+      })
+      await claimTurn(sql, submitted.turnId!)
+      // The claim set 'running'. If loadTurnInput still filtered on 'queued'
+      // alone, the worker would claim a turn and then read nothing.
+      const input = await loadTurnInput(sql, submitted.turnId!)
+      expect(input?.message).toBe('a week in Portugal')
+    })
+  })
 })
 
 /**
@@ -107,7 +120,8 @@ describeDb('claimTurn', () => {
  * the platform kills the function and not the statement Postgres has already
  * received, so a dead worker's late save can land on top of a live worker's
  * state. `attempts` is the fencing token: the claim already computed it, and
- * every write from here on carries it or is refused.
+ * `saveTurnState`'s write carries it or is refused. The completion write still
+ * goes through `finishTurn`, unfenced, until lesson 3.3 replaces it.
  */
 describeDb('saveTurnState', () => {
   it('rejects a write from a superseded worker and keeps the live one', async () => {
@@ -150,9 +164,10 @@ describeDb('claimTurn, under a real race', () => {
       const submitted = await submitMessage(deps(sql), {
         userId, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'race-1',
       })
-      // Two connections out of the same pool, both issuing the claim before
-      // either has committed. This is the shape Netlify's own retry produces,
-      // and the one a single serialised connection cannot produce at all.
+      // Two connections out of the same pool, racing: whichever way the two
+      // statements interleave, exactly one row matches. This is the shape
+      // Netlify's own retry produces, and the one a single serialised
+      // connection cannot produce at all.
       const [a, b] = await Promise.all([
         claimTurn(sql, submitted.turnId!),
         claimTurn(sql, submitted.turnId!),

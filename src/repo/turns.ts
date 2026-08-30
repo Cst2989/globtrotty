@@ -88,6 +88,10 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  * rows back is not an empty update, it is proof that this worker no longer owns
  * the turn, so it throws rather than returning quietly: a superseded worker that
  * carries on doing work is the thing this whole file exists to stop.
+ *
+ * This guard covers only the write this function makes. The turn's completion
+ * write still goes through `finishTurn`, which carries no token at all until
+ * lesson 3.3 replaces it, so a superseded worker can still land that write.
  */
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
   const rows = await sql`

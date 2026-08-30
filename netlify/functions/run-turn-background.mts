@@ -46,6 +46,10 @@ export default async (req: Request): Promise<Response> => {
     const claim = await claimTurn(sql, decision.turnId)
     if (!claim) return new Response('already claimed', { status: 200 })
     const input = await loadTurnInput(sql, decision.turnId)
+    // No message to run: the claim above already set 'running' and is not
+    // released here, so this turn is left for lesson 3.2's heartbeat sweeper
+    // to reap once that heartbeat goes stale, rather than walked back to
+    // 'queued' for an immediate retry.
     if (!input) return new Response('nothing to do', { status: 200 })
     const result = await turn(
       newConversation(input.conversationId),

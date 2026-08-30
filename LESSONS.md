@@ -20,6 +20,6 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-2-7 | Fifty presses, one turn | npm run migrate, then npm test (test/idempotency.test.ts) |
 | lesson-3-1 | The claim with a fencing token | npm test (test/claim.test.ts) |
 
-Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a `queued` turn with no message. The stalled-turn sweeper module 3 builds must also reap that case, not just a turn with no heartbeat.
+Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a turn with no message. Since lesson 3.1's worker claims before it loads, that turn now reaches the sweeper as `running` with a fresh heartbeat rather than `queued`; the stalled-turn sweeper module 3 builds must reap it once that heartbeat goes stale, not by looking for a queued turn with no heartbeat.
 
-A driver throw during a spend read escapes `turn()` today and strands the turn at `queued`; module 3's sweeper must reap it or resume it, so a database outage ends as a denial she can see, not a turn that hangs forever.
+A driver throw during a spend read escapes `turn()` today and strands the turn; since lesson 3.1 claims before running, that strand happens at `running` with a heartbeat already set, not at `queued`. Module 3's sweeper must reap it by that stale heartbeat or resume it, so a database outage ends as a denial she can see, not a turn that hangs forever.
