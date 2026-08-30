@@ -165,7 +165,11 @@ item appends a second row and the first one stays, so the corpus can answer
 "what price did we see for this id, and when?" rather than only "what does it
 hold now". Tier 3's driver and `npm run trip` run the same chain, so a run of
 either leaves its rows behind it and prints how many; the tests are what still
-search without recording, because they hold no claim to write under. The model
+search without recording, because what they wrap is `supplierRunner` or
+`mockRunner` rather than `corpusRunner`, and a search records when it runs
+through `corpusRunner` and not otherwise. A claim is not the separator:
+`test/crash.test.ts` and `test/turns.test.ts` both claim their turn and record
+nothing, because they are asserting something other than provenance. The model
 still reads a trimmed view of the same search and the two are deliberately not
 the same object.
 

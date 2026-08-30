@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { ProposalRefsSchema, rehydrateRefs } from '../src/gates/rehydrateGate.js'
 import { SLOT_KINDS } from '../src/gates/types.js'
+import { submitMessage } from '../src/handler.js'
 import { money } from '../src/money.js'
 import { recordResults } from '../src/repo/toolResults.js'
+import { claimTurn } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import type { FlightSearch } from '../src/supplier/types.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 
 const USER = randomUUID()
 
@@ -17,21 +20,36 @@ const params: FlightSearch = {
 }
 
 /**
- * A conversation with a search already in its corpus. Each call varies
- * `departureDate`, which is a field the hash MockSupplier derives every
- * sourceId from actually reads (`seed:from:to:departureDate`,
+ * A conversation with a search already in its corpus, and the claim that wrote
+ * it.
+ *
+ * A claimed turn rather than a bare conversation row, because `recordResults`
+ * is a fenced write (lesson 4.3): it appends only while `course.turns` shows
+ * this turn `running` at this claim's `attempts`, so a corpus row written by
+ * nobody is not a state this helper can produce. `submitMessage` then
+ * `claimTurn` is the same two lines `test/toolResults.test.ts`'s `convo` and
+ * `test/tool-calls.test.ts`'s `seedTurn` use, for the same reason. The claim
+ * comes back out because a caller that appends a SECOND fetch has to append it
+ * under the same claim.
+ *
+ * Each call varies `departureDate`, which is a field the hash MockSupplier
+ * derives every sourceId from actually reads (`seed:from:to:departureDate`,
  * src/supplier/mock.ts). Without that, two conversations seeded from one params
  * object get the SAME ids, and the scoping test below passes whether or not the
  * code scopes anything. `flexDays` would not do: it travels in the recorded
- * search and never reaches the hash.
+ * search and never reaches the hash. `n` stays under 20 so the date is a real
+ * September day.
  */
 async function seed(sql: postgres.Sql, n: number) {
-  const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
-  const conversationId = c!.id as string
+  const submitted = await submitMessage(
+    handlerDeps(sql),
+    { userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: randomUUID() },
+  )
+  const claim = (await claimTurn(sql, submitted.turnId!))!
   const seeded: FlightSearch = { ...params, departureDate: `2026-09-${String(n).padStart(2, '0')}` }
   const items = await mockSuppliers().flight.search(seeded)
-  await recordResults(sql, { conversationId, userId: USER, turnId: null, params: seeded, items })
-  return { conversationId, items }
+  await recordResults(sql, claim, { params: seeded, items })
+  return { claim, conversationId: claim.conversationId, items }
 }
 
 describe('ProposalRefsSchema, the model cannot send values', () => {
@@ -234,14 +252,15 @@ describeDb('rehydrateRefs', () => {
 
   it('reads the newest fetch of an item, the same one rehydrate returns', async () => {
     await withTestDb(async (sql) => {
-      const { conversationId, items } = await seed(sql, 9)
+      const { claim, conversationId, items } = await seed(sql, 9)
       const later = {
         ...items[0]!,
         price: money(items[0]!.price.minor + 4200n, items[0]!.price.currency),
         fetchedAt: new Date(items[0]!.fetchedAt.getTime() + 60_000),
       }
-      await recordResults(sql, {
-        conversationId, userId: USER, turnId: null,
+      // The same claim, because the second fetch is the same turn searching
+      // again, and a fenced write has nowhere else to come from.
+      await recordResults(sql, claim, {
         params: { ...params, departureDate: '2026-09-09' }, items: [later],
       })
       const res = await rehydrateRefs(sql, conversationId, [

@@ -249,8 +249,14 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
  * (netlify/functions/run-turn-background.mts) and `npm run trip`
  * (scripts/trip.ts) both wrap `supplierRunner` in `corpusRunner` instead, so a
  * search made by either writes its rows. What is left here is the tests, which
- * hold no claim to fence a corpus write on and are asserting something other
- * than provenance when they call a tool at all.
+ * wrap `supplierRunner` rather than `corpusRunner` because they are asserting
+ * something other than provenance when they call a tool at all.
+ *
+ * Holding a claim is NOT the separator, and reading it that way sends anyone
+ * checking straight into a counterexample: `test/crash.test.ts` and
+ * `test/turns.test.ts` both claim their turn and still record nothing, because
+ * what they run a search through is this function. A search records when it
+ * runs through `corpusRunner`, and not otherwise.
  */
 export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunner {
   const inner = supplierRunner(suppliers)
