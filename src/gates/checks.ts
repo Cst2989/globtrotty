@@ -1,5 +1,6 @@
 import { compareMoney, formatMoney, sumMoney, type Money } from '../money.js'
 import { isFlight, isHotel, itemTotal, type SupplierKind } from '../supplier/types.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import type { RehydratedItem, Violation } from './types.js'
 
 /**
@@ -26,7 +27,7 @@ export function checkFreshness(items: RehydratedItem[], now: Date): Violation[] 
     gate: 'freshness',
     sourceIds: bad.map((b) => b.item.sourceId),
     detail: `These prices are older than we will quote: `
-          + `${bad.map((b) => b.item.sourceId).join(', ')}. Re-search them and propose the new ids.`,
+          + `${bad.map((b) => sanitizeSourceId(b.item.sourceId)).join(', ')}. Re-search them and propose the new ids.`,
   }]
 }
 
@@ -66,7 +67,7 @@ export function checkCurrency(items: RehydratedItem[], expected: string | null):
       gate: 'currency',
       sourceIds: bad.map((b) => b.item.sourceId),
       detail: `This trip is priced in ${exp}, but these items are not: `
-            + `${bad.map((b) => `${b.item.sourceId} (${b.item.price.currency})`).join(', ')}. `
+            + `${bad.map((b) => `${sanitizeSourceId(b.item.sourceId)} (${b.item.price.currency})`).join(', ')}. `
             + `Search again with currency=${exp}. `
             + `Currencies present: ${currencies.join(', ')}.`,
     }]
@@ -77,7 +78,7 @@ export function checkCurrency(items: RehydratedItem[], expected: string | null):
     gate: 'currency',
     sourceIds: items.map((i) => i.item.sourceId),
     detail: `No trip currency is set yet, but these items mix currencies and cannot be summed: `
-          + `${items.map((i) => `${i.item.sourceId} (${i.item.price.currency})`).join(', ')}. `
+          + `${items.map((i) => `${sanitizeSourceId(i.item.sourceId)} (${i.item.price.currency})`).join(', ')}. `
           + `Currencies present: ${currencies.join(', ')}. Pick one currency and re-search the rest.`,
   }]
 }
@@ -154,7 +155,7 @@ export function checkSlots(items: RehydratedItem[]): Violation[] {
       gate: 'slots',
       sourceIds: unknown.map((r) => r.item.sourceId),
       detail: `These items were proposed for a slot that does not exist: `
-            + `${unknown.map((r) => `${r.item.sourceId} (slot "${r.ref.slot}")`).join(', ')}. `
+            + `${unknown.map((r) => `${sanitizeSourceId(r.item.sourceId)} (slot "${r.ref.slot}")`).join(', ')}. `
             + `The only slots are: ${Object.keys(SLOT_KINDS).join(', ')}.`,
     })
   }
@@ -162,9 +163,16 @@ export function checkSlots(items: RehydratedItem[]): Violation[] {
     violations.push({
       gate: 'slots',
       sourceIds: mismatched.map(({ r }) => r.item.sourceId),
+      // `r.item.detail.kind` is sanitized too, not just `sourceId`: it is read
+      // back from `payload` jsonb with no runtime validation (the type system
+      // says 'flight' | 'hotel', but nothing enforces that at the storage
+      // boundary), so a malformed or manually-seeded row could in principle
+      // carry an arbitrary string here — the same "unvalidated corpus content
+      // reaching model-read text" shape as `sourceId`, just on a different
+      // field of the same untrusted row.
       detail: `These items do not match the slot they were proposed for: `
             + `${mismatched.map(({ r, wants }) =>
-                  `${r.item.sourceId} is a ${r.item.detail.kind} but slot `
+                  `${sanitizeSourceId(r.item.sourceId)} is a ${sanitizeSourceId(r.item.detail.kind)} but slot `
                 + `"${r.ref.slot}" takes a ${wants}`).join('; ')}.`,
     })
   }
@@ -259,7 +267,7 @@ export function checkTotals(items: RehydratedItem[], expected: string | null): T
       gate: 'totals',
       sourceIds: badQuantity.map((i) => i.item.sourceId),
       detail: `These items have a quantity that is not a whole positive number: `
-            + `${badQuantity.map((i) => `${i.item.sourceId} (${i.ref.quantity})`).join(', ')}. `
+            + `${badQuantity.map((i) => `${sanitizeSourceId(i.item.sourceId)} (${i.ref.quantity})`).join(', ')}. `
             + `Quantity counts identical units, so it cannot be fractional or zero.`,
     })
   }
@@ -311,7 +319,7 @@ export function checkTotals(items: RehydratedItem[], expected: string | null): T
       gate: 'totals',
       sourceIds: multiplied.map((i) => i.item.sourceId),
       detail: `These items were proposed with a quantity above 1: `
-            + `${multiplied.map((i) => `${i.item.sourceId} (${i.ref.quantity})`).join(', ')}. `
+            + `${multiplied.map((i) => `${sanitizeSourceId(i.item.sourceId)} (${i.ref.quantity})`).join(', ')}. `
             + `Every price in this system already covers the whole booking — a flight `
             + `price covers the whole party, a hotel price covers the whole stay — so `
             + `quantity must be 1. Propose each item once with quantity 1.`,
@@ -420,7 +428,7 @@ export function checkDates(items: RehydratedItem[], window: DateWindow | null): 
     gate: 'dates',
     sourceIds: offenders,
     detail: `These items fall outside the ${window.earliest} to ${window.latest} travel window: `
-          + `${offenders.join(', ')}.`,
+          + `${offenders.map(sanitizeSourceId).join(', ')}.`,
   }]
 }
 

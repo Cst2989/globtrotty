@@ -69,6 +69,27 @@ export async function recordModelCall(
     result: ModelResult
     systemPrompt: string
     userPrompt: string
+    /**
+     * The request exactly as assembled for this call (`buildRequest`'s return),
+     * before redaction. Spec section 7's drift clause: "We also record the full
+     * request shape, because a silent provider-side change to a default is now
+     * as likely a drift vector as a weights change." Written only when
+     * `capturePolicyFor` returns `'full'` — see the `redactedRequest` comment
+     * below for why the cheap seats' truncated/sampled-out rows store NULL
+     * instead of a second copy of the same request.
+     *
+     * Typed `Record<string, unknown>` — exactly `buildRequest`'s return type —
+     * rather than `unknown`. `unknown` would accept `undefined`, and on a
+     * `'full'` seat `JSON.stringify(undefined)` returns the VALUE `undefined`
+     * (not the string `"undefined"`), which `redactCredentials` below then
+     * calls `.replace` on. That throws inside this function's own try/catch,
+     * which is caught and only `console.error`-logged — so a caller with no
+     * request object (`front_desk` and `reviewer` are both hardwired `'full'`
+     * by `capturePolicyFor`) would silently write NO `model_calls` row at all.
+     * `Record<string, unknown>` makes passing `undefined` here a compile error
+     * instead. See test/modelCalls.test.ts for the type-level proof.
+     */
+    requestShape: Record<string, unknown>
     /** What we asked the provider to do about thinking, e.g. 'adaptive'. */
     thinkingMode: string | null
     costMicros: bigint
@@ -97,12 +118,29 @@ export async function recordModelCall(
     // inside a nested content block from slipping through.
     const redactedResponse: unknown = JSON.parse(redactCredentials(JSON.stringify(response)))
 
+    // Same redact-then-reparse as `response` above, and for the same two
+    // reasons: `sql.json(<a string>)` stores a jsonb string scalar, which makes
+    // `request_shape->>'model'` null forever; and redacting before serialising
+    // is what stops a credential nested inside a message content block.
+    //
+    // Written only when `policy === 'full'`: driver/front_desk/reviewer, plus
+    // any cheap seat that happens to land under the truncation threshold. A
+    // truncated or (should the policy ever produce it) sampled-out row stores
+    // NULL rather than a second copy of the request — it is the largest thing
+    // in the row, and 'truncated' exists precisely to stop storing large things.
+    // The column has no NOT NULL constraint and its check constraint still
+    // admits 'sampled_out', so a future sampler must keep writing NULL here
+    // rather than silently start leaking requests.
+    const redactedRequest: unknown = policy === 'full'
+      ? JSON.parse(redactCredentials(JSON.stringify(args.requestShape)))
+      : null
+
     await sql.begin(async (tx) => {
       await tx`
         insert into model_calls (
           conversation_id, turn_id, user_id, seat, prompt_version, model_config_id,
           effort, thinking_mode, max_tokens, model, request_id, system_prompt,
-          user_prompt, response,
+          user_prompt, response, request_shape,
           input_tokens, cache_creation_input_tokens, cache_read_input_tokens,
           output_tokens, cost_micros, latency_ms, capture_policy
         ) values (
@@ -112,6 +150,7 @@ export async function recordModelCall(
           ${args.seatConfig.maxTokens}, ${r.model},
           ${r.requestId}, ${clip(system)}, ${clip(user)},
           ${sql.json(redactedResponse as never)},
+          ${redactedRequest === null ? null : sql.json(redactedRequest as never)},
           ${r.usage.input_tokens}, ${r.usage.cache_creation_input_tokens},
           ${r.usage.cache_read_input_tokens}, ${r.usage.output_tokens},
           ${args.costMicros.toString()}, ${r.latencyMs}, ${policy}

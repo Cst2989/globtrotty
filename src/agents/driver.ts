@@ -5,7 +5,7 @@ import { firstCeilingReached, type Limits, type LoopMessage } from '../engine.js
 import { classifyError } from '../errors.js'
 import { SEATS } from '../model/seats.js'
 import {
-  buildCountTokensRequest, callModel, estimateInputTokens,
+  buildCountTokensRequest, buildRequest, callModel, estimateInputTokens,
   type CallArgs, type ModelResult, type Transport,
 } from '../model/client.js'
 import { SYSTEM_CACHE_TTL } from '../model/cache.js'
@@ -20,6 +20,7 @@ import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/no
 import { constraintsFromNotebook, runGates } from '../gates/pipeline.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
 
@@ -167,6 +168,12 @@ export function makeDriver(deps: DriverDeps): Agent {
       conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
       seat: 'driver', seatConfig: seat, result,
       systemPrompt: args.system, userPrompt: lastUserText(ctx.state.messages),
+      // The request as actually assembled, not a reconstruction. `buildRequest`
+      // is pure and is the single assembly path (src/model/client.ts), so
+      // calling it here a second time yields exactly what `callModel` sent —
+      // preserving that single-assembly-path invariant is why this calls
+      // `buildRequest(args)` again rather than having `callModel` return it.
+      requestShape: buildRequest(args),
       thinkingMode: 'adaptive', costMicros: actual,
     })
 
@@ -428,9 +435,16 @@ async function execute(
       const { refs } = input as { refs: unknown[] }
       // Derived, not hardcoded: driver.md instructs the model to fix and
       // propose again, so a SECOND proposal in this turn must land as round 1,
-      // not a second round-0 row set. `gate_results.round` still has no
-      // uniqueness constraint (docs/backlog-plan.md Tier 1) — that is left to
-      // a later plan; this only makes the value itself honest.
+      // not a second round-0 row set. `gate_results.round` DOES now carry a
+      // uniqueness constraint — migration 0013's
+      // `gate_results_one_row_per_gate_per_round`, a unique index on
+      // `(turn_id, round, gate)` where `turn_id is not null`. That means this
+      // `round` value is load-bearing, not merely descriptive: any caller that
+      // runs the gates twice for the same turn without this count having
+      // advanced collides on insert, and `recordGateResults` has no
+      // `on conflict` clause, so the turn fails outright rather than silently
+      // double-counting (see `countPriorProposals`'s doc comment in
+      // src/repo/toolCalls.ts for the precondition this now enforces).
       const round = await countPriorProposals(sql, ctx.turnId, callId)
       const outcome = await runGates(sql, {
         conversationId: ctx.conversationId,
@@ -472,27 +486,3 @@ function renderItems(items: SupplierItem[]): string {
     .join('\n')
 }
 
-/** Above this a supplier-origin id is truncated, never rejected outright. */
-const MAX_SOURCE_ID_LEN = 128
-
-/**
- * Caps and escapes a supplier-origin `sourceId` before it lands in the
- * model's context, in `propose_itinerary`'s accepted-items line and its
- * per-gate violation lines. `sourceId` is written by `recordResults` from
- * whatever the supplier's response actually contained — untrusted, unlike the
- * gate's own `gate`/`detail` text, which this repo writes. Deliberately NOT
- * fencing the whole `propose_itinerary` result: that would tell the model to
- * disregard our own "fix these and propose again" instruction sitting right
- * next to it. Escaping and capping just the ids closes the injection surface
- * without muting the instruction.
- */
-function sanitizeSourceId(id: string): string {
-  // Printable ASCII only, and BEFORE capping — not after. A newline or control
-  // character in a supplier id could otherwise inject what reads as a new
-  // line of instructions into the tool result; '?' keeps the id recognisable
-  // rather than dropping it. Escaping first (rather than capping first, then
-  // escaping) matters: the '…' appended below is itself outside \x20-\x7e, so
-  // escaping AFTER capping would corrupt the marker this function just added.
-  const escaped = id.replace(/[^\x20-\x7e]/g, '?')
-  return escaped.length > MAX_SOURCE_ID_LEN ? `${escaped.slice(0, MAX_SOURCE_ID_LEN)}…` : escaped
-}

@@ -2,22 +2,23 @@ import { describe, expect, it } from 'vitest'
 import { checkTotals, checkBudget, checkDates, checkSlots, SLOT_KINDS } from '../src/gates/checks.js'
 import { money } from '../src/money.js'
 import type { RehydratedItem } from '../src/gates/types.js'
-import type { SupplierItem, PriceBasis } from '../src/supplier/types.js'
+import type { StoredItem, PriceBasis } from '../src/supplier/types.js'
 
 function hotel(id: string, minor: bigint, quantity = 1, basis: PriceBasis = 'total'): RehydratedItem {
-  const item: SupplierItem = {
+  const item: StoredItem = {
     sourceId: id, supplier: 'mock', kind: 'hotel', name: id,
     price: money(minor, 'EUR'), priceBasis: basis,
     fetchedAt: new Date('2026-08-16T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
     detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19',
               nights: 7, rating: null, coordinates: null, offerSource: null },
+    searchParams: null,
   }
   return { ref: { sourceId: id, quantity, slot: 'stay' }, item,
            lineTotal: money(minor * BigInt(quantity), 'EUR') }
 }
 
 function flight(id: string, dep: string, arr: string): RehydratedItem {
-  const item: SupplierItem = {
+  const item: StoredItem = {
     sourceId: id, supplier: 'kiwi', kind: 'flight', name: id,
     price: money(10_000n, 'EUR'), priceBasis: 'total',
     fetchedAt: new Date('2026-08-16T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
@@ -32,6 +33,7 @@ function flight(id: string, dep: string, arr: string): RehydratedItem {
       baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 },
       totalDurationSeconds: 1, selfTransfer: false,
     },
+    searchParams: null,
   }
   return { ref: { sourceId: id, quantity: 1, slot: 'flight' }, item, lineTotal: item.price }
 }

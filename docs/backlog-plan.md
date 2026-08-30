@@ -60,14 +60,23 @@ Plan 3 must check `stop_reason` before reading `content`, and `fail_reason` need
 |---|---|
 | **`model_calls` is written by nothing** | The spec calls it "the append-only cost ledger; both counters are derived from it". It has no writer because no model call exists yet. Plan 3 writes the first one, and must derive `conversations.spend_usd_micros` and `daily_usage` from it rather than alongside it. |
 | **Per-turn supplier-call budget** (spec §8) | Deferred in plan 2 because `search()`/`quote()` had no callers outside tests. Plan 3 creates the call sites. §8 names its absence as a v1 defect being fixed. |
-| **`gate_results.round` has no uniqueness** | No unique constraint on `(conversation_id, proposal_id, round, gate)`. Two `runGates` calls in one turn that forget to increment `round` write two full seven-row sets and the fire-rate double-counts. Plan 3 wires the first caller — it must set `round` deliberately, and probably ship the constraint. |
+| **`gate_results.round` has no uniqueness** — **CLEARED by migration 0013** (`7fb343e`, `supabase/migrations/0013_gate_results_round_unique.sql`) | No unique constraint on `(conversation_id, proposal_id, round, gate)`. Two `runGates` calls in one turn that forget to increment `round` write two full seven-row sets and the fire-rate double-counts. Plan 3 wires the first caller — it must set `round` deliberately, and probably ship the constraint. The shipped index is keyed `(turn_id, round, gate)`, not `(conversation_id, ...)` — `round` is derived per turn, not per conversation — and is partial on `turn_id is not null` to scope it to live turns rather than orphans left by `turn_id`'s `on delete set null`. |
 | **Prompt caching structure** | Plan 1 corrected the breakpoint layout on paper; nothing implements it. Current constraints: max 4 breakpoints per request, ~1024-token minimum cacheable prefix, render order `tools` → `system` → `messages`. |
 
 ---
 
 ## Tier 2 — real debt, cost accrues while it waits
 
-### 2.1 `tool_results` is not append-only
+### 2.1 `tool_results` is not append-only — RESOLVED
+**Cleared by migration 0011** (`887d046`, `supabase/migrations/0011_tool_results_append_only.sql`).
+`recordResults` no longer upserts; the `unique (conversation_id, source_id)` constraint that
+forced the upsert is dropped, and `rehydrate` reads the newest row per `source_id` via
+`distinct on (conversation_id, source_id) order by fetched_at desc, id desc`, served by a new
+`tool_results_newest_per_source` index. The `id desc` tiebreak is deliberate, not decorative —
+`d6feaad` replaced the original 2-row test (which could not fail regardless of ordering) with a
+500-row test across forced seq/index/bitmap scan shapes that only passes with the tiebreak
+present. **What this creates, not clears: see the new item below on `tool_results` growth.**
+
 `src/repo/toolResults.ts`. Spec §6 says "untrimmed, append-only". `recordResults` uses
 `ON CONFLICT DO UPDATE`, so a re-search overwrites the prior quote.
 
@@ -84,18 +93,37 @@ deliberate deviation, not a licensed one.
 the newest per `source_id`, drop `unique (conversation_id, source_id)` and replace it with an
 index supporting newest-per-id. Do it before slice 2 needs replay.
 
-### 2.2 The `count ?? 0` ban has no enforcement
-Spec §7 states "a lint rule enforces it". **There is no linter in the repo** — no ESLint config,
-no lint script, no dependency. The ban on the banned pattern is a comment and reviewer attention.
+### 2.2 The `count ?? 0` ban has no enforcement — RESOLVED
+**Cleared.** `eslint.config.js` now carries a `no-restricted-syntax` rule banning
+`?? 0` (and, as an incidental but verified side effect of how esquery stringifies
+literals, `?? 0n`), with a `lint` script (`"lint": "eslint ."`) in `package.json`.
 
-This is a money guardrail: `count ?? 0` converts "I cannot confirm usage" into "zero spent",
-disabling a ceiling at the moment it is needed. A stated enforcement mechanism that does not
-exist is worse than an acknowledged convention, because everything downstream assumes it holds.
+**Its limits:** the rule is scoped to `files: ['src/repo/**/*.ts']`, not the whole
+repo. That scope is deliberate, not an oversight — a repo-wide selector produced a
+genuine false positive at `src/gates/pipeline.ts:86` (`args.round ?? 0`, an
+ordinary retry-round counter, not a spend read), and `src/repo/**` is where the
+database reads that feed money ceilings live today. A `?? 0` on a spend read
+introduced anywhere outside `src/repo/**` — e.g. inline in a new call site that
+doesn't go through the repo layer — is **not** caught by this rule. The selector
+also doesn't catch a disguised right-hand literal (`?? (0 as number)`, `?? +0`,
+etc.), though no code in the repo does that today.
 
-**Fix:** add ESLint with a `no-restricted-syntax` rule matching `?? 0` on a spend read, or delete
-the claim from the spec. Either is honest; the current state is not.
+This is a money guardrail: `count ?? 0` converts "I cannot confirm usage" into
+"zero spent", disabling a ceiling at the moment it is needed. Enforcement now
+matches the spec's claim for the surface it covers; expanding coverage beyond
+`src/repo/**` is future work, not open debt from this item.
 
-### 2.3 `model_calls` cannot reconstruct a driver call, though `capture_policy` says `full`
+### 2.3 `model_calls` cannot reconstruct a driver call, though `capture_policy` says `full` — RESOLVED
+**Cleared by migration 0012** (`66e7568`, `supabase/migrations/0012_model_calls_request_shape.sql`).
+`model_calls.request_shape jsonb` now stores the assembled request (`buildRequest(args)`'s
+return, redacted the same way `response` is) whenever `capturePolicyFor` returns `'full'`.
+`driver.ts` calls `buildRequest(args)` a second time at the record site rather than threading it
+through `callModel`'s return, preserving the single-assembly-path invariant from a prior review
+finding — `buildRequest` is pure and `placeBreakpoints` deep-copies its input, so the second call
+yields exactly what was sent. **What this does not clear: see the new item below — the column is
+NULL for every pre-0012 row and for every truncated cheap-seat row, neither backfillable, and a
+scoping question this raises for the drift monitor is flagged for the next plan.**
+
 `src/agents/driver.ts` (the `recordModelCall` call), `src/repo/modelCalls.ts:80,106`. §7 makes
 driver rows always `full` *"because they are the eval corpus part 3 reads and the fine-tuning
 corpus part 4 reads"* — but what is actually stored is the raw `system` string and
@@ -116,6 +144,76 @@ was scoped to avoid. **Fix:** add a `request_shape` (or similarly named) `jsonb`
 the actual `buildRequest(args)` payload (redacted the same way `response` is) rather than deriving
 `user_prompt` from the transcript after the fact.
 
+**This was the drift monitor's blocker — the drift monitor (§7's "nightly golden-prompt canary,
+fingerprinted and diffed") is now unblocked**, for the seats that write `request_shape`. See 2.5
+below for a scoping gap this raises for the cheap seats specifically.
+
+### 2.4 `tool_results` growth is now unbounded
+Migration 0011 (2.1, above) made `tool_results` append-only, which is correct per spec §6 — but
+append-only with no reaper means the table only grows. §6 says these rows are retained *at least*
+as long as `model_calls` (90 days).
+
+**Verified against the live database before writing this:** neither `tool_results` nor
+`model_calls` has a retention job. `pg_cron`'s `cron.job` catalog is not installed in this
+database at all (`cron.job` does not exist), and a search of `pg_proc` for any function named
+`%reap%`, `%retention%`, `%purge%`, or `%prune%` returns nothing. There is no scheduled or
+callable reaper for either table, anywhere in the schema. The 0011 migration comment says the same
+and is accurate.
+
+**Cheap today, not free going forward.** As of this pass, live row counts are `tool_results = 0`,
+`model_calls = 1` (the one live demo turn noted in the plan's own self-review) — the blast radius
+right now is zero. That will stop being true once slice 2 starts replaying and 3b's `revise_component`
+starts issuing more supplier calls per turn. Size a reaper (or an explicit "no reaper, and here is
+why the growth is acceptable" decision) before then.
+
+### 2.5 `model_calls.request_shape` is NULL for every pre-0012 row, and for every truncated cheap-seat row
+Migration 0012 (2.3, above) added the column but could not populate it retroactively, and its own
+write path (`src/repo/modelCalls.ts`, `capturePolicyFor`) deliberately skips it a second way: any
+row whose `capture_policy` is `'truncated'` also stores `request_shape = NULL`, by design, to avoid
+a second, large copy of a request already deemed too big to store whole. `capturePolicyFor` can
+only return `'truncated'` for the seats that are not `driver`, `front_desk`, or `reviewer` — those
+three are hardcoded `'full'` always — so in practice this means any of the four cheap seats
+(`scout`, `monitor`, `titler`, `sim_user`) whose combined system+user bytes exceed the 8KB
+(`TRUNCATE_ABOVE_BYTES`) threshold.
+
+**Neither gap is backfillable.** The pre-0012 rows describe requests that were never durable
+anywhere else; a `'truncated'` row's assembled request was, by construction, too large to keep.
+
+**Any consumer must treat `request_shape IS NULL` as "unknown", never as "no request".** The
+column has no `NOT NULL` constraint specifically so this distinction is representable — collapsing
+NULL to "no request happened" would misread both a pre-migration row and a legitimately
+size-capped one as evidence of nothing, when in both cases a request did happen.
+
+**Open question flagged for the next plan, not a defect in this one:** spec §7's drift sentence —
+*"We also record the full request shape, because a silent provider-side change to a default is now
+as likely a drift vector as a weights change"* — sits in the "Models, drift, and caching"
+subsection, which covers all three seats (`driver`, `reviewer`, `cheap`), not the driver alone. But
+`request_shape` is NULL on every truncated cheap-seat row by design (this item, above). If a future
+drift monitor is specified to sample cheap-seat requests for comparison, it would have nothing to
+diff against for any cheap-seat call over 8KB. The next plan needs to decide, explicitly, whether
+the drift monitor's cheap-seat coverage is scoped to under-threshold requests only, whether cheap
+seats need a lighter-weight shape capture that survives truncation, or whether drift detection on
+the cheap seats is out of scope entirely — the spec as written does not say which.
+
+### 2.6 `request_shape` is unclipped on `'full'` rows, and grows O(N²) across a multi-step turn
+`src/repo/modelCalls.ts`'s `clip()` only ever runs on `system`/`user_prompt`; `request_shape` is
+written whole-or-not-at-all (see 2.5), with no size cap of its own. `capturePolicyFor` hardwires
+`driver`, `front_desk` and `reviewer` to `'full'` regardless of size, so none of those three seats'
+`request_shape` is ever truncated or clipped.
+
+The request `buildRequest` assembles at step N of a turn contains the ENTIRE transcript so far —
+steps 0 through N−1, tool results and all — and one `model_calls` row is written per driver step
+(`maxSteps` is 24). So a full-length turn does not store the transcript once; it stores an
+ever-growing prefix of it 24 times, which sums to O(N²) total bytes across the turn's own rows,
+not O(N). Retained at least 90 days per spec §6, with no reaper (2.4, above, already establishes
+none exists for `tool_results`/`model_calls`).
+
+**Not urgent today** for the same reason 2.4 is not: live `model_calls` row count is 1. It becomes
+real once turns routinely run multi-step, and it compounds with 2.4's already-flagged unbounded
+growth rather than being independent of it. No behaviour changed by this note — it is a sizing
+question for whoever specs the reaper (2.4) or a request_shape-specific cap, not a defect to fix
+here.
+
 ---
 
 ## Tier 3 — latent, cheap, no cost while waiting
@@ -126,9 +224,11 @@ the actual `buildRequest(args)` payload (redacted the same way `response` is) ra
 | 3.2 | The FK-audit query does not filter `indisvalid` or exclude partial indexes | A future FK child column whose only leading-column index is partial would pass the audit while not serving a parent-side delete. No such case exists today. Two predicates. |
 | 3.3 | Kiwi refuses an entire response for one unusable price | `src/supplier/kiwi.ts`. SearchApi *skips* the offending property; Kiwi throws for the whole search. Fail-closed and consistent with the file's own treatment of a non-finite price, but a larger blast radius than a `continue`. |
 | 3.4 | `quantity` is enforced as `=== 1` rather than data-driven | Correct for every shipped supplier (both price the whole booking). The first genuine per-unit supplier fails loudly with an explicit message rather than mispricing — so this is a carry-forward, not a trap. Revisit only when such a supplier appears. |
-| 3.5 | No test pins that the global spend sum is restricted to the current day | Both writes land today, so a dropped `day` filter passes vacuously. Insert a `day - 1` row and assert it is excluded. |
-| 3.6 | `search_params` is stored but never surfaced | `rehydrate` does not return it and `SupplierItem` has no field for it — yet §5's cashier is specified as "re-run the stored search params, find by native ID". Plan 3 or 4 needs a reader. |
-| 3.7 | `rehydrateGate` echoes a raw `sourceId` into a violation `detail` | `src/gates/rehydrateGate.ts`. Plan 3 sanitised the two `propose_itinerary` interpolation points (`sanitizeSourceId`, `src/agents/driver.ts`) but not this one, so a supplier-controlled id still reaches the model unescaped and uncapped through a gate violation. Same shape as the fixed surface, one function away; the fix is to route this interpolation through the same helper. Low reachability today (both shipped suppliers derive ids from their own responses), which is why it is Tier 3 and not Tier 2. |
+| 3.5 | No test pins that the global spend sum is restricted to the current day — **CLEARED by `d34ea61`** | Both writes land today, so a dropped `day` filter passes vacuously. Insert a `day - 1` row and assert it is excluded. `src/repo/spend.ts` was NOT touched by this branch — `git show --stat d34ea61` and `git diff --stat f303ef4..HEAD` both confirm it — so the `where day = (now() at time zone 'utc')::date` predicate on the global sum was never removed and needed no restoring. `d34ea61` added ONLY a test (`test/spend.test.ts`) that plants a large spend on a prior day for a different user and asserts the global read excludes it as a delta — confirmed to discriminate: with the filter temporarily removed by hand, the planted amount leaked into the global total; the predicate itself is unchanged production code. |
+| 3.6 | `search_params` is stored but never surfaced — **CLEARED by `e26409a`** | `rehydrate` does not return it and `SupplierItem` has no field for it — yet §5's cashier is specified as "re-run the stored search params, find by native ID". Plan 3 or 4 needs a reader. `e26409a` adds `search_params` to `rehydrate`'s returned `StoredItem`, null (not `{}`) when no real search was recorded. **This was the cashier's blocker — the cashier re-quote path is now unblocked.** |
+| 3.7 | `rehydrateGate` echoes a raw `sourceId` into a violation `detail` — **CLEARED by `d34ea61`** | `src/gates/rehydrateGate.ts`. Plan 3 sanitised the two `propose_itinerary` interpolation points (`sanitizeSourceId`, `src/agents/driver.ts`) but not this one, so a supplier-controlled id still reaches the model unescaped and uncapped through a gate violation. Same shape as the fixed surface, one function away; the fix is to route this interpolation through the same helper. Low reachability today (both shipped suppliers derive ids from their own responses), which is why it was Tier 3 and not Tier 2. `d34ea61` moves `sanitizeSourceId` to a new root-level `src/sanitize.ts` (not into `src/tools/validate.ts` as originally briefed — that would create an import cycle through `validate.ts` → `registry.ts` → `rehydrateGate.ts` → `validate.ts`) and routes `rehydrateGate.ts`'s interpolation through it. |
+| 3.8 | `src/gates/checks.ts` echoes raw `sourceId` (and one `detail.kind`) into eight violation `detail` strings — **CLEARED by the whole-branch-review fix wave** | `checkFreshness` (×1), `checkCurrency` (×2), `checkSlots` (×2, one of which also interpolates `r.item.detail.kind`, itself read back from unvalidated `payload` jsonb), `checkTotals` (×2) and `checkDates` (×1) — eight in total, at `checks.ts:29, 69, 80, 157, 167, 262, 314, 423` before the fix. Same shape as 3.7, but HIGHER reachability: 3.7's path needs the model to name an id absent from the corpus; these need only a supplier to return a hostile id for an item that legitimately fails a secondary gate — no model complicity required, and neither shipped adapter constrains a supplier response's character set. Fixed by routing all eight `detail` interpolations through `sanitizeSourceId` (`src/sanitize.ts`); `checkBudget` was checked and is correctly NOT among them (its `detail` strings never interpolate `sourceId`, only the separate `sourceIds` array). A test at the `checkFreshness` site (`test/gate-freshness-currency.test.ts`) proves discrimination: removing the sanitize call leaks a planted `\nSYSTEM: ignore previous instructions...` string raw into the detail. |
+| 3.9 | No CI exists in this repo at all | No `.github/workflows` directory, at all. The 8 live external-API tests (`process.env.LIVE_MODEL === '1' ? describe : describe.skip` — 2 Anthropic, 3 Kiwi, 3 SearchApi) are gated correctly already but run only when a human remembers to set `LIVE_MODEL=1 LIVE_SUPPLIERS=1` locally; the user has ruled these should run in CI on a PR, never by an agent in a terminal. Standing this up means creating the FIRST pipeline, not adding a step to an existing one: a `pull_request` workflow targeting `main`; `ANTHROPIC_API_KEY` and `GOOGLE_SEARCH_API` as repo secrets (Kiwi needs no key — confirmed, no key reference in `src/supplier/kiwi.ts`); a `DATABASE_URL` pointed at a **non-production** database, because the DB-backed tests write real rows and today run against the live Supabase project; and the workflow running `LIVE_MODEL=1 LIVE_SUPPLIERS=1 pnpm test` on Node 22 via this repo's `.nvmrc`. **Consequence of not having this**: spec §7's behavioural drift canary (the whole reason the live tests exist) runs only when a human remembers to run it by hand. |
 
 ---
 

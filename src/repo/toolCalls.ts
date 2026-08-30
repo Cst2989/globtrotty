@@ -74,9 +74,23 @@ export async function beginToolCall(
  * "fix exactly what it names and propose again" on rejection, and `maxSteps`
  * is 24 — a re-proposal in the same turn is not an edge case, so a hardcoded
  * `round: 0` on every call wrote duplicate seven-row sets with no unique
- * constraint, double-counting any `group by gate` fire-rate query. The unique
- * constraint itself is left to a later plan (docs/backlog-plan.md Tier 1) —
- * this only makes `round` honest.
+ * constraint, double-counting any `group by gate` fire-rate query. `round`
+ * now DOES carry a uniqueness constraint — migration 0013's
+ * `gate_results_one_row_per_gate_per_round`, a unique index on
+ * `(turn_id, round, gate)` where `turn_id is not null` — which makes this
+ * function's return value load-bearing, not merely a labelling nicety.
+ *
+ * PRECONDITION this function does not itself enforce: it counts
+ * `propose_itinerary` calls ONLY. Any future tool (e.g. a `revise_component`
+ * that re-runs the gates on an edited proposal without a fresh
+ * `propose_itinerary` call) must either be counted here too or derive `round`
+ * some other way — if it re-runs `runGates` while this count has not
+ * advanced, the insert collides with the unique index above and
+ * `recordGateResults` has no `on conflict` clause, so the whole turn fails
+ * (per `runGates`' own comment: a write failure here must not be swallowed).
+ * That is the correct trade for data integrity, not a bug to route around —
+ * but it means any new proposal-shaped tool must be wired into how `round`
+ * is derived before it ships, not after.
  *
  * Throws rather than returning 0 when the read fails, for the same reason
  * `countSupplierCalls` does: a `?? 0` here would relabel every re-proposal

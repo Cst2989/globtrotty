@@ -49,7 +49,16 @@ describeDb('tool_results repo', () => {
   // implementation — exactly the implementation this test exists to catch.
   // Fixed by giving the re-recorded item an explicitly later `fetchedAt` and
   // asserting strict `toBeGreaterThan`.
-  it('is idempotent on re-record and refreshes the price and fetched_at', async () => {
+  // CORRECTION (task-1 dispatch): this test used to be named "is idempotent on
+  // re-record and refreshes the price and fetched_at" — a title that describes
+  // the pre-migration-0011 upsert, which is the bug backlog 2.1 exists to fix.
+  // A second `recordResults` call is NOT idempotent: it appends a new row.
+  // The old assertions here (newest price/fetchedAt via `rehydrate`) also
+  // passed unchanged against an overwrite implementation, since `rehydrate`
+  // takes newest-per-id either way — they never actually distinguished
+  // append-only from overwrite. Added the row-count assertion below, which
+  // does: it is 2 under append-only and would be 1 under the old upsert.
+  it('appends a new row on re-record; rehydrate still returns the newest', async () => {
     await withTestDb(async (sql) => {
       const { userId, conversationId } = await convo(sql, '02')
       const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
@@ -64,6 +73,11 @@ describeDb('tool_results repo', () => {
       await expect(recordResults(sql, {
         conversationId, userId, turnId: null, params, items: [moved],
       })).resolves.toBe(1)
+
+      const all = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      expect(all[0]!.n).toBe(2)
 
       const after = (await rehydrate(sql, conversationId, [item!.sourceId])).get(item!.sourceId)!
       expect(after.price.minor).toBe(before.price.minor + 1000n)
@@ -150,6 +164,157 @@ describeDb('tool_results repo', () => {
     await withTestDb(async (sql) => {
       const { conversationId } = await convo(sql, '06')
       expect((await rehydrate(sql, conversationId, [])).size).toBe(0)
+    })
+  })
+
+  it('keeps every fetch, and rehydrates the newest per source_id', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '09')
+      const older = new Date('2026-08-01T10:00:00Z')
+      const newer = new Date('2026-08-02T10:00:00Z')
+      const [item] = await new MockSupplier({ kind: 'flight', now: () => older }).search(params)
+      const first = { ...item!, price: money(100_00n, 'EUR'), fetchedAt: older }
+      const second = { ...item!, price: money(190_00n, 'EUR'), fetchedAt: newer }
+
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [first] })
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [second] })
+
+      // BOTH fetches survive — this is the append-only property.
+      const all = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      expect(all[0]!.n).toBe(2)
+
+      // The historical price is still readable. This is what the upsert destroyed.
+      const prices = await sql<{ price_minor: string }[]>`
+        select price_minor from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}
+         order by fetched_at asc`
+      expect(prices.map((r) => r.price_minor)).toEqual(['10000', '19000'])
+
+      // The gate still sees exactly one item, and it is the newest.
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      expect(got.size).toBe(1)
+      expect(got.get(item!.sourceId)!.price.minor).toBe(190_00n)
+      expect(got.get(item!.sourceId)!.fetchedAt.toISOString()).toBe(newer.toISOString())
+    })
+  })
+
+  /**
+   * Re-running the SAME query against STATIC data in the SAME session tends to
+   * return ties in the same order every time regardless of `id desc` — that's
+   * just plan caching, not evidence the tiebreak does anything. (An earlier
+   * version of this test made exactly that mistake: it reran one query 10
+   * times in a loop and never once observed disagreement, with or without the
+   * tiebreak, because nothing about the query or the data ever changed
+   * between reads.)
+   *
+   * Postgres does not promise any particular order for tied `(source_id,
+   * fetched_at)` rows without `id desc` — the SQL standard leaves it
+   * unspecified, not "random". It happens to be stable for a small, static
+   * row set read repeatedly with one plan. It is NOT stable once the ties are
+   * numerous enough, and the query is forced through *different* plan shapes
+   * (seq scan vs. index scan vs. bitmap scan), each of which can walk the same
+   * tied rows in a different physical order. `id desc` is what pins the
+   * winner regardless of which plan shape postgres picks.
+   *
+   * Row ids are random UUIDs assigned by `gen_random_uuid()`, independent of
+   * insertion order by construction, so seeding many same-`fetched_at` rows in
+   * insertion order already decouples id order from physical/insertion order
+   * — no extra shuffling needed.
+   */
+  it('rehydrates the same row across seq/index/bitmap scans when many fetches share a fetched_at', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '10')
+      const same = new Date('2026-08-03T10:00:00Z')
+      const [template] = await new MockSupplier({ kind: 'flight', now: () => same }).search(params)
+      const sourceId = template!.sourceId
+
+      // 500 separate fetches (real write path, one recordResults call each —
+      // one call per item so the in-call dedup never collapses them). Fired
+      // concurrently so postgres.js pipelines them on the one connection
+      // instead of paying 500 network round trips serially.
+      //
+      // THIS DISCRIMINATES ONLY BECAUSE THE ROWS ARRIVE AS 500 SEPARATE
+      // STATEMENTS. Verified directly (whole-branch review): seeding the same
+      // 500 rows with ONE `insert ... select generate_series(...)` statement
+      // instead, all three forced plan shapes below agree on the same winner
+      // EVEN WITHOUT `id desc` on the query — the test would pass against the
+      // wrong implementation. A future refactor that batches this seeding
+      // loop into one statement for speed silently breaks this test's ability
+      // to catch a regression; if you do that, re-derive a seeding shape that
+      // still forces tie disagreement across plans before trusting this test
+      // again.
+      const ROWS = 500
+      await Promise.all(Array.from({ length: ROWS }, (_, i) => {
+        const item = { ...template!, price: money(template!.price.minor + BigInt(i), 'EUR'), fetchedAt: same }
+        return recordResults(sql, { conversationId, userId, turnId: null, params, items: [item] })
+      }))
+
+      // Force the planner through each scan shape in turn, and confirm
+      // `rehydrate` picks the same winner regardless of which one it used.
+      const planShapes: Array<[seq: 'on' | 'off', idx: 'on' | 'off', bitmap: 'on' | 'off']> = [
+        ['on', 'off', 'off'],
+        ['off', 'on', 'off'],
+        ['off', 'off', 'on'],
+      ]
+      const seen = new Set<string>()
+      try {
+        for (const [seq, idx, bitmap] of planShapes) {
+          // 'on'/'off' come from the fixed tuple above, never external input —
+          // safe to splice into a raw statement; postgres SET does not accept
+          // these as bind parameters.
+          await sql.unsafe(`set local enable_seqscan = ${seq}`)
+          await sql.unsafe(`set local enable_indexscan = ${idx}`)
+          await sql.unsafe(`set local enable_bitmapscan = ${bitmap}`)
+          const got = await rehydrate(sql, conversationId, [sourceId])
+          seen.add(got.get(sourceId)!.price.minor.toString())
+        }
+      } finally {
+        await sql.unsafe('reset enable_seqscan')
+        await sql.unsafe('reset enable_indexscan')
+        await sql.unsafe('reset enable_bitmapscan')
+      }
+      expect(seen.size).toBe(1)
+    })
+  }, 30_000)
+
+  it('rehydrate returns the search that found each item', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '11')
+      const searchParams: FlightSearch = { ...params, from: 'LGW', to: 'FAO', departureDate: '2026-09-12' }
+      const [item] = await new MockSupplier({ kind: 'flight' }).search(searchParams)
+      await recordResults(sql, {
+        conversationId, userId, turnId: null, params: searchParams, items: [item!],
+      })
+
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      const stored = got.get(item!.sourceId)!
+      expect(stored.searchParams).not.toBeNull()
+      expect(stored.searchParams).toMatchObject({ kind: 'flight', from: 'LGW', to: 'FAO' })
+    })
+  })
+
+  // A row with '{}'::jsonb from the search_params column default, never a
+  // real search — legitimate for a row written by something other than
+  // recordResults (a manual seed, a future bypass insert, a restore), NOT a
+  // historical "pre-0011" state: recordResults has written a real
+  // SearchParams value since its first commit, which predates migration
+  // 0011, and 0011 never touched search_params or its default. The guard
+  // must tell this apart from a genuine search — an empty object is not a
+  // search with no filters, it is the absence of one — so the cashier never
+  // re-quotes against a fabricated search.
+  it('reports a search-less row as null rather than an empty search', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '12')
+      const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [item!] })
+      // Simulate a row written by something other than recordResults, left
+      // on the column default rather than a real search.
+      await sql`update tool_results set search_params = '{}'::jsonb
+                 where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      expect(got.get(item!.sourceId)!.searchParams).toBeNull()
     })
   })
 })

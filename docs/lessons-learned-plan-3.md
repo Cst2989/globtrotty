@@ -84,10 +84,25 @@ is a comment.
 ## 5. Count the doors that move money, and keep one definition of the ceiling
 
 The whole-branch review was asked one question above all others: **how many functions move
-`conversations.spend_usd_micros` or `daily_usage.cost_micros`?** The answer — *"exactly four…
-a model call charges exactly once. I found no fourth door"* — is worth more than any number of
-passing tests, because it is a statement about the shape of the system rather than about a case
-someone thought to write.
+`conversations.spend_usd_micros` or `daily_usage.cost_micros`?**
+
+**CORRECTED** (this document originally quoted the review's answer as *"exactly four… I found
+no fourth door"*, which is self-contradictory as transcribed and was never re-verified before
+being written down here). The real count, verified by grepping `src/` and `netlify/` for
+`update conversations`, `insert into daily_usage`, and `update daily_usage`: **three** functions
+move one of those two columns —
+
+- `recordSpend` (`src/repo/spend.ts:47`)
+- `reserve` (`src/repo/reservation.ts:74`)
+- `reconcile` (`src/repo/reservation.ts:137`)
+
+`completeTurn` and `failTurn` (`src/repo/turns.ts`) also write a column named
+`spend_usd_micros`, but it is `turns.spend_usd_micros` — a different column on a different
+table, tracking what one turn spent rather than the account-level ceiling — which is why
+counting it would make five, not four: it is a different kind of door, not a fourth instance of
+this one. Neither of those two functions is a door on the question actually asked. The general
+lesson stands regardless of the exact number: it is a statement about the shape of the system,
+worth more than any number of passing tests, and worth re-deriving rather than re-quoting.
 
 Separately, three tiers had each hand-written the same "is any ceiling reached" comparison:
 `decideNext`, `submitMessage`, and the driver. The driver's copy also needed to know *which*

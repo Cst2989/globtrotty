@@ -75,6 +75,28 @@ export type HotelSearch = {
 }
 export type SearchParams = FlightSearch | HotelSearch
 
+/**
+ * What the corpus can give back about one item: everything `SupplierItem`
+ * carries, plus the search that found it.
+ *
+ * `searchParams` is NOT on `SupplierItem` on purpose. A `SupplierItem` is what a
+ * supplier returned for one item; the search that produced it is a property of
+ * the fetch, not of the item, and every supplier adapter constructs
+ * `SupplierItem` values without knowing how they will be stored. Widening
+ * `SupplierItem` would force every adapter to carry a field none of them can
+ * populate meaningfully.
+ *
+ * Nullable because the `search_params` column's own default is `'{}'::jsonb`
+ * — a legitimate value for a row written by something other than
+ * `recordResults` (a manual seed, a future bypass insert, a restore), and not
+ * a real search. An empty object is not a search, and the cashier must be
+ * able to tell "no search recorded" from "a search with no filters" rather
+ * than re-quoting against a fabricated one.
+ */
+export type StoredItem = SupplierItem & {
+  searchParams: SearchParams | null
+}
+
 export type SupplierCapabilities = {
   live: boolean
   mayRequote: boolean

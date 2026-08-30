@@ -1,5 +1,5 @@
 import type { Money } from '../money.js'
-import type { SupplierItem } from '../supplier/types.js'
+import type { StoredItem } from '../supplier/types.js'
 
 /**
  * Every deterministic gate, in the order `runGates` runs them, as ONE runtime
@@ -43,4 +43,15 @@ export type Violation = { gate: GateName; detail: string; sourceIds: string[] }
 export type GateOutcome =
   | { ok: true;  items: RehydratedItem[]; total: Money }
   | { ok: false; violations: Violation[] }
-export type RehydratedItem = { ref: ItemRef; item: SupplierItem; lineTotal: Money }
+// `item` is `StoredItem`, not the narrower `SupplierItem` — `rehydrateGate.ts`
+// builds this from `rehydrate`'s `StoredItem` map entries, and `StoredItem`'s
+// `searchParams` (null when no real search was recorded) is present at
+// runtime on every one of these. MINOR 9 in the whole-branch review: a bare
+// `SupplierItem` here would erase that field from the type while it stayed
+// present on the object, which is exactly the shape of bug the reviewer
+// would have to trace back through a variable assignment to find — the same
+// hazard the Task 2 review noted TypeScript's excess-property check does NOT
+// catch for a value passed through a variable rather than a literal. Widening
+// here is what makes `searchParams` visible to gate code and to whatever
+// plan 3b's cashier does with a `RehydratedItem`, without that trace.
+export type RehydratedItem = { ref: ItemRef; item: StoredItem; lineTotal: Money }

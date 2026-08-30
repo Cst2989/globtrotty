@@ -209,4 +209,23 @@ describeDb('readSpendFailClosed', () => {
       expect(s.globalMicros).toBeGreaterThanOrEqual(7_000n)
     })
   })
+
+  // Every other write in this file lands on TODAY's row, so a global sum with
+  // no `day` predicate at all would pass every one of them vacuously. This
+  // plants a large spend on a PRIOR day, for a user who never appears
+  // anywhere else in this file, and proves the global ceiling's read excludes
+  // it. Asserted as a DELTA, like the test above — the shared database may
+  // already hold real committed spend for today.
+  it('the global sum excludes a prior day', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into conversations (user_id) values (${USER}) returning *`
+      const other = '00000000-0000-4000-8000-00000000cc01'
+      const before = (await readSpendFailClosed(sql, USER, c!.id)).globalMicros
+      await sql`
+        insert into daily_usage (user_id, day, cost_micros)
+        values (${other}, (now() at time zone 'utc')::date - 1, 999000000)`
+      const after = (await readSpendFailClosed(sql, USER, c!.id)).globalMicros
+      expect(after - before).toBe(0n)
+    })
+  })
 })

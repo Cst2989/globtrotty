@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type postgres from 'postgres'
 import { rehydrate } from '../repo/toolResults.js'
 import { itemTotal } from '../supplier/types.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import { SLOT_KINDS } from './checks.js'
 import type { ItemRef, RehydratedItem, Violation } from './types.js'
 
@@ -106,7 +107,12 @@ export async function rehydrateRefs(
       violations: [{
         gate: 'provenance',
         sourceIds: missing,
-        detail: `These items match no search result in this conversation: ${missing.join(', ')}. `
+        // Escaped and capped: `missing` is supplier-controlled sourceId text
+        // (see sanitizeSourceId's doc comment in src/sanitize.ts), and this
+        // detail is read by the driver AND, since 3b, the reviewer seat — a
+        // second model consumer of the same unescaped text.
+        detail: `These items match no search result in this conversation: `
+              + `${missing.map(sanitizeSourceId).join(', ')}. `
               + `Search for them first, then propose the ids the search returned.`,
       }],
     }

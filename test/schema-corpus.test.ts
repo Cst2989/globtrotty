@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { NOT_EVALUATED } from '../src/gates/pipeline.js'
+import { recordGateResults } from '../src/repo/gateResults.js'
 
 describeDb('0004 corpus schema', () => {
   it('stores a tool result and reads it back by (conversation_id, source_id)', async () => {
@@ -23,7 +24,16 @@ describeDb('0004 corpus schema', () => {
     })
   })
 
-  it('rejects a duplicate (conversation_id, source_id)', async () => {
+  // CORRECTION (task-1 dispatch): this test used to be named "rejects a
+  // duplicate (conversation_id, source_id)" and asserted that a second insert
+  // for the same pair threw a unique-violation. That was asserting backlog
+  // 2.1's bug: migration 0004's `unique (conversation_id, source_id)` is what
+  // forced `recordResults` into an upsert, and every re-quote silently
+  // destroyed the previous price for that id. Migration 0011 (spec §6:
+  // `tool_results` is "untrimmed, append-only") drops that constraint, so a
+  // duplicate `(conversation_id, source_id)` is no longer an error — it is
+  // exactly what a second fetch of the same id is supposed to produce.
+  it('allows a duplicate (conversation_id, source_id) — append-only per migration 0011', async () => {
     await withTestDb(async (sql) => {
       const userId = '00000000-0000-4000-8000-000000000002'
       const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
@@ -34,7 +44,12 @@ describeDb('0004 corpus schema', () => {
         values (${c!.id}, ${userId}, 'DUP', 'mock', 'hotel', 'H',
                 ${(100n).toString()}, 'EUR', 'total', 900, ${sql.json({})})`
       await ins()
-      await expect(ins()).rejects.toThrow(/duplicate key|unique/i)
+      await expect(ins()).resolves.toBeDefined()
+
+      const rows = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${c!.id} and source_id = 'DUP'`
+      expect(rows[0]!.n).toBe(2)
     })
   })
 
@@ -326,6 +341,86 @@ describeDb('0008 turn_id indexes and the daily_usage RLS warning', () => {
       // Names the mechanism, not just the risk: without the remedy the warning
       // tells a reader to worry and not what to do.
       expect(c).toContain('bypassrls')
+    })
+  })
+})
+
+/**
+ * 0013. `round` is derived per TURN, not per conversation:
+ * `countPriorProposals` (src/repo/toolCalls.ts) filters `where turn_id = ...`,
+ * so it resets to 0 on every turn. Without a uniqueness rule, two `runGates`
+ * calls that land on the same (turn, round) write two full seven-row sets and
+ * every `group by gate` fire-rate double-counts. Plan 3b's `revise_component`
+ * creates multiple rounds per turn by design, so this has to hold before that
+ * lands.
+ *
+ * `seedTurn` creates turns with status 'done' (not the default 'queued') so
+ * that `seedAnotherTurn` can add a second turn to the SAME conversation
+ * without colliding with `turns_one_active_per_conversation`, the partial
+ * unique index that allows only one queued-or-running turn per conversation.
+ */
+describeDb('0013 gate_results round uniqueness', () => {
+  async function seedTurn(sql: any): Promise<{ conversationId: string; turnId: string }> {
+    const userId = '00000000-0000-4000-8000-000000000009'
+    const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
+    const conversationId = c!.id as string
+    const [t] = await sql`
+      insert into turns (conversation_id, user_id, idempotency_key, status)
+      values (${conversationId}, ${userId}, 'seed-1', 'done') returning id`
+    return { conversationId, turnId: t!.id as string }
+  }
+
+  async function seedAnotherTurn(sql: any, conversationId: string): Promise<string> {
+    const [conv] = await sql`select user_id from conversations where id = ${conversationId}`
+    const [t] = await sql`
+      insert into turns (conversation_id, user_id, idempotency_key, status)
+      values (${conversationId}, ${conv!.user_id}, 'seed-2', 'done') returning id`
+    return t!.id as string
+  }
+
+  it('rejects a second gate row for the same turn, round and gate', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seedTurn(sql)
+      const write = () => recordGateResults(sql, {
+        conversationId, turnId, proposalId: null, round: 0,
+        results: [{ gate: 'provenance', passed: false, detail: 'x', sourceIds: [] }],
+      })
+      await write()
+      await expect(write()).rejects.toThrow(/unique|duplicate/i)
+    })
+  })
+
+  // The one that proves the key is TURN-scoped, not conversation-scoped. round
+  // resets to 0 on every turn, so a conversation-scoped key would reject this
+  // turn's legitimate round 0 as a collision with the first turn's round 0.
+  it('allows round 0 again in a different turn of the same conversation', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId: t1 } = await seedTurn(sql)
+      const t2 = await seedAnotherTurn(sql, conversationId)
+      const row = { gate: 'provenance' as const, passed: true as const, detail: null, sourceIds: [] }
+      await recordGateResults(sql, {
+        conversationId, turnId: t1, proposalId: null, round: 0, results: [row],
+      })
+      await expect(
+        recordGateResults(sql, {
+          conversationId, turnId: t2, proposalId: null, round: 0, results: [row],
+        }),
+      ).resolves.not.toThrow()
+    })
+  })
+
+  it('allows a second round in the same turn', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seedTurn(sql)
+      const row = { gate: 'provenance' as const, passed: true as const, detail: null, sourceIds: [] }
+      await recordGateResults(sql, {
+        conversationId, turnId, proposalId: null, round: 0, results: [row],
+      })
+      await expect(
+        recordGateResults(sql, {
+          conversationId, turnId, proposalId: null, round: 1, results: [row],
+        }),
+      ).resolves.not.toThrow()
     })
   })
 })
