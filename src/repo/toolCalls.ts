@@ -59,6 +59,41 @@ export async function beginToolCall(
  * row stuck forever and every later replay silently reporting `ambiguous`
  * with no explanation in the system.
  */
+/**
+ * How many `propose_itinerary` calls this turn has already made, EXCLUDING
+ * the one in progress right now — same one-query pattern as
+ * `countSupplierCalls` (src/tools/supplierBudget.ts).
+ *
+ * "In progress right now" needs the exclusion because `loop()` calls
+ * `beginToolCall` (above) BEFORE the tool runs, so by the time
+ * `propose_itinerary`'s handler executes, its own 'pending' row already
+ * exists in `tool_calls` — count it and every proposal would be off by one,
+ * counting itself as a prior round.
+ *
+ * Used to derive `gate_results.round`: `driver.md` instructs the model to
+ * "fix exactly what it names and propose again" on rejection, and `maxSteps`
+ * is 24 — a re-proposal in the same turn is not an edge case, so a hardcoded
+ * `round: 0` on every call wrote duplicate seven-row sets with no unique
+ * constraint, double-counting any `group by gate` fire-rate query. The unique
+ * constraint itself is left to a later plan (docs/backlog-plan.md Tier 1) —
+ * this only makes `round` honest.
+ *
+ * Throws rather than returning 0 when the read fails, for the same reason
+ * `countSupplierCalls` does: a `?? 0` here would relabel every re-proposal
+ * back to round 0 exactly when the database is unhealthy, which is silent
+ * data corruption in the eval corpus, not a missing count.
+ */
+export async function countPriorProposals(
+  sql: postgres.Sql, turnId: string, callId: string,
+): Promise<number> {
+  const rows = await sql<{ n: number }[]>`
+    select count(*)::int as n from tool_calls
+     where turn_id = ${turnId} and name = 'propose_itinerary' and call_id != ${callId}`
+  const row = rows[0]
+  if (!row) throw new Error('countPriorProposals: count returned no row; refusing to assume zero')
+  return row.n
+}
+
 export async function finishToolCall(
   sql: postgres.Sql,
   turnId: string,

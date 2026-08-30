@@ -5,43 +5,84 @@ import { recordSpend, readSpendFailClosed } from '../src/repo/spend.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 
+const ZERO = {
+  input_tokens: 0, cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0, output_tokens: 0,
+}
+
 describe('costMicros', () => {
   it('prices Opus 5 input and output', () => {
     // $5/MTok in, $25/MTok out => 5 and 25 micros per 1k tokens
-    const c = costMicros('claude-opus-5', {
-      input_tokens: 1_000_000, cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0, output_tokens: 0,
-    })
-    expect(c).toBe(5_000_000n)          // $5.00
+    expect(costMicros('claude-opus-5', { ...ZERO, input_tokens: 1_000_000 }, '5m'))
+      .toBe(5_000_000n)                  // $5.00
   })
 
-  it('prices cache writes and reads DIFFERENTLY — one column could not', () => {
-    const write = costMicros('claude-opus-5', {
-      input_tokens: 0, cache_creation_input_tokens: 1_000_000,
-      cache_read_input_tokens: 0, output_tokens: 0,
-    })
-    const read = costMicros('claude-opus-5', {
-      input_tokens: 0, cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 1_000_000, output_tokens: 0,
-    })
-    expect(write).toBe(6_250_000n)      // 1.25x
-    expect(read).toBe(500_000n)         // 0.1x
-    expect(Number(write) / Number(read)).toBe(12.5)
+  it('bills a 5-minute cache write at exactly 1.25x base input', () => {
+    expect(costMicros('claude-opus-5',
+      { ...ZERO, cache_creation_input_tokens: 1_000_000 }, '5m')).toBe(6_250_000n)
+  })
+
+  it('rounds a genuinely fractional pre-round value UP, not down or to nearest', () => {
+    // 3 tokens * 5 micros/token * 1.25 = 18.75 micros exactly — verified in
+    // `node -e` before pinning this. Every other fixture in this file happens
+    // to land on a whole number, so Math.ceil, Math.round and Math.floor would
+    // all agree with them; only this one actually exercises the round-UP rule
+    // the doc comment promises. Math.floor here would yield 18n, Math.round
+    // would yield 19n too (coincidentally, since .75 rounds up) — so this
+    // value was chosen specifically to also catch a flip to Math.floor.
+    expect(costMicros('claude-opus-5',
+      { ...ZERO, cache_creation_input_tokens: 3 }, '5m')).toBe(19n)
+  })
+
+  it('bills a 1-hour cache write at exactly 2x base input', () => {
+    // The rate Task 6's `ttl: '1h'` actually incurs. Pinned as a figure, not as
+    // a ratio: a multiplier that drifts to 1.25 must fail here, loudly.
+    expect(costMicros('claude-opus-5',
+      { ...ZERO, cache_creation_input_tokens: 1_000_000 }, '1h')).toBe(10_000_000n)
+  })
+
+  it('prices the 1h write STRICTLY higher than the 5m write for identical usage', () => {
+    const u = { ...ZERO, cache_creation_input_tokens: 40_000 }
+    const short = costMicros('claude-opus-5', u, '5m')
+    const long = costMicros('claude-opus-5', u, '1h')
+    // The direction is the guardrail. An implementation that ignored the TTL
+    // would make these equal and pass every equality test written above in
+    // isolation.
+    expect(long).toBeGreaterThan(short)
+    expect(short).toBe(250_000n)
+    expect(long).toBe(400_000n)
+  })
+
+  it('bills a cache read at exactly 0.1x base input, whatever the write TTL', () => {
+    const u = { ...ZERO, cache_read_input_tokens: 1_000_000 }
+    expect(costMicros('claude-opus-5', u, '5m')).toBe(500_000n)
+    // A read is a read: the TTL prices the WRITE, and conflating them would
+    // make a 1h prefix look 20x more expensive to re-read than it is.
+    expect(costMicros('claude-opus-5', u, '1h')).toBe(500_000n)
+  })
+
+  it('prices a Haiku cache write on the same two multipliers', () => {
+    const u = { ...ZERO, cache_creation_input_tokens: 1_000_000 }
+    expect(costMicros('claude-haiku-4-5-20251001', u, '5m')).toBe(1_250_000n)
+    expect(costMicros('claude-haiku-4-5-20251001', u, '1h')).toBe(2_000_000n)
   })
 
   it('does not round a cheap Haiku call to zero', () => {
-    const c = costMicros('claude-haiku-4-5-20251001', {
-      input_tokens: 500, cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0, output_tokens: 20,
-    })
-    expect(c).toBeGreaterThan(0n)       // in cents this would have been 0
+    expect(costMicros('claude-haiku-4-5-20251001',
+      { ...ZERO, input_tokens: 500, output_tokens: 20 }, '5m')).toBeGreaterThan(0n)
   })
 
   it('throws on an unpriced model rather than charging zero', () => {
-    expect(() => costMicros('some-future-model', {
-      input_tokens: 1, cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0, output_tokens: 1,
-    })).toThrow()
+    expect(() => costMicros('some-future-model',
+      { ...ZERO, input_tokens: 1, output_tokens: 1 }, '5m')).toThrow(/Refusing to charge zero/)
+  })
+
+  it('refuses to guess the TTL rather than defaulting to the cheaper rate', () => {
+    const call = () =>
+      // @ts-expect-error the third argument is required on purpose: a defaulted
+      // TTL is exactly how a 1h write silently bills at the 5m rate.
+      costMicros('claude-opus-5', { ...ZERO, cache_creation_input_tokens: 1_000 })
+    expect(call).toThrow(/cache write TTL/)
   })
 })
 

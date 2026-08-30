@@ -63,13 +63,32 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
   }
 }
 
+/**
+ * `state as never` at every `.json(...)` call site in this file, including
+ * `completeTurn`'s, which already carried it.
+ *
+ * `turns.state` is `jsonb` and stores every shape a `TurnState` can take. What
+ * rejects it is postgres.js's `JSONValue`, a structural type with no room for
+ * `unknown` — and `ToolUseBlock.input` (src/engine.ts) is deliberately
+ * `unknown`, because a tool call's arguments are the model's to shape, not ours
+ * to enumerate.
+ *
+ * WHAT THE CAST REQUIRES OF CALLERS, stated because it is a real obligation and
+ * not a formality: `ToolUseBlock.input` must hold only JSON-derived values.
+ * `sql.json` throws on a `bigint`, a `Date`, a `Map` or a cycle — and at
+ * `saveTurnState` it throws AFTER `finishToolCall` and `recordSpend` have
+ * already committed, so the tool call is recorded and paid for while the
+ * transcript that mentions it is not. Today's only writer is a provider
+ * response parsed from JSON, which cannot contain any of those; anything that
+ * constructs `input` by hand must keep it that way.
+ */
 export async function saveTurnState(
   sql: postgres.Sql,
   claim: Claim,
   state: TurnState,
 ): Promise<void> {
   const rows = await sql`
-    update turns set state = ${sql.json(state)}, heartbeat_at = now()
+    update turns set state = ${sql.json(state as never)}, heartbeat_at = now()
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
@@ -102,7 +121,7 @@ export async function releaseForContinuation(
 ): Promise<void> {
   const rows = await sql`
     update turns
-       set state = ${sql.json(state)}, status = 'queued', queued_at = now()
+       set state = ${sql.json(state as never)}, status = 'queued', queued_at = now()
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
@@ -178,6 +197,15 @@ export async function failTurn(
   claim: Claim,
   reason: FailReason,
   spendMicros: bigint,
+  /**
+   * Optional agent message, written INSIDE the same fenced transaction as the
+   * status update rather than by the caller beforehand. A refusal must leave her
+   * with words she can act on (spec section 8), and a message written outside
+   * this transaction could land on a turn we no longer own — the exact write the
+   * fencing token exists to reject. Defaults to null, so a crash-path failure
+   * still says nothing rather than inventing an explanation.
+   */
+  agentMessage: string | null = null,
 ): Promise<void> {
   const conversationStatus = reason === 'limit_reached' ? 'limit_reached' : 'failed'
   await sql.begin(async (tx) => {
@@ -188,6 +216,11 @@ export async function failTurn(
        where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
       returning id`
     if (rows.length === 0) throw new FencedError(claim.turnId)
+    if (agentMessage !== null) {
+      await tx`insert into messages (conversation_id, user_id, turn_id, role, content)
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       'agent', ${agentMessage})`
+    }
     await tx`update conversations set status = ${conversationStatus}, updated_at = now()
               where id = ${claim.conversationId} and user_id = ${claim.userId}`
   })

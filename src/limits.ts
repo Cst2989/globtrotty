@@ -13,4 +13,5 @@ export const DEFAULT_LIMITS: Limits = {
   dailyCeilingMicros: 15_000_000n,         // $15
   globalCeilingMicros: 50_000_000n,        // $50, across ALL users in one UTC day
   maxSteps: 24,
+  maxSupplierCallsPerTurn: 12,             // enough for a realistic date/airport sweep, far below a runaway
 }

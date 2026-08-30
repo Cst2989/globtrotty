@@ -1,5 +1,8 @@
 import type postgres from 'postgres'
-import { decideNext, type Limits, type TurnState, type LoopMessage } from './engine.js'
+import {
+  decideNext,
+  type Limits, type TurnState, type LoopMessage, type ContentBlock, type FailReason,
+} from './engine.js'
 import {
   claimTurn, saveTurnState, completeTurn, failTurn, heartbeat, releaseForContinuation,
   FencedError, type Claim,
@@ -8,11 +11,91 @@ import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 
-export type AgentContext = { state: TurnState; conversationId: string; userId: string }
+export type AgentContext = {
+  state: TurnState
+  conversationId: string
+  userId: string
+  /**
+   * The turn this step belongs to. Everything durable an agent does — the
+   * per-turn supplier budget, the model_calls ledger, gate_results, tool_results
+   * — is scoped to a turn, and an agent that cannot name its turn can write none
+   * of it.
+   */
+  turnId: string
+}
 
 export type AgentStep =
-  | { kind: 'message'; text: string; costMicros: bigint }
-  | { kind: 'tool'; callId: string; name: string; run: () => Promise<unknown>; costMicros: bigint }
+  | {
+      kind: 'message'; text: string; costMicros: bigint
+      /**
+       * Spend the AGENT has already debited (src/repo/reservation.ts, Task 4).
+       *
+       * `loop()` adds this to the turn total so `turns.spend_usd_micros` reports
+       * what the turn really cost — but it does NOT pass it to `recordSpend`,
+       * which would apply the identical `conversations.spend_usd_micros`
+       * increment and `daily_usage` UTC upsert a SECOND time. Spec section 8
+       * requires the agent to reserve before dispatch, so the agent owns that
+       * ledger; the worker's job is to believe it.
+       *
+       * `costMicros` keeps its original meaning: spend nobody has debited yet,
+       * which the worker debits on the agent's behalf.
+       *
+       * THE RULE IS ABOUT MICROS, NOT ABOUT FIELDS: the same micros must never
+       * be named in both. Setting both fields is legitimate and expected — a
+       * `tool` step whose model call was self-debited and whose supplier call
+       * the worker still owes are two different sets of micros on one step.
+       * `loop()` charges each field through its own door exactly once, so both
+       * being present is safe; naming one amount twice is not, because
+       * `recordSpend` would apply it to `conversations.spend_usd_micros` and
+       * `daily_usage` on top of the debit the agent already made.
+       */
+      recordedMicros?: bigint
+    }
+  /**
+   * Ends the turn in a NAMED failure, with words she can act on. Spec section 8:
+   * a refused driver call "fails the turn with words she can act on and does not
+   * consume quota" — parking would record status 'done' with fail_reason null,
+   * which makes a refusal indistinguishable from a normal question and leaves
+   * `refused` (src/engine.ts) with no writer anywhere in the codebase.
+   *
+   * No `costMicros`: by construction the only agent that fails a turn is one
+   * that already made (and debited) the call that failed, so what it spent
+   * belongs in `recordedMicros`.
+   */
+  | {
+      kind: 'fail'; reason: FailReason; message: string
+      /** Already debited by the agent — see the `message` variant above. */
+      recordedMicros?: bigint
+    }
+  /**
+   * Terminal for the turn, but not a failure: she has been asked something and
+   * the conversation is waiting on her. Spec section 4 makes it a terminal turn
+   * status (`done`) with the conversation `awaiting_user`, precisely so the
+   * sweeper cannot resurrect it and re-bill a model call for a conversation that
+   * is simply idle.
+   *
+   * Carries `message`, not `text`, so it cannot be routed through the message
+   * branch by accident: a question and an answer are not the same event, even
+   * though both end the turn.
+   */
+  | { kind: 'park'; message: string; costMicros: bigint; recordedMicros?: bigint }
+  | {
+      kind: 'tool'; callId: string; name: string
+      run: () => Promise<unknown>
+      costMicros: bigint
+      /** Already debited by the agent — see the `message` variant above. */
+      recordedMicros?: bigint
+      /**
+       * The assistant turn that ASKED for this tool, verbatim — the `thinking`
+       * and `tool_use` blocks exactly as the provider returned them. `loop()`
+       * appends it ahead of the tool result. Without it the transcript grows a
+       * `tool_result` with no matching `tool_use`, which is a 400 on the next
+       * request; and a re-sent `thinking` block that was not echoed back
+       * byte-for-byte is rejected as well. Optional so `echoAgent` and the demo
+       * agent, which have no assistant turn to echo, are unaffected.
+       */
+      assistantContent?: ContentBlock[]
+    }
 
 export type Agent = (ctx: AgentContext) => Promise<AgentStep>
 
@@ -41,9 +124,10 @@ const EMPTY: TurnState = { step: 0, messages: [], reviewRounds: 0 }
 /** Proves the harness without a model: echoes the last user message back. */
 export const echoAgent: Agent = async ({ state }) => {
   const last = [...state.messages].reverse().find((m) => m.role === 'user')
+  const text = last?.content.find((b) => b.type === 'text')
   return {
     kind: 'message',
-    text: `You said: ${last?.content ?? '(nothing)'}`,
+    text: `You said: ${text?.type === 'text' ? text.text : '(nothing)'}`,
     costMicros: 1_000n,
   }
 }
@@ -80,11 +164,13 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // non-retryable failure cannot be requeued until the sweeper reaps it as a
     // crash loop, however stale its heartbeat gets. Pinned by test/worker.test.ts.
     //
-    // `retryable` is advice for the model client plan 3 brings (honour Retry-After,
-    // back off, give up), and for whoever decides — deliberately — whether a
-    // transient failure should ever be requeued instead of failed. Branching on it
-    // here would be inventing turn-level retry semantics with no client to justify
-    // their shape.
+    // Plan 3 brought the model client and `retryable` still has zero production
+    // consumers: the SDK's own `maxRetries` (default 2) already retries 429s and
+    // 5xx beneath us before an error reaches `classifyError` here. What is left
+    // unbuilt is turn-level retry — whoever decides, deliberately, whether a
+    // transient failure should ever be requeued instead of failed. Branching on
+    // `retryable` here would be inventing that semantics with nothing to justify
+    // its shape.
     //
     // The assignment below is also the compile-time check that every
     // ClassifiedReason (src/errors.ts) is a real FailReason (src/engine.ts) --
@@ -140,7 +226,7 @@ async function loop(
       ...state,
       messages: rows.map((r): LoopMessage => ({
         role: r.role === 'agent' ? 'assistant' : 'user',
-        content: r.content,
+        content: [{ type: 'text', text: r.content }],
       })),
     }
   }
@@ -166,11 +252,12 @@ async function loop(
         await deps.reinvoke(claim.turnId)
         return
       case 'park':
-        // decideNext never returns this today (Task 1 ruling — parking isn't wired
-        // up yet). Handled explicitly, rather than silently falling through to
-        // calling the agent, so a later plan that wires this up must replace this
-        // throw with real behavior instead of finding it already "working" by
-        // accident.
+        // NOT the same gap as the AgentStep 'park' below, which is now
+        // implemented and is the path `ask_user` uses. decideNext returns this
+        // only for a PENDING USER MESSAGE that needs answering mid-turn, which
+        // nothing in this plan wires. Kept as a throw rather than a silent
+        // fall-through so the plan that wires it must replace real behaviour
+        // rather than find it accidentally "working".
         throw new Error(`worker: 'park' decision is not implemented (message: ${decision.message})`)
       case 'call_model':
         break // fall through to invoking the agent below
@@ -184,24 +271,87 @@ async function loop(
 
     const step = await withHeartbeat(
       sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
-      () => deps.agent({ state, conversationId: claim.conversationId, userId: claim.userId }),
+      () => deps.agent({
+        state, conversationId: claim.conversationId,
+        userId: claim.userId, turnId: claim.turnId,
+      }),
     )
 
-    if (step.kind === 'message') {
-      // heartbeat() as a cheap ownership assertion: recordSpend and completeTurn
-      // don't carry the `attempts` fencing token themselves (they take bare ids),
-      // so this fenced single-row update stands in for them — if we've been
-      // superseded it throws FencedError here, before any money is spent.
-      await heartbeat(sql, claim)
-      await recordSpend(sql, {
-        userId: claim.userId, conversationId: claim.conversationId,
-        costMicros: step.costMicros,
-      })
-      turnSpend.total += step.costMicros
-      await completeTurn(sql, claim, {
-        state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
-      })
-      return
+    // Written as an explicit comparison rather than `?? 0n` so the zero is
+    // visibly a confirmed reading — "this agent debited nothing" — and not a
+    // default standing in for a value we failed to obtain. Same rule as
+    // readSpendFailClosed; this file sits outside src/repo/**, where the lint
+    // rule enforces it, so the discipline has to be deliberate here.
+    const alreadyDebited = step.recordedMicros === undefined ? 0n : step.recordedMicros
+
+    // Added BEFORE the switch, not inside each branch. The agent's own debit is
+    // an accomplished fact the moment the step is in our hands: it has already
+    // hit conversations.spend_usd_micros and daily_usage. Adding it later — after
+    // the tool path's heartbeat and beginToolCall, as this first did — means a
+    // database error in either await sends control to runTurn's catch, and the
+    // failTurn there records a turn total missing the agent's spend. No money is
+    // lost that way, but the turn row under-reports what the turn cost, which is
+    // the one number a human reads to find out. Every path below now inherits it
+    // uniformly, including the ones that never reach a happy ending.
+    //
+    // It is added to the turn total and NEVER passed to recordSpend, on any
+    // branch: that is the whole of the no-double-charge invariant, visible here
+    // rather than spread across three branches.
+    turnSpend.total += alreadyDebited
+
+    switch (step.kind) {
+      case 'message': {
+        // heartbeat() as a cheap ownership assertion: recordSpend and completeTurn
+        // don't carry the `attempts` fencing token themselves (they take bare ids),
+        // so this fenced single-row update stands in for them — if we've been
+        // superseded it throws FencedError here, before any money is spent.
+        await heartbeat(sql, claim)
+        await recordSpend(sql, {
+          userId: claim.userId, conversationId: claim.conversationId,
+          costMicros: step.costMicros,
+        })
+        turnSpend.total += step.costMicros
+        await completeTurn(sql, claim, {
+          state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
+        })
+        return
+      }
+      case 'park': {
+        // Same ownership assertion as the message path: recordSpend and
+        // completeTurn take bare ids and carry no fencing token of their own.
+        await heartbeat(sql, claim)
+        await recordSpend(sql, {
+          userId: claim.userId, conversationId: claim.conversationId,
+          costMicros: step.costMicros,
+        })
+        turnSpend.total += step.costMicros
+        // `parked: true` moves the conversation to 'awaiting_user'. fail_reason
+        // stays null: parking is not a failure, and recording it as one would
+        // make "how often does the driver actually fail?" unanswerable.
+        await completeTurn(sql, claim, {
+          state, agentMessage: step.message, parked: true, spendMicros: turnSpend.total,
+        })
+        return
+      }
+      case 'fail': {
+        // No recordSpend: a failing step's cost, if any, is already debited.
+        // The message goes in with failTurn, inside its fenced transaction, so
+        // a failed turn is never a blank thread — spec section 8's "words she
+        // can act on".
+        await heartbeat(sql, claim)
+        await failTurn(sql, claim, step.reason, turnSpend.total, step.message)
+        return
+      }
+      case 'tool':
+        break // fall through to the tool handling below
+      default: {
+        // Exhaustiveness guard for any FUTURE AgentStep variant. Without it a
+        // new kind silently lands in the tool branch and dereferences
+        // step.callId — which is how Task 9's `park` variant would have written
+        // a tool_calls row with a null call_id instead of failing to compile.
+        const unhandled: never = step
+        throw new Error(`worker: unhandled agent step ${JSON.stringify(unhandled)}`)
+      }
     }
 
     // Same ownership assertion ahead of beginToolCall — a superseded worker must
@@ -236,10 +386,26 @@ async function loop(
       turnSpend.total += step.costMicros
     }
 
+    // A tool result that is already a string is appended verbatim. Task 10's
+    // driver returns fenced, trimmed TEXT from run(), and JSON.stringify-ing it
+    // would deliver the model an escaped string literal instead of the fence.
+    const toolResult: ContentBlock = {
+      type: 'tool_result',
+      tool_use_id: step.callId,
+      content: typeof result === 'string' ? result : JSON.stringify(result),
+    }
     state = {
       ...state,
       step: state.step + 1,
-      messages: [...state.messages, { role: 'tool', content: JSON.stringify(result) }],
+      messages: [
+        ...state.messages,
+        // The assistant turn that asked for the tool, when the agent supplied
+        // it. A tool_result with no matching tool_use is a 400.
+        ...(step.assistantContent
+          ? [{ role: 'assistant' as const, content: step.assistantContent }]
+          : []),
+        { role: 'user' as const, content: [toolResult] },
+      ],
     }
     await saveTurnState(sql, claim, state)
   }

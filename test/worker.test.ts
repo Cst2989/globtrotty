@@ -9,6 +9,8 @@ import { RefusalError } from '../src/errors.js'
 import { sweep } from '../src/sweeper.js'
 import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { recordSpend } from '../src/repo/spend.js'
+import type { TurnState } from '../src/engine.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const LIMITS = DEFAULT_LIMITS
@@ -212,6 +214,244 @@ describeDb('runTurn end to end', () => {
       expect(convo!.status).toBe('limit_reached')
     })
   })
+
+  it('hands the agent the id of the turn it is running', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Faro')
+      let seen: string | null = null
+      const spy: Agent = async (ctx) => {
+        seen = ctx.turnId
+        return { kind: 'message', text: 'ok', costMicros: 1_000n }
+      }
+      await runTurn(workerDeps(sql, spy), r.turnId!)
+      // Task 10's driver cannot reach the supplier budget, the model_calls ledger
+      // or runGates without this. Before this task the literal above is a TS2353.
+      expect(seen).toBe(r.turnId)
+    })
+  })
+
+  it('does not charge again for spend the agent has already debited', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hello')
+      const DEBIT = 250_000n
+      // Stands in for Task 10's driver, which reserves and reconciles its own
+      // model call. `recordSpend` performs the IDENTICAL conversations
+      // increment and daily_usage upsert that Task 4's `reserve` does, and it
+      // exists today — so this defect can be pinned here, three tasks before the
+      // driver that would have shipped it.
+      const selfDebiting: Agent = async (ctx) => {
+        await recordSpend(sql, {
+          userId: USER, conversationId: ctx.conversationId, costMicros: DEBIT,
+        })
+        return { kind: 'message', text: 'ok', costMicros: 0n, recordedMicros: DEBIT }
+      }
+      await runTurn(workerDeps(sql, selfDebiting), r.turnId!)
+
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      // ONCE. A worker that also called recordSpend(step.costMicros) here would
+      // read 500_000n, and every driver model call in production would cost twice
+      // what the ledger says it did.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(DEBIT)
+      // ...and the turn still reports what the turn really spent, so the
+      // already-debited micros are not simply dropped.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(DEBIT)
+    })
+  })
+
+  /**
+   * The tool path's half of the same invariant, which the `message` and `fail`
+   * tests above cannot reach. Two things are pinned here that nothing else pins:
+   *
+   *  - a tool step's `recordedMicros` reaches `turns.spend_usd_micros`. Delete
+   *    the `turnSpend.total += alreadyDebited` line and this test reads 6_000n
+   *    instead of 106_000n.
+   *  - BOTH fields on ONE step is legitimate, not a mistake. A driver's model
+   *    call is self-debited (`recordedMicros`) while the supplier call the tool
+   *    then makes is still owed by the worker (`costMicros`) — two different
+   *    sets of micros. The rule is that the same micros must never be named
+   *    twice, which is why the conversation ledger below must show the
+   *    `costMicros` only.
+   */
+  it('reports a tool step\'s already-debited micros without recharging them', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async () => {
+        if (handedOut) {
+          return {
+            kind: 'message' as const, text: 'done',
+            costMicros: 1_000n, recordedMicros: 60_000n,
+          }
+        }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_billed', name: 'explore_flights',
+          run: async () => ({ offers: 1 }),
+          costMicros: 5_000n,          // the supplier call: the worker still owes it
+          recordedMicros: 40_000n,     // the model call: the agent already debited it
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      // Everything the turn cost: 40_000 + 5_000 (tool step) + 60_000 + 1_000.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(106_000n)
+      // ...but only the micros nobody had debited yet went through recordSpend.
+      // 106_000n here would mean every self-debited driver call is billed twice.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(6_000n)
+    })
+  })
+
+  /**
+   * Defect 4. `loop()` appended the tool RESULT to the transcript but never the
+   * assistant turn that ASKED for the tool. A `tool_result` block with no
+   * matching `tool_use` is a 400 from the provider on the very next request, so
+   * a multi-step driver would die on its second step — with a transcript that
+   * looks perfectly reasonable in the database.
+   */
+  it('appends the assistant tool_use turn ahead of the matching tool_result', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async () => {
+        if (handedOut) return { kind: 'message' as const, text: 'done', costMicros: 10n }
+        handedOut = true
+        return {
+          kind: 'tool' as const,
+          callId: 'toolu_pair',
+          name: 'explore_flights',
+          run: async () => '{"offers":1}',
+          costMicros: 10n,
+          assistantContent: [
+            { type: 'thinking' as const, thinking: 'BER to FAO', signature: 'sig-1' },
+            { type: 'tool_use' as const, id: 'toolu_pair', name: 'explore_flights',
+              input: { from: 'BER', to: 'FAO' } },
+          ],
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [row] = await sql<{ state: TurnState }[]>`
+        select state from turns where id = ${r.turnId}`
+      const messages = row!.state.messages
+      const useIdx = messages.findIndex(
+        (m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))
+      const resultIdx = messages.findIndex(
+        (m) => m.role === 'user' && m.content.some((b) => b.type === 'tool_result'))
+      expect(useIdx).toBeGreaterThanOrEqual(0)
+      // ORDER, pinned exactly: the request comes immediately before its answer.
+      expect(resultIdx).toBe(useIdx + 1)
+
+      const use = messages[useIdx]!.content.find((b) => b.type === 'tool_use')
+      const res = messages[resultIdx]!.content.find((b) => b.type === 'tool_result')
+      if (use?.type !== 'tool_use' || res?.type !== 'tool_result') {
+        throw new Error('unreachable')
+      }
+      // ...and the ids PAIR. An unpaired id is the same 400 as a missing turn.
+      expect(use.id).toBe('toolu_pair')
+      expect(res.tool_use_id).toBe('toolu_pair')
+      // The thinking block rides along verbatim, signature included: a thinking
+      // block that is not echoed back byte-for-byte is rejected too.
+      expect(messages[useIdx]!.content[0]).toEqual(
+        { type: 'thinking', thinking: 'BER to FAO', signature: 'sig-1' })
+      // run() returned a string, so it is appended verbatim rather than
+      // JSON.stringify-d into an escaped string literal.
+      expect(res.content).toBe('{"offers":1}')
+    })
+  })
+
+  it('parks the turn when the agent asks her a question', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const asking: Agent = async () => ({
+        kind: 'park', message: 'Which week in September works for you?', costMicros: 500n,
+      })
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select status, fail_reason, spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select status, spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [msg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+
+      // Terminal for the turn, so the sweeper cannot resurrect and re-bill it.
+      // (That the sweeper skips it is already pinned by test/sweeper.test.ts.)
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBeNull()      // parking is not a failure
+      expect(conv!.status).toBe('awaiting_user')
+      // Her question must actually reach the thread — a parked turn that showed
+      // nothing is a conversation that silently stops.
+      expect(msg!.content).toContain('Which week in September')
+      // And the park still bills: an agent that parks after a model call has
+      // spent money, and a park branch that forgot recordSpend would read 0 here.
+      expect(BigInt(turn!.spend_usd_micros)).toBe(500n)
+      expect(BigInt(conv!.spend_usd_micros)).toBe(500n)
+    })
+  })
+
+  it('parking does not re-charge spend the agent already debited', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const DEBIT = 120_000n
+      const asking: Agent = async (ctx) => {
+        await recordSpend(sql, {
+          userId: USER, conversationId: ctx.conversationId, costMicros: DEBIT,
+        })
+        return { kind: 'park', message: 'Which week?', costMicros: 0n, recordedMicros: DEBIT }
+      }
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      // The park branch is a second copy of the message branch's ledger handling,
+      // and a copy is exactly where the double charge comes back.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(DEBIT)
+      expect(BigInt(turn!.spend_usd_micros)).toBe(DEBIT)
+    })
+  })
+
+  it('fails the turn with a named reason and tells her why', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'something the model will refuse')
+      const refusing: Agent = async () => ({
+        kind: 'fail',
+        reason: 'refused',
+        message: 'I can’t help with that request. Tell me what you are trying to book '
+               + 'and I will pick it up from there.',
+      })
+      await runTurn(workerDeps(sql, refusing), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select status, fail_reason from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      const [msg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+
+      // Every assertion here separates a failure from a park. An implementation
+      // that routed 'fail' through completeTurn would read done/null/awaiting_user
+      // and fail all three.
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('refused')
+      expect(conv!.status).toBe('failed')
+      // ...and she is not left with a blank thread. Spec section 8: "fails the turn
+      // with words she can act on".
+      expect(msg!.content).toContain('what you are trying to book')
+    })
+  })
 })
 
 /**
@@ -315,6 +555,48 @@ describeDb('runTurn error classification', () => {
       const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
       expect(turn!.status).toBe('running')
       expect(turn!.fail_reason).toBeNull()
+    })
+  })
+
+  /**
+   * The `fail` AgentStep — spec section 8's refused driver call. A refusal is an
+   * HTTP 200 that never throws, so it cannot reach the crash handler above; and
+   * parking it would write status 'done' with fail_reason null, making a refusal
+   * indistinguishable from a normal question. This step is what finally gives
+   * `refused` (src/engine.ts) a writer on the non-throwing path, and it must end
+   * the turn NAMED *and* leave her words she can act on.
+   */
+  it('records a fail step as a named failure, with words she can act on', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      const refusing: Agent = async () => ({
+        kind: 'fail',
+        reason: 'refused',
+        message: 'I cannot help with that. Try asking about flights or hotels.',
+        recordedMicros: 7_000n,
+      })
+      // Returns normally: a refusal is a recorded outcome, not a crash.
+      await runTurn(workerDeps(sql, refusing), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      const [convo] = await sql<ConversationRow[]>`
+        select * from conversations where id = ${r.conversationId}`
+      const msgs = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} order by created_at`
+
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('refused')
+      expect(convo!.status).toBe('failed')
+      // Not a blank thread: the message is written inside failTurn's own fenced
+      // transaction, so it can never land on a turn we no longer own.
+      expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
+      expect(msgs[1]!.content).toContain('Try asking about flights or hotels')
+      // The micros the agent already debited are reported on the turn...
+      expect(BigInt(turn!.spend_usd_micros)).toBe(7_000n)
+      // ...and are NOT charged to the conversation a second time. This agent
+      // called recordSpend never, so a fail path that did would read 7_000n.
+      expect(BigInt(convo!.spend_usd_micros)).toBe(0n)
     })
   })
 })
