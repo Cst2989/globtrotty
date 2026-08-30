@@ -81,21 +81,34 @@ to run so her conversation is not held shut by a turn nobody can execute.
 "Went silent" is a real condition from this lesson on, because the worker loop
 stamps `heartbeat_at` every twenty-five seconds while a step runs. A turn whose
 worker keeps ticking is left alone however long it runs; a turn whose beat
-stops is requeued ninety seconds later, and the fencing token keeps the dead
-worker's late writes out.
+stops is requeued ninety seconds later. The fencing token keeps a dead
+worker's writes out once it loses its claim, `saveTurnState` and the rest of
+`src/repo/turns.ts` included; it does not, by itself, stop a worker that is
+NOT dead but has merely been superseded from still calling the model for the
+rest of its own budget after the fact. `src/worker.ts`'s abort signal is the
+part that answers that: a heartbeat tick that discovers the fence aborts it,
+and a driver that checks the signal between its own model and tool calls
+stops billing before the fence is even a full tick old.
+
+The attempt count is the sharper half of that same story, and it is history
+now rather than an open cost: before this lesson, a requeue advanced
+`attempts`, and the worker re-invoked for the reissued turn advanced it again
+when it claimed, so a live long turn with no ticking heartbeat spent two of
+its five attempts per ninety-second tick rather than one, and could reach
+`crash_loop` in about half the wall clock it otherwise would, thread and all,
+while workers were still running it. Both costs closed when this lesson's
+worker loop started ticking a heartbeat: a live turn's own beats now keep it
+out of the sweeper's stale check entirely, so neither the requeue nor its
+attempt cost is paid by a turn that is simply still running.
 
 `npm run demo` narrates the harness against a real database with no model and no
 API key: a message becomes durable work, a retried press buys no second turn, a
 process dies mid tool call and the resumed turn does not run the tool again, a
-superseded worker is refused, and the ledger shows what it all cost.
-
-The attempt count is the sharper half of that. The requeue advances `attempts`,
-and the worker re-invoked for the reissued turn advances it again when it
-claims, so a live long turn spends two of its five attempts per ninety-second
-tick rather than one, and reaches `crash_loop` in about half the wall clock it
-otherwise would. At that point tier 4 writes the failure sentence into her
-thread and sets her conversation `failed` while workers are still running the
-turn. Both costs end when the worker loop starts ticking a heartbeat.
+superseded worker is refused, and the ledger shows what it all cost. It runs
+under its own user id, distinct from `npm run trip`'s, so the two can share one
+database without one script's cleanup deleting the other's rows; the one thing
+it does NOT scope is `sweep()` itself, which is global by design and, on a
+shared database, requeues or fails every other user's stale turns too.
 
 ## What is next
 

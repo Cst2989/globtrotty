@@ -6,16 +6,22 @@
  *
  *   npm run demo
  *
- * Everything this script CREATES is scoped to the one demo user and deleted at
- * both ends of the run. The one thing that is not scoped is the sweeper, which
- * is global by design: point this at a scratch database, not a shared one.
+ * Everything this script CREATES is scoped to DEMO_SCRIPT_USER (src/her.ts),
+ * its own id, distinct from `npm run trip`'s DEMO_USER: the two scripts share
+ * a database and trip is the one script that spends real dollars on a live
+ * model, so a shared id would let this script's cleanup() delete a
+ * conversation trip just paid for. The one thing that is NOT scoped is the
+ * sweeper, which is global by design and genuinely destructive on a shared
+ * database: it requeues or fails every OTHER user's stale turn too, not only
+ * this script's own. Point this at a scratch database rather than a shared
+ * one if that matters to you.
  */
 import 'dotenv/config'
 import { config } from 'dotenv'
 import { connect } from '../src/db.js'
 import type { TurnState } from '../src/engine.js'
 import { submitMessage } from '../src/handler.js'
-import { DEMO_USER } from '../src/her.js'
+import { DEMO_SCRIPT_USER } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
@@ -72,11 +78,11 @@ async function turnRow(id: string) {
 }
 
 async function cleanup() {
-  await sql`delete from course.model_calls where user_id = ${DEMO_USER}`
-  await sql`delete from course.messages where user_id = ${DEMO_USER}`
-  await sql`delete from course.turns where user_id = ${DEMO_USER}`
-  await sql`delete from course.conversations where user_id = ${DEMO_USER}`
-  await sql`delete from course.daily_usage where user_id = ${DEMO_USER}`
+  await sql`delete from course.model_calls where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.messages where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.turns where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.conversations where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.daily_usage where user_id = ${DEMO_SCRIPT_USER}`
 }
 
 async function main() {
@@ -87,7 +93,7 @@ async function main() {
   head('A message becomes durable work',
        'the turn is committed before anything is scheduled, so a crash here loses nothing')
   const first = await submitMessage(deps, {
-    userId: DEMO_USER, conversationId: null, message: 'A cheap week in Faro in September?',
+    userId: DEMO_SCRIPT_USER, conversationId: null, message: 'A cheap week in Faro in September?',
     idempotencyKey: 'demo-1',
   })
   const conversationId = first.conversationId
@@ -98,7 +104,7 @@ async function main() {
 
   head('The same press again', 'a retried POST must not buy a second turn')
   const dupe = await submitMessage(deps, {
-    userId: DEMO_USER, conversationId, message: 'A cheap week in Faro in September?',
+    userId: DEMO_SCRIPT_USER, conversationId, message: 'A cheap week in Faro in September?',
     idempotencyKey: 'demo-1',
   })
   ok(`status ${dupe.status}, turn ${dupe.turnId?.slice(0, 8)}` +
@@ -128,7 +134,8 @@ async function main() {
   await sql`update course.turns set heartbeat_at = now() - interval '5 minutes' where id = ${turnId}`
   step('the sweeper runs, which on Netlify is the scheduled function...')
   note('sweep() is deliberately global: it is the floor walk, not a per-user query.')
-  note('On a shared database it will also requeue other people\'s stale turns.')
+  note('On a shared database this is destructive to OTHER people\'s work: it')
+  note('requeues or fails their stale turns too, the same as it does here.')
   const swept = await sweep(sql)
   ok(`requeued ${swept.requeued.length}, reaped ${swept.reaped.length}, stalled ${swept.stalled.length}, backlog ${swept.backlog}`)
 
@@ -147,7 +154,7 @@ async function main() {
 
   head('Two workers, one turn', 'the loser must not be able to write, though it believes it owns the turn')
   const second = await submitMessage(deps, {
-    userId: DEMO_USER, conversationId, message: 'And a hotel?', idempotencyKey: 'demo-2',
+    userId: DEMO_SCRIPT_USER, conversationId, message: 'And a hotel?', idempotencyKey: 'demo-2',
   })
   const t2 = second.turnId!
   const workerA = (await claimTurn(sql, t2))!
@@ -168,7 +175,7 @@ async function main() {
   head('The spend ledger', 'every step is metered before the next one is allowed')
   const [conv] = await sql`select spend_usd_micros from course.conversations where id = ${conversationId}`
   const [day] = await sql`select cost_micros from course.daily_usage
-                           where user_id = ${DEMO_USER} and day = (now() at time zone 'utc')::date`
+                           where user_id = ${DEMO_SCRIPT_USER} and day = (now() at time zone 'utc')::date`
   const usd = (micros: string) => `$${(Number(micros) / 1_000_000).toFixed(6)}`
   ok(`conversation spend ${usd(conv!.spend_usd_micros as string)} (ceiling ${usd(DEFAULT_LIMITS.conversationCeilingMicros.toString())})`)
   ok(`today's spend      ${usd((day?.cost_micros as string) ?? '0')} (ceiling ${usd(DEFAULT_LIMITS.dailyCeilingMicros.toString())})`)

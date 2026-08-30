@@ -77,4 +77,45 @@ describe('withRetry', () => {
     expect(await withRetry(work, { sleep, random: () => 0 })).toBe('ok')
     expect(work).toHaveBeenCalledTimes(2)
   })
+
+  // A provider's own Retry-After can ask for longer than the caller has left.
+  // Honouring it verbatim would sleep past the moment a time-boxed invocation
+  // (tier 3's fourteen minutes) gets killed anyway, stranding the turn
+  // `running` with a heartbeat seconds old. Giving up here instead lets the
+  // caller take its own "not now" path (worker.ts's continue_later) rather
+  // than gambling the rest of the budget on one sleep.
+  it('gives up rather than sleep past what remains of the caller budget', async () => {
+    const headers = new Headers({ 'retry-after': '900' })      // fifteen minutes
+    const work = vi.fn().mockRejectedValue(apiError(429, headers))
+    const { sleep, waits } = recorder()
+    await expect(withRetry(work, {
+      sleep, random: () => 0, remainingMs: () => 120_000,      // two minutes left
+    })).rejects.toThrow()
+    expect(work).toHaveBeenCalledTimes(1)                      // no second attempt
+    expect(waits).toEqual([])                                  // and no sleep at all
+  })
+
+  // The exponential backoff is capped the same way, not only a server-supplied
+  // Retry-After: a fourth attempt's own 4-second wait is still a real number
+  // that can outlast a budget almost spent.
+  it('caps the exponential backoff by the same budget, not only Retry-After', async () => {
+    const work = vi.fn().mockRejectedValue(apiError(503))
+    const { sleep, waits } = recorder()
+    await expect(withRetry(work, {
+      sleep, random: () => 0, maxAttempts: 4, remainingMs: () => 500,
+    })).rejects.toThrow()
+    expect(work).toHaveBeenCalledTimes(1)                      // the 1s base already exceeds 500ms
+    expect(waits).toEqual([])
+  })
+
+  // A budget that comfortably covers the wait is not a reason to give up: the
+  // cap only ever REFUSES a wait, it never shortens one that already fits.
+  it('still retries normally when the budget comfortably covers the wait', async () => {
+    const work = vi.fn().mockRejectedValueOnce(apiError(429)).mockResolvedValue('ok')
+    const { sleep, waits } = recorder()
+    expect(await withRetry(work, {
+      sleep, random: () => 0, remainingMs: () => 600_000,
+    })).toBe('ok')
+    expect(waits).toEqual([1_000])
+  })
 })

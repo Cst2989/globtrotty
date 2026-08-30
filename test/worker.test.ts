@@ -78,6 +78,30 @@ describeDb('runTurn', () => {
     })
   })
 
+  // The deterministic failure a review caught: a stray later press on the
+  // SAME conversation, stamped turn_id = null by src/handler.ts's `busy`
+  // path, must never be read as part of THIS turn's transcript. An earlier
+  // draft of the worker loop scanned the whole conversation and would have
+  // answered "and I forgot the crib" against a turn opened for "a week in
+  // Portugal"; loadTurnInput's turn-scoped join is what this test pins.
+  it('answers the turn she is owed, not a later press on the same conversation', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal', 'w3b')
+      // She types again while this turn is still queued: exactly src/handler.ts's
+      // `busy` path, a real row on the SAME conversation with no turn of its own.
+      await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+                values (${r.conversationId}, ${USER}, null, 'user', 'and I forgot the crib')`
+      const agent: Agent = async ({ state }) => {
+        const last = [...state.messages].reverse().find((m) => m.role === 'user')
+        return { kind: 'message', text: `answering: ${last?.content}`, costMicros: 10n }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+      const msgs = await sql`select content from course.messages
+                              where conversation_id = ${r.conversationId} order by seq`
+      expect(msgs[msgs.length - 1]!.content).toBe('answering: a week in Portugal')
+    })
+  })
+
   it('does not repeat a completed tool call on resume', async () => {
     await withTestDb(async (sql) => {
       const sideEffect = vi.fn().mockResolvedValue({ ok: true })
@@ -117,7 +141,11 @@ describeDb('runTurn', () => {
       expect(sideEffect).not.toHaveBeenCalled()
       const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('failed')
-      expect(t!.fail_reason).toBe('fenced')
+      // Not 'fenced': fenced means another worker holds the claim and is
+      // alive to finish the turn, which needs nobody's attention.
+      // 'ambiguous_tool_call' is the one outcome that genuinely needs a
+      // person (src/repo/toolCalls.ts, src/sweeper.ts's runbook).
+      expect(t!.fail_reason).toBe('ambiguous_tool_call')
     })
   })
 
@@ -144,6 +172,98 @@ describeDb('runTurn', () => {
       expect(beatsDuringStep).toBeGreaterThan(0)
     })
   })
+
+  // The global rule this whole file leans on: a heartbeat timer must never
+  // outlive the step it covers. The success path above proves the count is
+  // non-zero DURING a step; this proves ticking actually STOPS once the step
+  // is over, on both the ordinary exit and the throwing one. Real timers, not
+  // fake ones: `vi.useFakeTimers()` was tried here first, as the review
+  // suggested, but this suite's heartbeat tick makes a REAL Postgres call
+  // on every fire, and advancing a fake clock does not wait for that real
+  // network round trip to land; the whole scenario either read a stale
+  // "0 beats" or hung to the test timeout waiting on a query the fake clock
+  // had already raced past. Real, short delays are what the rest of this
+  // file already uses for the same reason (see the test just above).
+  it('stops ticking once the step settles, on success', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w6b')
+      const beats = { count: 0 }
+      const agent: Agent = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        return { kind: 'message', text: 'ok', costMicros: 10n }
+      }
+      const deps = workerDeps(sql, agent)
+      deps.heartbeatIntervalMs = 15
+      deps.onHeartbeat = () => { beats.count += 1 }
+      await runTurn(deps, r.turnId!)
+      const beatsAtDone = beats.count
+      expect(beatsAtDone).toBeGreaterThan(0)
+      // Ten more interval periods' worth of real time: if clearInterval had
+      // not run in withHeartbeat's `finally`, this would tick several more
+      // times against a turn the run has already finished with.
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      expect(beats.count).toBe(beatsAtDone)
+    })
+  })
+
+  it('stops ticking once the step settles, by throwing', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w6c')
+      const beats = { count: 0 }
+      const boom = new Error('agent exploded')
+      const agent: Agent = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        throw boom
+      }
+      const deps = workerDeps(sql, agent)
+      deps.heartbeatIntervalMs = 15
+      deps.onHeartbeat = () => { beats.count += 1 }
+      await expect(runTurn(deps, r.turnId!)).rejects.toThrow('agent exploded')
+      const beatsAtThrow = beats.count
+      expect(beatsAtThrow).toBeGreaterThan(0)
+      // Not "more ticks would be harmless": a timer still running after its
+      // step has already failed the turn would keep calling heartbeat()
+      // against a row this run no longer has any business touching.
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      expect(beats.count).toBe(beatsAtThrow)
+    })
+  })
+
+  // The subtlest code in the module: a tick's own heartbeat() discovering
+  // FencedError does not stop the step in flight (nothing here can cancel a
+  // call already running), it aborts the signal and defers the throw until
+  // `work()` itself settles. Proved with a real second claim, not a stub, so
+  // this exercises withHeartbeat's own deferred re-throw rather than an
+  // agent that throws FencedError directly (which never touches a tick at
+  // all, and is already covered by 'never classifies a FencedError' below).
+  it('re-throws a fence a tick discovers mid-step, leaving the turn to its new owner', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w6d')
+      const agent: Agent = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        return { kind: 'message', text: 'too late', costMicros: 10n }
+      }
+      const deps = workerDeps(sql, agent)
+      deps.heartbeatIntervalMs = 20
+      const run = runTurn(deps, r.turnId!)
+      // Let the claim's own first heartbeat tick or two pass uneventfully.
+      await new Promise((resolve) => setTimeout(resolve, 45))
+      // Steal the turn exactly as test/lease.test.ts does: back-date the
+      // heartbeat this worker itself refreshed, then claim it for real.
+      await sql`update course.turns set heartbeat_at = now() - interval '5 minutes' where id = ${r.turnId}`
+      const stolen = await claimTurn(sql, r.turnId!)
+      expect(stolen).not.toBeNull()
+      // The next tick's heartbeat() no longer matches this worker's
+      // attempts and throws FencedError for real; withHeartbeat captures it
+      // as the abort signal's reason and re-throws it once the agent's own
+      // delay resolves.
+      await run                                            // must resolve quietly
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
+      expect(t!.status).toBe('running')                    // the new owner's claim, untouched
+      expect(t!.fail_reason).toBeNull()
+    })
+  })
+
 
   // The deadline path. Handing back the lease is not the same as saving state:
   // saveTurnState leaves the row running with a fresh heartbeat, which the

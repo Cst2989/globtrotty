@@ -1,13 +1,13 @@
 import type postgres from 'postgres'
-import { decideNext, type FailReason, type Limits, type LoopMessage, type TurnState } from './engine.js'
+import { decideNext, type FailReason, type Limits, type TurnState } from './engine.js'
 import { classifyError } from './errors.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import {
-  claimTurn, completeTurn, failTurn, heartbeat, releaseForContinuation, saveTurnState,
-  FencedError, MAX_ATTEMPTS, type Claim,
+  claimTurn, completeTurn, failTurn, heartbeat, loadTurnInput, releaseForContinuation, saveTurnState,
+  FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim,
 } from './repo/turns.js'
 import { withRetry } from './retry.js'
 
@@ -25,17 +25,45 @@ export type AgentContext = {
    * closer directly and step around the loop that owns those calls.
    */
   attempts: number
+  /**
+   * Aborted the instant a heartbeat tick discovers this worker has been
+   * superseded (`withHeartbeat`, below). A driver that makes more than one
+   * model or tool call inside a single step (tier 3's `turn()` is exactly
+   * this: classify, extract, and every step of its own tool loop) has no
+   * other way to learn mid-flight that the row underneath it now belongs to
+   * someone else, and without this a fenced worker keeps calling the model
+   * and keeps billing `conversations.spend_usd_micros` for up to the rest of
+   * its budget after another worker has already taken over the same turn.
+   * Checking it is opt-in: a driver wraps whatever it hands to the model
+   * client and to its own tool runner so each call refuses to record once
+   * aborted, the same way `beginToolCall` already refuses to write once the
+   * claim's attempts no longer match. A driver that never checks it is no
+   * worse off than before this field existed; `withHeartbeat` still re-throws
+   * the fence once the step itself settles, as it always has.
+   */
+  signal: AbortSignal
 }
 
 /**
- * One move. The harness knows these three and nothing about what produced them,
- * which is why the whole of module 3 can be proved without a model: a fake agent
- * and a real agent are the same shape.
+ * One move. The harness knows these four and nothing about what produced them,
+ * which is why the whole of module 3 can be proved without a model: a fake
+ * agent and a real agent are the same shape.
  */
 export type AgentStep =
   | { kind: 'message'; text: string; costMicros: bigint }
-  | { kind: 'tool'; callId: string; name: string; run: () => Promise<unknown>; costMicros: bigint }
+  | { kind: 'tool'; callId: string; name: string; run: (signal: AbortSignal) => Promise<unknown>; costMicros: bigint }
   | { kind: 'fail'; reason: FailReason; text: string | null; costMicros: bigint }
+  /**
+   * The driver's OWN budget ran out mid-step, not the harness's. Tier 3's
+   * `turn()` carries its own deadline-aware loop (src/loop.ts) independent of
+   * `decideNext`'s check at the top of this file's own loop, and a step that
+   * starts with plenty of room can still cross that inner deadline before it
+   * returns. Neither a fail reason (nothing went wrong) nor a message (there
+   * is nothing to say yet): the work so far is simply unfinished, and the
+   * turn must be handed back and re-invoked exactly the way `decideNext`'s own
+   * `continue_later` is, not recorded as `done` with an empty reply.
+   */
+  | { kind: 'continue_later' }
 
 export type Agent = (ctx: AgentContext) => Promise<AgentStep>
 
@@ -56,9 +84,6 @@ export type WorkerDeps = {
 }
 
 const EST_STEP_MS = 60_000
-// Well under HEARTBEAT_STALE (90s), so a real step keeps refreshing heartbeat_at
-// several times before the sweeper's window could close on it.
-const HEARTBEAT_INTERVAL_MS = 25_000
 // A factory, not a shared constant. A module-level `EMPTY` spread into
 // `{ ...EMPTY }` copies the object and keeps the SAME messages array, so every
 // fresh turn in the process would share one transcript. Nothing mutates it
@@ -100,59 +125,107 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // is a real FailReason (src/engine.ts); errors.ts deliberately does not
     // import the engine, so this call site is where the two are pinned together.
     const { reason } = classifyError(err)
-    await failTurn(sql, claim, reason, turnSpend.total).catch(() => {})
+    // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
+    // itself ("conversation not found") or any other database error here is
+    // exactly the evidence that a turn left `running` by a failed write needs.
+    // Swallowing it silently would make that turn indistinguishable from an
+    // ordinary crashed worker until the sweeper's staleness window closes.
+    await failTurn(sql, claim, reason, turnSpend.total).catch((e: unknown) => {
+      console.error(`failTurn for turn ${claim.turnId} failed`, e)
+    })
     throw err
   }
 }
 
 /**
  * Runs `work` while saying "still here" on a timer, so a step that outlives the
- * staleness window is not mistaken for a dead process mid call. A tick that
- * discovers we have been superseded captures the error and re-throws it once
- * `work` settles, so the loop stops acting on a turn it no longer owns. Any
- * other heartbeat failure is transient and swallowed, and the next tick retries:
- * a tick must never surface as an unhandled rejection.
+ * staleness window is not mistaken for a dead process mid call. `work` is
+ * handed an `AbortSignal` an opt-in caller can check between its own model or
+ * tool calls (`AgentContext.signal`, above); a tick that discovers we have
+ * been superseded aborts it at once, carrying the `FencedError` itself as the
+ * signal's `reason`, so a caller that checks it can re-throw the very error
+ * that will short-circuit `runTurn`'s catch rather than inventing its own.
+ *
+ * `work` is not guaranteed to notice. Nothing here can reach into a call
+ * already in flight and cancel it, so a caller that ignores the signal (a
+ * fake agent in a test, a live model call with no cancellation support) simply
+ * keeps running; the check after `work()` settles is the backstop that still
+ * catches that case, exactly as it always has. Any OTHER heartbeat failure is
+ * transient and swallowed, and the next tick retries: a tick must never
+ * surface as an unhandled rejection.
  */
-async function withHeartbeat<T>(deps: WorkerDeps, claim: Claim, work: () => Promise<T>): Promise<T> {
-  // A holder object, not a bare `let`. The only assignment lives in a nested
-  // callback TypeScript does not track, so a plain `let fenced: FencedError |
-  // null = null` is still narrowed to `null` at the `if` below and the guard is
-  // dead at type level. A property read cannot be narrowed that way.
-  const seen: { fenced: FencedError | null } = { fenced: null }
+async function withHeartbeat<T>(
+  deps: WorkerDeps, claim: Claim, work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController()
   const timer = setInterval(() => {
     deps.onHeartbeat?.()
     heartbeat(deps.sql, claim).catch((err: unknown) => {
-      if (err instanceof FencedError) seen.fenced = err
+      if (err instanceof FencedError) controller.abort(err)
     })
-  }, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS)
+  }, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL * 1_000)
   try {
-    const result = await work()
-    if (seen.fenced) throw seen.fenced
+    const result = await work(controller.signal)
+    if (controller.signal.aborted) throw controller.signal.reason
     return result
   } finally {
     clearInterval(timer)
   }
 }
 
-type MessageRow = { role: 'user' | 'agent'; content: string }
+/**
+ * Hands the lease back and schedules a fresh invocation, for the two ways a
+ * step can end unfinished rather than done: `decideNext` saying so before the
+ * agent is even called, or the agent's own `continue_later` step when a
+ * driver's inner budget ran out mid-step. Ends the turn instead when there is
+ * no attempt left to hand it back with: `claimTurn` refuses a turn at
+ * `MAX_ATTEMPTS`, so a released turn at the cap is claimable by nothing and
+ * would sit forever, held shut, for the sweeper's crash-loop arm to eventually
+ * reap as `crash_loop` anyway; ending it here as `deadline_exceeded` says the
+ * true reason instead of waiting for that arm to relabel it.
+ */
+async function continueLater(
+  deps: WorkerDeps, claim: Claim, state: TurnState, turnSpend: { total: bigint },
+): Promise<void> {
+  const { sql } = deps
+  if (claim.attempts >= MAX_ATTEMPTS) {
+    await failTurn(sql, claim, 'deadline_exceeded', turnSpend.total)
+    return
+  }
+  // State AND ownership in one statement, then schedule. saveTurnState alone
+  // would leave the row running with a fresh heartbeat, which the
+  // re-invocation's own claimTurn can satisfy through neither arm.
+  await releaseForContinuation(sql, claim, state)
+  // The row is already durable at 'queued': a failed re-invocation is not her
+  // problem, exactly the way tier 2's own invokeAndLog treats a failed
+  // deps.invoke (src/handler.ts). Logged and swallowed rather than left to
+  // propagate, so a wrong SITE_URL or a cold-start 500 on the re-invocation
+  // does not turn an already-successful hand-back into a thrown error tier 3
+  // has no catch for.
+  await deps.reinvoke(claim.turnId).catch((err: unknown) => {
+    console.error(`reinvoke failed for turn ${claim.turnId}`, err)
+  })
+}
 
 async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }): Promise<void> {
   const { sql, limits } = deps
   let state: TurnState = claim.state ?? emptyState()
 
   if (state.messages.length === 0) {
-    // A fresh claim of a turn nobody has worked yet: the transcript is whatever
-    // is already in her thread. By seq, never by created_at, for the reason
-    // course.messages carries a seq at all.
-    const rows = await sql<MessageRow[]>`
-      select role, content from course.messages
-       where conversation_id = ${claim.conversationId} order by seq`
+    // A fresh claim of a turn nobody has worked yet: seed the transcript from
+    // exactly the message THIS turn was opened for, through the same
+    // turn-scoped join `loadTurnInput` has carried since lesson 2.2. Never
+    // "the newest message on the conversation": she can type again while this
+    // turn is still queued (src/handler.ts's `busy` path stamps that message
+    // `turn_id = null` on the SAME conversation), and reading the whole
+    // conversation back would let a resumed turn answer a question this turn
+    // was never opened for. `input` is null only for a turn nothing wrote a
+    // message for at all, the sweeper's own `stalled` case; the transcript
+    // then stays empty and the agent sees nothing to answer.
+    const input = await loadTurnInput(sql, claim.turnId)
     state = {
       ...state,
-      messages: rows.map((r): LoopMessage => ({
-        role: r.role === 'agent' ? 'assistant' : 'user',
-        content: r.content,
-      })),
+      messages: input ? [{ role: 'user', content: input.message }] : [],
     }
   }
 
@@ -182,19 +255,7 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
           decision.reason === 'limit_reached' ? limitReachedMessage(read, limits) : null)
         return
       case 'continue_later':
-        if (claim.attempts >= MAX_ATTEMPTS - 1) {
-          // Handed back, this turn would be one claimTurn can never take again:
-          // requeued by every sweep, worked by nothing, her conversation held
-          // shut until the sweeper reaps it. It ends here instead, with the
-          // reason that says what happened.
-          await failTurn(sql, claim, 'deadline_exceeded', turnSpend.total)
-          return
-        }
-        // State AND ownership in one statement, then schedule. saveTurnState
-        // alone would leave the row running with a fresh heartbeat, which the
-        // re-invocation's own claimTurn can satisfy through neither arm.
-        await releaseForContinuation(sql, claim, state)
-        await deps.reinvoke(claim.turnId)
+        await continueLater(deps, claim, state, turnSpend)
         return
       case 'park':
         // decideNext never returns this yet. Handled explicitly rather than
@@ -209,17 +270,30 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       }
     }
 
-    // Retried here, around the whole step, and safe to retry precisely because
-    // lesson 3.4 built the ledger: a step that already ran its tool replays that
-    // tool's result instead of running it again.
-    const step = await withHeartbeat(deps, claim, () =>
+    // Retried here, around the whole step, and safe to retry for the TOOL
+    // effects a step makes: lesson 3.4's ledger replays a tool call it already
+    // ran instead of running it again. It is NOT safe for model spend in the
+    // same way. `classify` and `extract` (src/classify.ts, src/extract.ts)
+    // call `callAndRecord` with no retry of their own, so a retryable
+    // `APIError` from either escapes `turn()` and this whole step is retried
+    // from scratch: a retried attempt pays for `classify` again even though
+    // `ledgerSink` already billed the first attempt's call. `withRetry`
+    // wrapping the whole step is the wrap this lesson has, over a single
+    // agent-defined unit of work; wrapping only the model call the 429 or 5xx
+    // actually came from is the narrower fix, and is not this lesson's.
+    const step = await withHeartbeat(deps, claim, (signal) =>
       withRetry(
         () => deps.agent({
           state, conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
-          attempts: claim.attempts,
+          attempts: claim.attempts, signal,
         }),
-        { sleep: deps.sleep, random: deps.random },
+        { sleep: deps.sleep, random: deps.random, remainingMs: () => deps.deadlineMs() - deps.now() },
       ))
+
+    if (step.kind === 'continue_later') {
+      await continueLater(deps, claim, state, turnSpend)
+      return
+    }
 
     if (step.kind === 'fail') {
       await spend(deps, claim, turnSpend, step.costMicros)
@@ -235,7 +309,10 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       await heartbeat(sql, claim)
       await spend(deps, claim, turnSpend, step.costMicros)
       await completeTurn(sql, claim, {
-        state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
+        // Null, not an empty string, on a blank answer: completeTurn writes a
+        // row for anything that is not null, and an empty bubble in her
+        // thread reads worse than nothing.
+        state, agentMessage: step.text || null, parked: true, spendMicros: turnSpend.total,
       })
       return
     }
@@ -246,15 +323,19 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
     if (outcome.status === 'replayed') {
       result = outcome.result
     } else if (outcome.status === 'ambiguous') {
-      // Started and never finished: the effect on the outside world is unknown,
-      // and guessing either way is worse than stopping.
-      await failTurn(sql, claim, 'fenced', turnSpend.total)
+      // Started and never finished: the effect on the outside world is
+      // unknown, and guessing either way is worse than stopping. Its own
+      // reason, not 'fenced': fenced means another worker holds the claim and
+      // is alive to finish the turn, which needs nobody's attention.
+      // 'ambiguous_tool_call' is the one outcome in this module that genuinely
+      // needs a person (src/repo/toolCalls.ts, src/sweeper.ts's runbook).
+      await failTurn(sql, claim, 'ambiguous_tool_call', turnSpend.total)
       return
     } else {
       // Wrapped exactly like the agent call above: a real supplier request can
       // run past the staleness window, so heartbeat_at has to keep moving while
       // it is in flight and not only either side of it.
-      result = await withHeartbeat(deps, claim, () => step.run())
+      result = await withHeartbeat(deps, claim, (signal) => step.run(signal))
       await heartbeat(sql, claim)
       await finishToolCall(sql, claim, step.callId, result)
       await spend(deps, claim, turnSpend, step.costMicros)

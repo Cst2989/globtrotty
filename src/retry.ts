@@ -8,6 +8,15 @@ export type RetryOptions = {
   sleep?: (ms: number) => Promise<void>
   /** Injected so the jitter is deterministic in a test. */
   random?: () => number
+  /**
+   * How much of the caller's own budget is left, in milliseconds, read fresh
+   * on every attempt. Omitted, nothing is capped: a caller with no deadline of
+   * its own (a test, a script) gets the plain exponential-plus-jitter wait.
+   * A caller inside a time-boxed invocation (`runTurn`, src/worker.ts) passes
+   * one, so a provider's `Retry-After` can never ask this function to sleep
+   * past the moment the platform kills the process anyway.
+   */
+  remainingMs?: () => number
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3
@@ -43,6 +52,16 @@ function retryAfterMs(err: unknown): number | null {
  * clients, because every one of them is the same program making the same
  * decision at the same moment. `Retry-After` beats both when the provider sent
  * one: it is the only party that knows.
+ *
+ * Neither is trusted past `options.remainingMs()` when the caller supplies one.
+ * A provider that answers `retry-after: 900` inside a fourteen-minute
+ * invocation is not wrong to ask, but honouring it verbatim would sleep the
+ * process past the moment the platform kills it: the turn is left `running`
+ * with a heartbeat seconds old, unrecoverable for a further staleness window,
+ * and the whole invocation bought nothing. Giving up here instead lets the
+ * caller's OWN deadline handling decide what "not now" means for it (tier 3's
+ * `continue_later`, which hands the lease back and reschedules), rather than
+ * this function gambling the rest of the budget on a single sleep.
  */
 export async function withRetry<T>(work: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
@@ -57,7 +76,10 @@ export async function withRetry<T>(work: () => Promise<T>, options: RetryOptions
       if (!retryable || attempt >= maxAttempts) throw err
       const told = retryAfterMs(err)
       const base = told ?? BASE_MS * 2 ** (attempt - 1)
-      await sleep(base + random() * JITTER_MS)
+      const wait = base + random() * JITTER_MS
+      const budget = options.remainingMs?.() ?? Infinity
+      if (wait >= budget) throw err
+      await sleep(wait)
     }
   }
 }

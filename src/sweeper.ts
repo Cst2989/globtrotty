@@ -43,27 +43,33 @@ export type SweepResult = {
  * her and re-bill it every heartbeat window.
  *
  * The `running` half of `stale` is a ceiling on how long a worker's claim may
- * last, not on how long its silence may last, until the worker loop exists.
- * Today the only writer of `heartbeat_at` on any live path is `claimTurn`'s own
- * stamp at the moment of the claim; the worker loop that ticks `heartbeat()` on
- * a timer while a step is in flight is not wired up yet. Until it is, an
- * ordinary multi-step planning turn that simply takes longer than
- * HEARTBEAT_STALE seconds to run looks identical, to this arm, to a worker that
- * has gone silent, and it gets requeued out from under the worker still running
- * it. That worker keeps going and pays for every model call it makes after the
- * requeue; the second worker that claims the reissued turn pays again for the
- * same turn, so one press is billed twice.
+ * last, not on how long its silence may last, and that distinction only holds
+ * because something keeps refreshing `heartbeat_at` WHILE a step runs.
  *
- * The sharper half of the same cost is the attempt count. The requeue below
- * advances `attempts`, and the worker re-invoked for the reissued turn advances
- * it again when it claims, so until the worker loop ticks a heartbeat a live
- * long turn spends two of MAX_ATTEMPTS for every ninety-second tick it survives
- * rather than one. It therefore reaches the crash arm above, which writes
- * TURN_FAILED_MESSAGE into her thread and sets her conversation `failed` while
- * workers are still running the turn, in about half the wall clock it otherwise
- * would. Fixing the cause belongs to the worker loop, not to this file; this arm
- * ships anyway because a turn nobody ever reaps is worse, but a deploy of this
- * tag should expect both costs until the worker loop starts ticking a heartbeat.
+ * Until lesson 3.6, nothing did: the only writer of `heartbeat_at` on any live
+ * path was `claimTurn`'s own stamp at the moment of the claim, so an ordinary
+ * multi-step planning turn that simply took longer than HEARTBEAT_STALE
+ * seconds to run looked identical, to this arm, to a worker that had gone
+ * silent, and got requeued out from under the worker still running it; that
+ * worker kept going and paid for every model call it made after the requeue,
+ * and the second worker that claimed the reissued turn paid again for the
+ * same turn, billing one press twice. The requeue also advances `attempts`,
+ * and the worker re-invoked for the reissued turn advances it again when it
+ * claims, so a live long turn without a ticking heartbeat spent two of
+ * MAX_ATTEMPTS for every ninety-second tick it survived rather than one, and
+ * could reach the crash arm above, `TURN_FAILED_MESSAGE` and all, in about
+ * half the wall clock it otherwise would, while workers were still running it.
+ *
+ * From lesson 3.6 on, `src/worker.ts`'s loop ticks `heartbeat()` on a timer
+ * (`HEARTBEAT_INTERVAL` seconds, src/repo/turns.ts) while a step is in
+ * flight, so an ordinary long-running turn keeps refreshing its own
+ * `heartbeat_at` and no longer looks like a dead worker to this arm, or to
+ * `claimTurn`'s own stale check. Both costs above are closed with it, for any
+ * step the worker's own heartbeat can reach: a single agent call that itself
+ * runs many model or tool calls (tier 3's whole `turn()` is exactly this) can
+ * still outlive its own turn's budget without a SECOND worker's claim ever
+ * being at risk from THIS arm; that is a fencing and retry-budget question
+ * `src/worker.ts` and `src/retry.ts` answer, not a gap in this sweeper.
  *
  * A turn failed `ambiguous_tool_call` (lesson 3.4) is `failed`, which sits
  * outside both arms of `stale`, so the sweeper never touches it, and never
@@ -191,7 +197,9 @@ export async function sweep(
    * 3 down, all of which produce zero claims, would sit at attempts = 0 and be
    * requeued forever, holding her live-turn slot shut with no ending the crash
    * arm above could ever reach. See the ceiling paragraph on sweep() for what
-   * this bump costs a live long turn while the worker loop is still missing.
+   * this bump cost a live long turn before lesson 3.6's worker loop started
+   * ticking a heartbeat; today a live turn's own beats keep it out of this
+   * arm entirely, so the bump only ever lands on a turn that really is silent.
    * `heartbeat_at` is stamped fresh for the same reason
    * releaseForContinuation stamps it fresh: a stale beat left on a `queued` row
    * would sort a turn just handed back to the head of every future batch,

@@ -17,10 +17,12 @@ export type TurnInput = {
 export const MAX_ATTEMPTS = 5
 
 /**
- * How often a working worker is expected to say "still here". The worker loop
- * that ticks this on a timer while a step is in flight arrives in lesson 3.6;
- * until then the only caller is the test file. HEARTBEAT_STALE below is the
- * number this cadence is reasoned against, not an independent guess.
+ * How often a working worker is expected to say "still here". From lesson 3.6
+ * on, `src/worker.ts`'s loop ticks this on a timer while a step is in flight;
+ * it is the only production caller, and it imports this constant rather than
+ * keeping its own copy, so the cadence and the reasoning below stay one thing
+ * in one place. HEARTBEAT_STALE below is the number this cadence is reasoned
+ * against, not an independent guess.
  */
 export const HEARTBEAT_INTERVAL = 25
 
@@ -227,12 +229,14 @@ export async function releaseForContinuation(
  * a `done` turn reads nothing; `claimTurn` refuses that turn first anyway, and
  * this filter is the second of the two answers rather than the only one.
  *
- * Used by nothing outside its own test file as of lesson 3.6: `runTurn`
- * (src/worker.ts) reads a turn's transcript from `course.messages` directly,
- * rather than a second query. Left here rather than deleted: module 5's driver
- * is what reads a turn's opening message by this join, and deleting it now
- * would delete the test that pins the reason it is a join on the turn and not
- * on the conversation.
+ * From lesson 3.6 on, `runTurn` (src/worker.ts) is the production caller: it
+ * seeds a fresh claim's transcript from exactly the message THIS turn was
+ * opened for, never from the newest row on the conversation, which can be a
+ * later press's message stamped `turn_id = null` while this turn was still
+ * queued (src/handler.ts's `busy` path). That is the failure this join was
+ * built to prevent, spelled out above, and the fix a review caught: an
+ * earlier draft of the worker loop read the whole conversation instead and
+ * reintroduced it.
  */
 export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<TurnInput | null> {
   const rows = await sql`

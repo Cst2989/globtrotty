@@ -5,10 +5,11 @@ import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
+import type { ModelCallSink } from '../../src/repo/model-calls.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
-import { ledgerRunner, mockRunner } from '../../src/tools.js'
+import { ledgerRunner, mockRunner, type ToolRunner } from '../../src/tools.js'
 import { runTurn, type Agent } from '../../src/worker.js'
 
 /**
@@ -47,7 +48,7 @@ export default async (req: Request): Promise<Response> => {
    * between model calls. Module 5 splits it into the driver's own steps; nothing
    * in the harness changes when it does, which is the point of the Agent type.
    */
-  const driverAgent: Agent = async ({ state, conversationId, userId, turnId, attempts }) => {
+  const driverAgent: Agent = async ({ state, conversationId, userId, turnId, attempts, signal }) => {
     const last = [...state.messages].reverse().find((m) => m.role === 'user')
     // ledgerRunner (src/tools.ts) fences its writes on a full Claim, not a bare
     // turn id, since lesson 3.4's fix round: a superseded worker must not be
@@ -55,22 +56,52 @@ export default async (req: Request): Promise<Response> => {
     // from the pieces AgentContext carries rather than handed the harness's own
     // Claim object, which would let this driver bypass the loop's own closers.
     const claim = { turnId, conversationId, userId, attempts, state }
+
+    // Checked before the underlying write in both wrappers below, not after: a
+    // fence discovered mid-turn must stop the NEXT model or tool call from
+    // ever being billed, and a `turn()` running fourteen minutes' worth of
+    // classify/extract/tool-loop calls has no other boundary this driver can
+    // reach without threading an abort signal through src/loop.ts itself. The
+    // call already in flight when the fence lands still finishes and is
+    // billed once; nothing after it is. Throwing the signal's own `reason`
+    // (the captured FencedError, `src/worker.ts`'s withHeartbeat) rather than
+    // a fresh error means it lands in runTurn's catch exactly the way a tick's
+    // own deferred throw would: written nowhere, because whoever fenced this
+    // turn is alive and already finishing it.
+    const baseSink = ledgerSink(sql, { userId, conversationId, turnId })
+    const record: ModelCallSink = async (facts) => {
+      if (signal.aborted) throw signal.reason
+      await baseSink(facts)
+    }
+    const baseRunner = ledgerRunner(sql, claim, mockRunner(new MockSupplier()))
+    const runner: ToolRunner = async (name, input, callId) => {
+      if (signal.aborted) throw signal.reason
+      return baseRunner(name, input, callId)
+    }
+
     const result = await turn(
       newConversation(conversationId),
       last?.content ?? '',
       liveClient(),
       // Every supplier call goes through the ledger, so a kill mid search costs
       // one call and never two (lesson 3.4).
-      ledgerRunner(sql, claim, mockRunner(new MockSupplier())),
+      runner,
       {
         deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
-        record: ledgerSink(sql, { userId, conversationId, turnId }),
+        record,
         readSpend: () => readSpendFailClosed(sql, userId, conversationId),
       },
     )
-    // 0n on both branches: ledgerSink already recorded every model call and
-    // incremented conversation and daily spend as it went, so a total here would
-    // be the same money counted twice.
+    // continue_later is neither a fail reason nor a message: the driver's own
+    // budget (src/loop.ts's toolLoop, checked against the same deadlineMs)
+    // ran out mid-turn, not the work itself. Mapping it into the message
+    // branch would record an unfinished turn as `done` with a blank reply,
+    // outside both the live-turn index and the sweeper's predicate, with
+    // nothing left able to pick it back up.
+    if (result.outcome === 'continue_later') return { kind: 'continue_later' }
+    // 0n on both remaining branches: ledgerSink already recorded every model
+    // call and incremented conversation and daily spend as it went, so a
+    // total here would be the same money counted twice.
     if (isFailReason(result.outcome)) {
       return { kind: 'fail', reason: result.outcome, text: result.text || null, costMicros: 0n }
     }
@@ -78,18 +109,31 @@ export default async (req: Request): Promise<Response> => {
   }
 
   try {
-    await runTurn(
-      {
-        sql,
-        limits: DEFAULT_LIMITS,
-        agent: driverAgent,
-        now: Date.now,
-        deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
-        reinvoke: httpInvoke(env),
-      },
-      decision.turnId,
-    )
-    console.log(`turn ${decision.turnId}: finished in ${Date.now() - startedMs} ms`)
+    try {
+      await runTurn(
+        {
+          sql,
+          limits: DEFAULT_LIMITS,
+          agent: driverAgent,
+          now: Date.now,
+          deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
+          reinvoke: httpInvoke(env),
+        },
+        decision.turnId,
+      )
+      console.log(`turn ${decision.turnId}: finished in ${Date.now() - startedMs} ms`)
+    } catch (err) {
+      // Every classified failure is already recorded on the row by runTurn's
+      // own catch before it re-throws; this catch exists only so THIS
+      // function still answers 200. The alternative, no catch at all, was the
+      // pre-3.6 shape's whole reason for answering 200 on a fenced retry
+      // ("nothing went wrong, somebody else has the work") and this lesson's
+      // rewrite dropped it: a rotated key or a database hiccup now recorded
+      // itself correctly and then made Netlify treat the invocation as a
+      // platform-level failure and retry it, on top of a row that already
+      // explains itself.
+      console.error(`turn ${decision.turnId} failed`, err)
+    }
   } finally {
     await sql.end({ timeout: 5 })
   }
