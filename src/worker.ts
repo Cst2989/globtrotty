@@ -174,7 +174,10 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // failed would tell her a request that DID something did nothing. The
     // original error still propagates either way: this changes what the turn
     // SAYS, not whether the failure is reported.
-    if (await completeIfLinkEmitted(deps, claim, progress.state, turnSpend.total)) throw err
+    // `emitted`, not `closed`: a close that threw leaves the row alive-looking
+    // for the sweeper, and failing it here instead would be the very write rule
+    // 6 forbids. Only the sweeper's operator-facing count reads `closed`.
+    if ((await completeIfLinkEmitted(deps, claim, progress.state, turnSpend.total)).emitted) throw err
     // Everything else is classified rather than recorded as one word. There is
     // no retry mechanism for this to feed: failTurn is terminal and the sweeper
     // only ever looks at queued and running rows. It changes what the row SAYS,
@@ -229,15 +232,32 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
   }
 }
 
+/** What `completeIfLinkEmitted` tells its caller. Two answers, see below. */
+export type PointOfNoReturn = {
+  /** A booking link had gone out, so no caller may mark this turn failed. */
+  emitted: boolean
+  /** The turn is now `done` with the hand-off sentence. Never true without `emitted`. */
+  closed: boolean
+}
+
 /**
  * The point of no return (src/cashier.ts, rule 6) as one function, and the only
  * place in this codebase that reads `course.link_clicks` in order to decide how
  * a turn ends.
  *
- * Returns true when this turn had already emitted a booking link, in which case
- * it is now `done`, carrying the same sentence the hand-off said, and the
- * caller must not mark it failed. Returns false when nothing went out and the
- * caller is free to do whatever it was going to do.
+ * Two answers, not one, because two callers ask two different questions.
+ * `emitted` says a booking link had already gone out, so the caller must not
+ * mark this turn failed whatever else happened; that is what `runTurn`'s catch
+ * and `failTurnUnlessLinkEmitted` branch on, and it stays true even when the
+ * close below threw, because a close that failed does not un-emit a link.
+ * `closed` says the turn is now `done` carrying the hand-off sentence, which is
+ * the narrower claim and the only one an operator-facing count may be built
+ * from; `sweep` (src/sweeper.ts) reads it for `handedOff`. Both are false when
+ * nothing went out and the caller is free to do whatever it was going to do.
+ *
+ * Reporting the wide answer as the narrow one was this fix round's own finding:
+ * the two-currency turn below was pushed into `handedOff` and logged as
+ * completed, for ever, which is a system describing a world it is not in.
  *
  * Exported for one caller outside this file, `sweep` (src/sweeper.ts), which
  * reaches the same state by a different road: a worker that died outright, so
@@ -276,13 +296,13 @@ export async function completeIfLinkEmitted(
   deps: { sql: postgres.Sql; now: () => number },
   claim: Claim, state: TurnState, spendMicros: bigint,
   close: TurnCloser = completeTurn,
-): Promise<boolean> {
+): Promise<PointOfNoReturn> {
   const { sql } = deps
   const emitted = await emittedLinks(sql, claim.turnId).catch((e: unknown) => {
     console.error(`emittedLinks for turn ${claim.turnId} failed`, e)
     return { links: [], verified: false, quotedAt: null }
   })
-  if (emitted.links.length === 0) return false
+  if (emitted.links.length === 0) return { emitted: false, closed: false }
   const now = new Date(deps.now())
   try {
     await close(sql, claim, {
@@ -293,8 +313,9 @@ export async function completeIfLinkEmitted(
     })
   } catch (e) {
     console.error(`closing turn ${claim.turnId} after link emission failed`, e)
+    return { emitted: true, closed: false }
   }
-  return true
+  return { emitted: true, closed: true }
 }
 
 /**
@@ -322,7 +343,9 @@ async function failTurnUnlessLinkEmitted(
   deps: WorkerDeps, claim: Claim, state: TurnState, spendMicros: bigint,
   reason: FailReason, agentMessage: string | null = null,
 ): Promise<void> {
-  if (await completeIfLinkEmitted(deps, claim, state, spendMicros)) return
+  // `emitted` for the same reason the catch above reads it: the fallback below
+  // is the write rule 6 forbids on a turn that emitted, close or no close.
+  if ((await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted) return
   await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
 }
 

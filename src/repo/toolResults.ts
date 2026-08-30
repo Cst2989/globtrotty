@@ -89,6 +89,14 @@ export async function recordResults(
   // items and a per-row round trip is several network hops inside a turn
   // already being timed against a heartbeat, and a mid-loop failure cannot
   // leave half a search recorded.
+  //
+  // There is no `order by` on the function scan, so `seq` is assigned in the
+  // order `jsonb_to_recordset` emits rows, which for a single array is array
+  // order. Postgres holds that and no plan shape here can reorder one function
+  // scan, but it is an assumption rather than a guarantee this statement makes,
+  // and test/toolResults.test.ts leans on it: of two rows sharing a
+  // `fetched_at`, the SECOND array element is the one rehydration takes. Which
+  // duplicate wins carries no meaning beyond that.
   const out = await sql`
     insert into course.tool_results
       (conversation_id, user_id, turn_id, source_id, supplier, kind, name,

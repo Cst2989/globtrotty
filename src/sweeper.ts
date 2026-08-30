@@ -25,10 +25,14 @@ export type SweepResult = {
   /** Turns failed as crash loops: out of attempts, and she has been told. */
   reaped: string[]
   /**
-   * Turns out of attempts that had already emitted a booking link, so they are
-   * `done` with the hand-off sentence rather than failed. Rule 6
-   * (src/cashier.ts): nothing may tell her a request that DID something did
-   * nothing.
+   * Turns out of attempts that had already emitted a booking link and that this
+   * walk actually closed, so they are `done` with the hand-off sentence rather
+   * than failed. Rule 6 (src/cashier.ts): nothing may tell her a request that
+   * DID something did nothing.
+   *
+   * Closed, not merely selected. A turn whose close threw is logged and left
+   * for the next walk, and it is deliberately absent from this list, because
+   * this list is what an operator reads to see the rule 6 road being taken.
    */
   handedOff: string[]
   /** Turns failed as stalled: nothing could ever have run them. */
@@ -204,6 +208,20 @@ export async function sweep(
    * which `sumMoney` (src/money.ts) refuses to total and the cashier refuses to
    * create. Failing it instead would break the rule this half exists to keep.
    * README.md names it beside the other residuals.
+   *
+   * Such a row is left out of `handedOff` too, which is why the loop below
+   * reads `closed` rather than `emitted`: the walk's own result is the one
+   * signal an operator has, and a result counting the turn this arm gave up on
+   * as completed would describe a world nobody is in.
+   *
+   * `for update skip locked`, like the two arms above, so a second walk running
+   * at the same time as this select takes different rows. It is not the safety
+   * net: `sql` here is whatever handle the caller passed, and under the plain
+   * pooled handle netlify/functions/sweep.mts uses, the lock lasts the
+   * statement rather than the walk. What actually makes a double close safe is
+   * the `attempts` fence carried into `completeReapedTurn`, which turns the
+   * loser into a FencedError. This narrows the window that puts one on
+   * `console.error`, the sweeper's alarm channel, for an ordinary outcome.
    */
   const emitted = await sql<{
     id: string; conversation_id: string; user_id: string; attempts: number; state: TurnState | null
@@ -212,11 +230,12 @@ export async function sweep(
       from course.turns t
      where t.attempts >= ${MAX_ATTEMPTS} and (${stale})
        and exists (select 1 from course.link_clicks l where l.turn_id = t.id)
-     limit ${limit}`
+     limit ${limit}
+       for update skip locked`
 
   const handedOff: string[] = []
   for (const row of emitted) {
-    const closed = await completeIfLinkEmitted(
+    const { closed } = await completeIfLinkEmitted(
       { sql, now: () => Date.now() },
       {
         turnId: row.id,

@@ -398,4 +398,57 @@ describeDb('after a link is emitted, the sweeper', () => {
       expect(c!.status).toBe('failed')
     })
   })
+
+  /**
+   * The one turn this arm cannot close, and what the walk must SAY about it.
+   * Two hand-offs in two currencies, so `handOffMessage` has no sentence to
+   * write (`sumMoney` refuses to total two codes), `completeReapedTurn` is
+   * never reached, and the row is left `running` at the cap for the next walk
+   * rather than marked failed, which rule 6 forbids.
+   *
+   * The assertion that matters is the first one. `completeIfLinkEmitted` tells
+   * its caller two separate things, `emitted` and `closed`, and the sweeper
+   * counts a turn as handed off only on the second. Reporting this row in
+   * `handedOff` would print it through netlify/functions/sweep.mts as a
+   * completed turn, so the one signal an operator has about the one turn the
+   * crash arm gives up on would say the arm handled it. That is the module's
+   * own named defect class: a system describing a world it is not in.
+   */
+  it('does not report a turn whose close threw as handed off', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-5')
+      const second = randomUUID()
+      const proposalId = await recordProposal(sql, {
+        conversationId: submitted.conversationId, userId: USER, turnId: submitted.turnId,
+        refs: [{ sourceId: 'hotel-0-3', quantity: 1, slot: 'stay' }],
+      })
+      await recordLinkClicks(sql, {
+        proposalId, turnId: submitted.turnId, userId: USER, verified: true, quotedAt: new Date(),
+        links: [{ id: second, sourceId: 'hotel-0-3', supplier: 'mock', trackingRef: second,
+                  url: `https://example.invalid/book/hotel-0-3?subid=${second}`,
+                  quoted: money(40_000n, 'USD') }],
+      })
+      await sql`update course.turns
+                   set attempts = ${MAX_ATTEMPTS}, status = 'running',
+                       heartbeat_at = now() - interval '10 minutes'
+                 where id = ${submitted.turnId}`
+      const result = await sweep(sql)
+      expect(result.handedOff).not.toContain(submitted.turnId)
+      // Nor failed by either of the other two arms: the reap's `dead` set
+      // excludes every turn carrying a link row, and this one is over the cap
+      // so the batch cannot requeue it either.
+      expect(result.reaped).not.toContain(submitted.turnId)
+      expect(result.requeued).not.toContain(submitted.turnId)
+
+      // Left exactly where it was, which is what "logged and left" means.
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('running')
+      expect(t!.fail_reason).toBeNull()
+      // No sentence, because there was none to build. An agent row here would
+      // mean a total that picked a currency.
+      const msgs = await sql`select content from course.messages
+                              where turn_id = ${submitted.turnId} and role = 'agent'`
+      expect(msgs).toHaveLength(0)
+    })
+  })
 })

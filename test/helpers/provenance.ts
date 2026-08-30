@@ -13,8 +13,10 @@ import { minorUnitExponent } from '../../src/money.js'
  * system does. It is the reproduction of the check lesson 1.4 and the source
  * articles shipped, kept for the two files that exist to show what that check
  * waves through, and nothing new may call it. That last sentence is enforced
- * rather than asked for: test/regressions.test.ts fails if any file other than
- * those two names `offeredAmounts`.
+ * rather than asked for: test/regressions.test.ts fails if any TEST file other
+ * than those two names `offeredAmounts`. It enumerates `testFiles()` and
+ * nothing else, so a `src/` file naming it would pass; nothing in `src` has any
+ * reason to, since `checkCurrency` is what judges a currency there.
  *
  * `offeredAmounts` below stays currency-blind rather than learning to compare
  * currencies, and the two files it is kept for want that blindness for two

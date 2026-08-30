@@ -44,6 +44,10 @@ export default async (): Promise<Response> => {
   // her, and the only thing that went wrong is that a worker died after
   // emitting them; it is worth a line because an operator watching this
   // function should be able to see that the crash arm took the rule 6 road.
+  //
+  // Every id printed here is a turn the walk closed. One it selected and could
+  // not close is absent (src/sweeper.ts, `handedOff`), so this line never
+  // reports a completion that did not happen.
   if (result.handedOff.length > 0) console.warn('sweep: completed turns that had emitted links', result.handedOff)
 
   for (let i = 0; i < result.requeued.length; i += CONCURRENCY) {

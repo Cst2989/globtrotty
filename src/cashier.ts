@@ -150,7 +150,7 @@ export function handOffMessage(
  * This is the whole cashier at lesson 4.1, and it is only ever handed items a
  * caller already chose. Lesson 4.5's `checkTotals` is what recomputes a total
  * from the corpus rather than trusting one, and lesson 4.6 is where this file
- * grows the part that re-quotes before she is given a link.
+ * grew the part that re-quotes before she is given a link.
  */
 export function totalOf(items: SupplierItem[]): Money {
   return sumMoney(items.map((item) => item.price))

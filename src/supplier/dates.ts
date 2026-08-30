@@ -26,7 +26,7 @@
  */
 export function utcDayStart(date: string): number {
   const t = Date.parse(`${date}T00:00:00Z`)
-  if (Number.isNaN(t)) throw new RangeError('nightsBetween: bad ISO date')
+  if (Number.isNaN(t)) throw new RangeError('utcDayStart: bad ISO date')
   return t
 }
 

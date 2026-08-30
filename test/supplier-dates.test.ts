@@ -11,7 +11,7 @@ describe('nightsBetween', () => {
 
   it('throws RangeError on a malformed date', () => {
     expect(() => nightsBetween('not-a-date', '2026-09-19'))
-      .toThrow(/nightsBetween: bad ISO date/)
+      .toThrow(/utcDayStart: bad ISO date/)
   })
 
   // Not on main, and it asserts on the instant rather than on a night count.
@@ -36,6 +36,6 @@ describe('nightsBetween', () => {
   })
 
   it('throws RangeError out of the parse itself', () => {
-    expect(() => utcDayStart('2026-13-99')).toThrow(/nightsBetween: bad ISO date/)
+    expect(() => utcDayStart('2026-13-99')).toThrow(/utcDayStart: bad ISO date/)
   })
 })

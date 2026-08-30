@@ -206,7 +206,7 @@ out of `course.tool_results` and throws away whatever the caller supplied, so
 there is no price field for a model to move or invent.
 `test/tampered-price.test.ts` holds both halves of that: the two offers that
 passed the old check, still passing it, and the same two offers refused by the
-schema. "The old check" is two functions from two places, and the test says so:
+schema. "The old check" is three functions from two places, and the test says so:
 the id half is the source articles' `checkProvenance`, reproduced in that file
 because no such function exists at any tag here, and the amount half is
 `quotedAmounts` and `offeredAmounts`, which is what lesson 1.4 actually shipped.
@@ -357,35 +357,31 @@ re-run and rounds start to mean something.
 by`, so it relies on Postgres emitting a single array's elements in array order.
 It does, and there is no plan shape here that would reorder it, and
 `test/toolResults.test.ts` asserts which of two rows sharing a `fetched_at` wins
-rehydration, which is only true if that holds. It is undocumented and untested
-as an assumption. Owner: a person, one sentence in the docstring.
+rehydration, which is only true if that holds. The assumption is written into
+the statement's own comment in the round that wrote this list, so it is here for
+the record rather than as work. Untested still, and untestable without a plan
+this schema cannot produce. Owner: nobody.
 
-`test/helpers/provenance.ts` says its guard covers "any file" naming
+`test/helpers/provenance.ts` said its guard covered "any file" naming
 `offeredAmounts`. It enumerates `testFiles()` only, so a `src/` file naming it
-would pass. The test's own name is accurate; the helper's docstring is the
-broader claim. Owner: a person, one word.
+would pass. Corrected in the same round that wrote this list, so it is here for
+the record rather than as work: the guard is still test files only, and the
+docstring now says so. Owner: nobody.
 
 `LESSONS.md`'s "How this branch was built" heading counted module 3's seven
 lessons and then grew module 4's bullets underneath it. Corrected in the same
 round that wrote this list, so it is here for the record rather than as work.
 Owner: nobody.
 
-`src/cashier.ts` describes lesson 4.6 in the future tense, four hundred lines
-above the code that lesson landed. Harmless as history, and the rest of the file
-reads in the present. Owner: a person, one word.
+`src/cashier.ts` described lesson 4.6 in the future tense, four hundred lines
+above the code that lesson landed. Corrected in the same round that wrote this
+list, so it is here for the record rather than as work. Owner: nobody.
 
 `supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
 document outside this repository may be cited from code, and `git ls-tree` finds
 no `docs` at any tag here, so a reader has nothing to open. The migration is
 frozen and stays as it is; the reference belongs in the lesson prose. Owner:
 module 6.
-
-The paragraph above on `test/tampered-price.test.ts` calls the old check "two
-functions from two places" and then names three: `checkProvenance`,
-`quotedAmounts` and `offeredAmounts`. Two PLACES is right and the count is not,
-and it is the module's most carefully argued paragraph, so a reader counting
-three has to decide which one the sentence forgot. Owner: a person, one word
-either way.
 
 ## What is next
 

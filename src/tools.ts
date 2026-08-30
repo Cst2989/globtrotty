@@ -287,6 +287,11 @@ export function supplierRunner(suppliers: SupplierPair, tripCurrency: string | n
       // identical throw and spends its step budget on it. Told what actually
       // happened, it has something to do instead.
       //
+      // "could not be trusted", not "could not be parsed": one of the two
+      // causes parses perfectly and is refused for answering in a currency
+      // nobody asked for. The `messageOf(err)` prefix carries which one it was,
+      // and this clause has to be true of both.
+      //
       // One sentence for every refusal, not one per cause. A taxonomy that
       // separates a bad payload from a timeout from a rate limit, each with its
       // own instruction, is module 5's; README.md carries it as a residual.
@@ -294,7 +299,7 @@ export function supplierRunner(suppliers: SupplierPair, tripCurrency: string | n
         return {
           outcome: {
             content: `${supplier.name} answered and the response was refused: ${messageOf(err)}. `
-              + 'The supplier is up. One value in the response could not be parsed, and the whole '
+              + 'The supplier is up. One value in the response could not be trusted, and the whole '
               + 'response was refused rather than trusted in part, so the identical search will be '
               + 'refused identically. Try the other desk, a different date, or ask her.',
             isError: true,
