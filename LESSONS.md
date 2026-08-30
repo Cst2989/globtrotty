@@ -24,7 +24,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
 | lesson-3-5 | The sweeper | npm run migrate, then npm test (test/sweeper.test.ts) |
 | lesson-3-6 | The worker loop assembled | npm run migrate, then npm test (test/worker.test.ts, test/retry.test.ts), then npm run demo |
-| lesson-3-7 | Building the harness with agents | npm test (test/regressions.test.ts) |
+| lesson-3-7 | Building the harness with agents | npm run migrate, then npm test (test/regressions.test.ts) |
 
 ## How this branch was built
 
