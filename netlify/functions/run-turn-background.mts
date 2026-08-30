@@ -104,9 +104,11 @@ export default async (req: Request): Promise<Response> => {
     //
     // What that costs today, on the record: the pipeline writes `budget` and
     // `dates` as not evaluated WITH A REASON on every proposal a live run
-    // produces, rather than as passes. It is the only path a reader can run,
-    // which is why lesson 4.5's own proof drives proposalRunner, this exact
-    // seam, with a real budget in it (test/gate-pipeline.test.ts).
+    // produces, rather than as passes. `npm run trip` (scripts/trip.ts) derives
+    // its constraints the same way from the same empty notebook, so that is
+    // both of the paths a reader can run, which is why lesson 4.5's own proof
+    // drives proposalRunner, this exact seam, with a real budget in it
+    // (test/gate-pipeline.test.ts).
     const notebook = constraintsFromNotebook(emptyNotebook())
     // Four wrappers, outermost first. The ledger decides whether the tool runs
     // at all (lesson 3.4); the proposal runner puts a proposal through the

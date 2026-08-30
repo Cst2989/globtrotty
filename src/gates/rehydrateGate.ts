@@ -42,13 +42,22 @@ export const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
 export const ProposalRefsSchema = z.strictObject({
   refs: z.array(z.strictObject({
     sourceId: z.string().min(1).max(512),
-    // Shape only. The VALUE is judged by `checkTotals` (lesson 4.5), which
-    // requires exactly 1 because every supplier this branch ships prices the
-    // whole booking. Deliberately not tightened to `z.literal(1)` here: a
-    // schema failure is reported as a `provenance` violation with no source
-    // ids, and an inflated quantity is a `totals` fault about specific items.
-    // Keeping the bound loose is what puts each fault in the right
-    // `gate_results` row with the right ids on it.
+    // Shape only, and the shape has bounds. The VALUE is judged by
+    // `checkTotals` (lesson 4.5), which requires exactly 1 because every
+    // supplier this branch ships prices the whole booking. Deliberately not
+    // tightened to `z.literal(1)` here: a schema failure is reported as a
+    // `provenance` violation with no source ids, and a quantity of 2 is a
+    // `totals` fault about specific items, so tightening it would file that
+    // fault in the wrong `gate_results` row with no ids on it.
+    //
+    // A nonpositive or oversized quantity is the opposite case and is a
+    // structural fault by design. Zero and minus one are not quantities of
+    // anything and 17 is past any party this product books, so none of them is
+    // a proposal an itemised reply could help with, and each lands here as a
+    // provenance rejection rather than as a totals verdict. `ProposeInput`
+    // (src/tools.ts) publishes these same two bounds, so a model reads them
+    // instead of discovering them, and test/tools.test.ts pins that the
+    // published document and this boundary still agree.
     quantity: z.int().positive().max(16),
     slot: z.enum(SLOT_NAMES),
   })).min(1).max(24)

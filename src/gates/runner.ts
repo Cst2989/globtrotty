@@ -1,4 +1,5 @@
 import type postgres from 'postgres'
+import { formatMoney } from '../money.js'
 import { runGates } from './pipeline.js'
 import type { NotebookConstraints } from './notebookConstraints.js'
 import type { ToolRunner } from '../tools.js'
@@ -38,6 +39,12 @@ export type ProposalContext = {
  * the same instant produces the same verdict anyway. Every other tool name
  * falls through to `inner`, so each layer knows exactly one thing.
  *
+ * `npm run trip` (scripts/trip.ts) builds the same three inner layers and drops
+ * the ledger, since it is one process with no crash to resume from. It is not
+ * free to drop THIS one: both drivers send the planning desk's tools, so a
+ * chain without this link advertises `propose_itinerary` and then answers the
+ * model "Unknown tool propose_itinerary" out of `supplierRunner`.
+ *
  * A rejection comes back as `isError: true` carrying the violations as JSON,
  * and not as a failed turn. `FAIL_REASONS` (src/engine.ts) does not grow a
  * `gate_rejected` entry and `turns_fail_reason_check` does not move, because a
@@ -74,8 +81,20 @@ export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: T
       content: JSON.stringify({
         ok: true,
         // The server's own total, in minor units and formatted, the same shape
-        // every price on this wire takes (src/tools.ts's itemForModel).
-        total: { minor: outcome.total.minor.toString(), currency: outcome.total.currency },
+        // every price on this wire takes (src/tools.ts's itemForModel), through
+        // the same formatter.
+        //
+        // `formatted` is not decoration. The desk is told the total it sees is
+        // never a number it wrote, and a bare `minor` takes that back: the
+        // model would have to divide by an exponent to write the figure into
+        // her reply. src/money.ts holds JPY at exponent 0 and KWD at 3, and
+        // from this lesson the search currency follows her budget, so the
+        // usual cents rule turns 46400 JPY into a reply saying 464.
+        total: {
+          minor: outcome.total.minor.toString(),
+          currency: outcome.total.currency,
+          formatted: formatMoney(outcome.total),
+        },
         items: outcome.items.map((i) => ({ sourceId: i.item.sourceId, slot: i.ref.slot })),
       }),
       isError: false,

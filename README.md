@@ -134,25 +134,32 @@ shared database, requeues or fails every other user's stale turns too.
 The supplier port arrived in lesson 4.1: a `SupplierItem` says who quoted it,
 when, for how long it stays quotable and whether it can be checked again, and
 `MockSupplier` answers all four honestly for a supplier that invents its prices
-from a hash. One seam ran through the suite from there to lesson 4.4: every
-search asked for one hard-coded currency, so flights came back in euros while
-the recorded reply `test/provenance-v0.test.ts` replays quotes them in dollars,
-and `offeredAmounts` compares whole-unit numbers without ever looking at a
-currency, so that test passed on a coincidence. The helper moved to
-`test/helpers/provenance.ts` in lesson 4.4 and gained a second caller there,
-`test/tampered-price.test.ts`, so the blind comparison spread rather than
-closed.
+from a hash. One coincidence has run through the suite since then and still
+does. `mockRunner` (src/tools.ts) calls `supplierRunner` with no currency, which
+reads as `TRIP_CURRENCY`, so every search a test makes through it comes back in
+euros, while the recorded reply `test/provenance-v0.test.ts` replays quotes
+dollars. `offeredAmounts` compares whole-unit numbers and never reads the
+currency code beside them, so 464 EUR and 464 USD are the same number to it and
+that test passes. The helper moved to `test/helpers/provenance.ts` in lesson 4.4
+and gained a second caller there, `test/tampered-price.test.ts`.
 
-Lesson 4.5 settles it by RETIRING that helper rather than teaching it
-currencies. `checkCurrency` (src/gates/checks.ts) is what judges a currency now:
-it compares codes, it refuses instead of converting, and it is the gate every
-real proposal goes through. `offeredAmounts` keeps exactly one job, which is to
-be the check lesson 1.4 shipped, inside the two files that exist to show what
-that check waves through. Being currency-blind is part of what those two
-demonstrate, so making it currency-aware would falsify the demonstration rather
-than close anything, and its own comment now says which of the two answers this
-was. The seam underneath it is closed separately, by the search currency
-described below.
+Lesson 4.5 answers the question that leaves open by RETIRING the helper rather
+than teaching it currencies. `checkCurrency` (src/gates/checks.ts) is what
+judges a currency now: it compares codes, it refuses instead of converting, and
+it is the gate every real proposal goes through, so `offeredAmounts` is no
+longer a check of anything this system does. It keeps exactly one job, which is
+to be the check lesson 1.4 shipped, inside the two files that exist to show what
+that check waves through. Its blindness is what makes
+`test/provenance-v0.test.ts` pass, so teaching it currencies would turn that
+file red and demonstrate nothing; `test/tampered-price.test.ts` does not turn on
+a currency at all, since both its offers are euros and what it shows is an id
+check that never looks at the values and an amount check that reads prose.
+`test/regressions.test.ts` pins the retirement rather than asking for it: any
+third file naming `offeredAmounts` fails there.
+
+What the search currency below closes is a different thing, the DEADLOCK. It
+does not reach this coincidence, because `mockRunner` passes no currency and
+goes on searching in euros.
 
 Two suppliers are real from lesson 4.2. Flights come from Kiwi's MCP
 endpoint, which needs no key; hotels come from SearchApi's Google Hotels
@@ -225,11 +232,15 @@ Two of the six still have nothing to check against, and both say so on the row
 rather than reporting a pass. The dates gate has no travel window, because this
 branch's notebook carries a month and not two dates; widening it touches
 `src/extract.ts` and its recorded fixtures and belongs to module 5. And on the
-path you can run, the budget gate has no budget: nothing stores a notebook, so
-tier 3 derives its constraints from an empty one and every live proposal records
-`budget: not evaluated` with the reason. The gate itself is exercised in
-`test/gate-pipeline.test.ts` through `proposalRunner`, the same seam and the same
-`runGates` call tier 3 makes, with a real budget in the context. Module 5.2 moves
+paths you can run, the budget gate has no budget: nothing stores a notebook, so
+both drivers derive their constraints from an empty one and every live proposal
+records `budget: not evaluated` with the reason. `npm run trip` and tier 3 build
+the same chain here, `proposalRunner` outside `corpusRunner`, so both can
+propose and both write `course.gate_results` rows; the ledger is the one layer
+`npm run trip` leaves out, because it is one process with no crash to resume
+from. The gate itself is exercised in `test/gate-pipeline.test.ts` through
+`proposalRunner`, the same seam and the same `runGates` call both drivers make,
+with a real budget in the context. Module 5.2 moves
 the registry inside the harness, where the turn's own notebook is in scope, and
 closes both.
 

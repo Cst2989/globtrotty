@@ -12,13 +12,25 @@ import { minorUnitExponent } from '../../src/money.js'
  * proposal goes through. So this pair is no longer a check of anything this
  * system does. It is the reproduction of the check lesson 1.4 and the source
  * articles shipped, kept for the two files that exist to show what that check
- * waves through, and nothing new may call it.
+ * waves through, and nothing new may call it. That last sentence is enforced
+ * rather than asked for: test/regressions.test.ts fails if any file other than
+ * those two names `offeredAmounts`.
  *
- * That is why `offeredAmounts` below stays currency-blind rather than learning
- * to compare currencies. Its blindness is PART OF THE DEFECT those two files
- * demonstrate: it reduces every price to a whole number and never looks at the
- * code beside it. Teaching it currencies would repair the exhibit and lose the
- * demonstration.
+ * `offeredAmounts` below stays currency-blind rather than learning to compare
+ * currencies, and the two files it is kept for want that blindness for two
+ * different reasons.
+ *
+ * test/tampered-price.test.ts does not turn on a currency at all: both offers
+ * are EUR, one carries another hotel's price and the other an invented price
+ * sent as JSON that the prose scanner never reads. What that file shows is the
+ * id check never looking at the values attached to an id, and the amount check
+ * scanning prose.
+ *
+ * test/provenance-v0.test.ts asserts the check PASSES, and the blindness is the
+ * unremarked reason it does: a recorded reply quoting dollars is replayed
+ * against a EUR corpus, and only a comparison that never reads a currency code
+ * lets those two agree. Teaching this function currencies turns that file red
+ * and demonstrates nothing in the other one.
  */
 
 /** Every amount in a reply that reads like money: "310 USD", "€420", "1,500 euros". */

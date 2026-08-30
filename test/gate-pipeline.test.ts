@@ -12,7 +12,7 @@ import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import type { FlightSearch, HotelSearch, SupplierItem } from '../src/supplier/types.js'
-import { flightSearchFrom } from '../src/tools.js'
+import { flightSearchFrom, itemForModel } from '../src/tools.js'
 import type { NotebookConstraints } from '../src/gates/pipeline.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { handlerDeps } from './helpers/turns.js'
@@ -566,18 +566,39 @@ describeDb('runGates', () => {
 
   it('carries the turn id onto every row it writes', async () => {
     await withTestDb(async (sql) => {
-      // The turn the corpus was seeded under, which is the turn a real proposal
-      // would be judged in: the claim already holds it, so nothing here has to
-      // insert a second one.
       const { claim, conversationId, items } = await seed(sql, 19)
+      // A SECOND turn, and it has to be a second one. The corpus rows carry the
+      // seeding turn's id, so a runGates that read `turn_id` off a corpus row
+      // instead of using the argument it was handed would pass here against the
+      // seeding turn and be wrong about every proposal judged in a later one.
+      // Passing the seeding turn back in would assert nothing but that the two
+      // ids match.
+      //
+      // The seeding turn is closed first, because 0004's
+      // `turns_one_active_per_conversation` lets a conversation hold one live
+      // turn at a time. That is also the honest sequence: she searched, the
+      // turn ended, she came back, and the proposal is judged in the turn she
+      // came back in, against a corpus an earlier turn built.
+      const closed = await sql`update course.turns set status = 'done', finished_at = now()
+                                where id = ${claim.turnId} returning id`
+      expect(closed).toHaveLength(1)
+      const submitted = await submitMessage(
+        handlerDeps(sql),
+        { userId: USER, conversationId, message: 'propose that one', idempotencyKey: randomUUID() },
+      )
+      const second = (await claimTurn(sql, submitted.turnId!))!
+      expect(second.turnId).not.toBe(claim.turnId)
+
       await runGates(sql, {
-        conversationId, userId: USER, turnId: claim.turnId, now: NOW, notebook,
+        conversationId, userId: USER, turnId: second.turnId, now: NOW, notebook,
         refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }],
       })
       const rows = await sql`select turn_id from course.gate_results where conversation_id = ${conversationId}`
       // Module 6 joins these rows to the turn that produced them; a null here
-      // would make every gate run anonymous.
-      expect(rows.every((r) => r.turn_id === claim.turnId)).toBe(true)
+      // would make every gate run anonymous. The count is asserted first
+      // because `every` over no rows is true.
+      expect(rows).toHaveLength(GATE_NAMES.length)
+      expect(rows.every((r) => r.turn_id === second.turnId)).toBe(true)
     })
   })
 })
@@ -595,9 +616,20 @@ describeDb('proposalRunner', () => {
         refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }],
       }, 's1-b0')
       expect(outcome.isError).toBe(false)
-      const body = JSON.parse(outcome.content) as { ok: boolean; total: { minor: string } }
+      const body = JSON.parse(outcome.content) as { ok: boolean; total: Record<string, string> }
       expect(body.ok).toBe(true)
       expect(body.total.minor).toBe(items[0]!.price.minor.toString())
+      // The total reaches the model in the SAME shape as every other price on
+      // this wire, compared against `itemForModel`'s own output rather than
+      // against a key list written here: minor units for arithmetic AND the
+      // formatted string, so a reply never has to divide by an exponent it
+      // guessed. money.ts lists JPY at exponent 0 and KWD at 3, and the search
+      // currency follows her budget from this lesson on, so a model applying
+      // the usual cents rule to a bare `minor` is a 100x error waiting for its
+      // first non-EUR trip.
+      const onTheWire = itemForModel(items[0]!).price as Record<string, string>
+      expect(Object.keys(body.total).sort()).toEqual(Object.keys(onTheWire).sort())
+      expect(body.total.formatted).toBe(onTheWire.formatted)
     })
   })
 
@@ -625,10 +657,10 @@ describeDb('proposalRunner', () => {
       const { conversationId, items } = await seed(sql, 24)
       // proposalRunner IS the seam tier 3 builds, and this drives it with a
       // real budget in the context: the same runGates call, reached the same
-      // way, rejecting a trip that is over her number. Tier 3 hands it an
-      // EMPTY notebook today (step 12), so `budget: not evaluated` is the only
-      // verdict `npm run trip` can produce, and a reader who ran only that
-      // command would never see this gate fire. This is the case the lesson
+      // way, rejecting a trip that is over her number. Both drivers hand it an
+      // EMPTY notebook today, so `budget: not evaluated` is the only verdict
+      // either `npm run trip` or tier 3 can produce, and a reader who ran only
+      // those would never see this gate fire. This is the case the lesson
       // points at when it says so.
       const tight: NotebookConstraints = { ...notebook, budget: money(1n, 'EUR') }
       const run = proposalRunner(

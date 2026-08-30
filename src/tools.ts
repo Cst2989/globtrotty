@@ -60,11 +60,18 @@ const HotelInput = z.object({
  * that decides. `runGates` re-parses the raw input with the real schema, so
  * this being wrong is a worse tool description and never a weaker gate. The
  * slot list is shared, not copied.
+ *
+ * The quantity bounds are the boundary's own, repeated here rather than left
+ * open. A published `z.int()` says every integer is well formed, and the
+ * boundary answers 0 or 17 with a structural provenance rejection carrying no
+ * source ids, so the one reply the model gets back cannot name the item it got
+ * wrong. Two numbers in a JSON schema cost nothing and the model never sends
+ * either value.
  */
 const ProposeInput = z.object({
   refs: z.array(z.object({
     sourceId: z.string().describe('The sourceId of a search result from THIS conversation, exactly as the search returned it'),
-    quantity: z.int().describe('Always 1. Every price here already covers the whole booking: a flight price covers the party, a hotel price covers the stay'),
+    quantity: z.int().positive().max(16).describe('Always 1. Every price here already covers the whole booking: a flight price covers the party, a hotel price covers the stay'),
     slot: z.enum(SLOT_NAMES).describe('Which part of the trip this item is'),
   })).min(1).max(24).describe('The items you propose, as references. There is no price field: the server reads every price back out of its own record of the search'),
 })

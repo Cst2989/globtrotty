@@ -1,3 +1,4 @@
+import { ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import type { Supplier } from '../src/supplier/types.js'
 import { itemForModel, mockRunner, TOOLS } from '../src/tools.js'
@@ -10,6 +11,28 @@ describe('tools', () => {
     // itself, and this is the one place a tool added by accident is caught.
     expect(TOOLS.map((t) => t.name)).toEqual(['search_flights', 'search_hotels', 'propose_itinerary'])
     for (const tool of TOOLS) expect(tool.input_schema.type).toBe('object')
+  })
+  it('publishes the quantity bounds the gate boundary actually enforces', () => {
+    // The published schema is documentation and `ProposalRefsSchema`
+    // (src/gates/rehydrateGate.ts) is the boundary that decides, so the two
+    // are two declarations of one shape and they have to agree on the bounds.
+    // A model reading a wider bound than the boundary keeps sends a quantity
+    // the boundary refuses structurally, and a structural refusal is a
+    // provenance violation carrying no source ids: the reply cannot name the
+    // item that was wrong. Published, it is a value the model never sends.
+    const propose = TOOLS.find((t) => t.name === 'propose_itinerary')!
+    const props = propose.input_schema.properties as {
+      refs: { items: { properties: Record<string, Record<string, unknown>> } }
+    }
+    const quantity = props.refs.items.properties.quantity!
+    expect(quantity.exclusiveMinimum).toBe(0)
+    expect(quantity.maximum).toBe(16)
+    // The boundary's own verdict on the two edges and on the largest value it
+    // still calls well formed, so this pins agreement rather than two numbers.
+    const proposal = (q: number) => ({ refs: [{ sourceId: 'flight-0-1', quantity: q, slot: 'flight' }] })
+    expect(ProposalRefsSchema.safeParse(proposal(0)).success).toBe(false)
+    expect(ProposalRefsSchema.safeParse(proposal(17)).success).toBe(false)
+    expect(ProposalRefsSchema.safeParse(proposal(16)).success).toBe(true)
   })
   it('returns offers as JSON', async () => {
     // 's0-b0' is a call id: mockRunner forwards it to a runner that ignores

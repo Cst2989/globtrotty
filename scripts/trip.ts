@@ -5,11 +5,13 @@ import { liveClient } from '../src/client.js'
 import { newConversation, turn } from '../src/conversation.js'
 import { connect } from '../src/db.js'
 import { loadEnv } from '../src/env.js'
+import { constraintsFromNotebook } from '../src/gates/pipeline.js'
+import { proposalRunner } from '../src/gates/runner.js'
 import { submitMessage } from '../src/handler.js'
 import { DEMO_USER, HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { notebookForPrompt } from '../src/notebook.js'
+import { emptyNotebook, notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { ledgerSink } from '../src/repo/spend.js'
 import { claimTurn } from '../src/repo/turns.js'
@@ -55,16 +57,32 @@ try {
     // was.
     const claim = await claimTurn(sql, turnId)
     if (!claim) throw new Error(`trip: turn ${turnId} is owned by another worker`)
+    // Her constraints through the one mapper, exactly as tier 3 derives them,
+    // and empty for the same reason: nothing on this branch stores a notebook,
+    // so budget, window and currency are all null here and every proposal this
+    // command produces records `budget` and `dates` as not evaluated with a
+    // reason. The day a conversation stores a notebook, this line reads that
+    // one and nothing else in the chain moves.
+    const notebook = constraintsFromNotebook(emptyNotebook())
     const result = await turn(
       newConversation(conversationId),
       text,
       liveClient(),
-      // The same corpus chain tier 3 runs (netlify/functions/run-turn-background.mts),
+      // The same chain tier 3 runs (netlify/functions/run-turn-background.mts),
       // minus the ledger: one process, no crash to resume from, and nothing
-      // here replays a tool call. What it shares is the part that matters for
-      // this lesson, that a search made against the live suppliers leaves rows
-      // in course.tool_results behind it.
-      corpusRunner(sql, claim, supplierRunner(suppliers)),
+      // here replays a tool call. The other three layers are not optional. The
+      // planning desk is handed `propose_itinerary` on every path (src/desks.ts)
+      // and is told in its prompt to use it, so a chain without `proposalRunner`
+      // answers the model "Unknown tool propose_itinerary" from the innermost
+      // link and this command can search but never propose. The corpus records
+      // what a search returned, and the searches ask for the SAME currency the
+      // gates expect, off the same constraints object, so a corpus and the
+      // currency gate cannot disagree by construction.
+      proposalRunner(
+        sql,
+        { conversationId, userId: DEMO_USER, turnId, notebook, now: () => new Date() },
+        corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+      ),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in
         // the whole course that calls a live model and spends real dollars,

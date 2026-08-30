@@ -118,6 +118,38 @@ describeDb('idempotency is keyed on the user, not the conversation', () => {
   })
 })
 
+/**
+ * Defect 4: a helper retired in prose, with nothing stopping the next caller.
+ *
+ * `offeredAmounts` (test/helpers/provenance.ts) is lesson 1.4's provenance
+ * check, kept as an exhibit after lesson 4.5 gave the currency question a real
+ * owner in `checkCurrency`. It compares whole-unit numbers and never reads the
+ * currency code beside them, which is exactly why test/provenance-v0.test.ts
+ * passes: a recorded reply quoting dollars, replayed against a EUR corpus.
+ *
+ * That is safe while the only files that call it are the two that exist to show
+ * what the old check waves through. A third caller would be a real check built
+ * on a comparison that cannot tell 464 EUR from 464 USD, and it would pass for
+ * the same reason. Lesson 4.4 already showed the shape of that: the helper
+ * moved out of one test file and immediately gained a second caller.
+ *
+ * Naming it counts, not only importing it, because naming it is how a new
+ * caller starts. Two files are exempt: this one, which has to name it to do the
+ * check, and the helper itself, which defines it.
+ */
+const RETIRED_CHECK = 'offeredAmounts'
+const RETIRED_CHECK_HELPER = 'test/helpers/provenance.ts'
+const RETIRED_CHECK_EXHIBITS = ['test/provenance-v0.test.ts', 'test/tampered-price.test.ts']
+
+describe('the retired provenance check keeps the two callers it is kept for', () => {
+  it('is named by its two exhibits and by no other test file', () => {
+    const callers = testFiles()
+      .filter((file) => file !== SELF && file !== RETIRED_CHECK_HELPER)
+      .filter((file) => readFileSync(path.join(REPO_ROOT, file), 'utf8').includes(RETIRED_CHECK))
+    expect(callers.sort()).toEqual(RETIRED_CHECK_EXHIBITS)
+  })
+})
+
 const OUTAGE_USER = randomUUID()
 
 /**
