@@ -86,10 +86,12 @@ export type SearchParams = FlightSearch | HotelSearch
  * `SupplierItem` would force every adapter to carry a field none of them can
  * populate meaningfully.
  *
- * Nullable because rows written before migration 0011 have `'{}'::jsonb` from
- * the column default rather than a real search — an empty object is not a
- * search, and the cashier must be able to tell "no search recorded" from "a
- * search with no filters" rather than re-quoting against a fabricated one.
+ * Nullable because the `search_params` column's own default is `'{}'::jsonb`
+ * — a legitimate value for a row written by something other than
+ * `recordResults` (a manual seed, a future bypass insert, a restore), and not
+ * a real search. An empty object is not a search, and the cashier must be
+ * able to tell "no search recorded" from "a search with no filters" rather
+ * than re-quoting against a fabricated one.
  */
 export type StoredItem = SupplierItem & {
   searchParams: SearchParams | null

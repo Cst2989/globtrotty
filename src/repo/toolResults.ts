@@ -10,10 +10,13 @@ type Row = {
 }
 
 /**
- * `search_params` is jsonb: whatever is in the column is `unknown`, and the
- * column default `'{}'` is a legitimate value that is not a search. A cast
- * would hand the cashier an object with no `kind` and let it re-quote against
- * nothing. Checking the discriminant is the whole guard.
+ * `search_params` is jsonb: whatever is in the column is `unknown`. This
+ * repository's only writer, `recordResults` below, always writes a real
+ * `SearchParams` value — but the column default `'{}'` is still a legitimate
+ * value for a row this function did not write (a manual seed, a future
+ * bypass insert, a restore), and it is not a search. A cast would hand the
+ * cashier an object with no `kind` and let it re-quote against nothing.
+ * Checking the discriminant is the whole guard.
  */
 function isSearchParams(v: unknown): v is SearchParams {
   return typeof v === 'object' && v !== null

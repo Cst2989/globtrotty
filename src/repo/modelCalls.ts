@@ -76,7 +76,7 @@ export async function recordModelCall(
      * as likely a drift vector as a weights change." Written only when
      * `capturePolicyFor` returns `'full'` — see the `redactedRequest` comment
      * below for why the cheap seats' truncated/sampled-out rows store NULL
-     * instead of a second, smaller copy of the same request.
+     * instead of a second copy of the same request.
      */
     requestShape: unknown
     /** What we asked the provider to do about thinking, e.g. 'adaptive'. */
