@@ -234,6 +234,17 @@ describeDb('tool_results repo', () => {
       // one call per item so the in-call dedup never collapses them). Fired
       // concurrently so postgres.js pipelines them on the one connection
       // instead of paying 500 network round trips serially.
+      //
+      // THIS DISCRIMINATES ONLY BECAUSE THE ROWS ARRIVE AS 500 SEPARATE
+      // STATEMENTS. Verified directly (whole-branch review): seeding the same
+      // 500 rows with ONE `insert ... select generate_series(...)` statement
+      // instead, all three forced plan shapes below agree on the same winner
+      // EVEN WITHOUT `id desc` on the query — the test would pass against the
+      // wrong implementation. A future refactor that batches this seeding
+      // loop into one statement for speed silently breaks this test's ability
+      // to catch a regression; if you do that, re-derive a seeding shape that
+      // still forces tie disagreement across plans before trusting this test
+      // again.
       const ROWS = 500
       await Promise.all(Array.from({ length: ROWS }, (_, i) => {
         const item = { ...template!, price: money(template!.price.minor + BigInt(i), 'EUR'), fetchedAt: same }
