@@ -1,33 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { minorUnitExponent } from '../src/money.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { handle } from '../src/router.js'
 import { mockRunner } from '../src/tools.js'
+import { offeredAmounts, quotedAmounts } from './helpers/provenance.js'
 import { replayClient } from './model/replay.js'
-
-/** Every amount in a reply that reads like money: "310 USD", "€420", "1,500 euros". */
-export function quotedAmounts(text: string): number[] {
-  const amounts: number[] = []
-  for (const match of text.matchAll(/(?:€|\$|USD|EUR)\s?(\d[\d,]*)|(\d[\d,]*)\s?(?:€|\$|USD|EUR|euros|dollars)/gi)) {
-    const raw = match[1] ?? match[2]
-    if (raw) amounts.push(Number(raw.replace(/,/g, '')))
-  }
-  return amounts
-}
-
-type WireOffer = { price: { minor: string; currency: string } }
-
-function offeredAmounts(trace: { content: string; isError: boolean }[]): Set<number> {
-  const amounts = new Set<number>()
-  for (const entry of trace) {
-    if (entry.isError) continue
-    for (const offer of JSON.parse(entry.content) as WireOffer[]) {
-      // The reply quotes whole units, the wire carries minor units.
-      amounts.add(Number(offer.price.minor) / 10 ** minorUnitExponent(offer.price.currency))
-    }
-  }
-  return amounts
-}
 
 describe('where the prices come from', () => {
   it('lesson one quoted prices that no tool returned', () => {

@@ -138,7 +138,10 @@ from a hash. One seam is open and the suite cannot see it: every search asks
 for `TRIP_CURRENCY`, so flights come back in euros, while the recorded reply
 `test/provenance-v0.test.ts` replays still quotes them in dollars, and that
 test's `offeredAmounts` compares whole-unit numbers without ever looking at a
-currency. Lesson 4.4 is what breaks that test on purpose and closes it.
+currency. Lesson 4.4 leaves that test exactly as lesson 1.4 wrote it and takes the
+weight off it instead: an offer stops carrying amounts at all, so no price a
+gate reads has been through a currency-blind comparison. The `currency` gate in
+lesson 4.5 is what judges a currency.
 
 Two suppliers are real from lesson 4.2. Flights come from Kiwi's MCP
 endpoint, which needs no key; hotels come from SearchApi's Google Hotels
@@ -156,10 +159,7 @@ hold now". Tier 3's driver and `npm run trip` run the same chain, so a run of
 either leaves its rows behind it and prints how many; the tests are what still
 search without recording, because they hold no claim to write under. The model
 still reads a trimmed view of the same search and the two are deliberately not
-the same object. What is missing is anything that MAKES the model use it: the
-offer it writes is still text with numbers in it, and lesson 1.4's provenance
-check still passes a price that came from the right conversation and the wrong
-item. Lesson 4.4 is where an offer becomes a list of references.
+the same object.
 
 The write is fenced like every other write a worker makes: `recordResults`
 takes the claim and appends only while the turn is still this worker's, so a
@@ -174,6 +174,22 @@ nothing prunes it; module 7's retention schedule is where that is answered. And
 row isolation is not enforced on it: the composite foreign key keeps a row
 attached to the right user, nothing else does, and the RLS worker role is
 lesson 5.7. Both are stated on the table itself, in `0010`.
+
+From lesson 4.4 an offer is a list of references. `ProposalRefsSchema`
+(src/gates/rehydrateGate.ts) accepts `{sourceId, quantity, slot}` and rejects
+any other key outright, and `rehydrateRefs` reads every field of every item back
+out of `course.tool_results` and throws away whatever the caller supplied, so
+there is no price field for a model to move or invent.
+`test/tampered-price.test.ts` holds both halves of that: the two offers that
+passed lesson 1.4's check, still passing it, and the same two offers refused by
+the schema.
+
+One hole is open and it is named in `src/supplier/types.ts` and in
+`src/gates/rehydrateGate.ts`: `quantity` is a number the model still controls,
+and a total is the sum of price times quantity. Nothing yet judges its value.
+Lesson 4.5's `checkTotals` is what closes it, and the answer is that for every
+supplier this branch ships, the price already covers the whole booking, so the
+only correct quantity is 1.
 
 ## What is next
 
