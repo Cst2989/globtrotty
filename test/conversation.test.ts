@@ -5,7 +5,6 @@ import { addUsage } from '../src/loop.js'
 import { costMicros, type Usage } from '../src/pricing.js'
 import { SpendUnconfirmedError } from '../src/repo/spend.js'
 import { SEATS } from '../src/seats.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { fakeClient, textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
@@ -25,7 +24,7 @@ const LOOP_USAGE: Usage = addUsage(
 describe('a conversation', () => {
   it('carries her lowered budget into the second turn', async () => {
     const client = replayClient('conversation-budget-drop')
-    const run = mockRunner(new MockSupplier())
+    const run = mockRunner()
     const first = await turn(newConversation(), HER_MESSAGE, client, run)
     expect(first.conversation.notebook.budget?.value.minor).toBe(150000n)
     // costMicros must cover every call this turn made: classify and extract
@@ -51,7 +50,7 @@ describe('a conversation', () => {
   // comment claims is closed.
   it('checks the ceiling before classify, so a capped account pays for nothing', async () => {
     const client = fakeClient([textMessage('should never be reached')])
-    const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), {
+    const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(), {
       readSpend: async () => (
         { conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros, dailyMicros: 0n, globalMicros: 0n }
       ),
@@ -70,7 +69,7 @@ describe('a conversation', () => {
   // unreached and her spinner never stopping.
   it('ends the turn instead of throwing when the first spend read cannot confirm', async () => {
     const client = fakeClient([textMessage('should never be reached')])
-    const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), {
+    const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(), {
       readSpend: async () => { throw new SpendUnconfirmedError('Cannot confirm conversation spend, fail closed, denying the request') },
     })
     expect(result.outcome).toBe('limit_reached')
@@ -83,7 +82,7 @@ describe('a conversation', () => {
   it('lets a plain Error from the first spend read propagate rather than denying on it', async () => {
     const client = fakeClient([textMessage('should never be reached')])
     await expect(
-      turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), {
+      turn(newConversation(), HER_MESSAGE, client, mockRunner(), {
         readSpend: async () => { throw new Error('boom') },
       }),
     ).rejects.toThrow('boom')

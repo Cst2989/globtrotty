@@ -61,7 +61,7 @@ export function compareMoney(a: Money, b: Money): -1 | 0 | 1 {
 /**
  * The display boundary: converting through a float here is fine because the
  * exact minor units travel beside this string wherever it matters (e.g.
- * `src/supplier/mock.ts`'s `offerForModel`), and this conversion is exact
+ * `src/tools.ts`'s `itemForModel`), and this conversion is exact
  * below 2^53 minor units, which every currency here is nowhere near.
  */
 export function formatMoney(m: Money): string {

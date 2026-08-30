@@ -6,7 +6,6 @@ import { HER_MESSAGE } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { beginToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn } from '../src/repo/turns.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -16,7 +15,7 @@ const USER = randomUUID()
 
 /** Counts supplier calls, the side effect a crash must not double, and keeps the last answer. */
 function countingRunner(): { run: ToolRunner; calls: number; lastContent: string } {
-  const inner = mockRunner(new MockSupplier())
+  const inner = mockRunner()
   const counter = {
     calls: 0,
     lastContent: '',

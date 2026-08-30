@@ -12,7 +12,7 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { ledgerSink } from '../src/repo/spend.js'
-import { MockSupplier } from '../src/supplier/mock.js'
+import { mockSuppliers } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 
 config({ path: '.env.local', override: false })
@@ -40,7 +40,7 @@ try {
       newConversation(conversationId),
       text,
       liveClient(),
-      mockRunner(new MockSupplier()),
+      mockRunner(mockSuppliers()),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in
         // the whole course that calls a live model and spends real dollars,

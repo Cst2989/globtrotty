@@ -115,6 +115,14 @@ database without one script's cleanup deleting the other's rows; the one thing
 it does NOT scope is `sweep()` itself, which is global by design and, on a
 shared database, requeues or fails every other user's stale turns too.
 
+The supplier port is a port and there is still only one thing behind it. From
+lesson 4.1 a `SupplierItem` says who quoted it, when, for how long it stays
+quotable and whether it can be checked again, and `MockSupplier` answers all
+four honestly for a supplier that invents its prices from a hash. Nothing yet
+stores what a search returned, so the only thing that can read a price is the
+model that was shown it, and the only thing that could check one is a caller
+holding the same object. Lesson 4.3 is where a search becomes a row.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

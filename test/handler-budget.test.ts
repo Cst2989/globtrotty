@@ -3,7 +3,6 @@ import type { Message } from '@anthropic-ai/sdk/resources/messages'
 import type { ModelClient } from '../src/client.js'
 import { newConversation, turn } from '../src/conversation.js'
 import { HER_MESSAGE } from '../src/her.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { textMessage, toolUseMessage } from './model/fake.js'
 
@@ -42,7 +41,7 @@ describe('her turn inside a request handler', () => {
     const client = slowClient(PER_CALL_MS, [label, requirements, search, answer])
     const finished = vi.fn()
     // Not awaited: the point of the test is what is true while it is still running.
-    void turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier())).then(finished)
+    void turn(newConversation(), HER_MESSAGE, client, mockRunner()).then(finished)
 
     await vi.advanceTimersByTimeAsync(HANDLER_BUDGET_MS)
     expect(finished).not.toHaveBeenCalled()

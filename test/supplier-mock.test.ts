@@ -1,20 +1,198 @@
-import { MockSupplier } from '../src/supplier/mock.js'
+import { MockSupplier, mockSuppliers } from '../src/supplier/mock.js'
+import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
+
+const search: FlightSearch = {
+  kind: 'flight', from: 'BER', to: 'FAO',
+  departureDate: '2026-09-19', returnDate: '2026-09-26', flexDays: 0,
+  adults: 2, children: 1, infants: 0, cabinClass: 'Economy',
+  currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+}
+const stay: HotelSearch = {
+  kind: 'hotel', query: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26',
+  adults: 2, currency: 'EUR',
+}
 
 describe('MockSupplier', () => {
-  const supplier = new MockSupplier()
-  const query = { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: '2026-09-25', adults: 2, children: 1 }
-  it('returns the same three flights for the same query', () => {
-    expect(supplier.searchFlights(query)).toEqual(supplier.searchFlights(query))
-    expect(supplier.searchFlights(query)).toHaveLength(3)
+  it('is deterministic: the same params yield the same ids and prices', async () => {
+    const a = await new MockSupplier({ kind: 'flight' }).search(search)
+    const b = await new MockSupplier({ kind: 'flight' }).search(search)
+    expect(a.map((i) => i.sourceId)).toEqual(b.map((i) => i.sourceId))
+    expect(a.map((i) => i.price.minor)).toEqual(b.map((i) => i.price.minor))
+    expect(a).toHaveLength(3)
   })
-  it('changes the fares when the date changes', () => {
-    const other = supplier.searchFlights({ ...query, departureDate: '2026-09-19' })
-    expect(other.map((o) => o.price.minor)).not.toEqual(supplier.searchFlights(query).map((o) => o.price.minor))
+
+  it('varies with the params, so two searches are not silently identical', async () => {
+    const a = await new MockSupplier({ kind: 'flight' }).search(search)
+    const b = await new MockSupplier({ kind: 'flight' }).search({ ...search, to: 'LIS' })
+    expect(a[0]!.sourceId).not.toBe(b[0]!.sourceId)
+    expect(a.map((i) => i.price.minor)).not.toEqual(b.map((i) => i.price.minor))
   })
-  it('prices hotels per night in euros', () => {
-    const hotels = supplier.searchHotels({ city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 })
-    expect(hotels.every((h) => h.price.currency === 'EUR')).toBe(true)
-    expect(hotels[0]!.price.minor % 100n).toBe(0n)     // whole euros in the mock
-    expect(hotels[0]?.detail).toContain('7 nights')
+
+  /**
+   * The load-bearing one. `test/fixtures/model/loop-portugal.json` holds a
+   * recorded reply quoting 147, 278, 388 and eleven other amounts, and
+   * `test/provenance-v0.test.ts` asserts every amount in that reply appears in
+   * a tool result of the same run. The replay client returns the recorded
+   * reply whatever the request, so a change to these numbers changes only one
+   * side of that comparison, and there is no key in CI to re-record the other.
+   *
+   * These are the exact minor units lesson 1.4's mock produced for the two
+   * searches that fixture drove. They are pinned here, in the supplier's own
+   * test, so that a change to the price derivation fails with a message about
+   * the price derivation rather than as a mysterious provenance failure three
+   * files away.
+   */
+  it('still prices the recorded fixture searches exactly as lesson 1.4 did', async () => {
+    const flights = await new MockSupplier({ kind: 'flight' }).search(search)
+    expect(flights.map((i) => i.price.minor)).toEqual([38800n, 14700n, 27800n])
+
+    const hotels = await new MockSupplier({ kind: 'hotel' }).search(stay)
+    expect(hotels.map((i) => i.price.minor)).toEqual([72100n, 84000n, 69300n])
+  })
+
+  it('prices in the requested currency', async () => {
+    const items = await new MockSupplier({ kind: 'flight' }).search({ ...search, currency: 'GBP' })
+    expect(items.every((i) => i.price.currency === 'GBP')).toBe(true)
+  })
+
+  /**
+   * The deliberately dishonest supplier, and the only reason it exists: lesson
+   * 4.5's currency gate needs a set of items that mix currencies, and the only
+   * honest way to produce one from a mock that otherwise answers in the
+   * currency it was asked for is to configure one that does not.
+   */
+  it('can be configured to answer in a currency nobody asked for', async () => {
+    const items = await new MockSupplier({ kind: 'hotel', currency: 'USD' }).search(stay)
+    expect(stay.currency).toBe('EUR')
+    expect(items.every((i) => i.price.currency === 'USD')).toBe(true)
+  })
+
+  it('quotes an existing id as ok with the same price', async () => {
+    const s = new MockSupplier({ kind: 'flight' })
+    const [first] = await s.search(search)
+    const q = await s.quote(first!.sourceId, search)
+    expect(q.status).toBe('ok')
+    if (q.status === 'ok') expect(q.item.price.minor).toBe(first!.price.minor)
+  })
+
+  it('quotes an id it has never searched by re-running the search first', async () => {
+    // A fresh instance has no memory, exactly like a fresh process. A real
+    // re-quote re-runs the stored search and finds by native id; this must do
+    // the same, or a cashier in a resumed turn would call every price gone.
+    const searched = await new MockSupplier({ kind: 'flight' }).search(search)
+    const fresh = new MockSupplier({ kind: 'flight' })
+    const q = await fresh.quote(searched[0]!.sourceId, search)
+    expect(q.status).toBe('ok')
+  })
+
+  it('quotes an unknown id as gone', async () => {
+    const s = new MockSupplier({ kind: 'flight' })
+    await s.search(search)
+    expect((await s.quote('no-such-id', search)).status).toBe('gone')
+  })
+
+  it('can be configured to move a price between search and quote', async () => {
+    const s = new MockSupplier({ kind: 'flight', quoteDriftMinor: 5000n })
+    const [first] = await s.search(search)
+    const q = await s.quote(first!.sourceId, search)
+    expect(q.status).toBe('ok')
+    if (q.status === 'ok') expect(q.item.price.minor).toBe(first!.price.minor + 5000n)
+  })
+
+  it('can be configured to fail a quote, because unknown is not unchanged', async () => {
+    const s = new MockSupplier({ kind: 'flight', quoteMode: 'throw' })
+    const [first] = await s.search(search)
+    await expect(s.quote(first!.sourceId, search)).rejects.toThrow(/quote failed/i)
+
+    const u = new MockSupplier({ kind: 'flight', quoteMode: 'unavailable' })
+    const [f2] = await u.search(search)
+    expect((await u.quote(f2!.sourceId, search)).status).toBe('unavailable')
+
+    const g = new MockSupplier({ kind: 'flight', quoteMode: 'gone' })
+    const [f3] = await g.search(search)
+    expect((await g.quote(f3!.sourceId, search)).status).toBe('gone')
+  })
+
+  it('can declare itself non-requotable', () => {
+    expect(new MockSupplier({ kind: 'flight', mayRequote: false }).capabilities.mayRequote).toBe(false)
+    expect(new MockSupplier({ kind: 'flight' }).capabilities.mayRequote).toBe(true)
+  })
+
+  it('stamps fetchedAt from the injected clock, not wall time', async () => {
+    const at = new Date('2026-08-16T12:00:00Z')
+    const items = await new MockSupplier({ kind: 'flight', now: () => at }).search(search)
+    expect(items.every((i) => i.fetchedAt.getTime() === at.getTime())).toBe(true)
+    expect(items.every((i) => i.ttlSeconds === 900)).toBe(true)
+  })
+
+  it('produces hotel items with nights derived from the date range', async () => {
+    const items = await new MockSupplier({ kind: 'hotel' }).search(stay)
+    const detail = items[0]!.detail
+    expect(detail.kind).toBe('hotel')
+    if (detail.kind !== 'hotel') throw new Error('unreachable')
+    expect(detail.nights).toBe(7)
+    expect(detail.checkIn).toBe('2026-09-19')
+  })
+
+  it('gives a flight one flight number per segment, in route order', async () => {
+    const items = await new MockSupplier({ kind: 'flight' }).search(search)
+    for (const item of items) {
+      const detail = item.detail
+      if (detail.kind !== 'flight') throw new Error('unreachable')
+      // One number per hop, so lesson 4.6 can tell a two-segment itinerary from
+      // a one-segment itinerary that happens to cost the same.
+      expect(detail.outbound.flightNumbers).toHaveLength(detail.outbound.route.length - 1)
+      // route is [from, ...stopovers, to], so a leg with n stops has n + 2
+      // airports and n + 1 segments.
+      expect(detail.outbound.stops).toBe(detail.outbound.route.length - 2)
+      expect(detail.inbound).not.toBeNull()
+    }
+  })
+
+  it('leaves inbound null for a one-way search', async () => {
+    const items = await new MockSupplier({ kind: 'flight' }).search({ ...search, returnDate: null })
+    const detail = items[0]!.detail
+    if (detail.kind !== 'flight') throw new Error('unreachable')
+    expect(detail.inbound).toBeNull()
+  })
+
+  it('rejects a search whose params.kind does not match the configured kind', async () => {
+    await expect(new MockSupplier({ kind: 'hotel' }).search(search))
+      .rejects.toThrow(/hotel.*flight|flight.*hotel/i)
+  })
+
+  it('rejects a quote whose params.kind does not match the configured kind', async () => {
+    await expect(new MockSupplier({ kind: 'flight' }).quote('anything', stay))
+      .rejects.toThrow(/hotel.*flight|flight.*hotel/i)
+  })
+
+  it('honours count, so a test can ask for more or fewer than the default three', async () => {
+    expect(await new MockSupplier({ kind: 'flight', count: 1 }).search(search)).toHaveLength(1)
+    expect(await new MockSupplier({ kind: 'flight', count: 5 }).search(search)).toHaveLength(5)
+  })
+})
+
+describe('mockSuppliers', () => {
+  it('builds one supplier per kind, each declaring its own kind', () => {
+    const pair = mockSuppliers()
+    expect(pair.flight.kind).toBe('flight')
+    expect(pair.hotel.kind).toBe('hotel')
+    expect(pair.flight.name).toBe('mock')
+  })
+
+  it('passes per-kind configuration through', async () => {
+    const pair = mockSuppliers({ hotel: { currency: 'USD' }, flight: { mayRequote: false } })
+    expect(pair.flight.capabilities.mayRequote).toBe(false)
+    expect(pair.hotel.capabilities.mayRequote).toBe(true)
+    const hotels = await pair.hotel.search(stay)
+    expect(hotels.every((i) => i.price.currency === 'USD')).toBe(true)
+  })
+
+  it('does not price the same amounts as a real one would, and says so in its name', async () => {
+    // `supplier` is what a corpus row records and what lesson 4.6 uses to pick
+    // a URL template, so a mock item must be recognisable as one.
+    const items = await mockSuppliers().flight.search(search)
+    expect(items.every((i) => i.supplier === 'mock')).toBe(true)
+    expect(items.every((i) => i.bookingUrl?.startsWith('https://example.invalid/'))).toBe(true)
   })
 })

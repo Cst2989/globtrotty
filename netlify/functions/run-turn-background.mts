@@ -6,7 +6,7 @@ import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { MockSupplier } from '../../src/supplier/mock.js'
+import { mockSuppliers } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../../src/tools.js'
 import { runTurn, type Agent } from '../../src/worker.js'
@@ -71,7 +71,7 @@ export default async (req: Request): Promise<Response> => {
     // at the provider by the time this sink runs, and only refuses the NEXT
     // one once a fence is discovered.
     const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
-    const baseRunner = ledgerRunner(sql, claim, mockRunner(new MockSupplier()))
+    const baseRunner = ledgerRunner(sql, claim, mockRunner(mockSuppliers()))
     const runner: ToolRunner = async (name, input, callId) => {
       // A tool call is the opposite case: checked BEFORE it starts, so a
       // fence refuses to run the tool at all rather than recording one that

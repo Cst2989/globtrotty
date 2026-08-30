@@ -5,7 +5,6 @@ import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { claimTurn, completeTurn, failTurn, loadTurnInput, releaseForContinuation } from '../src/repo/turns.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { handlerDeps } from './helpers/turns.js'
@@ -115,7 +114,7 @@ describeDb('completeTurn, the way the worker loop calls it', () => {
       const input = (await loadTurnInput(sql, submitted.turnId!))!
       const result = await turn(
         newConversation(input.conversationId), input.message,
-        fakeClient([textMessage('never reached')]), mockRunner(new MockSupplier()),
+        fakeClient([textMessage('never reached')]), mockRunner(),
         {
           readSpend: async () => ({
             conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros,
@@ -154,7 +153,7 @@ describeDb('completeTurn, the way the worker loop calls it', () => {
       let reads = 0
       const result = await turn(
         newConversation(input.conversationId), input.message,
-        fakeClient([textMessage('never reached')]), mockRunner(new MockSupplier()),
+        fakeClient([textMessage('never reached')]), mockRunner(),
         {
           readSpend: async () => {
             reads += 1
@@ -191,7 +190,7 @@ describeDb('continue_later, the way the worker loop handles it', () => {
       // loop hands back on its very first decision, before any model call.
       const result = await turn(
         newConversation(input.conversationId), input.message,
-        fakeClient([textMessage('never reached')]), mockRunner(new MockSupplier()),
+        fakeClient([textMessage('never reached')]), mockRunner(),
         { deadlineMs: Date.now() },
       )
       expect(result.outcome).toBe('continue_later')

@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs'
 import { minorUnitExponent } from '../src/money.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { handle } from '../src/router.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { replayClient } from './model/replay.js'
 
@@ -39,7 +38,7 @@ describe('where the prices come from', () => {
 
   it('every price in the reply appears in a tool result of the same run', async () => {
     const client = replayClient('loop-portugal')
-    const handled = await handle(HER_MESSAGE, client, mockRunner(new MockSupplier()))
+    const handled = await handle(HER_MESSAGE, client, mockRunner())
     client.done()
     expect(handled.toolTrace.length).toBeGreaterThan(0)
     const offered = offeredAmounts(handled.toolTrace)

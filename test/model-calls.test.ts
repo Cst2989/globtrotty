@@ -6,7 +6,6 @@ import { loadDesk } from '../src/desks.js'
 import { costMicros } from '../src/pricing.js'
 import { memorySink, pgSink } from '../src/repo/model-calls.js'
 import { SEATS } from '../src/seats.js'
-import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -41,7 +40,7 @@ describe('a recorded turn', () => {
   it('writes one row per model call, on the seat that made it', async () => {
     const sink = memorySink()
     const client = fakeClient([label, requirements, search, answer])
-    await turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), { record: sink })
+    await turn(newConversation(), HER_MESSAGE, client, mockRunner(), { record: sink })
 
     expect(sink.calls).toHaveLength(4)
     // Classification and extraction are cheap-seat calls; the loop runs on the driver.
@@ -72,7 +71,7 @@ describe('a recorded turn', () => {
       const turnId = 'turn-that-was-already-paid-for'
       const record = pgSink(throwingSql(), { userId: USER, conversationId: null, turnId })
       const client = fakeClient([label, requirements, search, answer])
-      const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(new MockSupplier()), { record })
+      const result = await turn(newConversation(), HER_MESSAGE, client, mockRunner(), { record })
 
       // The model calls already happened and were already paid for; a row
       // that fails to write must not take a finished turn down with it.
@@ -96,7 +95,7 @@ describeDb('pgSink', () => {
       })
       const client = fakeClient([label, requirements, search, answer])
       const result = await turn(newConversation(submitted.conversationId), HER_MESSAGE, client,
-        mockRunner(new MockSupplier()), { record })
+        mockRunner(), { record })
 
       const rows = await sql`select * from course.model_calls
                               where conversation_id = ${submitted.conversationId}
