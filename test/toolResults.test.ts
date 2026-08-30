@@ -49,7 +49,16 @@ describeDb('tool_results repo', () => {
   // implementation — exactly the implementation this test exists to catch.
   // Fixed by giving the re-recorded item an explicitly later `fetchedAt` and
   // asserting strict `toBeGreaterThan`.
-  it('is idempotent on re-record and refreshes the price and fetched_at', async () => {
+  // CORRECTION (task-1 dispatch): this test used to be named "is idempotent on
+  // re-record and refreshes the price and fetched_at" — a title that describes
+  // the pre-migration-0011 upsert, which is the bug backlog 2.1 exists to fix.
+  // A second `recordResults` call is NOT idempotent: it appends a new row.
+  // The old assertions here (newest price/fetchedAt via `rehydrate`) also
+  // passed unchanged against an overwrite implementation, since `rehydrate`
+  // takes newest-per-id either way — they never actually distinguished
+  // append-only from overwrite. Added the row-count assertion below, which
+  // does: it is 2 under append-only and would be 1 under the old upsert.
+  it('appends a new row on re-record; rehydrate still returns the newest', async () => {
     await withTestDb(async (sql) => {
       const { userId, conversationId } = await convo(sql, '02')
       const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
@@ -64,6 +73,11 @@ describeDb('tool_results repo', () => {
       await expect(recordResults(sql, {
         conversationId, userId, turnId: null, params, items: [moved],
       })).resolves.toBe(1)
+
+      const all = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      expect(all[0]!.n).toBe(2)
 
       const after = (await rehydrate(sql, conversationId, [item!.sourceId])).get(item!.sourceId)!
       expect(after.price.minor).toBe(before.price.minor + 1000n)
@@ -150,6 +164,60 @@ describeDb('tool_results repo', () => {
     await withTestDb(async (sql) => {
       const { conversationId } = await convo(sql, '06')
       expect((await rehydrate(sql, conversationId, [])).size).toBe(0)
+    })
+  })
+
+  it('keeps every fetch, and rehydrates the newest per source_id', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '09')
+      const older = new Date('2026-08-01T10:00:00Z')
+      const newer = new Date('2026-08-02T10:00:00Z')
+      const [item] = await new MockSupplier({ kind: 'flight', now: () => older }).search(params)
+      const first = { ...item!, price: money(100_00n, 'EUR'), fetchedAt: older }
+      const second = { ...item!, price: money(190_00n, 'EUR'), fetchedAt: newer }
+
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [first] })
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [second] })
+
+      // BOTH fetches survive — this is the append-only property.
+      const all = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      expect(all[0]!.n).toBe(2)
+
+      // The historical price is still readable. This is what the upsert destroyed.
+      const prices = await sql<{ price_minor: string }[]>`
+        select price_minor from tool_results
+         where conversation_id = ${conversationId} and source_id = ${item!.sourceId}
+         order by fetched_at asc`
+      expect(prices.map((r) => r.price_minor)).toEqual(['10000', '19000'])
+
+      // The gate still sees exactly one item, and it is the newest.
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      expect(got.size).toBe(1)
+      expect(got.get(item!.sourceId)!.price.minor).toBe(190_00n)
+      expect(got.get(item!.sourceId)!.fetchedAt.toISOString()).toBe(newer.toISOString())
+    })
+  })
+
+  it('rehydrates deterministically when two fetches share a fetched_at', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '10')
+      const same = new Date('2026-08-03T10:00:00Z')
+      const [item] = await new MockSupplier({ kind: 'flight', now: () => same }).search(params)
+      const first = { ...item!, price: money(100_00n, 'EUR'), fetchedAt: same }
+      const second = { ...item!, price: money(200_00n, 'EUR'), fetchedAt: same }
+
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [first] })
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [second] })
+
+      // Ten reads must all agree. Without the `id desc` tiebreak this is a coin flip.
+      const seen = new Set<string>()
+      for (let i = 0; i < 10; i++) {
+        const got = await rehydrate(sql, conversationId, [item!.sourceId])
+        seen.add(got.get(item!.sourceId)!.price.minor.toString())
+      }
+      expect(seen.size).toBe(1)
     })
   })
 })

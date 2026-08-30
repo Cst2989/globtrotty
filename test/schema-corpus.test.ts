@@ -23,7 +23,16 @@ describeDb('0004 corpus schema', () => {
     })
   })
 
-  it('rejects a duplicate (conversation_id, source_id)', async () => {
+  // CORRECTION (task-1 dispatch): this test used to be named "rejects a
+  // duplicate (conversation_id, source_id)" and asserted that a second insert
+  // for the same pair threw a unique-violation. That was asserting backlog
+  // 2.1's bug: migration 0004's `unique (conversation_id, source_id)` is what
+  // forced `recordResults` into an upsert, and every re-quote silently
+  // destroyed the previous price for that id. Migration 0011 (spec §6:
+  // `tool_results` is "untrimmed, append-only") drops that constraint, so a
+  // duplicate `(conversation_id, source_id)` is no longer an error — it is
+  // exactly what a second fetch of the same id is supposed to produce.
+  it('allows a duplicate (conversation_id, source_id) — append-only per migration 0011', async () => {
     await withTestDb(async (sql) => {
       const userId = '00000000-0000-4000-8000-000000000002'
       const [c] = await sql`insert into conversations (user_id) values (${userId}) returning id`
@@ -34,7 +43,12 @@ describeDb('0004 corpus schema', () => {
         values (${c!.id}, ${userId}, 'DUP', 'mock', 'hotel', 'H',
                 ${(100n).toString()}, 'EUR', 'total', 900, ${sql.json({})})`
       await ins()
-      await expect(ins()).rejects.toThrow(/duplicate key|unique/i)
+      await expect(ins()).resolves.toBeDefined()
+
+      const rows = await sql<{ n: number }[]>`
+        select count(*)::int as n from tool_results
+         where conversation_id = ${c!.id} and source_id = 'DUP'`
+      expect(rows[0]!.n).toBe(2)
     })
   })
 
