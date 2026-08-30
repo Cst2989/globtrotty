@@ -69,18 +69,20 @@ export type ClassifiedReason =
 /**
  * WHAT `retryable` DOES NOT MEAN.
  *
- * Nothing in this harness retries a classified failure, and nothing did before
- * this classifier existed. `failTurn` sets `status = 'failed'`
- * (src/repo/turns.ts), and the sweeper only ever considers `'queued'` or
- * `'running'` rows (src/sweeper.ts), so every classified failure is terminal,
- * whatever this flag says. `retryable: true` on a row means "this error was the
- * kind worth retrying", NOT "this turn was retried".
+ * Nothing RE-RUNS a failure once it has been recorded. `failTurn` sets
+ * `status = 'failed'` (src/repo/turns.ts), and the sweeper only ever considers
+ * `'queued'` or `'running'` rows (src/sweeper.ts), so a classified failure is
+ * terminal whatever this flag says. `retryable: true` on a row means "this
+ * error was the kind worth trying again", NOT "this turn was tried again".
  *
- * The flag is advice for the model client plan 3 brings (honour Retry-After,
- * back off, give up) and for whoever decides (deliberately, and not by
- * inheriting an assumption from this comment) whether the harness should ever
- * requeue a failed turn. The taxonomy exists so that decision CAN be made; it
- * does not make it.
+ * The one reader of the flag is `withRetry` (src/retry.ts, lesson 3.6), and it
+ * runs strictly EARLIER than any of that: it tries the same step again, honours
+ * `Retry-After`, backs off with jitter and gives up, all before the failure is
+ * classified onto a row at all. By the time a reason reaches `fail_reason`,
+ * whatever retrying was going to happen already has. Whether the harness should
+ * ever requeue a turn already recorded as failed is still nobody's decision but
+ * the person who takes it; the taxonomy exists so it CAN be taken, and does not
+ * take it.
  */
 export type Classification = { retryable: boolean; reason: ClassifiedReason }
 
@@ -98,9 +100,10 @@ const REFUSED: Classification = { retryable: false, reason: 'refused' }
 /**
  * FAIL CLOSED. An error we cannot name is NOT retryable.
  *
- * Read `retryable` as advice to a caller that does not exist yet; see the note
- * on WHAT `retryable` DOES NOT MEAN, below. The question this answers is what a
- * future retry mechanism should be told about an error nobody has classified.
+ * `withRetry` (src/retry.ts) reads this flag and does exactly what it says, so
+ * the question this answers is what the retry helper is told about an error
+ * nobody has classified; see the note on WHAT `retryable` DOES NOT MEAN, below,
+ * for what it still does not authorise.
  *
  * Both directions cost something, so the choice is which cost to prefer. This
  * bucket is the one that catches OUR OWN bugs: a TypeError is deterministic, so

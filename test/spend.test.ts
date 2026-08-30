@@ -217,7 +217,10 @@ describeDb('fencedModelCallSink', () => {
       await sink(facts)                                  // not yet fenced: records and returns
       controller.abort(new Error('fenced mid-turn'))
       await expect(sink({ ...facts, costMicros: 999n })).rejects.toThrow('fenced mid-turn')
-      const rows = await sql`select cost_micros from course.model_calls where conversation_id = ${c!.id} order by created_at`
+      // By seq, never created_at: both rows carry the same
+      // transaction_timestamp() inside withTestDb, so ordering by the clock
+      // leaves the order to the planner (0002's own comment says so).
+      const rows = await sql`select cost_micros from course.model_calls where conversation_id = ${c!.id} order by seq`
       // Each call to this sink represents one call that already happened at
       // the provider (that is `callAndRecord`'s own contract, src/metered.ts),
       // so both are recorded here; the fence's job is to stop a THIRD call

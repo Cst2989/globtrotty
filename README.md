@@ -78,7 +78,7 @@ turn whose worker went silent or that nothing ever started, fails a turn that
 has used up its attempts and tells her so, and fails a turn that has no message
 to run so her conversation is not held shut by a turn nobody can execute.
 
-"Went silent" is a real condition from this lesson on, because the worker loop
+"Went silent" is a real condition from lesson 3.6 on, because the worker loop
 stamps `heartbeat_at` every twenty-five seconds while a step runs. A turn whose
 worker keeps ticking is left alone however long it runs; a turn whose beat
 stops is requeued ninety seconds later. The fencing token keeps a dead
@@ -93,15 +93,15 @@ model and tool calls) only stops at its NEXT call boundary, not mid-call. One
 model or tool call already in flight when the fence lands still finishes and
 is billed once. Threading the signal all the way through module 1's
 `TurnOptions`, so a call already in flight could be cancelled outright, is
-parked rather than done this lesson.
+parked rather than done in module 3.
 
 The attempt count is the sharper half of that same story, and it is history
-now rather than an open cost: before this lesson, a requeue advanced
+now rather than an open cost: before lesson 3.6, a requeue advanced
 `attempts`, and the worker re-invoked for the reissued turn advanced it again
 when it claimed, so a live long turn with no ticking heartbeat spent two of
 its five attempts per ninety-second tick rather than one, and could reach
 `crash_loop` in about half the wall clock it otherwise would, thread and all,
-while workers were still running it. Both costs closed when this lesson's
+while workers were still running it. Both costs closed when lesson 3.6's
 worker loop started ticking a heartbeat: a live turn's own beats now keep it
 out of the sweeper's stale check entirely, so neither the requeue nor its
 attempt cost is paid by a turn that is simply still running.

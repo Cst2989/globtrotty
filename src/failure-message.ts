@@ -2,8 +2,8 @@
  * What she reads when a turn ends without an answer for a reason that is ours,
  * not hers. One sentence, in one place, for the same reason the capped sentences
  * live in one place (src/limit-message.ts): the sweeper writes it when it reaps a
- * crash loop, and lesson 3.7 makes the worker's own crash handler write the same
- * one, so a failure looks the same to her wherever it was noticed.
+ * crash loop, and lesson 3.6's worker loop makes its own crash handler write the
+ * same one, so a failure looks the same to her wherever it was noticed.
  *
  * It says what happened and what to do, and it does not apologise on behalf of a
  * system she cannot see. It also says the money part, because a turn that

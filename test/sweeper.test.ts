@@ -2,13 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { FencedError, HEARTBEAT_STALE, MAX_ATTEMPTS, claimTurn, heartbeat } from '../src/repo/turns.js'
 import { sweep, QUEUED_STALE } from '../src/sweeper.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 
 const USER = randomUUID()
-const deps = (sql: postgres.Sql) => ({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} })
 
 async function conversation(sql: postgres.Sql): Promise<string> {
   const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
@@ -50,7 +49,7 @@ describeDb('the two abandoned turns module 2 handed over', () => {
 
       // And she cannot start a new one, because this turn holds the live slot.
       await sql`update course.turns set status = 'queued' where id = ${turnId}`
-      const again = await submitMessage(deps(sql), {
+      const again = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId, message: 'anything at all', idempotencyKey: 's0-retry',
       })
       expect(again.status).toBe('busy')
@@ -87,6 +86,33 @@ describeDb('sweep', () => {
       expect(out.requeued).toContain(turnId)
       const [t] = await sql`select status from course.turns where id = ${turnId}`
       expect(t!.status).toBe('queued')
+    })
+  })
+
+  // The row claimTurn can already reclaim (test/lease.test.ts, "reclaims a
+  // running turn whose heartbeat was never set"). The sweeper has to agree, or
+  // a running turn with no beat is reachable by a claim that nothing ever
+  // makes: the running arm's comparison is NULL, the other two arms want
+  // 'queued', so nothing requeues it, nothing re-invokes a worker for it, its
+  // attempts never move and the crash-loop arm never fires either. It holds
+  // turns_one_active_per_conversation shut and her conversation on 'working'
+  // with no ending, which is the hole lesson 3.5 exists to close.
+  it('requeues a running turn whose heartbeat was never stamped', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await conversation(sql)
+      const [t] = await sql`
+        insert into course.turns (conversation_id, user_id, idempotency_key, status, attempts,
+                                  queued_at, started_at, heartbeat_at)
+        values (${cid}, ${USER}, 'w-nobeat', 'running', 1,
+                now() - make_interval(secs => ${HEARTBEAT_STALE + 60}),
+                now() - make_interval(secs => ${HEARTBEAT_STALE + 60}),
+                null)
+        returning id`
+      const turnId = t!.id as string
+      const out = await sweep(sql)
+      expect(out.requeued).toContain(turnId)
+      const [row] = await sql`select status from course.turns where id = ${turnId}`
+      expect(row!.status).toBe('queued')
     })
   })
 
@@ -225,7 +251,7 @@ describeDb('sweep', () => {
       // slot is what gates her, and this reap released it. Mirrors the stalled
       // test below, so TURN_FAILED_MESSAGE's last sentence, "Please send it
       // again", is a tested promise here too.
-      const again = await submitMessage(deps(sql), {
+      const again = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: cid, message: 'anything at all', idempotencyKey: 'w6-retry',
       })
       expect(again.status).toBe('queued')
@@ -309,7 +335,7 @@ describeDb('sweep', () => {
       expect(msgs).toHaveLength(0)          // nothing was invented to say
 
       // The point of all of it: she can start a turn again.
-      const next = await submitMessage(deps(sql), {
+      const next = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: cid, message: 'anything at all', idempotencyKey: 'w8-next',
       })
       expect(next.status).toBe('queued')

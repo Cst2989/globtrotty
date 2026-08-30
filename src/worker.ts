@@ -46,14 +46,35 @@ export type AgentContext = {
 }
 
 /**
+ * What one step cost, and whether the harness still has to bill it.
+ *
+ * `costMicros` means the same thing on every kind of step: what THIS step
+ * spent. `runTurn` accumulates it and whichever exit fires writes the total to
+ * `turns.spend_usd_micros`, so that column answers "what did this turn cost"
+ * whatever kind of agent ran it.
+ *
+ * `alreadyRecorded` answers a separate question: has this money reached
+ * `course.conversations` and `course.daily_usage` yet? A fake agent
+ * (`echoAgent`, and the tests) meters itself and writes nowhere, so the
+ * harness records it through `recordSpend`. Tier 3's driver bills every model
+ * call to both ledgers through `ledgerSink` (lesson 2.6) as it makes it, so it
+ * reports what it spent and sets this flag, and the harness counts the money
+ * for the turn without charging the conversation for it twice. That driver
+ * reported `0n` instead until lesson 3.7's whole-branch review: the two
+ * ledgers stayed right and `turns.spend_usd_micros` read as free for every
+ * turn tier 3 had ever run.
+ */
+type StepCost = { costMicros: bigint; alreadyRecorded?: boolean }
+
+/**
  * One move. The harness knows these four and nothing about what produced them,
  * which is why the whole of module 3 can be proved without a model: a fake
  * agent and a real agent are the same shape.
  */
 export type AgentStep =
-  | { kind: 'message'; text: string; costMicros: bigint }
-  | { kind: 'tool'; callId: string; name: string; run: (signal: AbortSignal) => Promise<unknown>; costMicros: bigint }
-  | { kind: 'fail'; reason: FailReason; text: string | null; costMicros: bigint }
+  | ({ kind: 'message'; text: string } & StepCost)
+  | ({ kind: 'tool'; callId: string; name: string; run: (signal: AbortSignal) => Promise<unknown> } & StepCost)
+  | ({ kind: 'fail'; reason: FailReason; text: string | null } & StepCost)
   /**
    * The driver's OWN budget ran out mid-step, not the harness's. Tier 3's
    * `turn()` carries its own deadline-aware loop (src/loop.ts) independent of
@@ -75,8 +96,14 @@ export type AgentStep =
    * lesson doing before this type existed; module 5, which moves the
    * driver's own steps inside the harness, is where a continuation resumes
    * instead of restarting.
+   *
+   * It carries a cost like every other step, because a restart is not free:
+   * whatever the driver spent before its own budget ran out has to reach
+   * `turns.spend_usd_micros` through the hand-back
+   * (`releaseForContinuation`), or a turn that continued three times would
+   * report only what its last attempt spent.
    */
-  | { kind: 'continue_later' }
+  | ({ kind: 'continue_later' } & StepCost)
 
 export type Agent = (ctx: AgentContext) => Promise<AgentStep>
 
@@ -148,15 +175,19 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // file is worth reading with that in mind. Ending with something for her to
     // read: this catch, the two `limit_reached` exits (which write
     // `limitReachedMessage` instead, because a ceiling is her news rather than
-    // ours), an agent's own `fail` step when it supplies text, and of course a
-    // completed turn. Ending with nothing in her thread, every one of which sets
-    // `conversations.status = 'failed'` and so stops her spinner on an empty
-    // conversation: `continueLater`'s `deadline_exceeded`, the `stop` branch for
-    // any reason other than `limit_reached`, and `ambiguous_tool_call`. Those
-    // three are not oversights this lesson is fixing, and they are not covered
-    // by the guarantee above either; closing them is a later lesson's, and until
-    // then this comment is the honest list rather than a claim that every failed
-    // turn says something.
+    // ours), an agent's own `fail` step when it supplies text, and a completed
+    // turn whose agent had an answer to give. Ending with nothing in her
+    // thread: `continueLater`'s `deadline_exceeded`, the `stop` branch for any
+    // reason other than `limit_reached`, `ambiguous_tool_call`, and a completed
+    // turn whose text was blank, since `completeTurn` writes no row for a null
+    // message (src/repo/turns.ts) and an empty bubble reads worse than none.
+    // The first three set `conversations.status = 'failed'` and so at least
+    // stop her spinner; the fourth parks the conversation on `awaiting_user`
+    // with nothing new above it, which is the quietest of the four. None of the
+    // four is an oversight this lesson is fixing, and none is covered by the
+    // guarantee above either; closing them is a later lesson's, and until then
+    // this comment is the honest list rather than a claim that every turn
+    // ending without an answer says something.
     //
     // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
     // itself ("conversation not found") or any other database error here is
@@ -207,10 +238,14 @@ async function withHeartbeat<T>(
 }
 
 /**
- * Hands the lease back and schedules a fresh invocation, for the two ways a
+ * Hands the lease back and schedules a fresh invocation, for the three ways a
  * step can end unfinished rather than done: `decideNext` saying so before the
- * agent is even called, or the agent's own `continue_later` step when a
- * driver's inner budget ran out mid-step. Ends the turn instead when there is
+ * agent is even called, the agent's own `continue_later` step when a driver's
+ * inner budget ran out mid-step, and a retry `withRetry` refused because the
+ * wait would cross what is left of this invocation (`RetryBudgetExceededError`,
+ * src/retry.ts, added in lesson 3.6's second fix round). All three mean the
+ * same thing to this row: the work is unfinished and still worth doing, by a
+ * later invocation rather than by this one. Ends the turn instead when there is
  * no attempt left to hand it back with: `claimTurn` refuses a turn at
  * `MAX_ATTEMPTS`, so a released turn at the cap is claimable by nothing and
  * would sit forever, held shut, for the sweeper's crash-loop arm to eventually
@@ -225,10 +260,13 @@ async function continueLater(
     await failTurn(sql, claim, 'deadline_exceeded', turnSpend.total)
     return
   }
-  // State AND ownership in one statement, then schedule. saveTurnState alone
-  // would leave the row running with a fresh heartbeat, which the
-  // re-invocation's own claimTurn can satisfy through neither arm.
-  await releaseForContinuation(sql, claim, state)
+  // State, ownership AND this attempt's spend in one statement, then schedule.
+  // saveTurnState alone would leave the row running with a fresh heartbeat,
+  // which the re-invocation's own claimTurn can satisfy through neither arm,
+  // and it would drop the money as well: only the attempt that finally reaches
+  // a closer would land on `turns.spend_usd_micros`, so a turn that continued
+  // three times would report a third of its bill.
+  await releaseForContinuation(sql, claim, state, turnSpend.total)
   // The row is already durable at 'queued': a failed re-invocation is not her
   // problem, exactly the way tier 2's own invokeAndLog treats a failed
   // deps.invoke (src/handler.ts). Logged and swallowed rather than left to
@@ -340,12 +378,13 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
     }
 
     if (step.kind === 'continue_later') {
+      await spend(deps, claim, turnSpend, step)
       await continueLater(deps, claim, state, turnSpend)
       return
     }
 
     if (step.kind === 'fail') {
-      await spend(deps, claim, turnSpend, step.costMicros)
+      await spend(deps, claim, turnSpend, step)
       await failTurn(sql, claim, step.reason, turnSpend.total, step.text)
       return
     }
@@ -356,7 +395,7 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       // single-row update stands in for them: if we have been superseded it
       // throws here, before any money is spent.
       await heartbeat(sql, claim)
-      await spend(deps, claim, turnSpend, step.costMicros)
+      await spend(deps, claim, turnSpend, step)
       await completeTurn(sql, claim, {
         // Null, not an empty string, on a blank answer: completeTurn writes a
         // row for anything that is not null, and an empty bubble in her
@@ -387,7 +426,7 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       result = await withHeartbeat(deps, claim, (signal) => step.run(signal))
       await heartbeat(sql, claim)
       await finishToolCall(sql, claim, step.callId, result)
-      await spend(deps, claim, turnSpend, step.costMicros)
+      await spend(deps, claim, turnSpend, step)
     }
 
     state = {
@@ -400,17 +439,22 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
 }
 
 /**
- * Adds one step's cost to the ledger and to this run's total. Skipped entirely
- * at zero, which is not an optimisation: tier 3's agent is metered per model
- * call by `ledgerSink` (lesson 2.6) and reports 0n here, and calling recordSpend
- * with nothing to record would touch two rows to add nothing.
+ * Adds one step's cost to this run's total, and to the conversation and daily
+ * ledgers unless the agent has already put it there itself (`StepCost`, above).
+ * The total is what a closer or a hand-back writes to `turns.spend_usd_micros`,
+ * so it is accumulated either way: a self-metering agent still has to say what
+ * it spent, or the turn's own row reads as free. Skipped entirely at zero,
+ * which is not an optimisation: a step that cost nothing would otherwise touch
+ * two rows to add nothing.
  */
 async function spend(
-  deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }, costMicros: bigint,
+  deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }, step: StepCost,
 ): Promise<void> {
-  if (costMicros === 0n) return
-  await recordSpend(deps.sql, {
-    userId: claim.userId, conversationId: claim.conversationId, costMicros,
-  })
-  turnSpend.total += costMicros
+  if (step.costMicros === 0n) return
+  if (!step.alreadyRecorded) {
+    await recordSpend(deps.sql, {
+      userId: claim.userId, conversationId: claim.conversationId, costMicros: step.costMicros,
+    })
+  }
+  turnSpend.total += step.costMicros
 }

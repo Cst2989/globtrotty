@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { submitMessage } from '../src/handler.js'
 import { DEMO_SCRIPT_USER, DEMO_USER } from '../src/her.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { SpendUnconfirmedError } from '../src/repo/spend.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 import { workerDeps } from './helpers/worker.js'
 
 // Resolved from this file rather than from process.cwd(): a guard that walks the
@@ -148,7 +148,7 @@ describeDb('a driver throw ends as something she can see', () => {
   it('fails the turn, tells her, and gives the slot back', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+        handlerDeps(sql),
         { userId: OUTAGE_USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: randomUUID() },
       )
       const agent: Agent = async () => { throw new SpendUnconfirmedError('cannot confirm') }
@@ -169,7 +169,7 @@ describeDb('a driver throw ends as something she can see', () => {
       // And the slot is free, which is the difference between a failure and a
       // dead conversation.
       const next = await submitMessage(
-        { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+        handlerDeps(sql),
         { userId: OUTAGE_USER, conversationId: submitted.conversationId, message: 'try again',
           idempotencyKey: randomUUID() },
       )

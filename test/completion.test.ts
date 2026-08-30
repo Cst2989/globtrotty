@@ -1,26 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { claimTurn, completeTurn, failTurn, FencedError, HEARTBEAT_STALE } from '../src/repo/turns.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps, silentFor } from './helpers/turns.js'
 
 const USER = randomUUID()
 const EMPTY = { step: 0, messages: [] }
-const deps = (sql: postgres.Sql) => ({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} })
 
 async function seed(sql: postgres.Sql, key: string): Promise<{ conversationId: string; turnId: string }> {
-  const submitted = await submitMessage(deps(sql), {
+  const submitted = await submitMessage(handlerDeps(sql), {
     userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: key,
   })
   return { conversationId: submitted.conversationId, turnId: submitted.turnId! }
-}
-
-async function silence(sql: postgres.Sql, turnId: string): Promise<void> {
-  await sql`update course.turns
-               set heartbeat_at = now() - make_interval(secs => ${HEARTBEAT_STALE + 30})
-             where id = ${turnId}`
 }
 
 describeDb('completeTurn', () => {
@@ -57,7 +50,7 @@ describeDb('completeTurn', () => {
 
       // Terminal means the slot is free: her next message opens a new turn
       // rather than bouncing off the one-live-turn index as 'busy'.
-      const next = await submitMessage(deps(sql), {
+      const next = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId, message: 'and the crib?', idempotencyKey: 'p1-next',
       })
       expect(next.status).toBe('queued')
@@ -84,7 +77,7 @@ describeDb('completeTurn', () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId } = await seed(sql, 'p3')
       const first = (await claimTurn(sql, turnId))!
-      await silence(sql, turnId)
+      await silentFor(sql, turnId, HEARTBEAT_STALE + 30)
       await claimTurn(sql, turnId)
 
       await expect(completeTurn(sql, first, {
@@ -188,7 +181,7 @@ describeDb('failTurn', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seed(sql, 'f4')
       const first = (await claimTurn(sql, turnId))!
-      await silence(sql, turnId)
+      await silentFor(sql, turnId, HEARTBEAT_STALE + 30)
       await claimTurn(sql, turnId)
 
       await expect(failTurn(sql, first, 'provider_down', 0n)).rejects.toThrow(FencedError)

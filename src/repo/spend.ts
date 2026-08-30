@@ -182,9 +182,13 @@ export function ledgerSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
  * the reason `pgSink`'s own comment gives for its write failures ("a row
  * that fails to write must not take a finished turn down with it") - a real
  * charge with no row anywhere is worse than the row this wrap might still
- * refuse a moment later. The fence still works: the throw runs AFTER the
- * write, so a caller like `toolLoop`'s per-iteration catch (src/loop.ts)
- * stops the call AFTER this one from ever being attempted.
+ * refuse a moment later. The fence still works, and it works harder than a
+ * skipped call: the throw runs AFTER the write, and `toolLoop`'s per-iteration
+ * catch (src/loop.ts) re-throws anything that is not an `APIError` or an
+ * `APIConnectionError`, so this one is not caught there at all. It ends the
+ * whole loop, propagates out of `turn()` into `runTurn`'s own catch
+ * (src/worker.ts), and is recognised there as a `FencedError` and written
+ * nowhere. No later call is attempted, because there is no later call.
  *
  * `netlify/functions/run-turn-background.mts`'s tier-3 driver is the one
  * production caller, wrapping a fenced turn's own `ledgerSink`; it lives here

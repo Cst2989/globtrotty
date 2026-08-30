@@ -10,6 +10,7 @@ import { MockSupplier } from '../src/supplier/mock.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 
 const USER = randomUUID()
 
@@ -67,7 +68,7 @@ describeDb('when the process dies mid-search, the work itself', () => {
   it('is not repeated, and the supplier is called once', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-2' },
       )
       const turnId = submitted.turnId!
@@ -101,7 +102,7 @@ describeDb('when the process dies mid-search, the work itself', () => {
   it('stops the turn rather than guess, when a call was started and never finished', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-3' },
       )
       const turnId = submitted.turnId!

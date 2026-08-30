@@ -88,12 +88,16 @@ type ClaimRow = {
  * The second arm is the lease: a turn whose worker has said nothing for
  * HEARTBEAT_STALE seconds is available again, judged by
  * `coalesce(heartbeat_at, queued_at)`, the same expression the `turns_sweeper`
- * index (migration 0004) is built on, so a claim and the sweeper can never
- * disagree about which turns are stale, and a `running` turn with no
- * heartbeat yet is still reclaimable rather than stuck forever. The queued
- * arm has no time condition, which is what makes a deliberate hand-off
- * (releaseForContinuation) claimable at once rather than after a staleness
- * window.
+ * index (migration 0004) is built on and the same one the sweeper's own
+ * `running` arm compares (src/sweeper.ts), so a claim and the floor walk
+ * cannot disagree about which RUNNING turn is silent, and a `running` turn
+ * with no heartbeat yet is reclaimable by both rather than stuck forever.
+ * (Lesson 3.5's sweeper compared bare `heartbeat_at` here for two lessons,
+ * which left exactly that row invisible to it; lesson 3.7's whole-branch
+ * review is what caught the divergence.) The two never agree about a QUEUED
+ * turn, deliberately: this arm has no time condition at all, which is what
+ * makes a hand-off (releaseForContinuation) claimable at once, while the
+ * sweeper waits QUEUED_STALE seconds before it treats one as orphaned.
  *
  * Returns null rather than throwing for a turn somebody else owns, because
  * "another worker has this" is the ordinary case on a platform that retries
@@ -195,15 +199,26 @@ export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> 
  * today; lesson 3.5 is where a turn parked at the cap gets an ending, and a
  * separate continuation count, distinct from the crash-loop count, is the
  * change to make if long turns start hitting it.
+ *
+ * `spendMicros` is what THIS attempt spent, added the same way both closers
+ * add theirs. Without it the money an attempt spent before handing back would
+ * be lost to the turn's own row: a closer only ever runs on the LAST attempt,
+ * so a turn that continued twice at 500 micros an attempt would end reading
+ * 500 against a conversation that was charged 1500. Conversation and daily
+ * spend are not touched here for the same reason the closers do not touch
+ * them: `recordSpend` (lesson 2.6) owns those two, and the worker has already
+ * called it, or the agent has, before this write.
  */
 export async function releaseForContinuation(
   sql: postgres.Sql,
   claim: Claim,
   state: TurnState,
+  spendMicros: bigint,
 ): Promise<void> {
   const rows = await sql`
     update course.turns
-       set state = ${sql.json(state)}, status = 'queued', queued_at = now(), heartbeat_at = now()
+       set state = ${sql.json(state)}, status = 'queued', queued_at = now(), heartbeat_at = now(),
+           spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
@@ -267,13 +282,15 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
  * re-billing a state that is supposed to cost nothing.
  *
  * `spendMicros` is the spend to add for this attempt, not a running total:
- * both statements below write it as `spend_usd_micros + ...`. Today exactly
- * one write ever lands, because parking and failing are both terminal, so
- * add and overwrite agree; the `+` is what stays correct if a retried attempt
- * (lesson 3.5) ever calls this a second time for the same turn. It lands on
- * `turns.spend_usd_micros` only. Conversation and daily spend accrue through
- * `recordSpend` (lesson 2.6) and adding them here as well would double-count
- * the conversation and bypass the daily counter a ceiling reads.
+ * both statements below write it as `spend_usd_micros + ...`. The `+` is load
+ * bearing rather than defensive. A closer is terminal, so at most one of them
+ * ever lands for one turn, but `releaseForContinuation` above adds every
+ * continued attempt's spend through the same column, so what a closer finds
+ * there is already the sum of the attempts that came before it and an
+ * overwrite would throw them away. It lands on `turns.spend_usd_micros` only.
+ * Conversation and daily spend accrue through `recordSpend` (lesson 2.6) and
+ * adding them here as well would double-count the conversation and bypass the
+ * daily counter a ceiling reads.
  */
 export async function completeTurn(
   sql: postgres.Sql,

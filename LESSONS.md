@@ -18,8 +18,8 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-2-5 | Record every call | npm run migrate, then npm test (test/model-calls.test.ts, test/alias-echo.test.ts) |
 | lesson-2-6 | Control the money | npm run migrate, then npm test (test/spend.test.ts) |
 | lesson-2-7 | Fifty presses, one turn | npm run migrate, then npm test (test/idempotency.test.ts) |
-| lesson-3-1 | The claim with a fencing token | npm test (test/claim.test.ts) |
-| lesson-3-2 | Heartbeats and leases | npm test (test/lease.test.ts) |
+| lesson-3-1 | The claim with a fencing token | npm run migrate, then npm test (test/claim.test.ts) |
+| lesson-3-2 | Heartbeats and leases | npm run migrate, then npm test (test/lease.test.ts) |
 | lesson-3-3 | Completion in one transaction | npm run migrate, then npm test (test/completion.test.ts) |
 | lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
 | lesson-3-5 | The sweeper | npm run migrate, then npm test (test/sweeper.test.ts) |

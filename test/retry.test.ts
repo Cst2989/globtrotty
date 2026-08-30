@@ -1,9 +1,7 @@
 import { vi } from 'vitest'
-import { APIError, APIConnectionError } from '@anthropic-ai/sdk/core/error'
-import { withRetry } from '../src/retry.js'
-
-const apiError = (status: number, headers = new Headers()): unknown =>
-  APIError.generate(status, { type: 'error', error: { type: 'api_error', message: 'boom' } }, undefined, headers)
+import { APIConnectionError } from '@anthropic-ai/sdk/core/error'
+import { withRetry, RetryBudgetExceededError } from '../src/retry.js'
+import { apiError } from './helpers/errors.js'
 
 /** Records what was slept rather than sleeping, so the test takes no time. */
 function recorder(): { sleep: (ms: number) => Promise<void>; waits: number[] } {
@@ -86,11 +84,20 @@ describe('withRetry', () => {
   // than gambling the rest of the budget on one sleep.
   it('gives up rather than sleep past what remains of the caller budget', async () => {
     const headers = new Headers({ 'retry-after': '900' })      // fifteen minutes
-    const work = vi.fn().mockRejectedValue(apiError(429, headers))
+    const rateLimited = apiError(429, headers)
+    const work = vi.fn().mockRejectedValue(rateLimited)
     const { sleep, waits } = recorder()
-    await expect(withRetry(work, {
+    // By CLASS, not a bare toThrow(), which any thrown value at all satisfies:
+    // src/worker.ts branches on this exact class to hand the lease back, so a
+    // regression to `throw err` would leave a bare assertion green and turn
+    // every budget-capped retry into a `provider_down` failure.
+    const thrown: unknown = await withRetry(work, {
       sleep, random: () => 0, remainingMs: () => 120_000,      // two minutes left
-    })).rejects.toThrow()
+    }).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(RetryBudgetExceededError)
+    // And the provider's own error is still reachable, which is the whole
+    // reason this class carries one rather than replacing it.
+    expect((thrown as RetryBudgetExceededError).original).toBe(rateLimited)
     expect(work).toHaveBeenCalledTimes(1)                      // no second attempt
     expect(waits).toEqual([])                                  // and no sleep at all
   })
@@ -99,11 +106,14 @@ describe('withRetry', () => {
   // Retry-After: a fourth attempt's own 4-second wait is still a real number
   // that can outlast a budget almost spent.
   it('caps the exponential backoff by the same budget, not only Retry-After', async () => {
-    const work = vi.fn().mockRejectedValue(apiError(503))
+    const unavailable = apiError(503)
+    const work = vi.fn().mockRejectedValue(unavailable)
     const { sleep, waits } = recorder()
-    await expect(withRetry(work, {
+    const thrown: unknown = await withRetry(work, {
       sleep, random: () => 0, maxAttempts: 4, remainingMs: () => 500,
-    })).rejects.toThrow()
+    }).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(RetryBudgetExceededError)
+    expect((thrown as RetryBudgetExceededError).original).toBe(unavailable)
     expect(work).toHaveBeenCalledTimes(1)                      // the 1s base already exceeds 500ms
     expect(waits).toEqual([])
   })

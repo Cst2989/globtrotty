@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { claimTurn, loadTurnInput, saveTurnState, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { describeDb, withRealDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 
 // Fresh per run: a fixed literal is also the id scripts/trip.ts commits real
 // rows for, and those rows outlive this test's rolled-back transaction.
 const USER = randomUUID()
-
-const deps = (sql: postgres.Sql) => ({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} })
 
 /**
  * Tier 3's body exactly as lesson 2.2 shipped it: read the turn and her
@@ -34,7 +32,7 @@ async function tier3AsItWas(sql: postgres.Sql, turnId: string, reply: string): P
 describeDb('two invocations of one turn, before this lesson', () => {
   it('both run it, and she is answered twice', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'k1',
       })
       // Both read before either writes, which is the whole race: Netlify's own
@@ -54,7 +52,7 @@ describeDb('two invocations of one turn, before this lesson', () => {
 describeDb('claimTurn', () => {
   it('claims a queued turn and increments attempts', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c1',
       })
       const claim = await claimTurn(sql, submitted.turnId!)
@@ -70,7 +68,7 @@ describeDb('claimTurn', () => {
 
   it('refuses a second claim of a live turn', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c2',
       })
       expect(await claimTurn(sql, submitted.turnId!)).not.toBeNull()
@@ -82,7 +80,7 @@ describeDb('claimTurn', () => {
 
   it('refuses a turn that has already finished', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c3',
       })
       await sql`update course.turns set status = 'done', finished_at = now() where id = ${submitted.turnId}`
@@ -92,7 +90,7 @@ describeDb('claimTurn', () => {
 
   it('refuses to claim past the crash-loop cap', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c4',
       })
       await sql`update course.turns set attempts = ${MAX_ATTEMPTS} where id = ${submitted.turnId}`
@@ -102,7 +100,7 @@ describeDb('claimTurn', () => {
 
   it('a claimed turn is still loadable, which is why the worker may claim first', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'c7',
       })
       await claimTurn(sql, submitted.turnId!)
@@ -126,7 +124,7 @@ describeDb('claimTurn', () => {
 describeDb('saveTurnState', () => {
   it('rejects a write from a superseded worker and keeps the live one', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c5',
       })
       const first = (await claimTurn(sql, submitted.turnId!))!
@@ -148,7 +146,7 @@ describeDb('saveTurnState', () => {
 
   it('rejects a write to a turn that is no longer running', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'c6',
       })
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -161,7 +159,7 @@ describeDb('saveTurnState', () => {
 describeDb('claimTurn, under a real race', () => {
   it('lets exactly one of two concurrent claims win', async () => {
     await withRealDb(async (sql, userId) => {
-      const submitted = await submitMessage(deps(sql), {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'race-1',
       })
       // Two connections out of the same pool, racing: whichever way the two
@@ -176,8 +174,12 @@ describeDb('claimTurn, under a real race', () => {
 
       const [t] = await sql`select status, attempts from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('running')
-      // The loser matched zero rows, so it incremented nothing: the counter that
-      // fences every later write is also the count of runs that actually began.
+      // The loser matched zero rows, so it incremented nothing: two claims of
+      // one turn cost one attempt, not two. `attempts` counts times TRIED
+      // rather than times claimed, and from lesson 3.5 the sweeper's own
+      // requeue advances it with no worker involved at all
+      // (src/sweeper.ts, test/sweeper.test.ts); what makes it a fencing token
+      // is that it only ever moves forward, not what it counts.
       expect(t!.attempts).toBe(1)
     })
   })

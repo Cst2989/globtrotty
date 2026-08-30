@@ -8,6 +8,7 @@ import { claimTurn, completeTurn, failTurn, loadTurnInput, releaseForContinuatio
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 import { fakeClient, textMessage } from './model/fake.js'
 
 const USER = randomUUID()
@@ -15,7 +16,7 @@ const USER = randomUUID()
 describeDb('loadTurnInput', () => {
   it('returns the message the turn was queued for', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'turns-1',
       })
       // the queued path always names a turn; only limit_reached returns null
@@ -27,7 +28,7 @@ describeDb('loadTurnInput', () => {
 
   it('returns null for a turn that has already run', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-2',
       })
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -41,7 +42,7 @@ describeDb('loadTurnInput', () => {
   // The reason the join is on the turn id and not on the conversation.
   it('ignores a later message on the same conversation', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'turns-3',
       })
       // She types again while the turn is still queued. Lesson 2.7 makes this
@@ -54,11 +55,17 @@ describeDb('loadTurnInput', () => {
   })
 })
 
-describeDb('completeTurn, through the path tier 3 takes', () => {
+// The closers themselves, driven the way `runTurn` (src/worker.ts) drives
+// them. Since lesson 3.6 tier 3 calls none of these three functions: its
+// driver returns an `AgentStep` (netlify/functions/run-turn-background.mts)
+// and the worker loop is what closes the turn. What these tests still pin is
+// the pair of writes each closer makes, and the numbers the worker hands it,
+// against real Postgres.
+describeDb('completeTurn, the way the worker loop calls it', () => {
   it('writes the reply and closes the turn together', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-4' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -80,7 +87,7 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
   it('records the same limit_reached reason tier 2 does, with the same sentence', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-5' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -96,12 +103,12 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
     })
   })
 
-  // The whole tier-3 path, with the fake client standing in for the model: a
+  // The whole driver path, with the fake client standing in for the model: a
   // capped turn ends with her sentence on the row and the reason beside it.
-  it('writes the exact capped sentence and fail_reason through the real tier-3 path', async () => {
+  it('writes the exact capped sentence and fail_reason through the real driver path', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-6' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -125,18 +132,21 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
     })
   })
 
-  // Tier 3 (netlify/functions/run-turn-background.mts) passes result.costMicros
-  // to failTurn, not a hand-picked number. This forces the same limit_reached
-  // outcome one step later than the test above: under ceiling on turn()'s own
-  // top-of-turn read, so classify (and extract, since 'hi' does not parse as a
-  // faq) actually run and bill something, then over ceiling on the loop's
-  // first per-step read. The turn still ends with no model call inside the
-  // loop, but it is no longer free: a real cost was already spent getting
-  // there, and it has to land on the row rather than read as zero.
-  it('records the real cost through the real tier-3 path, not a hand-picked number', async () => {
+  // Tier 3's driver reports `result.costMicros` on its fail step, and the
+  // worker passes that number on to failTurn: a hand-picked constant here
+  // would prove nothing about the money that was actually spent. This forces
+  // the same limit_reached outcome one step later than the test above: under
+  // ceiling on turn()'s own top-of-turn read, so classify (and extract, since
+  // 'hi' does not parse as a faq) actually run and bill something, then over
+  // ceiling on the loop's first per-step read. The turn still ends with no
+  // model call inside the loop, but it is no longer free: a real cost was
+  // already spent getting there, and it has to land on the row rather than
+  // read as zero, which is what it did for two lessons while that driver
+  // reported 0n.
+  it('records the real cost the driver reports, not a hand-picked number', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-7' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -163,15 +173,16 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
   })
 })
 
-// Tier 3's third branch: 'continue_later' is not an ending, so it must not
-// reach either closer. This mirrors run-turn-background.mts's own branch
-// exactly, rather than exercising the netlify function itself, which this
-// file's own docstring rules out (no Netlify test harness here).
-describeDb('continue_later, through the path tier 3 takes', () => {
+// The driver's third branch: 'continue_later' is not an ending, so it must not
+// reach either closer. Tier 3 returns that step and `runTurn` is what calls
+// `releaseForContinuation`; this drives the same two calls in the same order,
+// rather than exercising the netlify function itself, which there is no
+// harness for in this repository (run-turn-background.mts's own docstring).
+describeDb('continue_later, the way the worker loop handles it', () => {
   it('hands the lease back rather than closing the turn', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-8' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
@@ -185,7 +196,10 @@ describeDb('continue_later, through the path tier 3 takes', () => {
       )
       expect(result.outcome).toBe('continue_later')
 
-      await releaseForContinuation(sql, claim, { step: result.steps, messages: [] })
+      // The driver's own cost, exactly as tier 3 reports it on the step and
+      // the worker passes it here: a hand-back is where a continued turn's
+      // earlier attempts land on the row at all.
+      await releaseForContinuation(sql, claim, { step: result.steps, messages: [] }, result.costMicros)
 
       const [t] = await sql`select status, state from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('queued')

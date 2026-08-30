@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import type postgres from 'postgres'
-import { APIError, APIConnectionError } from '@anthropic-ai/sdk/core/error'
+import { APIConnectionError } from '@anthropic-ai/sdk/core/error'
 import { RefusalError } from '../src/errors.js'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { submitMessage } from '../src/handler.js'
@@ -11,19 +11,18 @@ import { claimTurn, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { sweep } from '../src/sweeper.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { apiError } from './helpers/errors.js'
+import { handlerDeps, silentFor } from './helpers/turns.js'
 import { workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
 
 async function submit(sql: postgres.Sql, message = 'a week in Portugal', key = 'w1') {
   return submitMessage(
-    { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+    handlerDeps(sql),
     { userId: USER, conversationId: null, message, idempotencyKey: key },
   )
 }
-
-const apiError = (status: number, headers = new Headers()): unknown =>
-  APIError.generate(status, { type: 'error', error: { type: 'api_error', message: 'boom' } }, undefined, headers)
 
 describeDb('runTurn', () => {
   it('answers her, parks the conversation, and records what the turn spent', async () => {
@@ -42,6 +41,53 @@ describeDb('runTurn', () => {
       const [c] = await sql`select status, spend_usd_micros from course.conversations where id = ${r.conversationId}`
       expect(c!.status).toBe('awaiting_user')
       expect(BigInt(c!.spend_usd_micros as string)).toBeGreaterThan(0n)
+    })
+  })
+
+  // H1 from lesson 3.7's whole-branch review. Tier 3's agent meters itself:
+  // every model call is already on course.conversations and course.daily_usage
+  // through ledgerSink by the time the step returns, so the step reports what
+  // it spent AND sets alreadyRecorded. The turn's own row still has to end up
+  // with the number, because completeTurn, failTurn and releaseForContinuation
+  // are the only things that ever write it; for two lessons that driver
+  // reported 0n and every turn tier 3 ran read as free.
+  it('records a self-metering agent spend on the turn without billing it twice', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w1b')
+      const agent: Agent = async () =>
+        ({ kind: 'message', text: 'two options near Faro', costMicros: 4_000n, alreadyRecorded: true })
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [t] = await sql`select status, spend_usd_micros from course.turns where id = ${r.turnId}`
+      expect(t!.status).toBe('done')
+      expect(BigInt(t!.spend_usd_micros as string)).toBe(4_000n)
+      // Zero here, and correct: nothing in this test ran a ledgerSink, so the
+      // only way this column could be 4000 is the harness recording money the
+      // agent had already recorded itself.
+      const [c] = await sql`select spend_usd_micros from course.conversations where id = ${r.conversationId}`
+      expect(BigInt(c!.spend_usd_micros as string)).toBe(0n)
+    })
+  })
+
+  // M3 from the same review. Every attempt's spend has to land, not only the
+  // one that happens to reach a closer.
+  it('adds every attempt of a continued turn to the turn row', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w1c')
+      const agent: Agent = async () => ({ kind: 'continue_later', costMicros: 500n })
+      const deps = workerDeps(sql, agent)
+
+      await runTurn(deps, r.turnId!)                  // first attempt: 500 spent, handed back
+      await runTurn(deps, r.turnId!)                  // the re-invocation claims it again
+
+      const [t] = await sql`select status, attempts, spend_usd_micros from course.turns where id = ${r.turnId}`
+      expect(t!.status).toBe('queued')
+      expect(t!.attempts).toBe(2)
+      expect(BigInt(t!.spend_usd_micros as string)).toBe(1_000n)
+      // The conversation was charged for both attempts too, and the two
+      // numbers agree: that is the comparison no test made before this one.
+      const [c] = await sql`select spend_usd_micros from course.conversations where id = ${r.conversationId}`
+      expect(BigInt(c!.spend_usd_micros as string)).toBe(1_000n)
     })
   })
 
@@ -241,7 +287,7 @@ describeDb('runTurn', () => {
       await new Promise((resolve) => setTimeout(resolve, 45))
       // Steal the turn exactly as test/lease.test.ts does: back-date the
       // heartbeat this worker itself refreshed, then claim it for real.
-      await sql`update course.turns set heartbeat_at = now() - interval '5 minutes' where id = ${r.turnId}`
+      await silentFor(sql, r.turnId!, 5 * 60)
       const stolen = await claimTurn(sql, r.turnId!)
       expect(stolen).not.toBeNull()
       // The next tick's heartbeat() no longer matches this worker's
@@ -410,7 +456,7 @@ describeDb('runTurn, when the step throws', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e6')
       await expect(runTurn(workerDeps(sql, throwing(apiError(401))), r.turnId!)).rejects.toThrow()
-      await sql`update course.turns set heartbeat_at = now() - interval '10 minutes' where id = ${r.turnId}`
+      await silentFor(sql, r.turnId!, 10 * 60)
       const out = await sweep(sql)
       expect(out.requeued).not.toContain(r.turnId)
       expect(out.reaped).not.toContain(r.turnId)

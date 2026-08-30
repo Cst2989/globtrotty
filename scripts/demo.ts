@@ -119,15 +119,21 @@ async function main() {
     step(`tool search_flights EXECUTED (execution number ${sideEffects})`)
     await finishToolCall(sql, claim, 'search-0', { offers: [{ id: 'MOCK-1' }] })
   }
+  // The state is saved WITHOUT the search result, because that is the window
+  // the ledger exists for: the call has landed at the supplier and in
+  // course.tool_calls, and the process dies before the state that carries its
+  // answer is written. Save `step: 1` with the tool line already in the
+  // transcript and the resumed agent below simply never asks for the tool
+  // again, so the count stays at 1 whether the ledger works or not and this
+  // scenario proves nothing.
   const partial: TurnState = {
-    step: 1,
-    messages: [
-      { role: 'user', content: 'A cheap week in Faro in September?' },
-      { role: 'tool', content: '{"offers":[{"id":"MOCK-1"}]}' },
-    ],
+    step: 0,
+    messages: [{ role: 'user', content: 'A cheap week in Faro in September?' }],
   }
   await saveTurnState(sql, claim, partial)
   console.log('   !!  the process dies here: no completeTurn, no failTurn')
+  note('the ledger has the call. The saved state does not, so the resumed turn')
+  note('will ask for the same search again and the ledger has to refuse it.')
   ok(`turn row: ${JSON.stringify(await turnRow(turnId))}`)
 
   step('ninety seconds of silence pass (simulated by backdating heartbeat_at)...')
@@ -139,7 +145,7 @@ async function main() {
   const swept = await sweep(sql)
   ok(`requeued ${swept.requeued.length}, reaped ${swept.reaped.length}, stalled ${swept.stalled.length}, backlog ${swept.backlog}`)
 
-  step('a fresh worker picks it up...')
+  step('a fresh worker picks it up, asks for search-0 again, and is replayed...')
   await runTurn(
     { sql, limits: DEFAULT_LIMITS, agent: demoAgent, now: Date.now,
       deadlineMs: () => Date.now() + 600_000, reinvoke: noop },

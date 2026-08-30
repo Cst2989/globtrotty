@@ -75,10 +75,12 @@ export type DecideInput = {
   deadlineMs: number
   estStepMs: number
   /**
-   * Something she typed while this turn was still working. Accepted and not read
-   * yet: module 3 is where a running turn picks it up instead of making her wait
-   * for a second turn. It is in the input now so the shape does not change under
-   * the callers later.
+   * Something she typed while this turn was still working. Accepted and still
+   * not read: both callers pass null (src/worker.ts, src/loop.ts) and module 3
+   * ended without a use for it, so a message she types mid-turn is answered by
+   * the next turn, exactly as it was before this field existed. It is in the
+   * input so the shape does not change under the callers when a later module
+   * gives a running turn a way to pick it up.
    */
   pendingUserMessage: string | null
 }

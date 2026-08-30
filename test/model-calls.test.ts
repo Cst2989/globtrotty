@@ -3,7 +3,6 @@ import type postgres from 'postgres'
 import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
 import { loadDesk } from '../src/desks.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { costMicros } from '../src/pricing.js'
 import { memorySink, pgSink } from '../src/repo/model-calls.js'
 import { SEATS } from '../src/seats.js'
@@ -11,6 +10,7 @@ import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps } from './helpers/turns.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 
@@ -88,7 +88,7 @@ describe('a recorded turn', () => {
 describeDb('pgSink', () => {
   it('writes the four token counts and the cost against her turn', async () => {
     await withTestDb(async (sql) => {
-      const submitted = await submitMessage({ sql, invoke: async () => {}, limits: DEFAULT_LIMITS }, {
+      const submitted = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'calls-1',
       })
       const record = pgSink(sql, {

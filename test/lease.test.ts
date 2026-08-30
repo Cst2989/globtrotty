@@ -1,28 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import {
   claimTurn, heartbeat, releaseForContinuation, saveTurnState,
   FencedError, HEARTBEAT_STALE, MAX_ATTEMPTS,
 } from '../src/repo/turns.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { handlerDeps, silentFor } from './helpers/turns.js'
 
 const USER = randomUUID()
-const deps = (sql: postgres.Sql) => ({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} })
 
 async function queuedTurn(sql: postgres.Sql, key: string): Promise<string> {
-  const submitted = await submitMessage(deps(sql), {
+  const submitted = await submitMessage(handlerDeps(sql), {
     userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: key,
   })
   return submitted.turnId!
-}
-
-/** Silence, made to have happened, by moving the last heartbeat into the past. */
-async function silentFor(sql: postgres.Sql, turnId: string, seconds: number): Promise<void> {
-  await sql`update course.turns
-               set heartbeat_at = now() - make_interval(secs => ${seconds})
-             where id = ${turnId}`
 }
 
 describeDb('the lease', () => {
@@ -45,9 +37,14 @@ describeDb('the lease', () => {
       const turnId = await queuedTurn(sql, 'l1b')
       // A running row with a null heartbeat: unreachable through claimTurn
       // today, since a claim always stamps one, but 0001 leaves the column
-      // nullable and the sweeper's own index expects it. queued_at, backdated
-      // past the threshold, is what coalesce(heartbeat_at, queued_at) falls
-      // back to.
+      // nullable, so the state exists and something has to be able to get out
+      // of it. queued_at, backdated past the threshold, is what
+      // coalesce(heartbeat_at, queued_at) falls back to. The sweeper judges
+      // the same rows by the same expression (src/sweeper.ts, indexed by
+      // migration 0009), which test/sweeper.test.ts pins from its side: a
+      // sweeper comparing bare heartbeat_at, as lesson 3.5's did, leaves this
+      // row invisible to every arm of the floor walk while this test stays
+      // green.
       await sql`update course.turns
                    set status = 'running',
                        heartbeat_at = null,
@@ -119,16 +116,19 @@ describeDb('heartbeat', () => {
  * to become claimable again immediately, not after a staleness window.
  */
 describeDb('releaseForContinuation', () => {
-  it('makes a turn immediately claimable, with its state kept', async () => {
+  it('makes a turn immediately claimable, with its state and its spend kept', async () => {
     await withTestDb(async (sql) => {
       const turnId = await queuedTurn(sql, 'l6')
       const claim = (await claimTurn(sql, turnId))!
 
-      await releaseForContinuation(sql, claim, { step: 1, messages: [] })
+      await releaseForContinuation(sql, claim, { step: 1, messages: [] }, 750n)
 
-      const [row] = await sql`select status, state from course.turns where id = ${turnId}`
+      const [row] = await sql`select status, state, spend_usd_micros from course.turns where id = ${turnId}`
       expect(row!.status).toBe('queued')
       expect(row!.state).toEqual({ step: 1, messages: [] })
+      // The attempt that hands back is the only chance this money has of
+      // reaching the turn's own row: a closer only ever runs on the last one.
+      expect(BigInt(row!.spend_usd_micros as string)).toBe(750n)
 
       // No staleness wait: the queued arm of claimTurn has no time condition at
       // all, which is the property saveTurnState alone cannot give.
@@ -144,7 +144,7 @@ describeDb('releaseForContinuation', () => {
       const first = (await claimTurn(sql, turnId))!
       await silentFor(sql, turnId, HEARTBEAT_STALE + 30)
       await claimTurn(sql, turnId)
-      await expect(releaseForContinuation(sql, first, { step: 9, messages: [] })).rejects.toThrow(FencedError)
+      await expect(releaseForContinuation(sql, first, { step: 9, messages: [] }, 0n)).rejects.toThrow(FencedError)
     })
   })
 })

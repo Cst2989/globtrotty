@@ -84,19 +84,38 @@ export async function sweep(
 ): Promise<SweepResult> {
   const limit = opts.batchSize ?? DEFAULT_BATCH
 
-  // One definition of "stale", composed into every query below, so the reap, the
-  // backlog count and the batch cannot drift apart. A threshold edited in one of
-  // three copies is a sweeper that alarms on one set of rows and acts on another.
+  // One definition of "stale", composed into the three queries that ask which
+  // turns are stale: the crash-loop reap, the backlog count and the batch. A
+  // threshold edited in one of three copies is a sweeper that alarms on one set
+  // of rows and acts on another. The stalled arm below is deliberately NOT one
+  // of the three: it asks a narrower question (a `queued` turn with no user
+  // message at all) and carries its own copy of QUEUED_STALE, which
+  // test/sweeper.test.ts guards as a copy rather than as this expression.
+  //
+  // `coalesce(heartbeat_at, queued_at)`, not bare `heartbeat_at`, because
+  // 0001 leaves the column nullable and `NULL < x` is NULL: a `running` turn
+  // with no beat yet would be invisible to every arm of this sweep, while
+  // `claimTurn` (src/repo/turns.ts) reclaims it through the identical
+  // expression. Lesson 3.5 shipped the bare comparison and lesson 3.7's
+  // whole-branch review caught the disagreement; migration 0009 re-keys
+  // `turns_sweeper_running` on the same expression so the index still matches
+  // the predicate.
   const stale = sql`
-    (status = 'running' and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE}))
+    (status = 'running'
+     and coalesce(heartbeat_at, queued_at) < now() - make_interval(secs => ${HEARTBEAT_STALE}))
     or (status = 'queued' and queued_at < now() - make_interval(secs => ${QUEUED_STALE}))`
 
   /**
    * First, the turn nothing can ever run: `queued`, old enough, and with no user
-   * message to run. Module 2's hand-off. Requeueing it would be a floor walk with
-   * no end, so it is failed as `stalled` and its conversation is handed back, and
-   * the point of the whole thing is that last part: the partial unique index on
-   * one live turn per conversation was holding her thread shut.
+   * message to run. Module 2's hand-off. The batch below would requeue it, and
+   * since that requeue advances `attempts` it would even end: five sweeps
+   * later the crash-loop arm reaps it as `crash_loop` and writes her
+   * TURN_FAILED_MESSAGE. Diagnosing it here instead costs one sweep rather
+   * than five, gives the row the reason that is actually true, and skips a
+   * message about something going wrong for a press that was already answered
+   * on the same conversation. Its conversation is handed back, and the point
+   * of the whole thing is that last part: the partial unique index on one live
+   * turn per conversation was holding her thread shut.
    *
    * No message is written for her. The press that claimed her key already wrote
    * her sentence on this same conversation and is already being answered; a

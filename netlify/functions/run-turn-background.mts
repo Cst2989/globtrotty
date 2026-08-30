@@ -100,14 +100,28 @@ export default async (req: Request): Promise<Response> => {
     // branch would record an unfinished turn as `done` with a blank reply,
     // outside both the live-turn index and the sweeper's predicate, with
     // nothing left able to pick it back up.
-    if (result.outcome === 'continue_later') return { kind: 'continue_later' }
-    // 0n on both remaining branches: ledgerSink already recorded every model
-    // call and incremented conversation and daily spend as it went, so a
-    // total here would be the same money counted twice.
-    if (isFailReason(result.outcome)) {
-      return { kind: 'fail', reason: result.outcome, text: result.text || null, costMicros: 0n }
+    //
+    // It still reports what it spent getting there, like every other branch:
+    // a restart pays for classify, extract and every tool step again, and a
+    // turn that continued three times has to end with all three attempts on
+    // its own row.
+    if (result.outcome === 'continue_later') {
+      return { kind: 'continue_later', costMicros: result.costMicros, alreadyRecorded: true }
     }
-    return { kind: 'message', text: result.text, costMicros: 0n }
+    // What `turn()` itself spent, on every branch, with `alreadyRecorded` set:
+    // `ledgerSink` has already added each of those model calls to
+    // course.conversations and course.daily_usage as it made them, so the
+    // harness must not charge them a second time, but `turns.spend_usd_micros`
+    // is written by nothing else at all (completeTurn, failTurn and
+    // releaseForContinuation, src/repo/turns.ts) and reporting 0n here left it
+    // reading as free for every turn tier 3 ran.
+    if (isFailReason(result.outcome)) {
+      return {
+        kind: 'fail', reason: result.outcome, text: result.text || null,
+        costMicros: result.costMicros, alreadyRecorded: true,
+      }
+    }
+    return { kind: 'message', text: result.text, costMicros: result.costMicros, alreadyRecorded: true }
   }
 
   try {

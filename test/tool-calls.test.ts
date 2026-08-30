@@ -1,27 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import { AmbiguousToolCallError, beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, FencedError, HEARTBEAT_STALE, type Claim } from '../src/repo/turns.js'
 import { ledgerRunner } from '../src/tools.js'
 import { describeDb, withRealDb, withTestDb } from './helpers/db.js'
+import { handlerDeps, silentFor } from './helpers/turns.js'
 
 const USER = randomUUID()
 
 async function seedTurn(sql: postgres.Sql, key: string): Promise<Claim> {
   const submitted = await submitMessage(
-    { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+    handlerDeps(sql),
     { userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: key },
   )
   return (await claimTurn(sql, submitted.turnId!))!
-}
-
-/** Silence, made to have happened, by moving the last heartbeat into the past (matches test/lease.test.ts). */
-async function silentFor(sql: postgres.Sql, turnId: string, seconds: number): Promise<void> {
-  await sql`update course.turns
-               set heartbeat_at = now() - make_interval(secs => ${seconds})
-             where id = ${turnId}`
 }
 
 describeDb('the tool-call ledger', () => {
@@ -116,7 +109,7 @@ describeDb('the ledger, fenced', () => {
   it('refuses to write intent for a turn this worker no longer owns, and lets the live worker proceed', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 't10' },
       )
       const turnId = submitted.turnId!
@@ -133,7 +126,7 @@ describeDb('the ledger, fenced', () => {
   it('refuses to record a finish for a turn this worker no longer owns', async () => {
     await withTestDb(async (sql) => {
       const submitted = await submitMessage(
-        { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+        handlerDeps(sql),
         { userId: USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: 't11' },
       )
       const turnId = submitted.turnId!
@@ -198,7 +191,7 @@ describeDb('beginToolCall, under a real race', () => {
   it('lets exactly one of two concurrent callers land fresh, and reports the other ambiguous', async () => {
     await withRealDb(async (sql, userId) => {
       const submitted = await submitMessage(
-        { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
+        handlerDeps(sql),
         { userId, conversationId: null, message: 'a week in Portugal', idempotencyKey: 'race-tc-1' },
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
