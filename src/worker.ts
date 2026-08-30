@@ -1,6 +1,7 @@
 import type postgres from 'postgres'
 import { decideNext, type FailReason, type Limits, type TurnState } from './engine.js'
 import { classifyError } from './errors.js'
+import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
@@ -137,12 +138,18 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // is a real FailReason (src/engine.ts); errors.ts deliberately does not
     // import the engine, so this call site is where the two are pinned together.
     const { reason } = classifyError(err)
+    // The sentence matters as much as the reason. `fail_reason` is for whoever
+    // is on call; this is for her, and without it a crashed turn and a hung turn
+    // look identical from her side of the screen. It is the same sentence the
+    // sweeper writes when it reaps a crash loop (src/failure-message.ts), so a
+    // failure reads the same whether the worker noticed it or the floor walk did.
+    //
     // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
     // itself ("conversation not found") or any other database error here is
     // exactly the evidence that a turn left `running` by a failed write needs.
     // Swallowing it silently would make that turn indistinguishable from an
     // ordinary crashed worker until the sweeper's staleness window closes.
-    await failTurn(sql, claim, reason, turnSpend.total).catch((e: unknown) => {
+    await failTurn(sql, claim, reason, turnSpend.total, TURN_FAILED_MESSAGE).catch((e: unknown) => {
       console.error(`failTurn for turn ${claim.turnId} failed`, e)
     })
     throw err

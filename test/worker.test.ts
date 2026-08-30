@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 import type postgres from 'postgres'
 import { APIError, APIConnectionError } from '@anthropic-ai/sdk/core/error'
 import { RefusalError } from '../src/errors.js'
+import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
@@ -384,7 +385,7 @@ describeDb('runTurn, when the step throws', () => {
     })
   })
 
-  it('records a refusal as refused, and writes her no empty answer', async () => {
+  it('records a refusal as refused, and tells her rather than answering emptily', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e4')
       await expect(
@@ -392,8 +393,13 @@ describeDb('runTurn, when the step throws', () => {
       ).rejects.toThrow(RefusalError)
       const [t] = await sql`select fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.fail_reason).toBe('refused')
-      const msgs = await sql`select role from course.messages where conversation_id = ${r.conversationId}`
-      expect(msgs.map((m) => m.role)).toEqual(['user'])
+      const msgs = await sql`select role, content from course.messages
+                              where conversation_id = ${r.conversationId} order by seq`
+      // Not an empty bubble, which is what a harness that only inspects
+      // exceptions hands her, and not the model's own words either.
+      expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
+      expect(msgs[1]!.content).toBe(TURN_FAILED_MESSAGE)
+      expect(msgs[1]!.content).not.toBe('')
     })
   })
 

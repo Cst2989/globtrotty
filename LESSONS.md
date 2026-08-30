@@ -24,6 +24,49 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
 | lesson-3-5 | The sweeper | npm run migrate, then npm test (test/sweeper.test.ts) |
 | lesson-3-6 | The worker loop assembled | npm run migrate, then npm test (test/worker.test.ts, test/retry.test.ts), then npm run demo |
+| lesson-3-7 | Building the harness with agents | npm test (test/regressions.test.ts) |
+
+## How this branch was built
+
+Seven lessons, one tag each, and a review between every one of them. What the
+reviews actually caught, and what it cost to catch it:
+
+**Tests that pass against the wrong implementation.** The commonest defect in the
+whole build, by a distance. A fifty-press test that pressed against a
+conversation that already existed, so the broken key scope was never exercised.
+A spend test that read a number it had not written. A completion test that threw
+on its first statement, so an unbatched implementation would have passed it too.
+What found them was not reading the test. It was writing the wrong
+implementation and checking that the test actually fails: `test/regressions.test.ts`
+carries the three that reached a tag, and the plan for each one says to break it,
+watch it fail, restore it, and paste both outputs.
+
+**Evidence, not assertions.** "I added a test that discriminates" is worth
+roughly nothing between two agents. A pasted failing output is worth a great
+deal. Every fix round in this module ends with a command and its output.
+
+**A wrong comment on a contract is worse than no comment.** Every instance had
+the same shape: a correct decision recorded with a reason that was not true. A
+docstring claiming a partial index cannot be a conflict target. A comment
+promising that `finishTurn` records a reason for every outcome when it recorded
+one for some. The decision was right and the explanation was reconstructed
+afterwards and never checked, which is why a reviewer skimming for wrong
+decisions sees nothing wrong. Check the claim, not the conclusion, and prefer a
+contract a test can read: `test/regressions.test.ts` asserts the idempotency rule
+out of the Postgres catalogue rather than describing it in a comment.
+
+**A whole-branch review finds a different class of defect.** A task review checks
+a diff against its own brief, and nothing in the brief was violated. The defects
+that only appear when you ask what a number means against data written in a
+different task need the whole diff and the whole spec, on the most capable model
+available, as a separate mandatory pass rather than a formality at the end.
+
+**A ledger, with the cost of being wrong.** Every ruling is written down, and the
+valuable part is not the decision. It is the sentence that says what it costs if
+it is wrong, because that is the only part still useful after everyone has
+forgotten why the decision was made.
+
+## Hand-offs
 
 Closed at lesson 3.5: the `queued` turn with no message that two presses of one
 key could leave behind is reaped as `stalled`, and its conversation goes back to

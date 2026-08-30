@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { FAIL_REASONS } from '../src/engine.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
@@ -7,7 +8,9 @@ import { describeDb, withTestDb } from './helpers/db.js'
 // constraint silently out of date.
 const REASONS = FAIL_REASONS
 
-const USER = '11111111-1111-1111-1111-111111111111'
+// Fresh per run: the fixed literal is the id the scripts commit real rows for,
+// and those rows outlive a rolled-back transaction for the rest of the UTC day.
+const USER = randomUUID()
 
 describeDb('the constraints and the types', () => {
   it('refuses a status nobody defined', async () => {

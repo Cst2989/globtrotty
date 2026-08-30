@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
@@ -13,7 +14,9 @@ import { describeDb, withTestDb } from './helpers/db.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 
-const USER = '11111111-1111-1111-1111-111111111111'
+// Fresh per run: the fixed literal is the id the scripts commit real rows for,
+// and those rows outlive a rolled-back transaction for the rest of the UTC day.
+const USER = randomUUID()
 // The cheap replies name the seat that actually answered them, so a row's
 // model_returned is truthful rather than defaulting to textMessage's own
 // model and quietly disagreeing with what was requested (that disagreement is
