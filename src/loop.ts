@@ -163,8 +163,9 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       const text = decision.reason === 'limit_reached' ? limitReachedMessage(spend, limits) : ''
       return finish(decision.reason, text)
     }
-    // Nowhere to continue to inside one process. Module 3 saves the state here
-    // and lets a fresh invocation pick the turn up.
+    // Nowhere to continue to inside one process. Module 3's
+    // releaseForContinuation saves the state here and lets a fresh invocation
+    // pick the turn up.
     if (decision.kind === 'continue_later') return finish('continue_later', '')
     // Not reachable yet: nothing returns 'park' until a desk can ask her a
     // question and wait. The branch exists so a new decision kind cannot be

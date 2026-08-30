@@ -17,16 +17,24 @@ export type TurnInput = {
 export const MAX_ATTEMPTS = 5
 
 /**
+ * How often a working worker is expected to say "still here". The worker loop
+ * that ticks this on a timer while a step is in flight arrives in lesson 3.6;
+ * until then the only caller is the test file. HEARTBEAT_STALE below is the
+ * number this cadence is reasoned against, not an independent guess.
+ */
+export const HEARTBEAT_INTERVAL = 25
+
+/**
  * Seconds of silence after which a `running` turn is treated as abandoned and
  * may be taken by another worker.
  *
- * The threshold has to sit above the hard execution ceiling of the environment
- * that runs a turn. Tier 3 is a Netlify background function, killed at fifteen
- * minutes, and lesson 2.3's deadline check makes a healthy turn hand off before
- * that, so ninety seconds of total silence from a process that is supposed to
- * report in every twenty-five is a dead process, not a busy one. Set below the
- * ceiling instead, and the sweeper resurrects runs that are still alive and the
- * same turn executes twice in parallel.
+ * The threshold has to sit well above HEARTBEAT_INTERVAL, far enough that a few
+ * lost beats or a slow round trip is not read as a death, and short enough that
+ * a real death is not a fifteen-minute outage. Ninety seconds is three and a
+ * half missed beats at HEARTBEAT_INTERVAL's twenty-five second cadence. What it
+ * must never do is drop near the interval itself: a threshold a worker can miss
+ * by being briefly busy resurrects live runs and executes the same turn twice
+ * in parallel.
  *
  * A plain number of seconds rather than a SQL interval literal, so it can be
  * bound as a parameter through `make_interval()` instead of being interpolated
@@ -76,9 +84,14 @@ type ClaimRow = {
  * off owning a turn the first already owns.
  *
  * The second arm is the lease: a turn whose worker has said nothing for
- * HEARTBEAT_STALE seconds is available again. The queued arm has no time
- * condition, which is what makes a deliberate hand-off (releaseForContinuation)
- * claimable at once rather than after a staleness window.
+ * HEARTBEAT_STALE seconds is available again, judged by
+ * `coalesce(heartbeat_at, queued_at)`, the same expression the `turns_sweeper`
+ * index (migration 0004) is built on, so a claim and the sweeper can never
+ * disagree about which turns are stale, and a `running` turn with no
+ * heartbeat yet is still reclaimable rather than stuck forever. The queued
+ * arm has no time condition, which is what makes a deliberate hand-off
+ * (releaseForContinuation) claimable at once rather than after a staleness
+ * window.
  *
  * Returns null rather than throwing for a turn somebody else owns, because
  * "another worker has this" is the ordinary case on a platform that retries
@@ -95,7 +108,8 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
        and attempts < ${MAX_ATTEMPTS}
        and (status = 'queued'
             or (status = 'running'
-                and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE})))
+                and coalesce(heartbeat_at, queued_at)
+                    < now() - make_interval(secs => ${HEARTBEAT_STALE})))
     returning id, conversation_id, user_id, attempts, state`
   const row = rows[0]
   if (!row) return null
@@ -117,6 +131,13 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  * This guard covers only the write this function makes. The turn's completion
  * write still goes through `finishTurn`, which carries no token at all until
  * lesson 3.3 replaces it, so a superseded worker can still land that write.
+ *
+ * This function, `heartbeat` and `releaseForContinuation` below all end in the
+ * same four-line fenced tail: match on id, attempts and status = 'running',
+ * return id, throw FencedError on nothing. That repetition is deliberate, not
+ * an oversight left for later cleanup: the shape of a fenced write is meant to
+ * be visible whole at each of the three places this lesson uses it, rather
+ * than hidden behind a shared helper the reader would have to open first.
  */
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
   const rows = await sql`
@@ -158,6 +179,18 @@ export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> 
  * interval of cron, for a hand-off that was entirely deliberate.
  *
  * Setting the status back to `queued` makes it claimable immediately.
+ * `heartbeat_at` is stamped fresh too, not left at the dying worker's last
+ * beat: `turns_sweeper` (migration 0004) reads `coalesce(heartbeat_at,
+ * queued_at)`, and a stale beat left on a `queued` row would make a
+ * continuation handed back a moment ago indistinguishable, to that index,
+ * from a turn abandoned minutes ago.
+ *
+ * A hand-back spends an attempt, because the next claim increments the
+ * token, and it must, or two workers could end up sharing one token value.
+ * That makes MAX_ATTEMPTS a ceiling on continuations as well as on crashes,
+ * today; lesson 3.5 is where a turn parked at the cap gets an ending, and a
+ * separate continuation count, distinct from the crash-loop count, is the
+ * change to make if long turns start hitting it.
  */
 export async function releaseForContinuation(
   sql: postgres.Sql,
@@ -166,7 +199,7 @@ export async function releaseForContinuation(
 ): Promise<void> {
   const rows = await sql`
     update course.turns
-       set state = ${sql.json(state)}, status = 'queued', queued_at = now()
+       set state = ${sql.json(state)}, status = 'queued', queued_at = now(), heartbeat_at = now()
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)

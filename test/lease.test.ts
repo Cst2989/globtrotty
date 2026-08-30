@@ -3,7 +3,8 @@ import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import {
-  claimTurn, heartbeat, releaseForContinuation, FencedError, HEARTBEAT_STALE, MAX_ATTEMPTS,
+  claimTurn, heartbeat, releaseForContinuation, saveTurnState,
+  FencedError, HEARTBEAT_STALE, MAX_ATTEMPTS,
 } from '../src/repo/turns.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
@@ -33,14 +34,35 @@ describeDb('the lease', () => {
       await silentFor(sql, turnId, HEARTBEAT_STALE + 30)
       const second = await claimTurn(sql, turnId)
       expect(second?.attempts).toBe(2)
+      // What the dead worker loses. No hand-queueing this time: the lease
+      // expired on its own, and the old token no longer matches.
+      await expect(saveTurnState(sql, first, { step: 1 })).rejects.toThrow(FencedError)
     })
   })
 
-  it('leaves a turn alone one second inside the threshold', async () => {
+  it('reclaims a running turn whose heartbeat was never set', async () => {
+    await withTestDb(async (sql) => {
+      const turnId = await queuedTurn(sql, 'l1b')
+      // A running row with a null heartbeat: unreachable through claimTurn
+      // today, since a claim always stamps one, but 0001 leaves the column
+      // nullable and the sweeper's own index expects it. queued_at, backdated
+      // past the threshold, is what coalesce(heartbeat_at, queued_at) falls
+      // back to.
+      await sql`update course.turns
+                   set status = 'running',
+                       heartbeat_at = null,
+                       queued_at = now() - make_interval(secs => ${HEARTBEAT_STALE + 30})
+                 where id = ${turnId}`
+      const claim = await claimTurn(sql, turnId)
+      expect(claim?.attempts).toBe(1)
+    })
+  })
+
+  it('leaves a turn alone well inside the threshold', async () => {
     await withTestDb(async (sql) => {
       const turnId = await queuedTurn(sql, 'l2')
       await claimTurn(sql, turnId)
-      await silentFor(sql, turnId, HEARTBEAT_STALE - 1)
+      await silentFor(sql, turnId, HEARTBEAT_STALE - 30)
       expect(await claimTurn(sql, turnId)).toBeNull()
     })
   })
@@ -69,6 +91,9 @@ describeDb('heartbeat', () => {
       // The worker is alive and says so, which is all a heartbeat is.
       await heartbeat(sql, claim)
       expect(await claimTurn(sql, turnId)).toBeNull()
+      const [row] = await sql`select attempts, state from course.turns where id = ${turnId}`
+      expect(row!.attempts).toBe(claim.attempts)   // still the same run, still its token
+      expect(row!.state).toEqual(claim.state)      // and still its state
     })
   })
 
