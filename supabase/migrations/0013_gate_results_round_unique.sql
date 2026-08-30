@@ -12,10 +12,13 @@
 -- `proposal_id` is deliberately NOT in the key: it is an OUTCOME of the gate run
 -- (null when the gates rejected), not part of its identity.
 --
--- PARTIAL, on `turn_id is not null`, because turn_id is `on delete set null`.
--- A total index would make deleting a turn fail as soon as two orphaned rows
--- collided -- turning a retention delete into an error, which is precisely the
--- kind of guard that fires on the wrong thing.
+-- PARTIAL, on `turn_id is not null`. Postgres unique indexes are NULLS DISTINCT
+-- by default (confirmed against this index's own pg_index.indnullsnotdistinct,
+-- which is false), so a non-partial index would not have blocked a delete
+-- either -- two orphaned rows with turn_id null never collide. The predicate
+-- is here to scope the index to live turns: turn_id is `on delete set null`,
+-- so an unscoped index would keep indexing every orphaned row forever, paying
+-- upkeep on rows this constraint no longer has any identity to protect.
 
 create unique index gate_results_one_row_per_gate_per_round
   on gate_results (turn_id, round, gate)
