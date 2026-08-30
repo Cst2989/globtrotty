@@ -195,6 +195,25 @@ the drift monitor's cheap-seat coverage is scoped to under-threshold requests on
 seats need a lighter-weight shape capture that survives truncation, or whether drift detection on
 the cheap seats is out of scope entirely — the spec as written does not say which.
 
+### 2.6 `request_shape` is unclipped on `'full'` rows, and grows O(N²) across a multi-step turn
+`src/repo/modelCalls.ts`'s `clip()` only ever runs on `system`/`user_prompt`; `request_shape` is
+written whole-or-not-at-all (see 2.5), with no size cap of its own. `capturePolicyFor` hardwires
+`driver`, `front_desk` and `reviewer` to `'full'` regardless of size, so none of those three seats'
+`request_shape` is ever truncated or clipped.
+
+The request `buildRequest` assembles at step N of a turn contains the ENTIRE transcript so far —
+steps 0 through N−1, tool results and all — and one `model_calls` row is written per driver step
+(`maxSteps` is 24). So a full-length turn does not store the transcript once; it stores an
+ever-growing prefix of it 24 times, which sums to O(N²) total bytes across the turn's own rows,
+not O(N). Retained at least 90 days per spec §6, with no reaper (2.4, above, already establishes
+none exists for `tool_results`/`model_calls`).
+
+**Not urgent today** for the same reason 2.4 is not: live `model_calls` row count is 1. It becomes
+real once turns routinely run multi-step, and it compounds with 2.4's already-flagged unbounded
+growth rather than being independent of it. No behaviour changed by this note — it is a sizing
+question for whoever specs the reaper (2.4) or a request_shape-specific cap, not a defect to fix
+here.
+
 ---
 
 ## Tier 3 — latent, cheap, no cost while waiting

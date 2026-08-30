@@ -16,7 +16,7 @@ function item(over: Partial<SupplierItem> = {}, quantity = 1): RehydratedItem {
               nights: 7, rating: null, coordinates: null, offerSource: null },
     ...over,
   }
-  return { ref: { sourceId: it.sourceId, quantity, slot: 'stay' }, item: it,
+  return { ref: { sourceId: it.sourceId, quantity, slot: 'stay' }, item: { ...it, searchParams: null },
            lineTotal: money(it.price.minor * BigInt(quantity), it.price.currency) }
 }
 
