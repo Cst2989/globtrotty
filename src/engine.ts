@@ -14,9 +14,15 @@ export type TurnState = { step: number }
  * word. `unclassified` is an error we could not name, which is deliberately not
  * disguised as a provider outage.
  */
+// 'fenced' and 'ambiguous_tool_call' are both from src/repo/toolCalls.ts's
+// world but stay two entries, not one: 'fenced' is another worker's claim
+// winning cleanly, which needs no attention because that worker is alive and
+// will finish the turn; 'ambiguous_tool_call' is a tool that ran and could
+// not be recorded, which has an unknown effect outside the system and needs a
+// person, the opposite response.
 export const FAIL_REASONS = [
   'provider_down', 'fetch_failed', 'limit_reached', 'step_cap',
-  'deadline_exceeded', 'crash_loop', 'fenced', 'stalled',
+  'deadline_exceeded', 'crash_loop', 'fenced', 'ambiguous_tool_call', 'stalled',
   'refused', 'provider_rejected', 'unclassified',
 ] as const
 

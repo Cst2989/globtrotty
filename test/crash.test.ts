@@ -5,6 +5,7 @@ import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { beginToolCall } from '../src/repo/toolCalls.js'
+import { claimTurn } from '../src/repo/turns.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
@@ -70,8 +71,9 @@ describeDb('when the process dies mid-search, the work itself', () => {
         { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-2' },
       )
       const turnId = submitted.turnId!
+      const claim = (await claimTurn(sql, turnId))!
       const supplier = countingRunner()
-      const run = ledgerRunner(sql, turnId, supplier.run)
+      const run = ledgerRunner(sql, claim, supplier.run)
 
       // The run that dies: the supplier answers, and the process is killed
       // before the reply is written.
@@ -80,8 +82,10 @@ describeDb('when the process dies mid-search, the work itself', () => {
         .rejects.toThrow('process killed')
       expect(supplier.calls).toBe(1)
 
-      // The resumed run asks the same questions in the same order, so it reaches
-      // the same call id and the ledger hands back what the supplier already said.
+      // The resumed run asks the same questions in the same order here because
+      // fakeClient is scripted to; the real model on the other end of
+      // options.client is not, which is exactly what src/loop.ts's callId
+      // comment and beginToolCall's name check are for.
       const retry = fakeClient([label, requirements, search, textMessage('Here are two hotels near the beach.')])
       const second = await turn(newConversation(submitted.conversationId), HER_MESSAGE, retry, run)
 
@@ -101,17 +105,18 @@ describeDb('when the process dies mid-search, the work itself', () => {
         { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-3' },
       )
       const turnId = submitted.turnId!
+      const claim = (await claimTurn(sql, turnId))!
       const supplier = countingRunner()
       // A pending row with no result: the previous attempt died between writing
       // the intent and recording the outcome.
-      await beginToolCall(sql, turnId, 's1-b0', 'search_hotels')
+      await beginToolCall(sql, claim, 's1-b0', 'search_hotels')
 
       const client = fakeClient([label, requirements, search, textMessage('unreachable')])
       const result = await turn(
         newConversation(submitted.conversationId), HER_MESSAGE, client,
-        ledgerRunner(sql, turnId, supplier.run),
+        ledgerRunner(sql, claim, supplier.run),
       )
-      expect(result.outcome).toBe('fenced')
+      expect(result.outcome).toBe('ambiguous_tool_call')
       expect(supplier.calls).toBe(0)                       // it did not guess and run it again
     })
   })
