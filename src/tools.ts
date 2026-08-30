@@ -11,14 +11,17 @@ import type {
 
 /**
  * A date on the wire is ISO yyyy-mm-dd, and the schema enforces it rather than
- * only describing it, because the alternative is a mislabelled failure. Every
+ * only describing it, because the alternative is a mislabelled failure. A hotel
  * date the model sends reaches `nightsBetween` (`src/supplier/dates.ts`), which
  * throws a RangeError on anything else; that throw surfaces from inside
  * `supplier.search`, where `supplierRunner` has no way left to tell it apart
  * from a supplier that fell over, and would report the model's own typo as an
- * outage. A model told the supplier failed re-issues the identical call. A
- * model told its input was invalid fixes the date. So the shape is checked here
- * at the seam, while the mistake still has the model's name on it.
+ * outage. A flight date never reaches it and fails worse: the mock hashes the
+ * string it was given and hands the model an itinerary whose `departureLocal`
+ * is built out of the typo. A model told the supplier failed re-issues the
+ * identical call. A model told its input was invalid fixes the date. So the
+ * shape is checked here at the seam, while the mistake still has the model's
+ * name on it.
  *
  * This is a format check and not a calendar check: `2026-02-31` passes here and
  * `nightsBetween` will happily count to it. Rejecting an impossible date is

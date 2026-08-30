@@ -42,10 +42,12 @@ describe('tools', () => {
     expect(outcome.content).not.toContain('Invalid input')
   })
   /**
-   * One case per date field the tools publish. A malformed date used to reach
-   * `nightsBetween` inside the supplier and come back as `mock search failed`,
-   * which tells the model the thing it should try again, so it re-issues the
-   * same broken date forever. The schema now refuses it at the seam
+   * One case per date field the tools publish. A malformed hotel date used to
+   * reach `nightsBetween` inside the supplier and come back as `mock search
+   * failed`, which tells the model the thing it should try again, so it
+   * re-issues the same broken date forever, and a malformed flight date came
+   * back as an itinerary built out of the typo. The schema now refuses both at
+   * the seam
    * (`src/tools.ts`), and the assertion that matters is the negative one: this
    * must never be described as an outage.
    */
