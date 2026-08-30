@@ -19,6 +19,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-2-6 | Control the money | npm run migrate, then npm test (test/spend.test.ts) |
 | lesson-2-7 | Fifty presses, one turn | npm run migrate, then npm test (test/idempotency.test.ts) |
 | lesson-3-1 | The claim with a fencing token | npm test (test/claim.test.ts) |
+| lesson-3-2 | Heartbeats and leases | npm test (test/lease.test.ts) |
 
 Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a turn with no message. Since lesson 3.1's worker claims before it loads, that turn now reaches the sweeper as `running` with a fresh heartbeat rather than `queued`; the stalled-turn sweeper module 3 builds must reap it once that heartbeat goes stale, not by looking for a queued turn with no heartbeat.
 

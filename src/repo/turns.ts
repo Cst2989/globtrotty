@@ -17,6 +17,24 @@ export type TurnInput = {
 export const MAX_ATTEMPTS = 5
 
 /**
+ * Seconds of silence after which a `running` turn is treated as abandoned and
+ * may be taken by another worker.
+ *
+ * The threshold has to sit above the hard execution ceiling of the environment
+ * that runs a turn. Tier 3 is a Netlify background function, killed at fifteen
+ * minutes, and lesson 2.3's deadline check makes a healthy turn hand off before
+ * that, so ninety seconds of total silence from a process that is supposed to
+ * report in every twenty-five is a dead process, not a busy one. Set below the
+ * ceiling instead, and the sweeper resurrects runs that are still alive and the
+ * same turn executes twice in parallel.
+ *
+ * A plain number of seconds rather than a SQL interval literal, so it can be
+ * bound as a parameter through `make_interval()` instead of being interpolated
+ * into the query text.
+ */
+export const HEARTBEAT_STALE = 90
+
+/**
  * What one worker holds while it owns a turn. `attempts` is the fencing token:
  * it is not a diagnostic counter, it is the value every subsequent write carries
  * to prove it comes from the run that currently owns this row.
@@ -60,6 +78,11 @@ type ClaimRow = {
  * Returns null rather than throwing for a turn somebody else owns, because
  * "another worker has this" is the ordinary case on a platform that retries
  * invocations, and the correct response is to walk away quietly.
+ *
+ * The second arm is the lease: a turn whose worker has said nothing for
+ * HEARTBEAT_STALE seconds is available again. The queued arm has no time
+ * condition, which is what makes a deliberate hand-off (releaseForContinuation)
+ * claimable at once rather than after a staleness window.
  */
 export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Claim | null> {
   const rows = await sql<ClaimRow[]>`
@@ -70,7 +93,9 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
            attempts = attempts + 1
      where id = ${turnId}
        and attempts < ${MAX_ATTEMPTS}
-       and status = 'queued'
+       and (status = 'queued'
+            or (status = 'running'
+                and heartbeat_at < now() - make_interval(secs => ${HEARTBEAT_STALE})))
     returning id, conversation_id, user_id, attempts, state`
   const row = rows[0]
   if (!row) return null
@@ -96,6 +121,52 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
   const rows = await sql`
     update course.turns set state = ${sql.json(state)}, heartbeat_at = now()
+     where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+    returning id`
+  if (rows.length === 0) throw new FencedError(claim.turnId)
+}
+
+/**
+ * "Still here." The cheapest fenced write there is, and the only thing standing
+ * between a slow step and a turn that gets taken away mid call. A worker calls
+ * it on a timer while a step is in flight, not only between steps: a step that
+ * runs longer than HEARTBEAT_STALE is exactly the case a heartbeat exists for,
+ * and one that only ticked between steps would go silent during the very call
+ * that needed it.
+ *
+ * Fenced like every other write here, so it doubles as a cheap ownership
+ * assertion: a caller that is about to spend money can call this first and find
+ * out it has been superseded before it spends anything.
+ */
+export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> {
+  const rows = await sql`
+    update course.turns set heartbeat_at = now()
+     where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+    returning id`
+  if (rows.length === 0) throw new FencedError(claim.turnId)
+}
+
+/**
+ * Persists state AND gives the lease back, in one statement, for the
+ * `continue_later` path.
+ *
+ * `saveTurnState` alone is the trap. It leaves the row `running` with a fresh
+ * `heartbeat_at`, so the re-invocation's own `claimTurn` satisfies neither arm:
+ * not the queued one, because the status is `running`, and not the stale one,
+ * because the heartbeat was just refreshed. The continuation would then wait for
+ * the sweeper, which is HEARTBEAT_STALE seconds of staleness plus up to a sweep
+ * interval of cron, for a hand-off that was entirely deliberate.
+ *
+ * Setting the status back to `queued` makes it claimable immediately.
+ */
+export async function releaseForContinuation(
+  sql: postgres.Sql,
+  claim: Claim,
+  state: TurnState,
+): Promise<void> {
+  const rows = await sql`
+    update course.turns
+       set state = ${sql.json(state)}, status = 'queued', queued_at = now()
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
