@@ -14,7 +14,7 @@ type Price = {
 type Property = {
   property_token?: string; name?: string; link?: string
   gps_coordinates?: { latitude: number; longitude: number }
-  rating?: number; total_price?: Price; price_per_night?: Price
+  rating?: number; total_price?: Price
   offers?: { source?: string }[]
 }
 

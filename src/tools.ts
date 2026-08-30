@@ -239,11 +239,16 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
 }
 
 /**
- * The plain runner: a search, as a tool result, with nothing recorded. Defaults
- * to a fresh pair of mocks so every test and script that had no opinion about
- * suppliers still has none. Lesson 4.3 wraps `supplierRunner` in `corpusRunner`
- * instead, and from then on this is the runner for code paths with no
- * conversation to attach a corpus row to.
+ * The plain runner: a search against whichever `SupplierPair` it is handed, as
+ * a tool result, with nothing recorded. The name is older than the pair.
+ * Nothing about this function is a mock; only the DEFAULT is, and from lesson
+ * 4.2 the two call sites that matter hand it real ones
+ * (`liveSuppliers().suppliers`, in scripts/trip.ts and in the tier 3
+ * background function), so `mockRunner` is what calls Kiwi in production. The
+ * default is what keeps every test and script that has no opinion about
+ * suppliers from needing one. Lesson 4.3 wraps `supplierRunner` in
+ * `corpusRunner` instead, and from then on this is the runner for code paths
+ * with no conversation to attach a corpus row to.
  */
 export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunner {
   const inner = supplierRunner(suppliers)

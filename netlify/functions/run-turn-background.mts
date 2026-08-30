@@ -64,16 +64,28 @@ export default async (req: Request): Promise<Response> => {
     // already in flight. `classify` and `extract` are the one exception and
     // are deliberately not given it (src/conversation.ts), so a fence landing
     // during one of those two short cheap-seat calls is still paid for.
-    // Throwing the
-    // signal's own `reason` (the captured FencedError, `src/worker.ts`'s
-    // withHeartbeat) rather than a fresh error means it lands in runTurn's
-    // catch exactly the way a tick's own deferred throw would: written
-    // nowhere, because whoever fenced this turn is alive and already
-    // finishing it.
-    // fencedModelCallSink (src/repo/spend.ts) records every call
-    // unconditionally, since it already happened and already cost real money
-    // at the provider by the time this sink runs, and only refuses the NEXT
-    // one once a fence is discovered.
+    //
+    // What cancelling costs, said plainly: the provider may already have
+    // generated most of a reply and may already have charged for it, and
+    // `callAndRecord` (src/metered.ts) records only what CAME BACK, so an
+    // aborted call writes no course.model_calls row, no daily_usage increment
+    // and no conversations.spend_usd_micros increment. That charge is
+    // invisible to every later ceiling check. It is not closed here and
+    // course.model_calls has no column that could name it; module 5's
+    // reserve-before-call is where a call becomes countable before it is made.
+    //
+    // fencedModelCallSink (src/repo/spend.ts) answers the OTHER case, a call
+    // that returned into a fence: it records every such call unconditionally,
+    // since it already happened and already cost real money by the time the
+    // sink runs, and only refuses the NEXT one. It never sees a cancelled
+    // call, because a cancelled call never reaches a sink.
+    //
+    // An aborted model call does not fail this turn either. It classifies as
+    // `unclassified` (src/errors.ts), the driver turns that into a `fail`
+    // step, and `withHeartbeat`'s check after `work()` settles (src/worker.ts)
+    // throws the captured FencedError before `runTurn` can reach the fail
+    // branch, so nothing is stamped on a turn this worker no longer owns. That
+    // post-check is load bearing here in a way it was not before 4.2.
     const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
     const baseRunner = ledgerRunner(sql, claim, mockRunner(liveSuppliers().suppliers))
     const runner: ToolRunner = async (name, input, callId, sig) => {

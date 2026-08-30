@@ -98,9 +98,18 @@ call are both cancelled rather than merely not being followed by another one.
 Two gaps are left and neither is silent: `classify` and `extract`
 (src/classify.ts, src/extract.ts) are single short calls on the cheap seat and
 are not given the signal, so a fence landing during one of them still pays for
-it; and a provider that has already charged for a call we then cancel has
-still charged for it, which is why `fencedModelCallSink` records the row
-before it throws.
+it; and cancelling a call does not un-charge it. The provider may already have
+generated most of a reply and billed for it, and `callAndRecord`
+(src/metered.ts) records only what came BACK, so an aborted call writes no
+`course.model_calls` row, no `daily_usage` increment and no
+`conversations.spend_usd_micros` increment. That charge is invisible to every
+later ceiling check, and it is a real hole this lesson opened rather than one
+it closed: `course.model_calls` has no column that could name a call that never
+returned, so recording it needs a migration this module does not do. Module 5's
+reserve-before-call, where a call is counted before it is made, is where it
+closes. `fencedModelCallSink` answers the OTHER case, a call that returned into
+a fence: it records that row before refusing the next call, and it never sees a
+cancelled one, because a cancelled call never reaches a sink.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced

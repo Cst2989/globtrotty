@@ -190,6 +190,14 @@ export function ledgerSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
  * (src/worker.ts), and is recognised there as a `FencedError` and written
  * nowhere. No later call is attempted, because there is no later call.
  *
+ * What this does NOT cover, from lesson 4.2 on: a call that was CANCELLED
+ * rather than returned. The signal now reaches the SDK, so an aborted call
+ * rejects and `callAndRecord` never reaches any sink, which means the very
+ * thing the paragraph above calls worse (a real charge with no row anywhere)
+ * is exactly what a cancelled call leaves behind. It is a known hole, named in
+ * README.md, and it needs a column `course.model_calls` does not have; module
+ * 5's reserve-before-call is where a call becomes countable before it is made.
+ *
  * `netlify/functions/run-turn-background.mts`'s tier-3 driver is the one
  * production caller, wrapping a fenced turn's own `ledgerSink`; it lives here
  * rather than inline there because there is no Netlify test harness in this
