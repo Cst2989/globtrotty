@@ -62,8 +62,8 @@ const STOPOVERS = ['MAD', 'BCN'] as const
  * stay that way: `test/fixtures/model/loop-portugal.json` is a recorded reply
  * quoting them, `test/provenance-v0.test.ts` compares that reply against these
  * numbers, and the replay client returns the recorded reply whatever the
- * request. `test/supplier-mock.test.ts` pins the six amounts that fixture
- * depends on.
+ * request. `test/supplier-mock.test.ts` pins all twelve amounts that fixture
+ * depends on, across all four of the searches it drove.
  */
 export class MockSupplier implements Supplier {
   readonly name = 'mock'
@@ -105,12 +105,15 @@ export class MockSupplier implements Supplier {
       return { status: 'unavailable', reason: 'mock: configured unavailable' }
     }
     if (this.cfg.quoteMode === 'gone') return { status: 'gone' }
-    // Rebuild from params when this instance has not searched yet, exactly as a
-    // real re-quote does: re-run the stored search, find by native id. A
-    // resumed turn's cashier runs in a fresh process with an empty map, and a
-    // supplier that called every price gone there would block every hand-off
-    // that ever crossed an invocation.
-    if (this.lastResults.size === 0) await this.search(params)
+    // Rebuild from params whenever this instance does not already hold the id,
+    // exactly as a real re-quote does: re-run the stored search, find by native
+    // id. The condition is "do I know this id", not "have I searched at all",
+    // and the difference is the whole point. A resumed turn's cashier runs in a
+    // fresh process with an empty map, but it is also handed one instance that
+    // serves several searches in a row: keying off an empty map would re-search
+    // once and then call every id from every OTHER search gone, which is the
+    // same broken hand-off one search later.
+    if (!this.lastResults.has(sourceId)) await this.search(params)
     const found = this.lastResults.get(sourceId)
     if (!found) return { status: 'gone' }
     const drift = this.cfg.quoteDriftMinor ?? 0n
@@ -188,8 +191,11 @@ export class MockSupplier implements Supplier {
       stops,
       route,
       cabinClass: 'Economy',
-      // A set, because "who flies this" is a set. `flightNumbers` below is per
-      // segment and must not be deduplicated for the same reason.
+      // Always one entry here, because this mock flies every segment of a leg
+      // on one airline. The field is a list because a real leg need not be:
+      // an interline itinerary is two carriers under one price. `flightNumbers`
+      // below is the other axis, one entry per segment rather than per airline,
+      // and must not be deduplicated.
       carriers: [CARRIER_CODES[carrier] ?? carrier],
       flightNumbers: route.slice(1).map((_, segment) => `${CARRIER_CODES[carrier] ?? 'ZZ'}${numberBase + segment}`),
     }

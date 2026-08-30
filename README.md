@@ -121,7 +121,12 @@ quotable and whether it can be checked again, and `MockSupplier` answers all
 four honestly for a supplier that invents its prices from a hash. Nothing yet
 stores what a search returned, so the only thing that can read a price is the
 model that was shown it, and the only thing that could check one is a caller
-holding the same object. Lesson 4.3 is where a search becomes a row.
+holding the same object. One seam is already open and the suite cannot see it:
+every search now asks for `TRIP_CURRENCY`, so flights come back in euros, while
+the recorded reply `test/provenance-v0.test.ts` replays still quotes them in
+dollars, and that test's `offeredAmounts` compares whole-unit numbers without
+ever looking at a currency. Lesson 4.4 is what breaks that test on purpose and
+closes it. Lesson 4.3 is where a search becomes a row.
 
 ## What is next
 

@@ -13,7 +13,9 @@ export type LegSummary = {
   cabinClass: string
   carriers: string[]
   /**
-   * One entry per segment, in segment order, for example `['U22202', 'LS875']`.
+   * One entry per segment, in segment order. `MockSupplier`'s two-segment
+   * Ryanair leg is `['FR110', 'FR111']`; lesson 4.2's Kiwi adapter fills this
+   * from the itinerary's own segment list.
    *
    * Lesson 4.6's cashier compares a re-quote per item and on item IDENTITY, not
    * just on the sum. Carrier alone is not identity: `FR1762` and `FR1763` are

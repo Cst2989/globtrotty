@@ -9,18 +9,36 @@ import type {
   FlightSearch, HotelSearch, SearchParams, SupplierItem, SupplierPair,
 } from './supplier/types.js'
 
+/**
+ * A date on the wire is ISO yyyy-mm-dd, and the schema enforces it rather than
+ * only describing it, because the alternative is a mislabelled failure. Every
+ * date the model sends reaches `nightsBetween` (`src/supplier/dates.ts`), which
+ * throws a RangeError on anything else; that throw surfaces from inside
+ * `supplier.search`, where `supplierRunner` has no way left to tell it apart
+ * from a supplier that fell over, and would report the model's own typo as an
+ * outage. A model told the supplier failed re-issues the identical call. A
+ * model told its input was invalid fixes the date. So the shape is checked here
+ * at the seam, while the mistake still has the model's name on it.
+ *
+ * This is a format check and not a calendar check: `2026-02-31` passes here and
+ * `nightsBetween` will happily count to it. Rejecting an impossible date is
+ * lesson 4.5's dates gate, which has her trip in front of it and can say what
+ * is wrong with it.
+ */
+const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('yyyy-mm-dd')
+
 const FlightInput = z.object({
   from: z.string().describe('IATA code of the departure airport'),
   to: z.string().describe('IATA code of the arrival airport'),
-  departureDate: z.string().describe('yyyy-mm-dd'),
-  returnDate: z.string().nullable().describe('yyyy-mm-dd, or null for one way'),
+  departureDate: IsoDate,
+  returnDate: IsoDate.nullable().describe('yyyy-mm-dd, or null for one way'),
   adults: z.number().int().min(1),
   children: z.number().int().min(0),
 })
 const HotelInput = z.object({
   city: z.string(),
-  checkIn: z.string().describe('yyyy-mm-dd'),
-  checkOut: z.string().describe('yyyy-mm-dd'),
+  checkIn: IsoDate,
+  checkOut: IsoDate,
   adults: z.number().int().min(1),
   children: z.number().int().min(0),
 })
@@ -93,11 +111,14 @@ export function hotelSearchFrom(input: HotelToolInput): HotelSearch {
 export type ToolOutcome = { content: string; isError: boolean }
 /**
  * `callId` identifies this call WITHIN its turn, so a resumed turn can recognise
- * a call it already made. A runner that does not care about identity, like
- * `mockRunner` below, declares two parameters and still satisfies this type,
- * because a function of fewer parameters is assignable to one of more. Calling
- * a value typed as `ToolRunner` is the other direction and does need all three,
- * which is why test/tools.test.ts passes a call id it then ignores.
+ * a call it already made. Declaring it is optional for an implementation: the
+ * runner that does not care about identity here is the two-parameter lambda
+ * `supplierRunner` returns below, and it satisfies a three-parameter type
+ * because a function of fewer parameters is assignable to one of more.
+ * `mockRunner` itself declares all three and forwards the id into that lambda,
+ * which drops it. Calling a value typed as `ToolRunner` is the other direction
+ * and does need all three, which is why test/tools.test.ts passes a call id
+ * nothing downstream reads.
  */
 export type ToolRunner = (name: string, input: unknown, callId: string) => Promise<ToolOutcome>
 

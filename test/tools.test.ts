@@ -9,8 +9,9 @@ describe('tools', () => {
     expect(TOOLS[0]?.input_schema.type).toBe('object')
   })
   it('returns offers as JSON', async () => {
-    // 's0-b0' is a call id: mockRunner ignores it, but calling a value typed
-    // as ToolRunner needs all three arguments regardless (src/tools.ts).
+    // 's0-b0' is a call id: mockRunner forwards it to a runner that ignores
+    // it, but calling a value typed as ToolRunner needs all three arguments
+    // regardless (src/tools.ts).
     const outcome = await run('search_hotels', { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 }, 's0-b0')
     expect(outcome.isError).toBe(false)
     expect(JSON.parse(outcome.content)).toHaveLength(3)
@@ -40,6 +41,40 @@ describe('tools', () => {
     expect(outcome.content).toContain('HTTP 503')
     expect(outcome.content).not.toContain('Invalid input')
   })
+  /**
+   * One case per date field the tools publish. A malformed date used to reach
+   * `nightsBetween` inside the supplier and come back as `mock search failed`,
+   * which tells the model the thing it should try again, so it re-issues the
+   * same broken date forever. The schema now refuses it at the seam
+   * (`src/tools.ts`), and the assertion that matters is the negative one: this
+   * must never be described as an outage.
+   */
+  it.each([
+    ['search_flights', 'departureDate',
+      { from: 'BER', to: 'LIS', departureDate: 'September 19', returnDate: null, adults: 2, children: 1 }],
+    ['search_flights', 'returnDate',
+      { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: '25/09/2026', adults: 2, children: 1 }],
+    ['search_hotels', 'checkIn',
+      { city: 'Lagos', checkIn: 'next Friday', checkOut: '2026-09-25', adults: 2, children: 1 }],
+    ['search_hotels', 'checkOut',
+      { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-9-25', adults: 2, children: 1 }],
+  ])('tells the model a malformed %s.%s is its own bad input, not an outage', async (tool, _field, input) => {
+    const outcome = await run(tool, input, 's0-b0')
+    expect(outcome.isError).toBe(true)
+    expect(outcome.content).toContain('Invalid input')
+    expect(outcome.content).not.toContain('search failed')
+    expect(outcome.content).not.toContain('bad ISO date')
+  })
+
+  it('accepts a null returnDate, which is a one-way search and not a bad date', async () => {
+    const outcome = await run(
+      'search_flights',
+      { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: null, adults: 2, children: 1 },
+      's0-b0',
+    )
+    expect(outcome.isError).toBe(false)
+  })
+
   it('never puts a supplier-supplied URL on the wire', async () => {
     const [item] = await mockSuppliers().hotel.search({
       kind: 'hotel', query: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25',

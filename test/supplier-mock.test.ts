@@ -30,24 +30,30 @@ describe('MockSupplier', () => {
 
   /**
    * The load-bearing one. `test/fixtures/model/loop-portugal.json` holds a
-   * recorded reply quoting 147, 278, 388 and eleven other amounts, and
-   * `test/provenance-v0.test.ts` asserts every amount in that reply appears in
-   * a tool result of the same run. The replay client returns the recorded
-   * reply whatever the request, so a change to these numbers changes only one
-   * side of that comparison, and there is no key in CI to re-record the other.
+   * recorded reply quoting twelve amounts, and `test/provenance-v0.test.ts`
+   * asserts every amount in that reply appears in a tool result of the same
+   * run. The replay client returns the recorded reply whatever the request, so
+   * a change to these numbers changes only one side of that comparison, and
+   * there is no key in CI to re-record the other.
    *
-   * These are the exact minor units lesson 1.4's mock produced for the two
-   * searches that fixture drove. They are pinned here, in the supplier's own
-   * test, so that a change to the price derivation fails with a message about
-   * the price derivation rather than as a mysterious provenance failure three
-   * files away.
+   * All twelve are pinned, across all four searches that fixture drove
+   * (BER-FAO and BER-LIS flights, Faro and Lisbon hotels), so that a derivation
+   * change which happened to move only one pair of searches still fails here.
+   * They are the exact minor units lesson 1.4's mock produced, pinned in the
+   * supplier's own test so that a change to the price derivation fails with a
+   * message about the price derivation rather than as a mysterious provenance
+   * failure three files away.
    */
-  it('still prices the recorded fixture searches exactly as lesson 1.4 did', async () => {
-    const flights = await new MockSupplier({ kind: 'flight' }).search(search)
-    expect(flights.map((i) => i.price.minor)).toEqual([38800n, 14700n, 27800n])
+  it('still prices all four recorded fixture searches exactly as lesson 1.4 did', async () => {
+    const flightsTo = async (to: string) =>
+      (await new MockSupplier({ kind: 'flight' }).search({ ...search, to })).map((i) => i.price.minor)
+    const hotelsIn = async (query: string) =>
+      (await new MockSupplier({ kind: 'hotel' }).search({ ...stay, query })).map((i) => i.price.minor)
 
-    const hotels = await new MockSupplier({ kind: 'hotel' }).search(stay)
-    expect(hotels.map((i) => i.price.minor)).toEqual([72100n, 84000n, 69300n])
+    expect(await flightsTo('FAO')).toEqual([38800n, 14700n, 27800n])
+    expect(await flightsTo('LIS')).toEqual([23000n, 27200n, 35500n])
+    expect(await hotelsIn('Faro')).toEqual([72100n, 84000n, 69300n])
+    expect(await hotelsIn('Lisbon')).toEqual([56000n, 95200n, 65800n])
   })
 
   it('prices in the requested currency', async () => {
@@ -83,6 +89,21 @@ describe('MockSupplier', () => {
     const fresh = new MockSupplier({ kind: 'flight' })
     const q = await fresh.quote(searched[0]!.sourceId, search)
     expect(q.status).toBe('ok')
+  })
+
+  it('re-runs the search for an id it does not hold, even after serving another search', async () => {
+    // The hand-off `quote`'s own comment describes, one search later than an
+    // empty map. `loop-portugal.json` drives BER-FAO and BER-LIS through one
+    // instance, so a resumed invocation can easily have searched LIS before the
+    // cashier asks it to re-quote an FAO id against its stored FAO params. A
+    // guard that fired only on an empty map would skip the re-search here and
+    // report a live fare gone.
+    const faoIds = (await new MockSupplier({ kind: 'flight' }).search(search)).map((i) => i.sourceId)
+    const resumed = new MockSupplier({ kind: 'flight' })
+    await resumed.search({ ...search, to: 'LIS' })
+    const q = await resumed.quote(faoIds[0]!, search)
+    expect(q.status).toBe('ok')
+    if (q.status === 'ok') expect(q.item.sourceId).toBe(faoIds[0])
   })
 
   it('quotes an unknown id as gone', async () => {
