@@ -75,14 +75,14 @@ type ClaimRow = {
  * gap between the two statements, and that gap is where the second worker walks
  * off owning a turn the first already owns.
  *
- * Returns null rather than throwing for a turn somebody else owns, because
- * "another worker has this" is the ordinary case on a platform that retries
- * invocations, and the correct response is to walk away quietly.
- *
  * The second arm is the lease: a turn whose worker has said nothing for
  * HEARTBEAT_STALE seconds is available again. The queued arm has no time
  * condition, which is what makes a deliberate hand-off (releaseForContinuation)
  * claimable at once rather than after a staleness window.
+ *
+ * Returns null rather than throwing for a turn somebody else owns, because
+ * "another worker has this" is the ordinary case on a platform that retries
+ * invocations, and the correct response is to walk away quietly.
  */
 export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Claim | null> {
   const rows = await sql<ClaimRow[]>`
