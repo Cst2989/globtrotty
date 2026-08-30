@@ -219,8 +219,10 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
  * weight from lesson 4.2 than it used to: an aborted model call surfaces as
  * `APIUserAbortError`, which classifies as `unclassified` (src/errors.ts) and
  * comes back from the driver as an ordinary `fail` step, so this post-check is
- * the ONLY thing standing between a cancelled call and a fenced worker
- * stamping `unclassified` on a turn it no longer owns. Any OTHER heartbeat
+ * what stops a fenced worker from even trying to stamp `unclassified` on a
+ * turn it no longer owns; without it, `failTurn`'s own fenced predicate would
+ * still refuse the write and throw `FencedError`, so the check saves a wasted
+ * write rather than standing alone. Any OTHER heartbeat
  * failure is transient and swallowed, and the next tick retries: a tick must
  * never surface as an unhandled rejection.
  */

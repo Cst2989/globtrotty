@@ -170,7 +170,8 @@ describe('the abort signal a fenced worker hands to turn()', () => {
     expect(result.desk).toBe('front')
     expect(result.outcome).toBe('done')
     // The supplier end: src/tools.ts handed the search the caller's own signal.
-    expect(flight.seen).toEqual([controller.signal])
+    expect(flight.seen).toHaveLength(1)
+    expect(flight.seen[0]).toBe(controller.signal)
     // The model end: both loop steps got it. Not merely "defined", the same object.
     expect(client.signals[1]).toBe(controller.signal)
     expect(client.signals[2]).toBe(controller.signal)
@@ -196,7 +197,8 @@ describe('the abort signal a fenced worker hands to turn()', () => {
     )
 
     expect(result.desk).toBe('planning')
-    expect(flight.seen).toEqual([controller.signal])
+    expect(flight.seen).toHaveLength(1)
+    expect(flight.seen[0]).toBe(controller.signal)
     expect(client.signals[2]).toBe(controller.signal)
     expect(client.signals[3]).toBe(controller.signal)
     // Both cheap-seat calls, not just classify.
