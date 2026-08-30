@@ -37,6 +37,8 @@ export type TurnOptions = {
   record?: ModelCallSink
   /** Read once per step, so a ceiling check is never stale for the rest of the turn. */
   readSpend?: () => Promise<Spend>
+  /** Aborted when this worker is superseded; passed to the model client and the tool runner. */
+  signal?: AbortSignal
 }
 
 /**
@@ -102,6 +104,7 @@ export async function turn(
       promptVersion: desk.promptVersion,
       record: options.record,
       readSpend: options.readSpend,
+      signal: options.signal,
     })
     const next = { ...conversation, replies: [...conversation.replies, result.text] }
     return {
@@ -132,6 +135,7 @@ export async function turn(
     promptVersion: desk.promptVersion,
     record: options.record,
     readSpend: options.readSpend,
+    signal: options.signal,
   })
   const next = { ...conversation, notebook, replies: [...conversation.replies, result.text] }
   return {

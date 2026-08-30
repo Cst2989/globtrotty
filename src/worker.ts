@@ -210,10 +210,11 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
  * signal's `reason`, so a caller that checks it can re-throw the very error
  * that will short-circuit `runTurn`'s catch rather than inventing its own.
  *
- * `work` is not guaranteed to notice. Nothing here can reach into a call
- * already in flight and cancel it, so a caller that ignores the signal (a
- * fake agent in a test, a live model call with no cancellation support) simply
- * keeps running; the check after `work()` settles is the backstop that still
+ * `work` is not guaranteed to notice. Aborting the signal cancels a call that
+ * was HANDED the signal, which from lesson 4.2 is tier 3's model call and its
+ * supplier fetch both; a caller that never threads it anywhere (a fake agent
+ * in a test, a driver that only checks the flag between calls) simply keeps
+ * running, and the check after `work()` settles is the backstop that still
  * catches that case, exactly as it always has. Any OTHER heartbeat failure is
  * transient and swallowed, and the next tick retries: a tick must never
  * surface as an unhandled rejection.
@@ -371,6 +372,11 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       // it, and it takes the identical hand-back rather than being
       // classified and failing a turn that only needs a later attempt.
       if (err instanceof RetryBudgetExceededError) {
+        // The hand-back is right and the reason for it is not recorded anywhere
+        // else: `deadline_exceeded` on the row says the invocation ran out of
+        // time, not that a provider asked us to wait longer than we had. One
+        // line, so that a recurring 429 reads as a 429 at three in the morning.
+        console.error(`turn ${claim.turnId}: retry budget exceeded, handing back`, err.original)
         await continueLater(deps, claim, state, turnSpend)
         return
       }

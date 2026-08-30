@@ -88,12 +88,19 @@ NOT dead but has merely been superseded from still calling the model for the
 rest of its own budget after the fact. `src/worker.ts`'s abort signal is the
 part that answers that, and only partly: a heartbeat tick discovers the fence
 and aborts the signal, but that discovery is up to one heartbeat interval
-late, and a driver that checks the signal (tier 3's does, between its own
-model and tool calls) only stops at its NEXT call boundary, not mid-call. One
-model or tool call already in flight when the fence lands still finishes and
-is billed once. Threading the signal all the way through module 1's
-`TurnOptions`, so a call already in flight could be cancelled outright, is
-parked rather than done in module 3.
+late.
+
+Threading the signal all the way through module 1's `TurnOptions` is done, at
+lesson 4.2. `TurnOptions` and `LoopOptions` both carry a `signal`, the model
+client passes it to the SDK and the tool runner passes it to the supplier's
+own `fetch`, so a fenced worker's in-flight model call and in-flight supplier
+call are both cancelled rather than merely not being followed by another one.
+Two gaps are left and neither is silent: `classify` and `extract`
+(src/classify.ts, src/extract.ts) are single short calls on the cheap seat and
+are not given the signal, so a fence landing during one of them still pays for
+it; and a provider that has already charged for a call we then cancel has
+still charged for it, which is why `fencedModelCallSink` records the row
+before it throws.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced
@@ -115,18 +122,25 @@ database without one script's cleanup deleting the other's rows; the one thing
 it does NOT scope is `sweep()` itself, which is global by design and, on a
 shared database, requeues or fails every other user's stale turns too.
 
-The supplier port is a port and there is still only one thing behind it. From
-lesson 4.1 a `SupplierItem` says who quoted it, when, for how long it stays
-quotable and whether it can be checked again, and `MockSupplier` answers all
-four honestly for a supplier that invents its prices from a hash. Nothing yet
-stores what a search returned, so the only thing that can read a price is the
-model that was shown it, and the only thing that could check one is a caller
-holding the same object. One seam is already open and the suite cannot see it:
-every search now asks for `TRIP_CURRENCY`, so flights come back in euros, while
-the recorded reply `test/provenance-v0.test.ts` replays still quotes them in
-dollars, and that test's `offeredAmounts` compares whole-unit numbers without
-ever looking at a currency. Lesson 4.4 is what breaks that test on purpose and
-closes it. Lesson 4.3 is where a search becomes a row.
+The supplier port arrived in lesson 4.1: a `SupplierItem` says who quoted it,
+when, for how long it stays quotable and whether it can be checked again, and
+`MockSupplier` answers all four honestly for a supplier that invents its prices
+from a hash. One seam is open and the suite cannot see it: every search asks
+for `TRIP_CURRENCY`, so flights come back in euros, while the recorded reply
+`test/provenance-v0.test.ts` replays still quotes them in dollars, and that
+test's `offeredAmounts` compares whole-unit numbers without ever looking at a
+currency. Lesson 4.4 is what breaks that test on purpose and closes it.
+
+Two suppliers are real from lesson 4.2. Flights come from Kiwi's MCP
+endpoint, which needs no key; hotels come from SearchApi's Google Hotels
+engine when `GOOGLE_SEARCH_API` is set and from the mock when it is not, and
+`npm run trip` prints which one it used. Both parsers are pure functions over
+recorded responses, so `npm test` still needs no key of any kind and touches
+no network; the two `*.live.test.ts` files are the only exception and they
+skip unless `LIVE_SUPPLIERS=1`. What is still missing is a record: a search
+result exists only inside the turn that made it, so nothing can answer "what
+did we quote for this id, and when?" once the reply is written. Lesson 4.3 is
+where a search becomes a row.
 
 ## What is next
 

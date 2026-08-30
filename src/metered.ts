@@ -18,10 +18,10 @@ import { seatNameOf, type Seat } from './seats.js'
 export async function callAndRecord(
   client: ModelClient,
   params: MessageCreateParamsNonStreaming,
-  meta: { seat: Seat; promptVersion: string; record?: ModelCallSink },
+  meta: { seat: Seat; promptVersion: string; record?: ModelCallSink; signal?: AbortSignal },
 ): Promise<Message> {
   const startedMs = Date.now()
-  const message = await client.create(params)
+  const message = await client.create(params, { signal: meta.signal })
   if (meta.record) {
     const usage = usageOf(message)
     await meta.record({

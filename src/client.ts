@@ -6,7 +6,10 @@ import type { Message, MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk
  * hand in a recorded client and production hands in the SDK.
  */
 export type ModelClient = {
-  create(params: MessageCreateParamsNonStreaming): Promise<Message>
+  create(
+    params: MessageCreateParamsNonStreaming,
+    options?: { signal?: AbortSignal },
+  ): Promise<Message>
 }
 
 /**
@@ -19,7 +22,7 @@ export function liveClient(): ModelClient {
   const anthropic = new Anthropic(
     workspaceId ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } } : {},
   )
-  return { create: (params) => anthropic.messages.create(params) }
+  return { create: (params, options) => anthropic.messages.create(params, options) }
 }
 
 /** The reply text, with every text block joined; tool blocks are not text. */

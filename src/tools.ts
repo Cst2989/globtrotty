@@ -114,16 +114,19 @@ export function hotelSearchFrom(input: HotelToolInput): HotelSearch {
 export type ToolOutcome = { content: string; isError: boolean }
 /**
  * `callId` identifies this call WITHIN its turn, so a resumed turn can recognise
- * a call it already made. Declaring it is optional for an implementation: the
- * runner that does not care about identity here is the two-parameter lambda
- * `supplierRunner` returns below, and it satisfies a three-parameter type
- * because a function of fewer parameters is assignable to one of more.
- * `mockRunner` itself declares all three and forwards the id into that lambda,
- * which drops it. Calling a value typed as `ToolRunner` is the other direction
- * and does need all three, which is why test/tools.test.ts passes a call id
- * nothing downstream reads.
+ * a call it already made. `signal` is the fence, added in lesson 4.2: a runner
+ * that reaches the network hands it to the platform, so a superseded worker's
+ * supplier call already in flight is cancelled rather than merely not followed
+ * by another one. Declaring either is optional for an implementation: the
+ * counting runner in test/crash.test.ts declares fewer parameters and still
+ * satisfies this type, because a function of fewer parameters is assignable to
+ * one of more, while `mockRunner` declares the call id and forwards it into the
+ * lambda `supplierRunner` returns, which drops it. Calling a value typed as
+ * `ToolRunner` is the other direction and does need the three required
+ * arguments, which is why test/tools.test.ts passes a call id nothing
+ * downstream reads.
  */
-export type ToolRunner = (name: string, input: unknown, callId: string) => Promise<ToolOutcome>
+export type ToolRunner = (name: string, input: unknown, callId: string, signal?: AbortSignal) => Promise<ToolOutcome>
 
 /**
  * True for a value shaped like a real `ToolOutcome`, not merely typed as one.
@@ -181,7 +184,7 @@ export type SupplierOutcome = { outcome: ToolOutcome; record: SearchRecord | nul
  * and their `bigint` intact. Re-parsing the JSON to recover them would lose
  * both types and would store the model's view rather than the supplier's.
  */
-export type SupplierRunner = (name: string, input: unknown, callId: string) => Promise<SupplierOutcome>
+export type SupplierRunner = (name: string, input: unknown, callId: string, signal?: AbortSignal) => Promise<SupplierOutcome>
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -192,10 +195,12 @@ function messageOf(err: unknown): string {
  * differently on purpose: a bad input is the model's mistake and says so, and a
  * supplier that fell over is not, and must not be reported to the model as if
  * it were. Both come back as an error result rather than a throw, because
- * `toolLoop` promises never to throw and a search is safe to try again.
+ * `toolLoop` promises never to throw and a search is safe to try again. An
+ * aborted call is the one thing that does leave here as a throw, for the
+ * reason written at the catch below: it is neither of those two failures.
  */
 export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
-  return async (name, input) => {
+  return async (name, input, _callId, signal) => {
     if (name !== 'search_flights' && name !== 'search_hotels') {
       return { outcome: { content: `Unknown tool ${name}`, isError: true }, record: null }
     }
@@ -213,8 +218,14 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
     const supplier = params.kind === 'flight' ? suppliers.flight : suppliers.hotel
     let items: SupplierItem[]
     try {
-      items = await supplier.search(params)
+      items = await supplier.search(params, signal)
     } catch (err) {
+      // An aborted fetch is not a supplier outage and must not be described to
+      // the model as one: the turn is over, and the model is not going to get
+      // another step in which to work around anything. It leaves as the
+      // signal's own reason, which is the FencedError withHeartbeat captured,
+      // so it lands in runTurn's catch and is written nowhere.
+      if (signal?.aborted) throw signal.reason
       return {
         outcome: { content: `${supplier.name} search failed: ${messageOf(err)}`, isError: true },
         record: null,
@@ -236,7 +247,7 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
  */
 export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunner {
   const inner = supplierRunner(suppliers)
-  return async (name, input, callId) => (await inner(name, input, callId)).outcome
+  return async (name, input, callId, signal) => (await inner(name, input, callId, signal)).outcome
 }
 
 /**
@@ -254,7 +265,7 @@ export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunne
  * wrapped in exactly the same way.
  */
 export function ledgerRunner(sql: postgres.Sql, claim: Claim, inner: ToolRunner): ToolRunner {
-  return async (name, input, callId) => {
+  return async (name, input, callId, signal) => {
     const outcome = await beginToolCall(sql, claim, callId, name)
     if (outcome.status === 'replayed') {
       // `result` is `unknown`: it came back through a `jsonb` column the type
@@ -269,7 +280,7 @@ export function ledgerRunner(sql: postgres.Sql, claim: Claim, inner: ToolRunner)
       return outcome.result
     }
     if (outcome.status === 'ambiguous') throw new AmbiguousToolCallError(callId, name)
-    const result = await inner(name, input, callId)
+    const result = await inner(name, input, callId, signal)
     try {
       await finishToolCall(sql, claim, callId, result)
     } catch {

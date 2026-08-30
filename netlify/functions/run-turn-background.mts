@@ -6,7 +6,7 @@ import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { mockSuppliers } from '../../src/supplier/mock.js'
+import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../../src/tools.js'
 import { runTurn, type Agent } from '../../src/worker.js'
@@ -57,10 +57,14 @@ export default async (req: Request): Promise<Response> => {
     const claim = { turnId, conversationId, userId, attempts, state }
 
     // A `turn()` running fourteen minutes' worth of classify/extract/tool-loop
-    // calls has no boundary this driver can reach mid-call without threading
-    // an abort signal through src/loop.ts itself, so both guards below only
-    // ever stop the NEXT call, never the one already in flight when a fence
-    // lands; that one still finishes and is billed once. Throwing the
+    // calls had no boundary this driver could reach mid-call until lesson 4.2
+    // threaded an abort signal through src/loop.ts itself. It has one now: the
+    // guards below still refuse to START the next call, and the same signal,
+    // handed to `turn()` below, cancels the model call and the supplier fetch
+    // already in flight. `classify` and `extract` are the one exception and
+    // are deliberately not given it (src/conversation.ts), so a fence landing
+    // during one of those two short cheap-seat calls is still paid for.
+    // Throwing the
     // signal's own `reason` (the captured FencedError, `src/worker.ts`'s
     // withHeartbeat) rather than a fresh error means it lands in runTurn's
     // catch exactly the way a tick's own deferred throw would: written
@@ -71,14 +75,14 @@ export default async (req: Request): Promise<Response> => {
     // at the provider by the time this sink runs, and only refuses the NEXT
     // one once a fence is discovered.
     const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
-    const baseRunner = ledgerRunner(sql, claim, mockRunner(mockSuppliers()))
-    const runner: ToolRunner = async (name, input, callId) => {
+    const baseRunner = ledgerRunner(sql, claim, mockRunner(liveSuppliers().suppliers))
+    const runner: ToolRunner = async (name, input, callId, sig) => {
       // A tool call is the opposite case: checked BEFORE it starts, so a
       // fence refuses to run the tool at all rather than recording one that
       // already fired. Nothing has happened yet at this point, unlike the
       // model call above, so there is no row to lose by refusing here.
       if (signal.aborted) throw signal.reason
-      return baseRunner(name, input, callId)
+      return baseRunner(name, input, callId, sig)
     }
 
     const result = await turn(
@@ -92,6 +96,9 @@ export default async (req: Request): Promise<Response> => {
         deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
         record,
         readSpend: () => readSpendFailClosed(sql, userId, conversationId),
+        // Closed in lesson 4.2: the fence now reaches a call already in flight,
+        // not only the next one. README.md's residual paragraph moves with it.
+        signal,
       },
     )
     // continue_later is neither a fail reason nor a message: the driver's own

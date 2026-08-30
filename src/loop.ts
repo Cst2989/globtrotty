@@ -58,6 +58,16 @@ export type LoopOptions = {
    * checked by a test rather than by a type.
    */
   record?: ModelCallSink
+  /**
+   * Aborted when the worker holding this turn is superseded (`withHeartbeat`,
+   * src/worker.ts). Threaded all the way to the model client and to the tool
+   * runner, so a call ALREADY IN FLIGHT is cancelled rather than merely not
+   * being followed by another one. Module 3 parked this deliberately and named
+   * the cost in README.md: one model or tool call in flight when a fence landed
+   * still finished and was billed once. Optional, because a caller with no
+   * fence to enforce (a script, a test) has no signal to give.
+   */
+  signal?: AbortSignal
 }
 
 /** Token-by-token sum, with no opinion on whether `a` and `b` came from the same model. */
@@ -189,6 +199,7 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
           // this string names a call site to go fix, not a fact about a call.
           promptVersion: options.promptVersion ?? 'unversioned',
           record: options.record,
+          signal: options.signal,
         },
       )
     } catch (err) {
@@ -225,7 +236,7 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       const callId = `s${steps}-b${index}`
       let outcome: ToolOutcome
       try {
-        outcome = await options.run(block.name, block.input, callId)
+        outcome = await options.run(block.name, block.input, callId, options.signal)
       } catch (err) {
         // The one error the runner is allowed to end a turn with. A tool that
         // was started and never finished may already have changed something

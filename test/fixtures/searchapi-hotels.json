@@ -1,0 +1,3003 @@
+{
+  "search_metadata": {
+    "id": "search_b65xNDvgndHyyx05a48d73q0",
+    "status": "Success",
+    "created_at": "2026-08-29T10:16:38Z",
+    "request_time_taken": 3.54,
+    "parsing_time_taken": 0.01,
+    "total_time_taken": 3.54,
+    "request_url": "https://www.google.com/travel/search?q=Faro+Portugal",
+    "html_url": "https://www.searchapi.io/api/v1/searches/search_b65xNDvgndHyyx05a48d73q0.html",
+    "json_url": "https://www.searchapi.io/api/v1/searches/search_b65xNDvgndHyyx05a48d73q0"
+  },
+  "search_parameters": {
+    "engine": "google_hotels",
+    "q": "Faro Portugal",
+    "check_in_date": "2026-09-12",
+    "check_out_date": "2026-09-19",
+    "currency": "EUR",
+    "hl": "en",
+    "gl": "us",
+    "adults": 2,
+    "property_type": "hotel"
+  },
+  "search_information": {
+    "total_results": 2444
+  },
+  "properties": [
+    {
+      "type": "hotel",
+      "property_token": "ChkIo_iL3tWq4_86Gg0vZy8xMXJnNGI4djdzEAE",
+      "data_id": "0xd0554cfffb17ba9:0x3aff8d555bc2fc23",
+      "name": "Pure Formosa Concept Hotel",
+      "link": "https://www.pureformosa.com/?utm_medium=organic&utm_source=google&utm_campaign=google-my-business&utm_term=google-local",
+      "gps_coordinates": {
+        "latitude": 37.0272529,
+        "longitude": -7.8397502
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€159",
+        "extracted_price": 159,
+        "price_before_taxes": "€147",
+        "extracted_price_before_taxes": 147
+      },
+      "total_price": {
+        "price": "€1,113",
+        "extracted_price": 1113,
+        "price_before_taxes": "€1,032",
+        "extracted_price_before_taxes": 1032
+      },
+      "nearby_places": [
+        {
+          "name": "Mercados de Olhão",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "6 min"
+            }
+          ]
+        },
+        {
+          "name": "Igreja Matriz",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "27 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "54 min"
+            }
+          ]
+        },
+        {
+          "name": "Vai e Volta",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "3 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "3-star hotel",
+      "extracted_hotel_class": 3,
+      "rating": 4.6,
+      "reviews": 703,
+      "reviews_histogram": {
+        "5": 517,
+        "4": 136,
+        "3": 24,
+        "2": 6,
+        "1": 20
+      },
+      "location_rating": 4.4,
+      "proximity_to_things_to_do_rating": 3.8,
+      "proximity_to_transit_rating": 4.5,
+      "airport_access_rating": 4.0,
+      "reviews_breakdown": [
+        {
+          "name": "Bar",
+          "description": "Bar or lounge",
+          "total": 49,
+          "positive": 39,
+          "neutral": 4,
+          "negative": 6
+        },
+        {
+          "name": "Fitness",
+          "description": "Fitness",
+          "total": 50,
+          "positive": 44,
+          "neutral": 3,
+          "negative": 3
+        },
+        {
+          "name": "Pool",
+          "description": "Pool",
+          "total": 42,
+          "positive": 39,
+          "neutral": 1,
+          "negative": 2
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 72,
+          "positive": 63,
+          "neutral": 3,
+          "negative": 6
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 71,
+          "positive": 65,
+          "neutral": 1,
+          "negative": 5
+        },
+        {
+          "name": "Sleep",
+          "description": "Sleep",
+          "total": 29,
+          "positive": 21,
+          "neutral": 2,
+          "negative": 6
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Parking ($)",
+        "Outdoor pool",
+        "Air conditioning",
+        "Bar",
+        "Restaurant",
+        "Airport shuttle",
+        "Accessible"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnqjzWHa8_QyFk0lGUVeLmut03YV2vnng8MoQoSi6LqaNAPoYO47oI34nnX6Kvjkv8QALAIm2dIPSZ46IlEbxpB3gBqXjyhOjA9OXS61UYntyAzAsH4cEhRj3ITCGJsEDtsHhxM=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnqjzWHa8_QyFk0lGUVeLmut03YV2vnng8MoQoSi6LqaNAPoYO47oI34nnX6Kvjkv8QALAIm2dIPSZ46IlEbxpB3gBqXjyhOjA9OXS61UYntyAzAsH4cEhRj3ITCGJsEDtsHhxM=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl6mmsiZ9_czh2spnXQF8OcYd9MA9zQfaiSwaFQcFQ6EaGflZcoDbqHdysQyPKHz_vrP7pGNNB2uYHtmGz9niqVvz4dSo4yApEF5sUqOaf1KetnrbxFZFUfcs9-PpPuYMyVwRY_6Q=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl6mmsiZ9_czh2spnXQF8OcYd9MA9zQfaiSwaFQcFQ6EaGflZcoDbqHdysQyPKHz_vrP7pGNNB2uYHtmGz9niqVvz4dSo4yApEF5sUqOaf1KetnrbxFZFUfcs9-PpPuYMyVwRY_6Q=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/5cclFEFZVxOZRrD9BAooMwaaNEPuKXfgXav-vVYItQKNot8FahQU4nNbLHCJ3MwqIE3AklArSs-VLCekFtcb7hPLtRsIEc6IF98UNqUEvKYfsnylJlNPXfTpeEttL7A2-NsFjF5b5LA4adAGF128U-fg9UU75kk=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/69000000/68050000/68048400/68048336/75dd7e10_z.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/bN0r4tjwOntl1GAM2AbpCsGRVP4QivRqZfv6DNQVhG6BHUnOYGcfWOwWJwUkCTn2zpWYPboaPTDibAePDYB12iU0-NULgWYIJf5nC5OBls1UdIhmjGUOt6JSqGf5D7HTF6gHkA_HRUcRU-WHDSFUVU_n6u6zoA=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/52/zz/52ad40d22d513f2e8e5368da19f3f03f40a36118.JPEG"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/2QOUTamEt1vs8z4PUI6MuMT4pcdh3URVsqQB3WAzPj3inmql7LUDKJ6j7pOF5Gt45UB__baM_iIJq1DkfP61UefJx88wOMZ9XF2-uZZkduLpFcKQGnvwJcz267tXBim1VxXnJfAdCiEpu1aBSIBApp_UNofXKP4=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/33/0d/330dd0db53e3b514db34d868133c43101d40b08b.JPEG"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnpPVzT90VlCjQUKEvCaP9cyjlIZgiPwRRg3J9C2D8kTsp_a7-3LJiR56h25E3aILcs7J4POZhHMsmBot33BBDyBEsDSnSsxzrrvY0qj8BmW2WSTS-JK3D0LDbLkvl_sx1lqj8M=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnpPVzT90VlCjQUKEvCaP9cyjlIZgiPwRRg3J9C2D8kTsp_a7-3LJiR56h25E3aILcs7J4POZhHMsmBot33BBDyBEsDSnSsxzrrvY0qj8BmW2WSTS-JK3D0LDbLkvl_sx1lqj8M=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnHyYCblJyj-3_9ddV15N0mi6sUWRdhWp3fa0UPOKug6PNvDl94BaeqWASa7AW4UlBF8eLSZzQsFYT2VBOtPborqy70xqfjWe386atufiV_xd2du_12G0dGSvXJT235a2DFYhXv=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnHyYCblJyj-3_9ddV15N0mi6sUWRdhWp3fa0UPOKug6PNvDl94BaeqWASa7AW4UlBF8eLSZzQsFYT2VBOtPborqy70xqfjWe386atufiV_xd2du_12G0dGSvXJT235a2DFYhXv=s10000"
+        }
+      ]
+    },
+    {
+      "type": "vacation_rental",
+      "property_token": "ChkQ6ue5j66-v456Gg0vZy8xMXY1cmg3c3JiEAI",
+      "name": "AL - Comfortable House",
+      "link": "https://www.bluepillow.com/search/63989d7fc551970d3c720483?dest=bkng&cat=House&lat=37.02124&lng=-7.92537&language=en",
+      "gps_coordinates": {
+        "latitude": 37.021240234375,
+        "longitude": -7.925370216369629
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "4:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€64",
+        "extracted_price": 64,
+        "price_before_taxes": "€61",
+        "extracted_price_before_taxes": 61
+      },
+      "total_price": {
+        "price": "€450",
+        "extracted_price": 450,
+        "price_before_taxes": "€426",
+        "extracted_price_before_taxes": 426
+      },
+      "nearby_places": [
+        {
+          "name": "Rádio Naval",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "19 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "25 min"
+            }
+          ]
+        },
+        {
+          "name": "O Palhacinho - Restaurante",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "5 min"
+            }
+          ]
+        }
+      ],
+      "offers": [
+        {
+          "source": "Bluepillow.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/190ff319-d0fd-4c45-bfc8-bad6f5f395f2.png",
+          "num_guests": 2,
+          "price_per_night": {
+            "price": "€64",
+            "extracted_price": 64.0,
+            "price_before_taxes": "€61",
+            "extracted_price_before_taxes": 61.0
+          }
+        }
+      ],
+      "rating": 5,
+      "reviews": 8,
+      "location_rating": 3.8,
+      "proximity_to_transit_rating": 4.3,
+      "airport_access_rating": 4.1,
+      "amenities": [
+        "Air conditioning",
+        "Kitchen",
+        "Smoke-free",
+        "Cable TV",
+        "Free parking",
+        "Free Wi-Fi"
+      ],
+      "excluded_amenities": [
+        "No airport shuttle"
+      ],
+      "essential_info": [
+        "Entire house",
+        "Sleeps 2",
+        "1 bedroom",
+        "1 bathroom",
+        "1 bed"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/hi9dnxTFvO61DQoC-20tOUEuZ-QeMmSpk1k2-XdyT8Dt8qHdxmyCfuLUNIbHEn28x0zo3V_89DYEZ5Ri6xU6eqnm6DG1V2fQBaPC9K1ww6UxihUQph1o-6UThlkT1cofEbN39oY-L3P6bRI56ck7IhOw4OLGgg=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/351819521.jpg?k=b64068abe51007af2b489e08544effe9ec7bf64bd5792c79a805d3aa8a3e7946&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/c-3V2_qGzIAlHsdGiI6R3qUzqe6W1UqyXYyVxhj8DjSb51Kid0uNQNFFLTigTEykJWxoQ3ecgDkx-MsANHekBzoUQ4xa8RVkTgCVbKI7xYtHZhsbilHdN21QsEuT_pV34hwzsylYf2Tecwbo2spdqGeuPCiruw=s287-w287-h192-n-k-no-v1",
+          "original": "https://static.cupid.travel/hotels/378921767.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/Evc6Vat8843GOTXmbiH999VJbPBLuLWvpongsxMTQRgUTJ6TxrNbLaJAVdBZiypPvLZ5BX04WUcq_j4z-aiSVhgl9wfoqIAcwTJKTM-1TcqgfeGgQulPgQNyqaBIP3AJAyJ04ks5yqSqXwbBPr3tApFWrL2vTA=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/351819510.jpg?k=3c711beaabac84c42b4e2831352d78efb56e22f0e6b54c7a67904882fefe757c&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/JoFgePPyuTiLj5rQiP55S_CegPsVqNF_Ac1P5W4VwVx3x0tiGt-zVHutHwSm2gVmmCscx2l_Oz27smmLwcP0lMZS3T0hGl_DI0vc29pGU4DCjKC2IQYNR1ie9ttXFJdiavbI-G9RW9XKoKip2-fIZZi2xH0hW_8=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/378921803.jpg?k=b3716a0aa4c6f6d7ffc1e319e87622fb455faf80186c3c155ff146ded72dae09&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/nIHlZTy9A6sLBz4VDp-jSLsmhVUSyD4VSyjUkujHwCgsc6FT8VksUca2VmlSePxqSezORoH2RqwbGqOc2P9Rjaf5Al9L2r07iBEL6OmPcPSiavblrknlumw-3kTcr-qr0DuMy_LvqaL7Y8MOPAJDTiEoRJvjhq8=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/378921821.jpg?k=463059159e23952ea648f353e3bafba8dee7fb60333e6a00979ea07fbe1eafe8&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/_KtfhF9YBq4MiarM5x8vPzM_zf3UJokz6XX-O7cla7deNdCpNjSYfppw3rbMN5xnCAcAZD_3fYyzJYCm067JO16M7KLvdw6h30HeJz4Nca2jbfpVGcZ2ViwsVul_e2Hz6Drx8T_cBlB_TErCfzctyFWjrPAi-w=s287-w287-h192-n-k-no-v1",
+          "original": "https://static.cupid.travel/hotels/351819549.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/XPNAm2vQAxlv5uT7V7tofEOG6axWwyuNT7vsFtRsOjeVGzTwisGNXC7KzVIJ3p8nWDZYyNvauIKxoF4V6RgepBlbZcKtBcm0A7Pg0911Qb_tFeqeGknCvbVjCyfii6F8w7te93YOgElAsm5xU-o165s-KAj3WFc=s287-w287-h192-n-k-no-v1",
+          "original": "https://static.cupid.travel/hotels/488575319.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/NGStQxg8g18kuFVbVaLDNC4N25EREKw8ZVML9pHnvKlmdHuurZa9l1RaIVRwr8GnO4zqcrBrK71kEl-jNbktPuB6YmosINRk0fbgCCYlslFtLAfjL6DDsUA8rBZlG-ayoRdwioQDYMXv0_Q5o0tnaHkOVPIzIA=s287-w287-h192-n-k-no-v1",
+          "original": "https://static.cupid.travel/hotels/378921785.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/tMUNITUFtl1nOkwNxNDMe6UhbGRLe0dnB0Lkx8XijrfVE3wUooUcdRiQUnt3ur5MDAdbbRyplucd5dY_fTLGvHFkHZT8hcRr9hNkF6UgpBcks7s7KOY0XsF6faDXejdRHoT_4l_T6CEC8F7GhejLLom9dWVcKCw=s287-w287-h192-n-k-no-v1",
+          "original": "https://static.cupid.travel/hotels/351819471.jpg"
+        }
+      ]
+    },
+    {
+      "type": "vacation_rental",
+      "property_token": "ChoQ-ZeIxKX2lsWdARoNL2cvMTFuaGxodHBubhAC",
+      "name": "Casa Ilda",
+      "link": "https://www.booking.com/hotel/pt/casa-ilda-olhao.en-gb.html?aid=2068758&utm_source=seogooglelocal&utm_medium=description&utm_term=hotel-14575580&utm_campaign=en-gb&label=seogooglelocal-link-imagesaow-hotel-14575580_grp-0_gendate-20260826",
+      "gps_coordinates": {
+        "latitude": 37.02655792236328,
+        "longitude": -7.843714237213135
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€184",
+        "extracted_price": 184,
+        "price_before_taxes": "€168",
+        "extracted_price_before_taxes": 168
+      },
+      "total_price": {
+        "price": "€1,286",
+        "extracted_price": 1286,
+        "price_before_taxes": "€1,175",
+        "extracted_price_before_taxes": 1175
+      },
+      "offers": [
+        {
+          "source": "Booking.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/61aadbe1-e141-4d2e-a831-b6a18727e130.png",
+          "num_guests": 4,
+          "price_per_night": {
+            "price": "€184",
+            "extracted_price": 184.0,
+            "price_before_taxes": "€168",
+            "extracted_price_before_taxes": 168.0
+          },
+          "has_free_cancellation": true,
+          "free_cancellation_until": {
+            "date": "Sep 4",
+            "time": "11:59 PM"
+          }
+        }
+      ],
+      "rating": 5,
+      "reviews": 11,
+      "amenities": [
+        "Air conditioning",
+        "Crib",
+        "Elevator",
+        "Kitchen",
+        "Microwave",
+        "Oven stove",
+        "Pet-friendly",
+        "Smoke-free",
+        "Cable TV",
+        "Washer",
+        "Wheelchair accessible"
+      ],
+      "excluded_amenities": [
+        "No fitness center",
+        "No heating",
+        "No ironing board",
+        "No outdoor grill",
+        "No patio"
+      ],
+      "essential_info": [
+        "Entire apartment",
+        "Sleeps 4",
+        "2 bedrooms",
+        "2 bathrooms",
+        "2 beds",
+        "1,238 sq ft"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/kVNDyS2nWHO3yeKLulx9JDGCGtaEDPlREHNdNWRsYnUoy7RCp9HLigxezTmKcWdgOQ5O9QVWD5kVGgEvDxVJ0vrMbEmhY_O7wxCEhcfkKCk4F0wI6NRh3MVoRBBtqriuIFvIb2EvoLcKNxO14_oxlel2Zw_qYw=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxQlRkartS_eho8BID_9qzT3Xbzp1F5IGzNkCq3J5wYttDZiSU8yAIpBRGHzmA-s-ehn-SHSumcPeL_EIOl_fOKvK4SDJ-Xb-eDxC97oCEg==.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/iboMVYkGGUfemOn4-AnLc5n9jDY2bLcMS2ZTFPzX5YYyf_Dz9tWPODqKgc2lGzGYDFgnYoWxP0DLsiW_lnpTkP1u6VnK8P-InjnrbFTRuBr53eSBYVFYp98Z77MdaeYrx6KmG5wHK7-cVUZlsMcnShgKayKYIw=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYQ71XUYidBUzj-FyDWQs3BRd1PJZtTsu1SU8MrZQDBE0w4tDj1wI_7CZQENssYAVRpcZj5cyHYJ3J9KYVM7kEM9yFnjCpSCTs79ExYvoEKHCiWnel2IA==.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/DTvU_oo8xcJ0nzULOa9hgDEPj37j-pgjK-b_dsZ_6j2nhO15xhCIUhYFiYz0Rliz7nX4FgSg40J5yQ0XVS6I_G3XJ4K4-OV4ZLasw5IPriX-GUkOG2X3c48Yw9gHSxRquvUJ_NrZnugDwkjI-WNCNepXiHIrrg=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0Dxa95sNVPiBv6URCDGLk4C56Z_ZeExdVQ_vOw0yk1uCFLkUrUR44B8s3uqY6wJ5hWMLPI3dabpuHSdyC8GQdGBUzzROkY4_A1rtFWEXZ61w==.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/14DGs7kj2xmEzZ4jfknXplr6quteeZ_bq_JJm4R-xwNtFkW2Qn8V6KqcXA6AhJldqCRReY-v97OOtw88HZ5U9RY5WiWHHCkCPQXhDoGqX7zlaXBfwqywS-zz2N2F_tJknHQbt68KX0ghiS78770KQJOGrpgGxGE=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxQXA9Z1C-xfqSP-Ye9UClDXCkLrbeEjGlVbzSVGR3nTutecgIIaUk-bX0yvG8cm0VbHY9sLiYBLRCeo-JqMprAlQQR0PhtE69U72NbNFjA==.jpg"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/44aGKbIMR5q1XZ-ytCk1bwtbjAtibF-wLA5pfXnrmx6Al_pyREtCmDbJwAK-t9jvSNboMVvGy1ydfsP2TQNo1c0z8OZyZpo1gqM8fSJOm49IgK_c0aHm9pb8UrnGf3MfHZ6F4cF-Hnl_CIp-ecySz7lNntqCVg=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxbzozHH6sKLEMKWVl-yPWI2ySYiyChyM7ihcAxu6UP03ynOb26bXV64biNLIcPBUSurhQXGdyeBgw_Mlnk_Vw8_FwMZ4WY6odsrn-uwpTQ==.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/7YXP2zE0Hxn7qJLWNyb7CoUx9H0xyIkc5psKrM3NScC18cKuvmtv1lTOksJH56J7QzOjaS8OrMvT-MXvAKDPrAfbvp06wV8PHxD2BDF92kvZzVkJzOf5Mxgo0va296Vac2uonJpI2lkmLxQF9SDwdR46ui8KPr0=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxbTB_L0G7d1B-yNY17tDgl7UfLsp-zteyx2F204hC4lHIlVYQ6ELTsQnR3-ZywLrzm1e7Pm6hpMITvxCw-qVq1-K_tV2P93JEQwWNS01YQ==.jpg"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/g5M2EedOw8r7T5u9mBJ_Buaq1QHBYzpdJnAw4kHuhVgnkg7Ezpc2ScvBleIpsTY2ZAI2WlZDBS407ZBxVCkfeYkuHgup-4mmmY3t2MMF7-NSlKd1qMdu_VgyTqBJheWQU3TamrsNS6J4mdkN-FAfJFcUgcOdtQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxTkoxrDCha6pu4NwYONWYj1gL9fv8MtcQtXBFF8dScXrOp1xOzzXyitdwQL7CUS1_vW9i9pm1tYH8YZ6gNlF7wsjhUvbdY20fJfLoupbgA==.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/UPrIU_hxx_7Owh2BaKI_ULFapRe5z1F_72xMAsVQsBjJbCS8Xu_zUeWgX3Fh_Ac2h7cd622-OM3pfQ9We4K0W9D0hDhe9WObWlMBSzZqMlWLqhMGbwBXoXmdAIYzYJ0NMPnXwIYxK7V6YPYVrgUN5IvFTmtBTqI=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxfNcYW1TkKz43s3KFHTqztx-qjZnXY97eDdr6R36ZBwjIhN2CmuxCj-zlQu8RLVbkQZcEMZ1fr4Alppni15RC3uynzwYZb37NSRLxuKiWQ==.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/1B8xPLYopRwsNIGZfoPJxF9wdzp3O8_5H6c0iZ2SVoQH2r10RHtOTHaC6fm80fBkBVNlx9bLiWQHoFytoh_v9y6xUT3yApQWC4-a7rszIVfqwRHk0WRT9KxDsXlWkV7oKbs905aGYejfY9CDzmUWAaeNPyRXdgc=s287-w287-h192-n-k-no-v1",
+          "original": "https://xx.bstatic.com/xdata/w/hotel/840x460_watermarked_standard/UlYG65CxyC0DxUXkdb1xi7MoRjqM8Mtk9K4kXNjbqp1yoTc08w3bfPNONZoteR-3U2JdMZBzIWXcHBq9Sxiy9vQqQT2-YnKXs-fplzK06knrztTZJeU10Q==.jpg"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkImsrQnJ6ktY1_Gg0vZy8xMWxkODVsMWRtEAE",
+      "data_id": "0xd054dc11c175aef:0x7f1ad521e394251a",
+      "name": "Glamping Camp Faro",
+      "link": "https://domo-camp.org/faro-pt",
+      "gps_coordinates": {
+        "latitude": 37.0059341,
+        "longitude": -7.990773600000001
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€79",
+        "extracted_price": 79,
+        "price_before_taxes": "€79",
+        "extracted_price_before_taxes": 79
+      },
+      "total_price": {
+        "price": "€555",
+        "extracted_price": 555,
+        "price_before_taxes": "€554",
+        "extracted_price_before_taxes": 554
+      },
+      "nearby_places": [
+        {
+          "name": "Ria Formosa",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "10 min"
+            }
+          ]
+        },
+        {
+          "name": "Praia de Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "7 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "9 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "13 min"
+            }
+          ]
+        },
+        {
+          "name": "Wax RestoBar",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        }
+      ],
+      "rating": 3.8,
+      "reviews": 91,
+      "reviews_histogram": {
+        "5": 41,
+        "4": 18,
+        "3": 13,
+        "2": 7,
+        "1": 12
+      },
+      "location_rating": 3.8,
+      "proximity_to_things_to_do_rating": 3.9,
+      "proximity_to_transit_rating": 3.2,
+      "airport_access_rating": 4.8,
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkOAzDBKGiQCLXN09WABkTxISKn7YMncPYQAjrYHPb_C5xcyOPGpH26FI9dT1oHkJ_htAMCWiok108G8WqzXvPi8my_QmGRMdbfkNvxcufZSqtLCOhFL6dGE0h1tZdk8bt9qXEWSQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkOAzDBKGiQCLXN09WABkTxISKn7YMncPYQAjrYHPb_C5xcyOPGpH26FI9dT1oHkJ_htAMCWiok108G8WqzXvPi8my_QmGRMdbfkNvxcufZSqtLCOhFL6dGE0h1tZdk8bt9qXEWSQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn-TxWYaib1oH_JnMZ9y4iuyAAayc2y02SkQCcc-9mclnemVWXAWTxmplXwKgH-0b22Ga3oLwsPe7dTyVo21A1aoe84fAlB_3E8ER_1vQobqx-gyFGegrBWKIdlkjxEhDY7hVvb=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn-TxWYaib1oH_JnMZ9y4iuyAAayc2y02SkQCcc-9mclnemVWXAWTxmplXwKgH-0b22Ga3oLwsPe7dTyVo21A1aoe84fAlB_3E8ER_1vQobqx-gyFGegrBWKIdlkjxEhDY7hVvb=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl6-3pREVcxLziFjrdhAIOdX3NZKMKN9ZRXoUeAKRUxxDtIl8Zm3lN_7QA87UNXXpqK9U1IdGvwgzXaxB30lnFwmryrmiPgfu3GHAELD5vavjUuwcdA7DfMfPJWLEHvZzgpjVs=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl6-3pREVcxLziFjrdhAIOdX3NZKMKN9ZRXoUeAKRUxxDtIl8Zm3lN_7QA87UNXXpqK9U1IdGvwgzXaxB30lnFwmryrmiPgfu3GHAELD5vavjUuwcdA7DfMfPJWLEHvZzgpjVs=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWm_F87hHrXLt_i3zt2LD4Nwfs_qbHf73JRZ13n8DU0UHB2tBgpgENN987cclZDG9eCiLQCshOV1ANsEmWYITlKiBfAUTO1CGrDMPMImfwt4NjEPc16yAKF_Vt8W29ybEMgT87O1=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWm_F87hHrXLt_i3zt2LD4Nwfs_qbHf73JRZ13n8DU0UHB2tBgpgENN987cclZDG9eCiLQCshOV1ANsEmWYITlKiBfAUTO1CGrDMPMImfwt4NjEPc16yAKF_Vt8W29ybEMgT87O1=s10000"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/Gw4qHprXJAntmKhKcsZezCoFx6h1U2qMTwkfBAKRh2yPX1fOYWt7u_jlUiF5B1cWnVgu35Lzlp3Q9s4R6aE0GciKzZtaEtvaGbSXpqNypnJ3oahtHPv4sOVzytsHpJIGbXr-6zEmU72rPIueVJUjbCDis6OQfY0=s287-w287-h192-n-k-no-v1",
+          "original": "https://dweh1u36hoppi.cloudfront.net/ORIG/81296/79EA9CC8-EEF7-11EE-80B6-B98418537B7B.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmORYGG-lS267joKOy_EewxqOz1g_ghGK6sVmtbCnIWJpeWT5a-nIAxKq_J7Oif_7FXTDxd68gJ2QOeJfgMT0JOYMCPeiWQ6rMzphjMdpG5K_v-GZ4MiFgbJNY5whdu5JyBU_8=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmORYGG-lS267joKOy_EewxqOz1g_ghGK6sVmtbCnIWJpeWT5a-nIAxKq_J7Oif_7FXTDxd68gJ2QOeJfgMT0JOYMCPeiWQ6rMzphjMdpG5K_v-GZ4MiFgbJNY5whdu5JyBU_8=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnTKiJ_6znb4pjv1NZSaUVY6u6urB3UgrAASqDvvXgCnEBM4umfp4TyUMbO0_aJ4UXJR2K6y_P8xkRoYr9edLJo77RGm-LyC6VXMnDvfsNPlgWI2XKkio0lwOa9ARaBGC3XuMwi8g=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnTKiJ_6znb4pjv1NZSaUVY6u6urB3UgrAASqDvvXgCnEBM4umfp4TyUMbO0_aJ4UXJR2K6y_P8xkRoYr9edLJo77RGm-LyC6VXMnDvfsNPlgWI2XKkio0lwOa9ARaBGC3XuMwi8g=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnE0GrfnCz_hOytKwsnBonmqSDeCo5Iurre59MIgPk-qqgpHKq1ltinakYOBTuRJa024qvHePfRVogWyAZRdWWds7XajvXjW8ePRQcMWKLCvroZSziSLX2i_FjV9xjisiZ0lGWp0g=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnE0GrfnCz_hOytKwsnBonmqSDeCo5Iurre59MIgPk-qqgpHKq1ltinakYOBTuRJa024qvHePfRVogWyAZRdWWds7XajvXjW8ePRQcMWKLCvroZSziSLX2i_FjV9xjisiZ0lGWp0g=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnya8pMmibFGukt3qhvZvNe_qwCnXvvPqAquPk7Plv8uVXjWXt5WFIZiid0X3WnkVazqQfQjfo-odtDfrk4R5P1iDnRwWAnPvRqpBuSvatj3NPH0xm_fQiLxpBVwdyQrnnznJiW=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnya8pMmibFGukt3qhvZvNe_qwCnXvvPqAquPk7Plv8uVXjWXt5WFIZiid0X3WnkVazqQfQjfo-odtDfrk4R5P1iDnRwWAnPvRqpBuSvatj3NPH0xm_fQiLxpBVwdyQrnnznJiW=s10000"
+        }
+      ]
+    },
+    {
+      "type": "vacation_rental",
+      "property_token": "ChkQs7CHhPjpl_1BGg0vZy8xMXpibXM0d21fEAI",
+      "name": "Marina Legacy I Demi-suite Solaris 5",
+      "gps_coordinates": {
+        "latitude": 37.01753616333008,
+        "longitude": -7.935859203338623
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "10:00 AM",
+      "price_per_night": {
+        "price": "€78",
+        "extracted_price": 78,
+        "price_before_taxes": "€74",
+        "extracted_price_before_taxes": 74
+      },
+      "total_price": {
+        "price": "€543",
+        "extracted_price": 543,
+        "price_before_taxes": "€515",
+        "extracted_price_before_taxes": 515
+      },
+      "offers": [
+        {
+          "source": "Vrbo.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/icon_1850600648__vrbo.com.png",
+          "num_guests": 2,
+          "price_per_night": {
+            "price": "€78",
+            "extracted_price": 78.0,
+            "price_before_taxes": "€74",
+            "extracted_price_before_taxes": 74.0
+          },
+          "has_free_cancellation": true,
+          "free_cancellation_until": {
+            "date": "Aug 29",
+            "time": "11:59 PM"
+          }
+        }
+      ],
+      "amenities": [
+        "Air conditioning",
+        "Balcony",
+        "Heating",
+        "Kitchen",
+        "Patio",
+        "Smoke-free",
+        "Cable TV",
+        "Free Wi-Fi"
+      ],
+      "excluded_amenities": [
+        "No indoor pool",
+        "No outdoor pool",
+        "Not pet-friendly"
+      ],
+      "essential_info": [
+        "Entire cottage",
+        "Sleeps 2",
+        "1 bedroom",
+        "1 bathroom",
+        "1 bed",
+        "258 sq ft"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/2sUjfbt7oTpJ_9V5WOXpVfO5takS7cd1Hx-_owVdy3kAYzj2AWh3Scac-Q3Yi2PPzBnb7xexcqzznQ-yVyLfCSBgsxkhG2UKHPZZTcYCq23yDi5XEjhMKLqW3cNDmCKq-W7J3UYzw1CV3zGjmw0I7GgvAwjCISA=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/ea3281b0.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/DqtzEWA26QGKdmSUV2VD0mrlZ0NiR-Fl06vWHevlgs48U9pSJgB2WLNPRAOhbqMoDMndaOxMq8BLC-0_hp4sTaYmmP3iT7BG-iLse4HDfls8-0l7xaAP7gfjGZSUTOYl93BWLy_w17fj6ONKrvCbg858ByS4TA=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/131000000/130490000/130484200/130484139/7034e0f0_z.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/tKZg2cDQOqEHe3rvPmZ-jeBXeW5ub6s3U48F-VmYGzSIDFLPPWi4PSHQ7aaQzTaY4ER0EQnxpK8hFhLRTC5SPzZGNdmr79Fxwm3u93q3QdV8rHm-WrvNWt7tki4Y06fc4r8QfEUWoAq0TZUhvc6kjKRcb3grDQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/104112b4.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/5sjVxmYTdCQGgGnU1eph3kJdjUvQSuXqZzooZzrk2wOGxi_2yNJ9oaUPHT3vcdUwYgU0FYlJam3f11C4SO03-5_OJ-8IaI34nGWS6o5vVy7re5PgL7S6YpDIYzq1Dwhet1-B_xNL0OQMvoGzBQyyGik3lzBbeQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/131000000/130490000/130484200/130484139/16398484_z.jpg"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/gLL2ChAhoSowARSkTpbV4QR9FSnhZ2PCOsRkvcR4tJZxTpzy6d1uLl_dVjUYPnwGHBrB1s9RaHRy2spGjFePRJJxccKhjif1VUXUduEJVE7pJi5dIZlhHkMphkPmdxEVC89CWoLM2Its_Y13eExOrsfhYpdPJHw=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/c8a91fa7.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/j6jwmOEe7bh3uoFVjlEx7sJapp8RGOM76MbwSrbvyY8j0yGvuodj13wS1jPSo2GKRb-PnTRyVc21vxic8qPpVPFm4SY-Z0HSF7OVm4HBFpYVfP-1H1TH7_WkAvCQspyEzv058K9UgR_6KgkcqnvVIoCB7JS4j1A=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/b0d83a94.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/yZMIdGD0GaeH28F6iQdQRQWd-fuhBapGCMQr04d-61UkcBfPy0hMyoxNbxU9H5TM_8IKt7dPqLRmMCQ8BOJ6thOiXvERljL5bVnPOi4rD0vkyq1oygD0afNMUC5EbAu5aLwKy6FS0WTFhv9EWkr0hLmowT0eVN4=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/5cec7f80.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/WzSgEB3wfCsx91Qlrq12uzSeUI3GmbYZQnHrme0UZLByvJw3orlSOf22BytCcXoFJsDgyvD_nSW3jqzzHswDaeQa-YJuOhDQzAyON-h-JS1eMiH8YqbY5cPh2Ewo-Q5n_mgHtMFQzGyqACtZZM6HDMeCMk5GTQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/8dbd866f.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/6e-o6JHgN-NxSNbR1_X4QJrd_XQz9bkZzSSFJeBk6NiVR6NkU0Rs7EoJeht7fJzLFixoMQQrRl_VHrEpRrx_AJu9KyumftGwK81sQyM1xgxfjW3LRenriYuf5t7ogdJ7TUJ10Ms3e3_Mzeim1gb5NMo5LKD1X7Y=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/131000000/130490000/130484200/130484139/1b978c7a.jpg"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoIhtS0nZ3S_KXGARoNL2cvMTFoejExd2g1MhAB",
+      "data_id": "0xd05531117b6477d:0xc64bf291d3ad2a06",
+      "name": "À da Avó - The Guesthouse",
+      "link": "http://www.adaavo.pt/",
+      "gps_coordinates": {
+        "latitude": 37.0230049,
+        "longitude": -7.9383189000000005
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€77",
+        "extracted_price": 77,
+        "price_before_taxes": "€73",
+        "extracted_price_before_taxes": 73
+      },
+      "total_price": {
+        "price": "€537",
+        "extracted_price": 537,
+        "price_before_taxes": "€509",
+        "extracted_price_before_taxes": 509
+      },
+      "deal": "17% less than usual",
+      "deal_description": "Deal",
+      "nearby_places": [
+        {
+          "name": "Chapel of Bones of Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "7 min"
+            }
+          ]
+        },
+        {
+          "name": "Hotel Alnacir",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "18 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "20 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Mercearia São Pedro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "8 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "3-star hotel",
+      "extracted_hotel_class": 3,
+      "rating": 4.5,
+      "reviews": 74,
+      "reviews_histogram": {
+        "5": 47,
+        "4": 18,
+        "3": 7,
+        "2": 0,
+        "1": 2
+      },
+      "location_rating": 4.1,
+      "proximity_to_things_to_do_rating": 4.3,
+      "proximity_to_transit_rating": 4.7,
+      "airport_access_rating": 4.5,
+      "reviews_breakdown": [
+        {
+          "name": "Breakfast",
+          "description": "Breakfast",
+          "total": 6,
+          "positive": 5,
+          "neutral": 0,
+          "negative": 1
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 12,
+          "positive": 9,
+          "neutral": 1,
+          "negative": 2
+        },
+        {
+          "name": "Cleanliness",
+          "description": "Cleanliness",
+          "total": 12,
+          "positive": 9,
+          "neutral": 0,
+          "negative": 3
+        },
+        {
+          "name": "Bathroom",
+          "description": "Bathroom and toiletries",
+          "total": 6,
+          "positive": 4,
+          "neutral": 0,
+          "negative": 2
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 11,
+          "positive": 11,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 8,
+          "positive": 6,
+          "neutral": 1,
+          "negative": 1
+        }
+      ],
+      "amenities": [
+        "Breakfast",
+        "Free Wi‑Fi",
+        "Air conditioning",
+        "Pet-friendly"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnsnfUrsLT04OCqFBWO8NdjUqmAnXxr2gFDolFoY30I9lszdrKwHq_Qy99ppV0EGNf8a8rZ1--ui9D_fzjnBfXt_bC-Oj8K8RuBLBgG6MN0rhHBvWH7lm3OBccDjmisMTGaI1tu=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnsnfUrsLT04OCqFBWO8NdjUqmAnXxr2gFDolFoY30I9lszdrKwHq_Qy99ppV0EGNf8a8rZ1--ui9D_fzjnBfXt_bC-Oj8K8RuBLBgG6MN0rhHBvWH7lm3OBccDjmisMTGaI1tu=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/Ofb3ZHzIh5qgBPtCHV9YyHGBgwQRVDR4-ja5QNgXxowtOdF8abUZ1ngNrRRW7Buv62G12mh13UIDxjPRhL_iOlzj8aMiOr2C4ZYfMcqGBfR-H2EI39xiU3lkdaAc_khpy8oI-zGWDO-xnaqzaJrjMtygxuViYc4=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/75/755642/755642a_hb_w_034.jpg?20250327061549?20250517055808"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/tY6aYo9CJtbKETeZdWsnf2bDc0o0mrKbIRcWaQBm1TfCSMZK_vITjvv2H-V1PfG8uyiMWoOQ2uw_F_CHBpnQy-e0xhcI2AdAi6XrKlvmExZRFqYgn3owumt3o_abuqj--T3sRC_jQEekCSIAvWldAD0RuvzJfyg=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/75/755642/755642a_hb_w_088.jpg?20250403132727?20250517055806"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmBXr1QBYjV0kVDQ18t1rV7rEveMWe5HbqiTBQRQQvETsxc3766FFJeIdFy3bSgI4xM90iwbURu10aLn2zXaTtBfI4ErBvcaWjFI9LdXJSdJ_dAyNALf9FrO_1NFXyvC-LY64inmg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmBXr1QBYjV0kVDQ18t1rV7rEveMWe5HbqiTBQRQQvETsxc3766FFJeIdFy3bSgI4xM90iwbURu10aLn2zXaTtBfI4ErBvcaWjFI9LdXJSdJ_dAyNALf9FrO_1NFXyvC-LY64inmg=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/chpBfDgCZCxED0Mb-s-_oYPmsxfuHaXV6z6a3NSIFZ9rtQO1lxix0D5xGM7IYnGD-4KRto6b4I0Pxci071I0lFDn0lvbIowDwVllTnHlBKGCc8SqM6FxbrWpr2PFlGsZQr8woBaaGDLX8MVhNLvMYNcdZ0NeGpg=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/75/755642/755642a_hb_l_010.jpg?20250403132727?20250517055807"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkh-ppNPQWsIYXNaOw5GyXSRNGuxtDv_L2glsI_JhppcepEpxaKktXNiRE99W46MWgN-Hql864EHLPygxjB0TX79GTGW153cnLxFQt65AZIgIdcWNHrs-C-V6VyyHU6zPAIKDVB=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkh-ppNPQWsIYXNaOw5GyXSRNGuxtDv_L2glsI_JhppcepEpxaKktXNiRE99W46MWgN-Hql864EHLPygxjB0TX79GTGW153cnLxFQt65AZIgIdcWNHrs-C-V6VyyHU6zPAIKDVB=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn44h58SwvKPDWt2xuj8Wp8LAlJMezcXwVThR5kdCYD1GQpfrAYfc78PD1PxpR_ZGil-z3zXynC4fTIbG6EkIfNMJMCBxtIIVTgy95P66kCfFwwoWnZ_3m_rq9ny7qYs9P5TFg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn44h58SwvKPDWt2xuj8Wp8LAlJMezcXwVThR5kdCYD1GQpfrAYfc78PD1PxpR_ZGil-z3zXynC4fTIbG6EkIfNMJMCBxtIIVTgy95P66kCfFwwoWnZ_3m_rq9ny7qYs9P5TFg=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/OtTi3t35eY3TPT8RJJfVVAMO8ZLtGY9efB16zZIqlDc8ZLtR-krWMoGs0oOh9xv94qzh7Q-00v-89q9rVwr4PSAcr3wWlJTYpdPe228UuJeOQ6KSl6durexnPYX4agB7D5TBzmbTlKuaC0SxErdEQs9rvFue2Ec=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/75/755642/755642a_hb_w_084.jpg?20250403132727?20250517055806"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/WfoV-6Uy31io6Zbt5c8VCWq2Am_fs6ruvFTR6-AXPy3b29JLX5EEeyJbdhoa-tjYz0PgfTVCgOJK9tVrJRYyMdTpVGtU8TEpM2zqCCsfj7l69Yzv2k_G1sBD-3Y7P_f4OIZVjC8yy3SwjG2rLl7RLOBuAafXBA=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/75/755642/755642a_hb_l_019.jpg?20250307034619?20250517055805"
+        }
+      ]
+    },
+    {
+      "type": "vacation_rental",
+      "property_token": "ChkQ2vqB-bGr_e5PGg0vZy8xMXZkYnFseTg4EAI",
+      "name": "Divine Room",
+      "link": "https://www.bluepillow.com/search/64c8d104a1247fa35c62f6e6?dest=bkng&cat=House&lat=36.99275&lng=-7.8418&language=en",
+      "gps_coordinates": {
+        "latitude": 36.99274826049805,
+        "longitude": -7.841800212860107
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "4:30 PM",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€106",
+        "extracted_price": 106,
+        "price_before_taxes": "€106",
+        "extracted_price_before_taxes": 106
+      },
+      "total_price": {
+        "price": "€739",
+        "extracted_price": 739,
+        "price_before_taxes": "€739",
+        "extracted_price_before_taxes": 739
+      },
+      "nearby_places": [
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "1 hr 3 min"
+            }
+          ]
+        },
+        {
+          "name": "João Farol",
+          "transportations": [
+            {
+              "duration": "4 min"
+            }
+          ]
+        }
+      ],
+      "offers": [
+        {
+          "source": "Bluepillow.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/190ff319-d0fd-4c45-bfc8-bad6f5f395f2.png",
+          "num_guests": 2,
+          "price_per_night": {
+            "price_before_taxes": "€106",
+            "extracted_price_before_taxes": 106.0
+          }
+        }
+      ],
+      "rating": 5,
+      "reviews": 8,
+      "location_rating": 4.0,
+      "proximity_to_transit_rating": 3.8,
+      "airport_access_rating": 3.8,
+      "amenities": [
+        "Air conditioning",
+        "Airport shuttle",
+        "Beach access",
+        "Kid-friendly",
+        "Ironing board",
+        "Smoke-free",
+        "Cable TV",
+        "Wheelchair accessible",
+        "Free parking"
+      ],
+      "excluded_amenities": [
+        "No Wi-Fi"
+      ],
+      "essential_info": [
+        "Entire house",
+        "Sleeps 4",
+        "1 bedroom",
+        "1 bathroom",
+        "2 beds"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/fGLog5vT6hojiSSNlmzW0aAw5WFb-sqMN7n4yiHmCo08fFICOg5pfq6TeBRXKZGX6EAXImxDYDNjeQ8BIiHRyjdvbbsZHnxPNilC8zCccIAILLXMmpvJaev1P97cXeAnGHbpHwTD4xXEXgwnf0egiMpKPda7cA=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/476492367.jpg?k=4e2f31c699eb7f58cb04e92641ad5d982b14a7c7de41f1d4aa779c7bdf49cfa2&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/voT2JsoEvhaVQNZNwZmClR4dJOEofB9nkMfrkyA7QkmzivHEidM2yhRgW9615APZ6RRLPEhc3pkJbP7NSEoh3tVHD8_XpnicXpfXalelFGGtIOxAO6fWquwwjwYSrsdanQC7mHs43XdBXBGTktglwoSZv_aHbZY=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/765243954.jpg?k=fa8adee42029bb4f00a983b795cf6168f8ebad516c4a800539747b954daf195b&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/beMq5U38zi13bn9VhAH9Nh6xxt4JaYaL7k0b0_r6zrbgilhzYy2PmM7HL9C5xXUIB3A9Kq8dXFxiu3B7RsvV8BCbPV8TS90qK0mKP2jM70in81s6v-B12GwK_75IW8wJwpZ9uYOGNCXqh0iwC2LCdaacCFHztmM=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/762320339.jpg?k=7a60462bba8fe4b170d177de0b94faccad6f43d43ca2455de0f9e1fe025d9684&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/urfvDN09Fy_V3M6oS81HJJuifZp4CYRl1LyMIIw_CzrXRlqeEhFiq_Gn74vyRRnI5aRZ-8mBgoYxyOmof_7Cj2xQJMX1IR3--uptY7shbL786PA9G_tPIm2DQ3DHLWzgZM49Nwc9vYSPl-IaGrGovBfgdd24JJM=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/762320323.jpg?k=cb717fe8964a4cd5efa7fc24c44c6640f13ed1bf41759c42b793bae024e8d935&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/rCbEtIcyFHn13THFt7ux24y06C91kj9Voyp9jKGoAeEqOMlqwEC8vNJrZBTwpgrxyEHpIpdJKIcU980D6mxpknVoQi49Rlz-ZAZT7t7rRyMZuzOC-BQNQXaDLEB4EUnKb-UCq9uqlaSLz7MYm-gMkQf_aBKvkwg=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/476492395.jpg?k=83bd25fd6d536d2f1687645ef9c44ee3d9744f129d8eac279c5c0538ea442d1c&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/p16sZ1iwy3LXHX0iLy5HzcKmR7XkigdZa5Ci7_gaoHPzotTFbUrJENIyn7v-q8-8x1WITsrudzO1pblWfdhS_o9380rOQ3G6L_W8k3BWVhUOao6EBZj0QYo8xXvzzTiJhhgn2zeyUzzpplf0cGSCK201CuiVb_A=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/472333865.jpg?k=2befb1ea27d647ad90e3aeeff01f9e29c087038df0c65336a9340b7408594158&o=&a=1538557"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/11sfoBuW3ki0GcerGcPmcdv9FmYpo_fnIYK0p4CLNzJ4xQ82uSutTxa3Bf-VduCM4PyxV57BHU05uNkvK_ElzgbIRPp8cir2W1a4ihgWRlBtIFQKNU8vLV68xS6R7KNeRdch04VMtoNCV5t8HXCnwvNJkjFkwA=s287-w287-h192-n-k-no-v1",
+          "original": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x683/472331264.jpg?k=83dd0b75d8628c30039ae64a3aef9fa5fd4c7bd5666c8820981b74d40a469754&o=&a=1538557"
+        }
+      ]
+    },
+    {
+      "type": "vacation_rental",
+      "property_token": "ChkQnYWKjZK9oaUOGg0vZy8xMXg2MGtfNDlmEAI",
+      "name": "Maison-Centre Historique--Jacuzzi-PlainPied-Patio",
+      "gps_coordinates": {
+        "latitude": 37.02587890625,
+        "longitude": -7.842916965484619
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "4:00 PM",
+      "check_out_time": "10:00 AM",
+      "price_per_night": {
+        "price": "€159",
+        "extracted_price": 159,
+        "price_before_taxes": "€159",
+        "extracted_price_before_taxes": 159
+      },
+      "total_price": {
+        "price": "€1,112",
+        "extracted_price": 1112,
+        "price_before_taxes": "€1,112",
+        "extracted_price_before_taxes": 1112
+      },
+      "nearby_places": [
+        {
+          "name": "Tempos Livres",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "3 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "23 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "56 min"
+            }
+          ]
+        },
+        {
+          "name": "Dominó",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "offers": [
+        {
+          "source": "Bluepillow.com",
+          "logo": "https://www.gstatic.com/travel-hotels/branding/190ff319-d0fd-4c45-bfc8-bad6f5f395f2.png",
+          "num_guests": 2,
+          "price_per_night": {
+            "price_before_taxes": "€159",
+            "extracted_price_before_taxes": 159.0
+          }
+        }
+      ],
+      "rating": 4.7394733,
+      "reviews": 76,
+      "location_rating": 4.4,
+      "proximity_to_transit_rating": 4.1,
+      "airport_access_rating": 3.9,
+      "amenities": [
+        "Air conditioning",
+        "Beach access",
+        "Kid-friendly",
+        "Crib",
+        "Heating",
+        "Hot tub",
+        "Ironing board",
+        "Kitchen",
+        "Microwave",
+        "Outdoor grill",
+        "Oven stove",
+        "Patio",
+        "Smoke-free",
+        "Cable TV",
+        "Washer",
+        "Free Wi-Fi"
+      ],
+      "excluded_amenities": [
+        "No indoor pool",
+        "No outdoor pool",
+        "Not pet-friendly",
+        "No parking"
+      ],
+      "essential_info": [
+        "Entire cottage",
+        "Sleeps 6",
+        "3 bedrooms",
+        "2 bathrooms",
+        "3 beds",
+        "1,281 sq ft"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/5Uo4Dtb_Xc-MNgk1Wth3e26rMH4RZmEpBWMJLQ4m5fBH_SlMwr1irWC61YZjZFM-j6Hce_144hi_U_YIdX_XnvtXHWrhPy6r7CXfI9nfBoQUoNZYNn_vk2tHz2bclf5fqegFU4EtA69QKhHPKIT7eXKpdEyzvA=s287-w287-h192-n-k-no-v1",
+          "original": "https://freecancellationscdn-hsbgcwfragasdpfe.z01.azurefd.net/remote/media.vrbo.com/lodging/28000000/27250000/27240600/27240501/fca78f48.jpg?impolicy=ccrop&w=1000&h=666&q=medium&w=1024&h=683&mode=crop&scale=both&anchor=middlecenter&quality=80"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/5E3cZFLIV-7rTUDhNd00a8MT8hW3x_sujG9HW4n3fuhQSc8JDb94OQw9vvEGmW16gZ1UNCKWE9No8pmME1c1MdYJ9Ba8YcUa8EWQIPZyAPx56KcIKqT93RyjDgzOfwt6kGjpuJp-DIbB_DT0QClynJkDM5p-IkU=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/28000000/27250000/27240600/27240501/c37f5027.jpg"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/rXgSTfkoxdJLYQz_PqIRjpog2p8PlY7BjhuMibrGq1osltfMnneEEfmAR_EyCtbIkAxci6THvCKqICgWSF42nH1ZNToxOoZ6cpQtOHf1AzjVJnQQTdU12QDFXPLu7Zhyt8vqhASBSv8BrYckmxDUfQlfl3sPdfg=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/28000000/27250000/27240600/27240501/e865f4f4.jpg?impolicy=ccrop&w=1000&h=666&q=medium"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/jzQKLx5ZrlmS4rlu4iPHhlpMyNxxHGuzZjYcCaVkFfBOWCpi_1khYfPBz-AnhC71daPC9MIXt5mtgHfLEFXsDqqf_scq8IdrJ-sxyYXavkq1kkmMKDrMMJBzPEBxXK0daom3kDTZqqKWSoUiItqNzqiusqTKoCM=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/28000000/27250000/27240600/27240501/ddb0764e_z.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/dIJOZJO3nqK57iiVtZPU9Xmo7nELdFDM3qVE-gw7P_-16OrFnZUx66KOb6zRvxpi5PI01qSXeE14hO6ScDhtAD2YtZxq5LDPDnUeojJWAp695viUJl_kOpGfrjCuYKdqHMyJ3Vp7ebV3chLMrniitql2PbYo3A=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/28000000/27250000/27240600/27240501/04051ae8.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/g6osP6SsFPaqCR2PrECisPeUPGvyt3m3ieAAN2Q9ifhUktokmlP16VyacvLd91CoiOEdIZYCDb4R9FBK6cnMjsioxCZOBQL0PRj3OEZukAmhybMbeiW0vTzlhQz29H19uIbkZGSTCa12Z_m6DjOzq6taDoDePc4=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/28000000/27250000/27240600/27240501/84905b37_z.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/nFMTaVhj7UTnw4DcBw94vTDmUz_8OyaaQwSvbnxRnvV7ypHbww-PD8n4uEa0FlCfHopWtjGASvK9q0bBmpWyGcO7Q4I6imnL8vcpjasn9rGr9bF4vMMOBnukzFwVEKZUqgxyiBF3SFF-ftkA58qLNIHHNA_CY7o=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/28000000/27250000/27240600/27240501/050898fb.jpg"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/IR00ZD8vAIkQkoacnr_E0QSir-KegV1r-fjKtaikW5lN_zrMaSVp1XiwgNHUsc3da5DUVxhcYZqPOkdfxpRkm2y7ZyqWLbCm3v-J4pOHVMdOXiuJ13g7zpT4BEbbdgITmNo9BGdBPUwX5NU_bbC8qF69RQZ3Zxs=s287-w287-h192-n-k-no-v1",
+          "original": "https://media.vrbo.com/lodging/28000000/27250000/27240600/27240501/e865f4f4.jpg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/wn73H7hcIBEzjAjcwD8HumUeYa7YzTy-PsT_saRwITb7PsswFD2imuyVCAcJ4XFLWhZ6lF7vxMP6mrUhYtI37K8PL3aHArakZTpfOhaTDqp1zc59TaSpRUgd_wi5eAgJeDGWxX9V8Ms27uT1ADN5xznxY339U6U=s287-w287-h192-n-k-no-v1",
+          "original": "https://p.fih.io/v2/nSr0o-3gbZN8o1xMecXCcG-BkDeQVo3k-wOeVogkTe7ajuFOX7O-WA8aRWhXz1jsToZif_TsA_xCWfhWRa0Z2bmVmCQI4GM0DQ6xQZ1h1BXtu2aNGey4uwmcftLpjqusDwN-x6zDC0DgGzF4en3ketkYyx1j1dLbUfhlOgkNcIcn9PwNtk_AU2csbUk6dd9sHrY9VmP2oVtSPacx5dpRpY0tdfs0O2klORT9A5pSgP3ZvBhQ3nG9m-EPX9if2loJa_hO30Ey8pmsqKVXLkuB-8O4z7jWYWZy9fxXsuOZRX1kFBNeByClbPYoDMd7awtI-XJidwhiDwaN2Mcu8oVKz3YPNKFWFQ"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChgIqJaQoJfZw_CgARoLL2cvMXRkazF2cmwQAQ",
+      "data_id": "0xd0552c3e54038b7:0xa0e10ec974040b28",
+      "name": "Casa d'Alagoa",
+      "link": "http://www.farohostel.com/",
+      "description": "Down-to-earth hostel in an elegant building featuring a communal kitchen, a terrace & a game room.",
+      "gps_coordinates": {
+        "latitude": 37.0153103,
+        "longitude": -7.931461299999999
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€63",
+        "extracted_price": 63,
+        "price_before_taxes": "€56",
+        "extracted_price_before_taxes": 56
+      },
+      "total_price": {
+        "price": "€442",
+        "extracted_price": 442,
+        "price_before_taxes": "€391",
+        "extracted_price_before_taxes": 391
+      },
+      "nearby_places": [
+        {
+          "name": "Arco da Vila",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "5 min"
+            }
+          ]
+        },
+        {
+          "name": "Pr. Alexandre Herculano",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "20 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "22 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Travessa",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "2-star hotel",
+      "extracted_hotel_class": 2,
+      "rating": 4.4,
+      "reviews": 580,
+      "reviews_histogram": {
+        "5": 398,
+        "4": 105,
+        "3": 39,
+        "2": 10,
+        "1": 28
+      },
+      "location_rating": 4.6,
+      "proximity_to_things_to_do_rating": 4.3,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.5,
+      "reviews_breakdown": [
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 114,
+          "positive": 104,
+          "neutral": 4,
+          "negative": 6
+        },
+        {
+          "name": "Sleep",
+          "description": "Sleep",
+          "total": 46,
+          "positive": 28,
+          "neutral": 6,
+          "negative": 12
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 118,
+          "positive": 110,
+          "neutral": 4,
+          "negative": 4
+        },
+        {
+          "name": "Kitchen",
+          "description": "Kitchen",
+          "total": 27,
+          "positive": 26,
+          "neutral": 0,
+          "negative": 1
+        },
+        {
+          "name": "Atmosphere",
+          "description": "Atmosphere",
+          "total": 38,
+          "positive": 38,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Safety",
+          "description": "Safety",
+          "total": 12,
+          "positive": 5,
+          "neutral": 1,
+          "negative": 6
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Bar",
+        "Restaurant",
+        "Kitchen in some rooms",
+        "Airport shuttle",
+        "Full‑service laundry",
+        "Kid-friendly"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmk_hv1uPQGDIq0PlDmQQF1r5SzxELjdYFqNs56VRAONwwa1fSGFokWSpTuHbrwV-YYs67Z1P3LOj6XLByMJNwdMtvvnQKRcRDpdlnpSmFpiiWdzNBDMzX1c4cX3634qmLuebcn=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmk_hv1uPQGDIq0PlDmQQF1r5SzxELjdYFqNs56VRAONwwa1fSGFokWSpTuHbrwV-YYs67Z1P3LOj6XLByMJNwdMtvvnQKRcRDpdlnpSmFpiiWdzNBDMzX1c4cX3634qmLuebcn=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk_zma7G-QTfJN4Jyb3dnz1bm42UybHzhYxynNHjNg5O331hDA3p4xaDiyLB9rK267gcywiKnH04lvngHbjsmzS-E2xKCqx58A0m3Ki80ScBkylvzl3wFDvR66p-mL9zSQIU8k=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk_zma7G-QTfJN4Jyb3dnz1bm42UybHzhYxynNHjNg5O331hDA3p4xaDiyLB9rK267gcywiKnH04lvngHbjsmzS-E2xKCqx58A0m3Ki80ScBkylvzl3wFDvR66p-mL9zSQIU8k=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlNWA5jKa3pdOzbKpCxLXEMCmdU-TzK2QgAcKjZYhNVWL8xJLHgX0-SE3GIdf8GBu8cWHCOyb9398LBodze69qNQIdVB966FIfvuz06n9GdkIMfgC-mr8azgBr1ieBqj_4n7LA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlNWA5jKa3pdOzbKpCxLXEMCmdU-TzK2QgAcKjZYhNVWL8xJLHgX0-SE3GIdf8GBu8cWHCOyb9398LBodze69qNQIdVB966FIfvuz06n9GdkIMfgC-mr8azgBr1ieBqj_4n7LA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlUW4usmCtG6bXWObCE_48hNXChedlYmIKIVJjLEswQliRaVt473EAc3Q0JE_gCttDB1x0H-MB0lKwhcUMV8OqTWqw57x2BacxUkA4vkaPYBKyrCaJtKRJe_wxSBldgy_8-e-A=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlUW4usmCtG6bXWObCE_48hNXChedlYmIKIVJjLEswQliRaVt473EAc3Q0JE_gCttDB1x0H-MB0lKwhcUMV8OqTWqw57x2BacxUkA4vkaPYBKyrCaJtKRJe_wxSBldgy_8-e-A=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnjaUyfJHjuteiMNBkOeZ7vBPnXk374mFInSQfIkSt0TfNa-YQKGipr7vjsfIoQbZgVAO8_quzIZIfLiB51ASAZdNQRR-UthHoTizKOG3qyeCt0MzKL4X2sphh6HL1Jya2jh3HmnQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnjaUyfJHjuteiMNBkOeZ7vBPnXk374mFInSQfIkSt0TfNa-YQKGipr7vjsfIoQbZgVAO8_quzIZIfLiB51ASAZdNQRR-UthHoTizKOG3qyeCt0MzKL4X2sphh6HL1Jya2jh3HmnQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmOHHNGqn1cXEUoz8ssnO1yXjS-qk1aogQjnl6FJRHa-jwUmYGsTw_AF4bysdTrm98w2zVy7_Dtr0eKbogu5dbmkmGASaNAMHGryf2UlwtL4-fuvgrtDPuxNf7XITVrOaFe--c9zw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmOHHNGqn1cXEUoz8ssnO1yXjS-qk1aogQjnl6FJRHa-jwUmYGsTw_AF4bysdTrm98w2zVy7_Dtr0eKbogu5dbmkmGASaNAMHGryf2UlwtL4-fuvgrtDPuxNf7XITVrOaFe--c9zw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnN00qA_A-xMF42M112Uo47hfj2P8kXbsKgSd-h4brvZ3EMkc-bCrVTUF83Zxzh2Ju3rFeo9i2-KSii2cxQjscunSBuzTV52rL_SuBVH_WZYUclwaVbz-1T7GipFHAn60Tk_T3T-w=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnN00qA_A-xMF42M112Uo47hfj2P8kXbsKgSd-h4brvZ3EMkc-bCrVTUF83Zxzh2Ju3rFeo9i2-KSii2cxQjscunSBuzTV52rL_SuBVH_WZYUclwaVbz-1T7GipFHAn60Tk_T3T-w=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/8ehr_K_cMkMNsvRBv0TnkmTXIGl3AidUWTn7fuoWTlldTqdgtYpu5IiA1rrRwWaIxVjdVseuo-Ax38mThmVbmEgAPUzFpSYptS0qIDwjUJ0PhFl2i1T5aQagUukegcDwejxWAIwv6XPiJU2yztQVl1i-RGhQSKo=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/66/666144/666144a_hb_a_006.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk6RxjaUFIWi6kCG_SAeNnPe51t2ABIhsOOTxA2XHKCCmdyIirQaFye7JuvuM-tPdK8zvX31WAWh5LS_cwLRKSjHDRGSgBmktMYdlA_KDMZZkecOJNPVMVcR2GXPo9gwlas9y9tag=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk6RxjaUFIWi6kCG_SAeNnPe51t2ABIhsOOTxA2XHKCCmdyIirQaFye7JuvuM-tPdK8zvX31WAWh5LS_cwLRKSjHDRGSgBmktMYdlA_KDMZZkecOJNPVMVcR2GXPo9gwlas9y9tag=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkIkIGSy_ui89p2Gg0vZy8xMWcwNzJoaGdxEAE",
+      "data_id": "0xd0552db5b643fab:0x76b5cd17b9648090",
+      "name": "Hostel A Casa da Árvore",
+      "link": "https://arvore.tripcombined.com/",
+      "gps_coordinates": {
+        "latitude": 37.0170189,
+        "longitude": -7.9255374
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "2:00 PM",
+      "price_per_night": {
+        "price": "€75",
+        "extracted_price": 75,
+        "price_before_taxes": "€67",
+        "extracted_price_before_taxes": 67
+      },
+      "total_price": {
+        "price": "€525",
+        "extracted_price": 525,
+        "price_before_taxes": "€469",
+        "extracted_price_before_taxes": 469
+      },
+      "deal": "36% less than usual",
+      "deal_description": "Great Deal",
+      "nearby_places": [
+        {
+          "name": "Parque Natural da Ria Formosa",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "7 min"
+            }
+          ]
+        },
+        {
+          "name": "Tribunal",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "20 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "24 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Velha Casa",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "7 min"
+            }
+          ]
+        }
+      ],
+      "rating": 4.7,
+      "reviews": 48,
+      "reviews_histogram": {
+        "5": 38,
+        "4": 8,
+        "3": 0,
+        "2": 1,
+        "1": 1
+      },
+      "location_rating": 3.6,
+      "proximity_to_things_to_do_rating": 4.0,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.3,
+      "reviews_breakdown": [
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 10,
+          "positive": 10,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Cleanliness",
+          "description": "Cleanliness",
+          "total": 8,
+          "positive": 7,
+          "neutral": 1,
+          "negative": 0
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 5,
+          "positive": 1,
+          "neutral": 4,
+          "negative": 0
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 5,
+          "positive": 5,
+          "neutral": 0,
+          "negative": 0
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Kid-friendly"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnpiDCRXxofEe7XKdrar9kx55PyCKc739KveLBy1iT2jLIfMyoIw9TCqIi9c2LyBzqrbRdIqcfk8G2cOVQmPtRazlzmT8PXIq_jC1LYjtU8UAJdW9nxXNkUR5YmAPFOoF6OQR2G=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnpiDCRXxofEe7XKdrar9kx55PyCKc739KveLBy1iT2jLIfMyoIw9TCqIi9c2LyBzqrbRdIqcfk8G2cOVQmPtRazlzmT8PXIq_jC1LYjtU8UAJdW9nxXNkUR5YmAPFOoF6OQR2G=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/O80ayLnDmLeT-wG7C676KPCKt9ZSsTDGb-MbWGKiqxdYri0Lk5MRBhxkgGIOz5pPuoxA0Wm7nlD9NPpx1uPISy0OGcmRuBnbUZjQ871aISFB1f7yo4PCnqHpYd9Iu6g7ojnNl30_zqEvPCpWfYtZI7Goxi9plYU=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/47/18/4718e227894eaa8e6aeac15e3db7d096f385bfb2.jpeg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkMWCm5fvFoxiPb7g_f1dHBtcOSRFOv98RnqJqs0JkD13yj97nlY-nOUq9pzIfbC13ARfp-cXgmuavi2NY5eojjiZH5FHzJGDrd9YAUt-XaUs0yDV8IHzaav8zRjUNXqLZeH613WQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkMWCm5fvFoxiPb7g_f1dHBtcOSRFOv98RnqJqs0JkD13yj97nlY-nOUq9pzIfbC13ARfp-cXgmuavi2NY5eojjiZH5FHzJGDrd9YAUt-XaUs0yDV8IHzaav8zRjUNXqLZeH613WQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkyj5yRwweqIH6WwbVcMKKcvQ_6fb863LEHvrycTGsPNWr2Gjga8Ewgl-87u5TagLvXNBc8d4qq4-M1a0m0YI0Py_4OFYqKqopg0Ifr2D_7IOgHGCkdB5bRPzVBhi6HVJuKAzla=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkyj5yRwweqIH6WwbVcMKKcvQ_6fb863LEHvrycTGsPNWr2Gjga8Ewgl-87u5TagLvXNBc8d4qq4-M1a0m0YI0Py_4OFYqKqopg0Ifr2D_7IOgHGCkdB5bRPzVBhi6HVJuKAzla=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlmRXtAOdmpc0S6DPDv0l9vSvYSHSrzHcYjEzvRtlsmGcdLEcC3BwqgKNfNrnYr5cndDnQfDUH3R-Y5jvzGkfbfZKH05kmBrqGdzYsWrmXUusmCI7KqvYahczyshmo-fNaxx0D_fA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlmRXtAOdmpc0S6DPDv0l9vSvYSHSrzHcYjEzvRtlsmGcdLEcC3BwqgKNfNrnYr5cndDnQfDUH3R-Y5jvzGkfbfZKH05kmBrqGdzYsWrmXUusmCI7KqvYahczyshmo-fNaxx0D_fA=s10000"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/c3AUtdqOJ_Hp38UQtn5BFySwATplyDBfO4jOyKVwFKfp54rlR10v2mhR9hh8nAAuRmQwDBOx5aHsREfYCMSyZi4pENKnytLZc0C3c668RbwiKA6RYy9tXkPyUyFFTN9Bm9y-kFxxv_XGUoHvnexcRaPkBvWcaA=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/db/d0/dbd0267eb4dabcdcb58972256a36b3cbf939339a.jpeg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/qZmcapK6y94pg5g3Yh-Qeg9QQYegJAjargC4gpIkYAjStQ5F9vQrzyx3Y4WdCcuEo64ygtTO6UQmL9J0MrN3pzCxdoBz9oZNHWnRQk9lUkCKnU3Rb-yTldLi_aeR7ZDixhmVmYGWELb8ApI28lPzo7Auh1ALtQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/13/14/47/88/hostel-a-casa-da-arvore.jpg?w=2100&h=1200&s=1"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/proxy/AThzsXuRhUJQx7kK5H_2j3p8k_dq1emNNKHqzxdSNL93nZYqN7qTrJ770BYgruzBOaKelLL0DZVKlWS_BUm-s_TRJpFJtjDLMCspUPzgaJgOvXyNPW6N3RQqPlMB7tEoUNiDZGzH55zIuaNkSoB01I3ZRsYC0uI=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/9e/06/9e0670f3647b087324486614dcfeb14737d246c0.jpeg"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/hT1kGn8b3rohKRCpGGv47sArftydsW2-gKDysN9SatCVEk6aDUgG9PpEw-X_BOeGkTZ9D05at5-C1U8xwxdcmrk_1DJJ-RSwXbWEG-RLAvw2Y5FoobnogTK4_m9z0jmt0ohTDAkIdd8HVlcCaF7ate8BKo-F2Xo=s287-w287-h192-n-k-no-v1",
+          "original": "https://cdn.worldota.net/t/1024x768/content/bb/0b/bb0b1a956f3470b238d02f96a703d1cac901e0ed.jpeg"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoImob0-vCb9obAARoNL2cvMTFtdHdrZHowZBAB",
+      "data_id": "0xd0553706ba2d3c7:0xc00dd8df0f5d031a",
+      "name": "3HB Faro",
+      "link": "https://3hb.com/home/3hb-faro/?partner=6259&utm_source=google&utm_medium=organic&utm_campaign=MyBusiness&utm",
+      "description": "Elegant quarters in a chic hotel featuring a spa area with a pool, plus a rooftop restaurant/bar.",
+      "gps_coordinates": {
+        "latitude": 37.0169127,
+        "longitude": -7.932579
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "12:00 PM",
+      "nearby_places": [
+        {
+          "name": "Faro Marina",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "5 min"
+            }
+          ]
+        },
+        {
+          "name": "Pontinha",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "18 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "21 min"
+            }
+          ]
+        },
+        {
+          "name": "Centenário",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "5-star hotel",
+      "extracted_hotel_class": 5,
+      "rating": 4.8,
+      "reviews": 1081,
+      "reviews_histogram": {
+        "5": 992,
+        "4": 55,
+        "3": 10,
+        "2": 7,
+        "1": 17
+      },
+      "location_rating": 4.6,
+      "proximity_to_things_to_do_rating": 4.3,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.6,
+      "reviews_breakdown": [
+        {
+          "name": "Fitness",
+          "description": "Fitness",
+          "total": 92,
+          "positive": 77,
+          "neutral": 6,
+          "negative": 9
+        },
+        {
+          "name": "Wellness",
+          "description": "Wellness",
+          "total": 57,
+          "positive": 47,
+          "neutral": 5,
+          "negative": 5
+        },
+        {
+          "name": "Spa",
+          "description": "Spa",
+          "total": 55,
+          "positive": 46,
+          "neutral": 4,
+          "negative": 5
+        },
+        {
+          "name": "Pool",
+          "description": "Pool",
+          "total": 70,
+          "positive": 63,
+          "neutral": 4,
+          "negative": 3
+        },
+        {
+          "name": "Breakfast",
+          "description": "Breakfast",
+          "total": 117,
+          "positive": 108,
+          "neutral": 5,
+          "negative": 4
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 214,
+          "positive": 204,
+          "neutral": 2,
+          "negative": 8
+        }
+      ],
+      "eco_certified": true,
+      "amenities": [
+        "Free Wi‑Fi",
+        "Pools",
+        "Air conditioning",
+        "Fitness center",
+        "Spa",
+        "Bar",
+        "Restaurant",
+        "Room service",
+        "Airport shuttle",
+        "Full‑service laundry",
+        "Accessible",
+        "Kid-friendly",
+        "Smoke-free property"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlglGkSYlSc0XRMhzkfWJUKCp_a8A1MPlteaCNjVlb52O3Fjt_72SwlyjSsQOhyQ_0GdQCh6ba1Mh-DK8rJNeHAeL_e8MRBzsSk8Xq8t8cHgYHNIzEdrqqP8ehuK-d4kHQXF6Su=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlglGkSYlSc0XRMhzkfWJUKCp_a8A1MPlteaCNjVlb52O3Fjt_72SwlyjSsQOhyQ_0GdQCh6ba1Mh-DK8rJNeHAeL_e8MRBzsSk8Xq8t8cHgYHNIzEdrqqP8ehuK-d4kHQXF6Su=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlVfIK35_qieC1tm31X8LyQX0aMetSDJr2PGXcIQJsj6W6ZPFoFbSs6QnfLqd1Kp302Y7Zoc6W0V1qXcZ7snSvvy1JCzawX_j53dKsOAugn6clKWgeb5TSx4dODdJD9m2QOTaHMSg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlVfIK35_qieC1tm31X8LyQX0aMetSDJr2PGXcIQJsj6W6ZPFoFbSs6QnfLqd1Kp302Y7Zoc6W0V1qXcZ7snSvvy1JCzawX_j53dKsOAugn6clKWgeb5TSx4dODdJD9m2QOTaHMSg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlvD6IrPxmgC8jlPFAMU-p9-yA8hKSDVUNaI-BQXJjpr3EFyn6rGcWNKIkXd5v05XhVhzlGLXM4iuxuLs0WzONvBfR_rDbiTszyhdq54wiupxwVcbaB32RASEuoaaMKU68JPME9=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlvD6IrPxmgC8jlPFAMU-p9-yA8hKSDVUNaI-BQXJjpr3EFyn6rGcWNKIkXd5v05XhVhzlGLXM4iuxuLs0WzONvBfR_rDbiTszyhdq54wiupxwVcbaB32RASEuoaaMKU68JPME9=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmJpMBfzXtSnHTYezHGOOxB6BBY2DIufU_ecYDH1zueJqMDPOqbKzY6MxBRYc6wIjjcUk-vJRC7eq9uXuyPQxLQbz2ZbjwoDUYwnNe-HT7X-YGG9HqNymWpiWjA2VRtp94YKw_E=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmJpMBfzXtSnHTYezHGOOxB6BBY2DIufU_ecYDH1zueJqMDPOqbKzY6MxBRYc6wIjjcUk-vJRC7eq9uXuyPQxLQbz2ZbjwoDUYwnNe-HT7X-YGG9HqNymWpiWjA2VRtp94YKw_E=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlSRng7rPPAFy9wxMSzjMQ6D3Q8ZRw83AhaKW-HbJ_mK2D3x6tIw9oidY2UDMFk708zjsqxFU-K0q9_d_yPEpAO89Ij3ZUWMWPMDPNk3qKQKMk1tKFfc5DZ_jXhAH70rKAD_Sm4Wg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlSRng7rPPAFy9wxMSzjMQ6D3Q8ZRw83AhaKW-HbJ_mK2D3x6tIw9oidY2UDMFk708zjsqxFU-K0q9_d_yPEpAO89Ij3ZUWMWPMDPNk3qKQKMk1tKFfc5DZ_jXhAH70rKAD_Sm4Wg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmz4KABA_LiuZnWIb2TfrGqHqVmK-rn3X3LZY7GRCJL9vbKPjI6lDqrC-5IgilP88UGMdvE3eVgqX3Rur4BhQNJkAweehH89sSkGtZrymBZQBCT3LZgtAE1pk_C-zOj9_kR2nQR=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmz4KABA_LiuZnWIb2TfrGqHqVmK-rn3X3LZY7GRCJL9vbKPjI6lDqrC-5IgilP88UGMdvE3eVgqX3Rur4BhQNJkAweehH89sSkGtZrymBZQBCT3LZgtAE1pk_C-zOj9_kR2nQR=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlA1ntTwYHEnM-MU2scAO8sWajlreeCEFs3HIlyXBgC7GvmB3EMJWulTcAHKThFSMAMLrD2T4X8fpbHnhzkos1_A51sD_XwQOfu8PoVEZeD4a3J_65cgva_EMzHa42BVTbunpwjRA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlA1ntTwYHEnM-MU2scAO8sWajlreeCEFs3HIlyXBgC7GvmB3EMJWulTcAHKThFSMAMLrD2T4X8fpbHnhzkos1_A51sD_XwQOfu8PoVEZeD4a3J_65cgva_EMzHa42BVTbunpwjRA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn5zoisoEnVp37cKQXZ8rlgcozy3Ri8zolz73rqBK4T5K0MhN1nKt5leLi1OtmT4zdOnTFN3AR2bQimthBLG0qlqn7j0gw32xfBTO69cnOdow8saehtbt12zlqPr-pqvGbiZuhD5w=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn5zoisoEnVp37cKQXZ8rlgcozy3Ri8zolz73rqBK4T5K0MhN1nKt5leLi1OtmT4zdOnTFN3AR2bQimthBLG0qlqn7j0gw32xfBTO69cnOdow8saehtbt12zlqPr-pqvGbiZuhD5w=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/wG3V13CseplFxEk-ZW5kc86CF3xugKYipth9Ghxq8dKjvOh5I7rpmIQ2G_DL8gKlOtQaf9wEA5R_n200IelLXBJZibZ7duHPm00XWksGXAqNqB_0c7AXJhjD_vX3ZhEYMpbqrNnSMVSgUCCCvfwlwL3BvNCX4g=s287-w287-h192-n-k-no-v1",
+          "original": "https://images.trvl-media.com/lodging/59000000/58920000/58913400/58913383/8c6c7d31_z.jpg"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChgI97XWpt7KkfaOARoLL2cvMXZsazJ0ajMQAQ",
+      "data_id": "0xd0552c3ea7b15b9:0x8eec4655e4d59af7",
+      "name": "Faro Boutique Hotel",
+      "link": "http://www.faroboutiquehotel.pt/",
+      "description": "Modern rooms, some with balconies, in a trendy hotel featuring a rooftop bar with lagoon views.",
+      "gps_coordinates": {
+        "latitude": 37.0147289,
+        "longitude": -7.930911500000001
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€161",
+        "extracted_price": 161,
+        "price_before_taxes": "€157",
+        "extracted_price_before_taxes": 157
+      },
+      "total_price": {
+        "price": "€1,127",
+        "extracted_price": 1127,
+        "price_before_taxes": "€1,099",
+        "extracted_price_before_taxes": 1099
+      },
+      "nearby_places": [
+        {
+          "name": "Municipal Museum of Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "5 min"
+            }
+          ]
+        },
+        {
+          "name": "Pr. Alexandre Herculano",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "21 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "22 min"
+            }
+          ]
+        },
+        {
+          "name": "Old Tavern A Tasca",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "3-star hotel",
+      "extracted_hotel_class": 3,
+      "rating": 4,
+      "reviews": 738,
+      "reviews_histogram": {
+        "5": 281,
+        "4": 258,
+        "3": 134,
+        "2": 33,
+        "1": 32
+      },
+      "location_rating": 4.6,
+      "proximity_to_things_to_do_rating": 4.3,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.4,
+      "reviews_breakdown": [
+        {
+          "name": "Breakfast",
+          "description": "Breakfast",
+          "total": 44,
+          "positive": 29,
+          "neutral": 3,
+          "negative": 12
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 75,
+          "positive": 69,
+          "neutral": 2,
+          "negative": 4
+        },
+        {
+          "name": "Bathroom",
+          "description": "Bathroom and toiletries",
+          "total": 29,
+          "positive": 7,
+          "neutral": 2,
+          "negative": 20
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 89,
+          "positive": 61,
+          "neutral": 10,
+          "negative": 18
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 67,
+          "positive": 58,
+          "neutral": 7,
+          "negative": 2
+        },
+        {
+          "name": "Bar",
+          "description": "Bar or lounge",
+          "total": 23,
+          "positive": 19,
+          "neutral": 2,
+          "negative": 2
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Free parking",
+        "Air conditioning",
+        "Bar",
+        "Full‑service laundry",
+        "Smoke-free property"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmexsAz_1oQuSYhMUTr7D2TYg2ab_7smaikbnxB__k9HcDFph_MQzzXY876z4_KRJe0qY3ktsLgtJ6myX5VfbPDm2LxKPJj5T_qRNNve3h50DM_C0b2To969ymhbbooopqSzJ90=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmexsAz_1oQuSYhMUTr7D2TYg2ab_7smaikbnxB__k9HcDFph_MQzzXY876z4_KRJe0qY3ktsLgtJ6myX5VfbPDm2LxKPJj5T_qRNNve3h50DM_C0b2To969ymhbbooopqSzJ90=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmSF-fj1iSCAv2ruyqNmFaWvisYcfZC6igZA0LLzRfkjjDCG8apvAoTOXm9C0xscy5bbAqmwo0G_eNDmJK6iJ34WbfbWqXLK4XP12hULK0i6qNK-gn23p7gA22E2E4m4e4Aaxlprw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmSF-fj1iSCAv2ruyqNmFaWvisYcfZC6igZA0LLzRfkjjDCG8apvAoTOXm9C0xscy5bbAqmwo0G_eNDmJK6iJ34WbfbWqXLK4XP12hULK0i6qNK-gn23p7gA22E2E4m4e4Aaxlprw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmaHui_okz8Yh4pj86b5Kt1UOeDAjH3rpqtVtAo8Ke3Aqh7YwRfzgAvn48yiGfIv2k-ELN31DAe_dnTkFBL55RMzC8nQImCNmUBiUr88XE-_Pe_9CF_2ZYHw9ttB_dmfPB3Lo7f=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmaHui_okz8Yh4pj86b5Kt1UOeDAjH3rpqtVtAo8Ke3Aqh7YwRfzgAvn48yiGfIv2k-ELN31DAe_dnTkFBL55RMzC8nQImCNmUBiUr88XE-_Pe_9CF_2ZYHw9ttB_dmfPB3Lo7f=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkyk2GFvqj4RqJoIMGcxJ0XPFH5dyehfvIjm3t_iFhPW_MBKHPfW_O0GtkHgQ64tgsMp6kghnnyyPXUH7BIVoECElYinbRsCCVArd1_UFN8EXBb7Rh1Nj8WjmwNs-PKxMwtLIYw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkyk2GFvqj4RqJoIMGcxJ0XPFH5dyehfvIjm3t_iFhPW_MBKHPfW_O0GtkHgQ64tgsMp6kghnnyyPXUH7BIVoECElYinbRsCCVArd1_UFN8EXBb7Rh1Nj8WjmwNs-PKxMwtLIYw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnnI5gEhs8JR47pgRsiG-TX3cAu4towUZY3dtqg4sIGLo9Mg5RIhXNaegkv1V6Dd-bPmGorHkGFiKui3MvnbhYeNmK9Ro3Q1Ynn985gp8f0uakcJk0l8EdAJj2YLoTsFYIvTXHJ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnnI5gEhs8JR47pgRsiG-TX3cAu4towUZY3dtqg4sIGLo9Mg5RIhXNaegkv1V6Dd-bPmGorHkGFiKui3MvnbhYeNmK9Ro3Q1Ynn985gp8f0uakcJk0l8EdAJj2YLoTsFYIvTXHJ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlmDnf0yGQp5JF0F0Nk5YjsTg2gxuIUjxoe1YfT6Er00fASno4kt8eYh-1PwFCKWJ0jnkCZobfqg4-pyehRD5-ocf64WMpWbtDQi7YSh2fLU32g47_i6PpocwpItwBQqy4oVLZrxQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlmDnf0yGQp5JF0F0Nk5YjsTg2gxuIUjxoe1YfT6Er00fASno4kt8eYh-1PwFCKWJ0jnkCZobfqg4-pyehRD5-ocf64WMpWbtDQi7YSh2fLU32g47_i6PpocwpItwBQqy4oVLZrxQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnaxb_-roHyUzWCykaTQDQdLnYwOIQ0WdSOtJ_II1QznZcozojVMZhalmJhBmyCgsuMkhWAQQJM_JlzavUT-holsKmNkABJmEKHiJW1pzUf6ycemWF142tLDugZ0_QoSrDZMqlz=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnaxb_-roHyUzWCykaTQDQdLnYwOIQ0WdSOtJ_II1QznZcozojVMZhalmJhBmyCgsuMkhWAQQJM_JlzavUT-holsKmNkABJmEKHiJW1pzUf6ycemWF142tLDugZ0_QoSrDZMqlz=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlz4L_s3KxTnJTUtq7QA5gVAg9HwuyXNXl_btFixnwVggCfTmuvOMXS2Imj-l8K15MmTKbeUdS4Freob6wAszd4eLDylKKpPVKT6HoYOjtQpVsxy-CrxDIvrnNsxFBnrWkln08=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlz4L_s3KxTnJTUtq7QA5gVAg9HwuyXNXl_btFixnwVggCfTmuvOMXS2Imj-l8K15MmTKbeUdS4Freob6wAszd4eLDylKKpPVKT6HoYOjtQpVsxy-CrxDIvrnNsxFBnrWkln08=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkOIV_fEKAbNhV_9Y0rL2eGN9uAaKMJmF-GHYaH6HtS1xAHrjOAhW3TzwCzMqmpWfgl-bFoHs1MYsQY_4k7rCHYc-JuXb_o5gahsAgfYqiWudsHHyM4sbbwbFTQTP0-VHB6Zpce9A=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkOIV_fEKAbNhV_9Y0rL2eGN9uAaKMJmF-GHYaH6HtS1xAHrjOAhW3TzwCzMqmpWfgl-bFoHs1MYsQY_4k7rCHYc-JuXb_o5gahsAgfYqiWudsHHyM4sbbwbFTQTP0-VHB6Zpce9A=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkIjvnDh5i4yImSARoML2cvMWhjMXExeGRjEAE",
+      "data_id": "0xd0552c12a475119:0x921321c180f0fc8e",
+      "name": "Hotel Occidental Faro",
+      "link": "https://www.barcelo.com/en-gb/occidental-faro/?utm_source=google&utm_medium=organic&utm_campaign=my_business&utm_content=95924",
+      "description": "Upmarket lodging featuring sleek rooms & suites, plus a rooftop restaurant/bar & a spa.",
+      "gps_coordinates": {
+        "latitude": 37.0164877,
+        "longitude": -7.9347675
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "2:00 PM",
+      "check_out_time": "12:00 PM",
+      "price_per_night": {
+        "price": "€235",
+        "extracted_price": 235,
+        "price_before_taxes": "€224",
+        "extracted_price_before_taxes": 224
+      },
+      "total_price": {
+        "price": "€1,646",
+        "extracted_price": 1646,
+        "price_before_taxes": "€1,565",
+        "extracted_price_before_taxes": 1565
+      },
+      "nearby_places": [
+        {
+          "name": "Faro Marina",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "R. 1º de Maio",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "15 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "20 min"
+            }
+          ]
+        },
+        {
+          "name": "O Coreto",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "4-star hotel",
+      "extracted_hotel_class": 4,
+      "rating": 4.2,
+      "reviews": 2231,
+      "reviews_histogram": {
+        "5": 1199,
+        "4": 606,
+        "3": 225,
+        "2": 79,
+        "1": 122
+      },
+      "location_rating": 4.7,
+      "proximity_to_things_to_do_rating": 4.4,
+      "proximity_to_transit_rating": 5.0,
+      "airport_access_rating": 4.7,
+      "reviews_breakdown": [
+        {
+          "name": "Bar",
+          "description": "Bar or lounge",
+          "total": 155,
+          "positive": 108,
+          "neutral": 13,
+          "negative": 34
+        },
+        {
+          "name": "Breakfast",
+          "description": "Breakfast",
+          "total": 166,
+          "positive": 142,
+          "neutral": 9,
+          "negative": 15
+        },
+        {
+          "name": "Fitness",
+          "description": "Fitness",
+          "total": 80,
+          "positive": 49,
+          "neutral": 9,
+          "negative": 22
+        },
+        {
+          "name": "Nature",
+          "description": "Nature and outdoor activities",
+          "total": 64,
+          "positive": 46,
+          "neutral": 10,
+          "negative": 8
+        },
+        {
+          "name": "Dining",
+          "description": "Food and Beverage",
+          "total": 118,
+          "positive": 92,
+          "neutral": 7,
+          "negative": 19
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 221,
+          "positive": 162,
+          "neutral": 9,
+          "negative": 50
+        }
+      ],
+      "eco_certified": true,
+      "amenities": [
+        "Free Wi‑Fi",
+        "Parking ($)",
+        "Pool",
+        "Air conditioning",
+        "Fitness center",
+        "Spa",
+        "Bar",
+        "Restaurant",
+        "Room service",
+        "Full‑service laundry",
+        "Accessible",
+        "Kid-friendly",
+        "Smoke-free property"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/VAlapmXuCy6Yapqh23xnD3TcArXDMQrjAyv4zDvD1c0rqX7-pyhCDhFOpIcD79TVfn4r5F3hRt9Sg-1EICJUO4x6-kt9rcejDIV2eZXFyjy_9uNfx-ajk3MgGXWYUySUgtbJOZtvhxVozhocJEKs3Th7Wq1lXBE=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/00/004938/004938a_hb_p_003.jpg"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/NqnRQ2-yKTyGW_9tgmVNxOd6hkvjsADQbg0bHTh-_Ib_Z5O-SuBp51jKevaLA4aZaOgta1AzFBjchDMJWkiUquoFSRHpRLdbR_qyskfDu2PVi7FW0eUK1GfqDIHZFLWAY0ouEqUzg_KLyYUwymg8YPvaedCuTA=s287-w287-h192-n-k-no-v1",
+          "original": "https://www.iceportal.com/data/2813-179275-f90557560_XXLejpg/Portugal/Faro/Occidental-Faro/Photo/Occidental-Faro-Faro-Undefined-OFARO-ROOM.jpg"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn6BGJDzL7GirG_xnWxQ2YxREJCsESZouaZA8dV9Zo7lNDk4OEwR1Toq6lipU8_6n3EGJKrdPMjlaQIxgLu1pQ_sNb8aGE8B7RK2W5EmUgifUJPeTejHcW3vqKSOEVEsrdX-a56sQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn6BGJDzL7GirG_xnWxQ2YxREJCsESZouaZA8dV9Zo7lNDk4OEwR1Toq6lipU8_6n3EGJKrdPMjlaQIxgLu1pQ_sNb8aGE8B7RK2W5EmUgifUJPeTejHcW3vqKSOEVEsrdX-a56sQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmC5dGcKah4snpKVvZy5PW80uzZx-aP7wWucEH96jH9peznyTzCnE2SlXmgRbnRrBsp3BY0dHopsc9VATwx_MNIFiRgKvirvceWujdRgGsEiYKkdF_vxbNHVFiyjNeiDhi_ULBCzrOXLwoM=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmC5dGcKah4snpKVvZy5PW80uzZx-aP7wWucEH96jH9peznyTzCnE2SlXmgRbnRrBsp3BY0dHopsc9VATwx_MNIFiRgKvirvceWujdRgGsEiYKkdF_vxbNHVFiyjNeiDhi_ULBCzrOXLwoM=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl8VTXqss18phQ9380sj2SYvvXnTCFBlB70dxent-A1RTY-Zkx2fAcSuRUo4EjNB9D6J2d2ehnpq-Hp8HFhiczv51QlAmhiluA2ofW-mSLqDydiLPQ-AqK7jRrCQRYBOCgJ0palSg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl8VTXqss18phQ9380sj2SYvvXnTCFBlB70dxent-A1RTY-Zkx2fAcSuRUo4EjNB9D6J2d2ehnpq-Hp8HFhiczv51QlAmhiluA2ofW-mSLqDydiLPQ-AqK7jRrCQRYBOCgJ0palSg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkGOWy0IjlVziiRp5_cFsKw_jWBRRC6mrbIpvVvnKb5VvsAy-mL78x_xyfmd-vHfp1Cp9GN11jV0asDawZtK3w9iS0BzQeYWKILCFE4k3N9UyJH5KA8gQ5p4-6xERvU5adjVBc9zw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkGOWy0IjlVziiRp5_cFsKw_jWBRRC6mrbIpvVvnKb5VvsAy-mL78x_xyfmd-vHfp1Cp9GN11jV0asDawZtK3w9iS0BzQeYWKILCFE4k3N9UyJH5KA8gQ5p4-6xERvU5adjVBc9zw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlhlUi4nS1hJQ2d1AqtSXO4S0oEhkXoF_CXpkBuDsJNwH2q87t9aZBVy2CrxwHSdP-cYxmU841sHelYH9-ZPKXT0hjNXG_oC6dwU5c92M4k1Mh_zSvweE9XIFHRU5v7Le44_NFh=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlhlUi4nS1hJQ2d1AqtSXO4S0oEhkXoF_CXpkBuDsJNwH2q87t9aZBVy2CrxwHSdP-cYxmU841sHelYH9-ZPKXT0hjNXG_oC6dwU5c92M4k1Mh_zSvweE9XIFHRU5v7Le44_NFh=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnvyJP0G94G7gpGGXWrNiojnvoE5NzqVOJBrkFV6I-TrZZJZitiKtwBHMEZMQzlIUaCs5FxemcKPaJRzwI3mRWuFuN12XPLDoBodS0STviyB_wFY3IqgofR_GdIO7aEbGQCOGmc=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnvyJP0G94G7gpGGXWrNiojnvoE5NzqVOJBrkFV6I-TrZZJZitiKtwBHMEZMQzlIUaCs5FxemcKPaJRzwI3mRWuFuN12XPLDoBodS0STviyB_wFY3IqgofR_GdIO7aEbGQCOGmc=s10000"
+        },
+        {
+          "thumbnail": "https://lh6.googleusercontent.com/proxy/Hh0RP3M-Og1kBheXGJZP9FYEMwU2ssrINNUyxmo5kHA11o7OCF5s_5dQFMStqAZ1F_FE5Qq9RHpQb1fe0U_9fxsKhkLxt3zju3v0N4K9EKtSmdiOSrbVS9i1VfkGqBnwCpCc6cpESSlvirI8BqAw1Mt7Lb5Tsw=s287-w287-h192-n-k-no-v1",
+          "original": "https://photos.hotelbeds.com/giata/original/00/004938/004938a_hb_r_022.jpg"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkIiZbZ9_iLi8ofGg0vZy8xMXY1ZmJ3bnZzEAE",
+      "data_id": "0xd055332b760277d:0x1f942c5f8ef64b09",
+      "name": "Dear Faro - Guest House",
+      "link": "http://www.dearfaro.com/",
+      "gps_coordinates": {
+        "latitude": 37.0191315,
+        "longitude": -7.936660400000001
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€96",
+        "extracted_price": 96,
+        "price_before_taxes": "€87",
+        "extracted_price_before_taxes": 87
+      },
+      "total_price": {
+        "price": "€672",
+        "extracted_price": 672,
+        "price_before_taxes": "€608",
+        "extracted_price_before_taxes": 608
+      },
+      "deal": "20% less than usual",
+      "deal_description": "Deal",
+      "nearby_places": [
+        {
+          "name": "Chapel of Bones of Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "5 min"
+            }
+          ]
+        },
+        {
+          "name": "R. Infante D. Henrique",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "14 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "17 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Mercearia São Pedro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "rating": 4.6,
+      "reviews": 99,
+      "reviews_histogram": {
+        "5": 78,
+        "4": 13,
+        "3": 4,
+        "2": 2,
+        "1": 2
+      },
+      "location_rating": 4.7,
+      "proximity_to_things_to_do_rating": 4.4,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.8,
+      "reviews_breakdown": [
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 11,
+          "positive": 10,
+          "neutral": 0,
+          "negative": 1
+        },
+        {
+          "name": "Cleanliness",
+          "description": "Cleanliness",
+          "total": 11,
+          "positive": 11,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 11,
+          "positive": 11,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 10,
+          "positive": 10,
+          "neutral": 0,
+          "negative": 0
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Air conditioning",
+        "Smoke-free property"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmOWhKpgs_sEPWPYpTWYTd3ZqAYFUaeC6bovgenBoLj1BDEJB75uImLBm6L8p5kVHSa9e7KCq-hamJ772VGxlG6gG6MLa1Rjdgxt9crljF7sSyGOJtE6smTxzIwbyB-U-NKmioX=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmOWhKpgs_sEPWPYpTWYTd3ZqAYFUaeC6bovgenBoLj1BDEJB75uImLBm6L8p5kVHSa9e7KCq-hamJ772VGxlG6gG6MLa1Rjdgxt9crljF7sSyGOJtE6smTxzIwbyB-U-NKmioX=s10000"
+        },
+        {
+          "thumbnail": "https://lh5.googleusercontent.com/proxy/zxRMKy3Iwp5Jfb-adgpHzSX1BESmqyFaQQUsr1YxCkaMjLkLnl8H5EV-Uv51HyNYRl3mH9sdo5PHwIWitzmUmuGBAKr88ZwEhZaca9rhuzrHBFVvlzb8xNi7jShvsPg6fMsomKHUqiMFuvMIp-Dp46_b9EuIIA=s287-w287-h192-n-k-no-v1",
+          "original": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2d/17/38/b0/caption.jpg?w=2100&h=1400&s=1"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnuZRcj2vVO76uZjrlxhddqZ0yIghxKM0PybYe8ST4_H7sJmhD7WxlquVKE08FX84uxCvpdyWs7jIa_85x2r925Mf5WGz-YokdGDaiJVrVacnl-AnqwenfuvOGoZFsuNwObEjPxFg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnuZRcj2vVO76uZjrlxhddqZ0yIghxKM0PybYe8ST4_H7sJmhD7WxlquVKE08FX84uxCvpdyWs7jIa_85x2r925Mf5WGz-YokdGDaiJVrVacnl-AnqwenfuvOGoZFsuNwObEjPxFg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkZcvtTP-weEU9bmKowLXjwwjHM-Fj0hLTg6DSW5VXcUtIA-XMLztk2B8d9fbCX2N3NRLA8CflB9CG1wFLkFnBnjU9N8FZAqOGzWcQNAf6ezVIGfA4Wrw5TvSHLSetwrkkLeTjp=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkZcvtTP-weEU9bmKowLXjwwjHM-Fj0hLTg6DSW5VXcUtIA-XMLztk2B8d9fbCX2N3NRLA8CflB9CG1wFLkFnBnjU9N8FZAqOGzWcQNAf6ezVIGfA4Wrw5TvSHLSetwrkkLeTjp=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmT0MN52t93mfDDqwjdCQOww2m6EElM9T5h5gFR_G22aRZlpJFdm1jlXaZ3LEkHjadV74Dj59f06Zn9fhGWA3Xa6R85wIutMpks2dDPmMLloRDzA-F4pmhmj3oaDMkxzRCEViF3=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmT0MN52t93mfDDqwjdCQOww2m6EElM9T5h5gFR_G22aRZlpJFdm1jlXaZ3LEkHjadV74Dj59f06Zn9fhGWA3Xa6R85wIutMpks2dDPmMLloRDzA-F4pmhmj3oaDMkxzRCEViF3=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnCfV8bplPjVZeRSlegWr0MhDSVjHoCKPuutRIsBFQkcXA9vz624ryz3ufv3l94O6blQj4j8JnHfAeZpye0upZUeoGE0ddp6LmVB61kGW8na92r7FTYMeg3anCxGqy0Wj7Z9hc=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnCfV8bplPjVZeRSlegWr0MhDSVjHoCKPuutRIsBFQkcXA9vz624ryz3ufv3l94O6blQj4j8JnHfAeZpye0upZUeoGE0ddp6LmVB61kGW8na92r7FTYMeg3anCxGqy0Wj7Z9hc=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlYWaBk29cvp21d9KeRfqlReUKT5oSPK_mFfwRatjFLHJUAjgyM1CPryMPqK--XmBEIRU-iNEiERSRh-8x1gOjS2pOzKo_qFWINfZ3vfGyYVE3tuNQDcgEvVbV6QktVQUlEZGw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlYWaBk29cvp21d9KeRfqlReUKT5oSPK_mFfwRatjFLHJUAjgyM1CPryMPqK--XmBEIRU-iNEiERSRh-8x1gOjS2pOzKo_qFWINfZ3vfGyYVE3tuNQDcgEvVbV6QktVQUlEZGw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWma84fI8hgDfs9x0APotv_q_4lOcCQIW-z9CnDGdy6d2ciT8if3GzDu3KxAJJ3TZ5MTM-xwhygtGV944GLAs8OC7YCeX8j173Y6LmfNiER6jj4O_lWvKymB5yu-afYT21Mr6DPO=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWma84fI8hgDfs9x0APotv_q_4lOcCQIW-z9CnDGdy6d2ciT8if3GzDu3KxAJJ3TZ5MTM-xwhygtGV944GLAs8OC7YCeX8j173Y6LmfNiER6jj4O_lWvKymB5yu-afYT21Mr6DPO=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnbGYrha-MGxZyKhvgDjTocKDItbEy-HqqkHuXgfylu-2C1CHp8rWevJ_Yz7suaaM9nQAlldKIX1OvOKuh36kinkaaFJERr3RaI1Lk8pUXEeZTNBz324lKT1lseAK7XSEUxqNohXw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnbGYrha-MGxZyKhvgDjTocKDItbEy-HqqkHuXgfylu-2C1CHp8rWevJ_Yz7suaaM9nQAlldKIX1OvOKuh36kinkaaFJERr3RaI1Lk8pUXEeZTNBz324lKT1lseAK7XSEUxqNohXw=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkImOq-qbKM5JJMGg0vZy8xMWxtZl82NDE0EAE",
+      "data_id": "0xd1ab3cfe7af52a3:0x4c259063252fb518",
+      "name": "Casas das Ilhas",
+      "link": "https://www.casasdasilhas.com/en",
+      "gps_coordinates": {
+        "latitude": 37.0177042,
+        "longitude": -7.9280903
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€96",
+        "extracted_price": 96,
+        "price_before_taxes": "€92",
+        "extracted_price_before_taxes": 92
+      },
+      "total_price": {
+        "price": "€672",
+        "extracted_price": 672,
+        "price_before_taxes": "€644",
+        "extracted_price_before_taxes": 644
+      },
+      "deal": "30% less than usual",
+      "deal_description": "Great Deal",
+      "nearby_places": [
+        {
+          "name": "Parque Natural da Ria Formosa",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "8 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro (Tribunal)",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "21 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "21 min"
+            }
+          ]
+        },
+        {
+          "name": "O Palhacinho - Restaurante",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        }
+      ],
+      "rating": 3.8,
+      "reviews": 18,
+      "reviews_histogram": {
+        "5": 10,
+        "4": 2,
+        "3": 2,
+        "2": 0,
+        "1": 4
+      },
+      "location_rating": 4.1,
+      "proximity_to_things_to_do_rating": 4.1,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.4,
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk9tCiTlvdX3mhhHcPoOh0j__q7Ajvj4Y7gQnXrSAxeTwjJj0f4dcKXYqXRzEaqDn-0W1pcLJ6-cCqGV8d2ChT6vO-3wSPtOzKB1oMgpaOJiIU2C9nSe3wD6s1H-sUjQYU8ypdC=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWk9tCiTlvdX3mhhHcPoOh0j__q7Ajvj4Y7gQnXrSAxeTwjJj0f4dcKXYqXRzEaqDn-0W1pcLJ6-cCqGV8d2ChT6vO-3wSPtOzKB1oMgpaOJiIU2C9nSe3wD6s1H-sUjQYU8ypdC=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmafgEQEsBBh954ObrAUrgZ1R-us9FIFbFrYOoaJTCN-eeLIMWcYloXPfjm0PIqfglHn5mdUn0XNjbuNki6sWNfJl2eD37d3GCfR5dnPUoUZ8bRa_tI9TJCDnRoWok7N67Glzx-=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmafgEQEsBBh954ObrAUrgZ1R-us9FIFbFrYOoaJTCN-eeLIMWcYloXPfjm0PIqfglHn5mdUn0XNjbuNki6sWNfJl2eD37d3GCfR5dnPUoUZ8bRa_tI9TJCDnRoWok7N67Glzx-=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmO9oLPKOeE-E1l_dPvZ5Kx4ba2dLGEGd52CnW0exUEVorTW-q9xCuX7ZmnTu4Cwol9YbAmdWxysxQ6YZdx77Zgt4hgqkwDG429zp3cCpdPX7u-BvFeD3wJDuGCbKBUuMkv6qqrxw=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmO9oLPKOeE-E1l_dPvZ5Kx4ba2dLGEGd52CnW0exUEVorTW-q9xCuX7ZmnTu4Cwol9YbAmdWxysxQ6YZdx77Zgt4hgqkwDG429zp3cCpdPX7u-BvFeD3wJDuGCbKBUuMkv6qqrxw=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlKGSXDEyoqKz4yTgayEEq18U5UunFnXLnmYDTzpCcnFdnV0-ZL9L100Rnnf1v-zfueG03oQWXSKmDcAvWrzvsBjFu7ZV44CewuQBfa27ZyijVbpu9kHBOs-pMGEtHmNuQ1AvNb=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlKGSXDEyoqKz4yTgayEEq18U5UunFnXLnmYDTzpCcnFdnV0-ZL9L100Rnnf1v-zfueG03oQWXSKmDcAvWrzvsBjFu7ZV44CewuQBfa27ZyijVbpu9kHBOs-pMGEtHmNuQ1AvNb=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlpWwqxCBTXyF3icrB-Jy2PP3hCfSSb1_DpMnxkyX6d2DB4TUq84hBIBIkDxgNFPaA5jCxazXN5-qlJP08E82Gm2F-Lh0SIa-u7DfcfeBAcGM7YRN3voVOmi9zG5o67kQgSYjqI=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlpWwqxCBTXyF3icrB-Jy2PP3hCfSSb1_DpMnxkyX6d2DB4TUq84hBIBIkDxgNFPaA5jCxazXN5-qlJP08E82Gm2F-Lh0SIa-u7DfcfeBAcGM7YRN3voVOmi9zG5o67kQgSYjqI=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlUuC115S5QPLaLT4eMvv2CV4gC5OCAwvbTd0Z-WQMwoQzG6lFBMWL4sMGvvY4BQ3Jvm1-xwiC94QSdHxPaLkoXMgrjR0hExmt6Bu1e2XCRaqVUMNYofs-6WbiZx-sgYa7r9A-tEQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlUuC115S5QPLaLT4eMvv2CV4gC5OCAwvbTd0Z-WQMwoQzG6lFBMWL4sMGvvY4BQ3Jvm1-xwiC94QSdHxPaLkoXMgrjR0hExmt6Bu1e2XCRaqVUMNYofs-6WbiZx-sgYa7r9A-tEQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkx3sQGZh2rM9j8mR5aIT687RKqBrlzmr2WeRZeudAIIy5cJh8gqkBBwW2zPMPiB-Lf0oAv9TdxKaszp-UqbzYMo6Gwx9oGk8z_lsYCMD0ib0Aq7MDHMTaevstt8gtCqacRICc_=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkx3sQGZh2rM9j8mR5aIT687RKqBrlzmr2WeRZeudAIIy5cJh8gqkBBwW2zPMPiB-Lf0oAv9TdxKaszp-UqbzYMo6Gwx9oGk8z_lsYCMD0ib0Aq7MDHMTaevstt8gtCqacRICc_=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn-ZN01eE0-C7mUKfoFOAU2JFqiSlybj7cWekJyoZQN_8ib8pqbsR5z8RPrK7kahurzKO7jqtB_DnLqIpnI656vKBXN1MNR7TY-0XBZ5ZlNA_juGUMHZWMGxW3sZjkCd2NgQDoHLg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn-ZN01eE0-C7mUKfoFOAU2JFqiSlybj7cWekJyoZQN_8ib8pqbsR5z8RPrK7kahurzKO7jqtB_DnLqIpnI656vKBXN1MNR7TY-0XBZ5ZlNA_juGUMHZWMGxW3sZjkCd2NgQDoHLg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmNg6o2b6k-lirppPP2opzU52iQSQ3c-I8n8IU-C0KHdqzofZMI4XSZ8T6z7I3CB2QbdvL4im428U00vrYHtbhtCsv1cXqKP70gzOUdMpEo850rGfMrA2B1zzvVR2MDomgs9vQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmNg6o2b6k-lirppPP2opzU52iQSQ3c-I8n8IU-C0KHdqzofZMI4XSZ8T6z7I3CB2QbdvL4im428U00vrYHtbhtCsv1cXqKP70gzOUdMpEo850rGfMrA2B1zzvVR2MDomgs9vQ=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoIu-Tk0622mMXjARoNL2cvMTFkXzcxbTY4MBAB",
+      "data_id": "0xd0554c61b0dd877:0xe38a61b2da79323b",
+      "name": "OceanOasis - Hostel",
+      "link": "https://oceanoasishostel.com/",
+      "description": "Relaxed rooms & a dorm in a quaint hostel offering free Wi-Fi & a rooftop terrace with city views.",
+      "gps_coordinates": {
+        "latitude": 37.0266185,
+        "longitude": -7.845691
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:30 AM",
+      "price_per_night": {
+        "price": "€48",
+        "extracted_price": 48,
+        "price_before_taxes": "€42",
+        "extracted_price_before_taxes": 42
+      },
+      "total_price": {
+        "price": "€335",
+        "extracted_price": 335,
+        "price_before_taxes": "€297",
+        "extracted_price_before_taxes": 297
+      },
+      "nearby_places": [
+        {
+          "name": "Mercados de Olhão",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "9 min"
+            }
+          ]
+        },
+        {
+          "name": "R. Feira",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "22 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "58 min"
+            }
+          ]
+        },
+        {
+          "name": "Figo de Pita - Brunch & Bowls",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "3 min"
+            }
+          ]
+        }
+      ],
+      "rating": 4.1,
+      "reviews": 257,
+      "reviews_histogram": {
+        "5": 130,
+        "4": 70,
+        "3": 31,
+        "2": 12,
+        "1": 14
+      },
+      "location_rating": 4.5,
+      "proximity_to_things_to_do_rating": 3.9,
+      "proximity_to_transit_rating": 4.3,
+      "airport_access_rating": 4.2,
+      "reviews_breakdown": [
+        {
+          "name": "Sleep",
+          "description": "Sleep",
+          "total": 5,
+          "positive": 1,
+          "neutral": 1,
+          "negative": 3
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 12,
+          "positive": 9,
+          "neutral": 2,
+          "negative": 1
+        },
+        {
+          "name": "Breakfast",
+          "description": "Breakfast",
+          "total": 7,
+          "positive": 3,
+          "neutral": 0,
+          "negative": 4
+        },
+        {
+          "name": "Transit",
+          "description": "Public transit",
+          "total": 5,
+          "positive": 2,
+          "neutral": 3,
+          "negative": 0
+        },
+        {
+          "name": "Room",
+          "description": "Room amenities",
+          "total": 6,
+          "positive": 4,
+          "neutral": 1,
+          "negative": 1
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 8,
+          "positive": 7,
+          "neutral": 1,
+          "negative": 0
+        }
+      ],
+      "amenities": [
+        "Free Wi‑Fi",
+        "Air conditioning",
+        "Airport shuttle",
+        "Accessible",
+        "Kid-friendly"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmjVAi1HrspwcDvAhezK1W2FNnMGtDpnpEW29Jcx5rYfgh4r1rlN5e72I4Y_MhA-aL8oiDwIyd2sVp3b0x9BV6KNO6iC6QqB4bqb7x0__5dpPsQIQCTshzHt_j3gNjgV5n9u2Rk=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmjVAi1HrspwcDvAhezK1W2FNnMGtDpnpEW29Jcx5rYfgh4r1rlN5e72I4Y_MhA-aL8oiDwIyd2sVp3b0x9BV6KNO6iC6QqB4bqb7x0__5dpPsQIQCTshzHt_j3gNjgV5n9u2Rk=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWne71MzckxVaxxgJqbbgVTzQ8H8IMNa22gQHqPKVyusVZGRQPxlRjPv9gqT_bOofP2LxYYq5Wjtx145yNWlCNy6rxW2IiRJbelAZpBB0-QKJMd1GvmhQHtEEJEbd_X3QVF-k68=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWne71MzckxVaxxgJqbbgVTzQ8H8IMNa22gQHqPKVyusVZGRQPxlRjPv9gqT_bOofP2LxYYq5Wjtx145yNWlCNy6rxW2IiRJbelAZpBB0-QKJMd1GvmhQHtEEJEbd_X3QVF-k68=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWklVy1cD3OVDGkEsWL-YX-XYc0pWEVedfysQg6dx-jpClIUFsuhpFNiazhgSDCABaRg2gQxEQnr-YGGp16RBUcyYZRnpPwLALASjGitZeO-qva7l94iysfwDLoM-io150HHj7EK=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWklVy1cD3OVDGkEsWL-YX-XYc0pWEVedfysQg6dx-jpClIUFsuhpFNiazhgSDCABaRg2gQxEQnr-YGGp16RBUcyYZRnpPwLALASjGitZeO-qva7l94iysfwDLoM-io150HHj7EK=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlvlhlErYPFXs_zZZc0U5ztBeiRpyoVPpR7_edsdehjPwfg_eUQOCHE3AIIaNJdqD3uXbU0NB227yHF4lIiklAhP1aF3sOq0-RSeRevMEA1X6Tz3B_kR19JyNtIuHpYogYBu9t0aA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlvlhlErYPFXs_zZZc0U5ztBeiRpyoVPpR7_edsdehjPwfg_eUQOCHE3AIIaNJdqD3uXbU0NB227yHF4lIiklAhP1aF3sOq0-RSeRevMEA1X6Tz3B_kR19JyNtIuHpYogYBu9t0aA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkxAFq6A1eh15Ex2BEs0B-H0RhAD5wk8wJfO_k1ACIzdh23VqomdB_df-9Eio1MnqhpGsCquz5Qyv2WALra1H2ga7pGfJOrK9ZuNUzh0WoFFPaFGXddFyYgf64-fa7mlnDGdhLi=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkxAFq6A1eh15Ex2BEs0B-H0RhAD5wk8wJfO_k1ACIzdh23VqomdB_df-9Eio1MnqhpGsCquz5Qyv2WALra1H2ga7pGfJOrK9ZuNUzh0WoFFPaFGXddFyYgf64-fa7mlnDGdhLi=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkv4uU2zKQ0T7Ddtmn3B5wPjnDHZs94v-ttjs_4cyvcbh0L50-cwtEOnuYeFxRUaOqhYBJq27oMLENJkTfwMJ_Uqv8M_LBhqdKr5Egg7x3-75Hu0JtmWDXyzxG2Z5jACyG3AXDUxg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkv4uU2zKQ0T7Ddtmn3B5wPjnDHZs94v-ttjs_4cyvcbh0L50-cwtEOnuYeFxRUaOqhYBJq27oMLENJkTfwMJ_Uqv8M_LBhqdKr5Egg7x3-75Hu0JtmWDXyzxG2Z5jACyG3AXDUxg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlHtZ9xr_xwRpc_fg0j11R6ReKQ4DfPnsffeD3tPUR_w4JbHQwBTdflzoUr6QIPKZKCfEaHCmVsz2wfmAJYesAYElerdSR5sloDFosd7btcFUNvogfRpAV3wUnxmXyUHd988RFx=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlHtZ9xr_xwRpc_fg0j11R6ReKQ4DfPnsffeD3tPUR_w4JbHQwBTdflzoUr6QIPKZKCfEaHCmVsz2wfmAJYesAYElerdSR5sloDFosd7btcFUNvogfRpAV3wUnxmXyUHd988RFx=s10000"
+        },
+        {
+          "thumbnail": "https://lh4.googleusercontent.com/proxy/_5osPL4XVjB_KuysgrjQHzRh8JwWuwxxG-rkaPrznKUBh3mwXYzy9wKwHUE9NoRzEVHO2wtTabzIJBRoe5opayWcWKUBk39lO6vrRAuL71eBg7wvnG-iMw3xOvL9rpCbUaWdzMuqB5yLr53cEluLhLcyX3quSg=s287-w287-h192-n-k-no-v1",
+          "original": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/10/31/68/bf/oceanoasis-hostel.jpg?w=1900&h=1400&s=1"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWktdbDnOH2DkZn9OS2kbOgv3uFPS-UnGX8pw9y93bvuLrlrqKLeUFapZyW5f8UnsJ2HfgLssVHB4bIKPRGzrJePa-uaymfVQXutsyqK5g8wZYYDa42INznMpmvtjH1FqMpML5LjcA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWktdbDnOH2DkZn9OS2kbOgv3uFPS-UnGX8pw9y93bvuLrlrqKLeUFapZyW5f8UnsJ2HfgLssVHB4bIKPRGzrJePa-uaymfVQXutsyqK5g8wZYYDa42INznMpmvtjH1FqMpML5LjcA=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoIjImr0-Osk76eARoNL2cvMTFsZjJ4NmhrMhAB",
+      "data_id": "0xd05530046549d4f:0x9e7c4d663a6ac48c",
+      "name": "Madalena Hostel e Suites",
+      "link": "https://madalenahostelsuites.com/",
+      "gps_coordinates": {
+        "latitude": 37.017836,
+        "longitude": -7.9365701
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "price_per_night": {
+        "price": "€54",
+        "extracted_price": 54,
+        "price_before_taxes": "€50",
+        "extracted_price_before_taxes": 50
+      },
+      "total_price": {
+        "price": "€375",
+        "extracted_price": 375,
+        "price_before_taxes": "€347",
+        "extracted_price_before_taxes": 347
+      },
+      "nearby_places": [
+        {
+          "name": "Faro Marina",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro (Terminal Rodoviário)",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "12 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "18 min"
+            }
+          ]
+        },
+        {
+          "name": "Há Pátria - SABORES COM ALMA PORTUGUESA",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        }
+      ],
+      "rating": 4.3,
+      "reviews": 94,
+      "reviews_histogram": {
+        "5": 68,
+        "4": 9,
+        "3": 5,
+        "2": 4,
+        "1": 8
+      },
+      "location_rating": 4.7,
+      "proximity_to_things_to_do_rating": 4.4,
+      "proximity_to_transit_rating": 5.0,
+      "airport_access_rating": 4.8,
+      "reviews_breakdown": [
+        {
+          "name": "Sleep",
+          "description": "Sleep",
+          "total": 9,
+          "positive": 6,
+          "neutral": 0,
+          "negative": 3
+        },
+        {
+          "name": "Bathroom",
+          "description": "Bathroom and toiletries",
+          "total": 5,
+          "positive": 2,
+          "neutral": 1,
+          "negative": 2
+        },
+        {
+          "name": "Cleanliness",
+          "description": "Cleanliness",
+          "total": 11,
+          "positive": 10,
+          "neutral": 0,
+          "negative": 1
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 11,
+          "positive": 10,
+          "neutral": 1,
+          "negative": 0
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 8,
+          "positive": 6,
+          "neutral": 1,
+          "negative": 1
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 8,
+          "positive": 6,
+          "neutral": 0,
+          "negative": 2
+        }
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnx-FaXu0C7TCJPmvRfbvARyQdVGfZsjLw6whAOmoovDIaV-BtPt_33zfFNMlwbbu1ASH22SePdeJunxpcBicJitLbxIxWnmEXq0FfTLs5grwx_HBuLGTvM2B7-p0pPwY05hKoq=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnx-FaXu0C7TCJPmvRfbvARyQdVGfZsjLw6whAOmoovDIaV-BtPt_33zfFNMlwbbu1ASH22SePdeJunxpcBicJitLbxIxWnmEXq0FfTLs5grwx_HBuLGTvM2B7-p0pPwY05hKoq=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn0CfnN7zy2nO7UKEyBoeOCeup5a2wyPil332W9pcQty_EjQcmzFoaA0hwhU4glAwghDiEPFv3I9PrAqbcXffebsk1tPSEilGKQzaFlJ2hhqqaoYzTukUwo9vcME-zVRK2cHQ0OFg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn0CfnN7zy2nO7UKEyBoeOCeup5a2wyPil332W9pcQty_EjQcmzFoaA0hwhU4glAwghDiEPFv3I9PrAqbcXffebsk1tPSEilGKQzaFlJ2hhqqaoYzTukUwo9vcME-zVRK2cHQ0OFg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnDpun5TE0VbP63pdYLDaj-rgqc95TfR9uqOYwYvWYGPHViZGl5WbOGVr7BvMAQH3a03sXXRgtzIGbzcaNKa7FWJwAG38SZ-1xAmCY5CmAkujNQfVsQk0YWQXYMPttZCWvgAXGWQA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnDpun5TE0VbP63pdYLDaj-rgqc95TfR9uqOYwYvWYGPHViZGl5WbOGVr7BvMAQH3a03sXXRgtzIGbzcaNKa7FWJwAG38SZ-1xAmCY5CmAkujNQfVsQk0YWQXYMPttZCWvgAXGWQA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl0Gs7cjv04fYSANCvMZr3_Ew__AQZIcm-_HiWwHukL5k-YebaV_b5tBLTvPEyojCEPt4NJ6IiiJEvjZpw16UamZSyOZShHrWOxPJyZIlyjUGQtzo36V4pQYkKIp590susFkdmS0g=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl0Gs7cjv04fYSANCvMZr3_Ew__AQZIcm-_HiWwHukL5k-YebaV_b5tBLTvPEyojCEPt4NJ6IiiJEvjZpw16UamZSyOZShHrWOxPJyZIlyjUGQtzo36V4pQYkKIp590susFkdmS0g=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmxwGBSJ_bPB0gN6txBk0-rgyx9x41pYh8vX-7G8FNjsjX41hJeQZ5U0bXRWl2esvf-FwInLSp0fRvG_55cKvEV0OiY5CwuhTEPdD8UaPDtJYEHoEQ88XPsNGLR5BGkl2SZ1vKT=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmxwGBSJ_bPB0gN6txBk0-rgyx9x41pYh8vX-7G8FNjsjX41hJeQZ5U0bXRWl2esvf-FwInLSp0fRvG_55cKvEV0OiY5CwuhTEPdD8UaPDtJYEHoEQ88XPsNGLR5BGkl2SZ1vKT=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmV25uy11Wr94PxE2FUO5WDn5_ijJ__uxmW2skdFdPVICu9BKOaRTLM-6XGt1nRPYjBL8jvWapUgPE-vNT2xAhwFyyNvBb20keaMifBWwLN3pfu4U1ThDbPQ0tOs_L28imA2uA3=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmV25uy11Wr94PxE2FUO5WDn5_ijJ__uxmW2skdFdPVICu9BKOaRTLM-6XGt1nRPYjBL8jvWapUgPE-vNT2xAhwFyyNvBb20keaMifBWwLN3pfu4U1ThDbPQ0tOs_L28imA2uA3=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn5e52Q8bEghGOpqDiNRSYt0o1R5uY0pq7Qv6fEc1xqdZc6TDU_gp_gCBv50L6eO7vrce7tFkdxzU0rvUcLh7vWcRDQAIlQnNSF9WUiGMEaHOQz2EQ6P1C0A9Z1r_sB9pFiBRih=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn5e52Q8bEghGOpqDiNRSYt0o1R5uY0pq7Qv6fEc1xqdZc6TDU_gp_gCBv50L6eO7vrce7tFkdxzU0rvUcLh7vWcRDQAIlQnNSF9WUiGMEaHOQz2EQ6P1C0A9Z1r_sB9pFiBRih=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkaf4eCmL2kdJnPDJA-hnPK301uibSkwqVAugGtpv8VGr3Vqz9o7Pb5dfomj4cRS11IYXrPG3V_p-dMvISa5xd9RXX3CAMy5Jcp9lvbcwyEHctIk4Vqouk1Obal_A4Xw1US-ZdXqQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkaf4eCmL2kdJnPDJA-hnPK301uibSkwqVAugGtpv8VGr3Vqz9o7Pb5dfomj4cRS11IYXrPG3V_p-dMvISa5xd9RXX3CAMy5Jcp9lvbcwyEHctIk4Vqouk1Obal_A4Xw1US-ZdXqQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnPU7-yaSuInP9HofDKORCY2W2-qxHIrP_BCDkW81hfzPDZ_sGR1MdPEAYGGAG3qmRS6dA_nYzR0_z9lu0I4pT5sR-geQfwWwkz56uI69YMDFw_bd-n3Pgihq-RGOWbOR2FrmjQbA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnPU7-yaSuInP9HofDKORCY2W2-qxHIrP_BCDkW81hfzPDZ_sGR1MdPEAYGGAG3qmRS6dA_nYzR0_z9lu0I4pT5sR-geQfwWwkz56uI69YMDFw_bd-n3Pgihq-RGOWbOR2FrmjQbA=s10000"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChkIpv-Tj76b748MGg0vZy8xMXhuMGJwNXNwEAE",
+      "data_id": "0xd0553cd67c62e37:0xc1fbcdbe1e4ffa6",
+      "name": "Faro Station Eleven Guest House (163915/AL)",
+      "link": "https://www.booking.com/hotel/pt/faro-station-eleven-guest-house.pt-pt.html",
+      "gps_coordinates": {
+        "latitude": 37.0197578,
+        "longitude": -7.9392755
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "4:00 PM",
+      "check_out_time": "10:00 AM",
+      "price_per_night": {
+        "price": "€89",
+        "extracted_price": 89,
+        "price_before_taxes": "€80",
+        "extracted_price_before_taxes": 80
+      },
+      "total_price": {
+        "price": "€624",
+        "extracted_price": 624,
+        "price_before_taxes": "€563",
+        "extracted_price_before_taxes": 563
+      },
+      "nearby_places": [
+        {
+          "name": "Faro Marina",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "8 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "3 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Taxi",
+              "duration": "18 min"
+            },
+            {
+              "type": "Public Transport",
+              "duration": "20 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Adega Nova",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "3 min"
+            }
+          ]
+        }
+      ],
+      "rating": 4.6,
+      "reviews": 11,
+      "reviews_histogram": {
+        "5": 7,
+        "4": 4,
+        "3": 0,
+        "2": 0,
+        "1": 0
+      },
+      "location_rating": 4.6,
+      "proximity_to_things_to_do_rating": 4.4,
+      "proximity_to_transit_rating": 4.9,
+      "airport_access_rating": 4.5,
+      "amenities": [
+        "Free Wi‑Fi",
+        "Air conditioning",
+        "Smoke-free property"
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkisplg9pGinTLI_GeW92T4sVDMxkJ-XBN1OzmtZlES-4baPXnOAzEK5m5J01VzZWPxPTWcNVoFf_Wjo_6RD_Jn501vdpxTQ-EXldgDCcSNIhs8u84Hkyke-am6L_7T69e09BYH0DR9ibYM=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkisplg9pGinTLI_GeW92T4sVDMxkJ-XBN1OzmtZlES-4baPXnOAzEK5m5J01VzZWPxPTWcNVoFf_Wjo_6RD_Jn501vdpxTQ-EXldgDCcSNIhs8u84Hkyke-am6L_7T69e09BYH0DR9ibYM=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlpdTsUjHSLy2wydf3nobplVSfsSbuLd_71_rqQKsJ7ZSJwuCpd_coVD5CSi52q1h6_-NVEsCoOGrcC_8W3YmMyy88GEPQvI93U26MrEukSzkc-p8qwUpDwIz3_LfLkqj3V4aZcOIXv1b_K=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlpdTsUjHSLy2wydf3nobplVSfsSbuLd_71_rqQKsJ7ZSJwuCpd_coVD5CSi52q1h6_-NVEsCoOGrcC_8W3YmMyy88GEPQvI93U26MrEukSzkc-p8qwUpDwIz3_LfLkqj3V4aZcOIXv1b_K=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmi9y8A3SWW6P-LhBo2HVHtKH-DJjcUDEvtL_5CZQzqv2-7migWvP_DJNkEK15VIUkyWBWiXiLkoI8cpLhd04aoNe22YneT9hCdFf7wZhZ_EsQoYsTnp9R7d4uxroVRwOp5oLoi9JyaQb8l=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmi9y8A3SWW6P-LhBo2HVHtKH-DJjcUDEvtL_5CZQzqv2-7migWvP_DJNkEK15VIUkyWBWiXiLkoI8cpLhd04aoNe22YneT9hCdFf7wZhZ_EsQoYsTnp9R7d4uxroVRwOp5oLoi9JyaQb8l=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmtRAScUT6lNf8jt1142UOW0SNKf86sOFezPZA3rc1HHaBOBjrtNCfRiIvx-WhydJfzUGrXcSOHynvOxHNdjyPl2XfSxmMgZF8Sm5eOXaQdtd8QZBBJfvAgeMF5pRpZ-NQq7YIpDSFqBbCM=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmtRAScUT6lNf8jt1142UOW0SNKf86sOFezPZA3rc1HHaBOBjrtNCfRiIvx-WhydJfzUGrXcSOHynvOxHNdjyPl2XfSxmMgZF8Sm5eOXaQdtd8QZBBJfvAgeMF5pRpZ-NQq7YIpDSFqBbCM=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl880m02fTfhzrjN5CMzwEBGGrV9AxX7focmP87McpyCL9Mkx4X3E82AWiwDhHxr88s_Pc3BzY5_j1Q1e9Rg2dLaVllN1aJJ7G13SkxH5FeY3HeUjNGo8Lzn7eEGgquVZKnzuQLksKyZzFe=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl880m02fTfhzrjN5CMzwEBGGrV9AxX7focmP87McpyCL9Mkx4X3E82AWiwDhHxr88s_Pc3BzY5_j1Q1e9Rg2dLaVllN1aJJ7G13SkxH5FeY3HeUjNGo8Lzn7eEGgquVZKnzuQLksKyZzFe=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlohjxMp8FUD4WO8YkNG5g9iW1LD--sw_1kIAyPuEXbnbboPL093fVlhnh6H1z07jvYutyVLtL20zt_EC0ournxcN7WANP8Yd0mLCdXTPjG33co-19aw4UMBtzFZ9tM3vhEtxs-pCYLuvQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlohjxMp8FUD4WO8YkNG5g9iW1LD--sw_1kIAyPuEXbnbboPL093fVlhnh6H1z07jvYutyVLtL20zt_EC0ournxcN7WANP8Yd0mLCdXTPjG33co-19aw4UMBtzFZ9tM3vhEtxs-pCYLuvQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkYjKTGGOVWSvAuEp2awiHtxxeIN5Ua6NRp-uNVW3tIVo7aJlIztFQVTHLtZIzSKHSfkMx6flqbzou4NQAesJe0tcd0kNd0XfLlssKJcY3LZ_S_AN2JxgiGkFjOSIqiHY8oxPb-cGcWlhQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkYjKTGGOVWSvAuEp2awiHtxxeIN5Ua6NRp-uNVW3tIVo7aJlIztFQVTHLtZIzSKHSfkMx6flqbzou4NQAesJe0tcd0kNd0XfLlssKJcY3LZ_S_AN2JxgiGkFjOSIqiHY8oxPb-cGcWlhQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnO8YlHHGjHcafuLXEwbFdIT0guyvTvGgOkOOyn0wUoSKcfYmF_c9HRouK4Td9yYbv1KzI30c6caiFAXz2i7ufRoksjZsFLx0kqIsqZ5tdDeUgBnc61aroOcbF12CpN6cS7R0f50ADHVppg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnO8YlHHGjHcafuLXEwbFdIT0guyvTvGgOkOOyn0wUoSKcfYmF_c9HRouK4Td9yYbv1KzI30c6caiFAXz2i7ufRoksjZsFLx0kqIsqZ5tdDeUgBnc61aroOcbF12CpN6cS7R0f50ADHVppg=s10000"
+        },
+        {
+          "thumbnail": "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?panoid=IrLGHUrzEjnlpHoVXfwO3g&cb_client=search.estubs.gps&w=287&h=192&yaw=300.82092&pitch=0&thumbfov=100&scale=2"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoIlKPMnov_vfG-ARoNL2cvMTFuaHp5OGhydhAB",
+      "data_id": "0xd1ab3006c7420e9:0xbee2f7f8b3d31194",
+      "name": "BLife Montya Faro",
+      "link": "https://tripingguide.com/blife-montya-private-rooms-portugal",
+      "gps_coordinates": {
+        "latitude": 37.0315997,
+        "longitude": -7.9607874999999995
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€82",
+        "extracted_price": 82,
+        "price_before_taxes": "€73",
+        "extracted_price_before_taxes": 73
+      },
+      "total_price": {
+        "price": "€572",
+        "extracted_price": 572,
+        "price_before_taxes": "€514",
+        "extracted_price_before_taxes": 514
+      },
+      "rating": 1.5,
+      "reviews": 4,
+      "reviews_histogram": {
+        "5": 0,
+        "4": 0,
+        "3": 1,
+        "2": 0,
+        "1": 3
+      },
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmxo8CfIX5vAbkveKdn6jT87M84khCPB8NQUa5TfTzVh5iSBbHCikp9WmRcYon_HGBIhdNtqaoPAR8x7sIkVDaSgOQhkrxQREuuGX_FJhJ7DQV_VR4aB6BpC1tbCODuDQhwsUVwtKFj_yA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmxo8CfIX5vAbkveKdn6jT87M84khCPB8NQUa5TfTzVh5iSBbHCikp9WmRcYon_HGBIhdNtqaoPAR8x7sIkVDaSgOQhkrxQREuuGX_FJhJ7DQV_VR4aB6BpC1tbCODuDQhwsUVwtKFj_yA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmlWjHj6l5Odg6ukJiQK9dquJmx2MOOI8ZoJtjSLDhGNQlqqb05R9drfJ3zF8xT5MBkRwZ96-yAM6qNt-GZADy4MKBlX2WSimx_67v5X-NmtXW8Ua018lwssadMbUtiSJY3oZ_P_HIk8bQ7=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmlWjHj6l5Odg6ukJiQK9dquJmx2MOOI8ZoJtjSLDhGNQlqqb05R9drfJ3zF8xT5MBkRwZ96-yAM6qNt-GZADy4MKBlX2WSimx_67v5X-NmtXW8Ua018lwssadMbUtiSJY3oZ_P_HIk8bQ7=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmQpClbAOT4z1LPK3m-9ovNfQsA2Z2TzINQebLdvQfWCpa8o4_cohdH4I69yBJG_HEq7QdNtD5EN5SCxf2Q8qxcOIUP5eq6JvP3D5Dn-CR-biOd0fdtwIrAUp6zXb7MhEhKr-kV-LeUjnc=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmQpClbAOT4z1LPK3m-9ovNfQsA2Z2TzINQebLdvQfWCpa8o4_cohdH4I69yBJG_HEq7QdNtD5EN5SCxf2Q8qxcOIUP5eq6JvP3D5Dn-CR-biOd0fdtwIrAUp6zXb7MhEhKr-kV-LeUjnc=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnAo8XckJ2AvMdIksBkrHZbjvk_mC_2HzV3VKqKCeORPq1pjhNjSu0mWST_nDTWhVP47a3q0SiT3obFh50ziwW2duJVU07FaH4IV6ScRJraScwTon54jmaYptgTxJoCaJDf0F-h3LWf6zI-=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnAo8XckJ2AvMdIksBkrHZbjvk_mC_2HzV3VKqKCeORPq1pjhNjSu0mWST_nDTWhVP47a3q0SiT3obFh50ziwW2duJVU07FaH4IV6ScRJraScwTon54jmaYptgTxJoCaJDf0F-h3LWf6zI-=s10000"
+        },
+        {
+          "thumbnail": "https://streetviewpixels-pa.googleapis.com/v1/thumbnail?panoid=dbKgcqw8xUZEDKP2QWwE6g&cb_client=search.estubs.gps&w=287&h=192&yaw=304.57132&pitch=0&thumbfov=100&scale=2"
+        }
+      ]
+    },
+    {
+      "type": "hotel",
+      "property_token": "ChoIs4mHyM6B4cL2ARoNL2cvMTFmbnN5YnZoORAB",
+      "data_id": "0xd05534b2324bc57:0xf685840ce901c4b3",
+      "name": "Faro GuestHouse",
+      "gps_coordinates": {
+        "latitude": 37.0182476,
+        "longitude": -7.9345596
+      },
+      "city": "Faro",
+      "country": "PT",
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "price_per_night": {
+        "price": "€113",
+        "extracted_price": 113,
+        "price_before_taxes": "€113",
+        "extracted_price_before_taxes": 113
+      },
+      "total_price": {
+        "price": "€788",
+        "extracted_price": 788,
+        "price_before_taxes": "€788",
+        "extracted_price_before_taxes": 788
+      },
+      "nearby_places": [
+        {
+          "name": "Chapel of Bones of Faro",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "4 min"
+            }
+          ]
+        },
+        {
+          "name": "Largo da Palmeira",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "1 min"
+            }
+          ]
+        },
+        {
+          "name": "Faro International Airport",
+          "transportations": [
+            {
+              "type": "Public Transport",
+              "duration": "15 min"
+            },
+            {
+              "type": "Taxi",
+              "duration": "19 min"
+            }
+          ]
+        },
+        {
+          "name": "Restaurante Sol E Jardim",
+          "transportations": [
+            {
+              "type": "Walking",
+              "duration": "2 min"
+            }
+          ]
+        }
+      ],
+      "hotel_class": "3-star hotel",
+      "extracted_hotel_class": 3,
+      "rating": 4.6,
+      "reviews": 74,
+      "reviews_histogram": {
+        "5": 55,
+        "4": 13,
+        "3": 4,
+        "2": 1,
+        "1": 1
+      },
+      "location_rating": 4.7,
+      "proximity_to_things_to_do_rating": 4.4,
+      "proximity_to_transit_rating": 5.0,
+      "airport_access_rating": 4.7,
+      "reviews_breakdown": [
+        {
+          "name": "Cleanliness",
+          "description": "Cleanliness",
+          "total": 16,
+          "positive": 15,
+          "neutral": 1,
+          "negative": 0
+        },
+        {
+          "name": "Kitchen",
+          "description": "Kitchen",
+          "total": 6,
+          "positive": 6,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Location",
+          "description": "Location",
+          "total": 13,
+          "positive": 12,
+          "neutral": 1,
+          "negative": 0
+        },
+        {
+          "name": "Service",
+          "description": "Service",
+          "total": 12,
+          "positive": 12,
+          "neutral": 0,
+          "negative": 0
+        },
+        {
+          "name": "Property",
+          "description": "Property",
+          "total": 16,
+          "positive": 15,
+          "neutral": 1,
+          "negative": 0
+        },
+        {
+          "name": "Room",
+          "description": "Room amenities",
+          "total": 5,
+          "positive": 4,
+          "neutral": 0,
+          "negative": 1
+        }
+      ],
+      "images": [
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkXvVDzIeq5hcukk2N-dqpZ4rJzVh5Jp_UQW4e5rLAE3-3NfGZaWhbyys6pocWG3HVxkaIch2uSAhNFEeHc4hjJG2c0vSigwfMlvXQNnPBrU4k4j68NIZ5Lbi6Qc0PsDy728LbP=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWkXvVDzIeq5hcukk2N-dqpZ4rJzVh5Jp_UQW4e5rLAE3-3NfGZaWhbyys6pocWG3HVxkaIch2uSAhNFEeHc4hjJG2c0vSigwfMlvXQNnPBrU4k4j68NIZ5Lbi6Qc0PsDy728LbP=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl7iHHAjbA0TcYQStH0WWFxuifZJzTni6c4MePgoHieadfRUEUcxIixuxulvQAUVeX-ZSIHf3evarWUaIW4nBay_-qbXD44al2eAyfMZ3R184sZsotchPE3xhXHkxGUojp2Vdou=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl7iHHAjbA0TcYQStH0WWFxuifZJzTni6c4MePgoHieadfRUEUcxIixuxulvQAUVeX-ZSIHf3evarWUaIW4nBay_-qbXD44al2eAyfMZ3R184sZsotchPE3xhXHkxGUojp2Vdou=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWngJe7LEEo7KpcVdjQ3mpy-7_XpE4rK6IQLOpSKdA51J_URWOLZg0wDonLMepm1Yy02nZSgXe26tdUIs8m3QkQ2SyIwD5wWVhJofu3rpg9qn3uhGhXed0GwXKXFLg8R72zPN-60xg=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWngJe7LEEo7KpcVdjQ3mpy-7_XpE4rK6IQLOpSKdA51J_URWOLZg0wDonLMepm1Yy02nZSgXe26tdUIs8m3QkQ2SyIwD5wWVhJofu3rpg9qn3uhGhXed0GwXKXFLg8R72zPN-60xg=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnExkb_Dl9R6l5JAPWdBe-HzqrfMmd0l7T1bJ1WR42vjSKnQyDIbDWXPoqbdwN60FXX98W0DiO38B2aafzKSl7P3f0rA32nMPRE-qgWp__fjMNbEr05PV9k03nq-Yg07Mu0kr0ujA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnExkb_Dl9R6l5JAPWdBe-HzqrfMmd0l7T1bJ1WR42vjSKnQyDIbDWXPoqbdwN60FXX98W0DiO38B2aafzKSl7P3f0rA32nMPRE-qgWp__fjMNbEr05PV9k03nq-Yg07Mu0kr0ujA=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnOElmgwfPnDFxxFXvMhZ2WKqdT-9K2Lj6wP6m349C1Ka0swwH4Xv5xaTqoGrOIPMj_nrx5hzsRV9dCWSMGC7Wuf7sMYlI4EL7Ng2wORlq2gE-xdzFUdAX-tKppTaE3NoC8LRY=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnOElmgwfPnDFxxFXvMhZ2WKqdT-9K2Lj6wP6m349C1Ka0swwH4Xv5xaTqoGrOIPMj_nrx5hzsRV9dCWSMGC7Wuf7sMYlI4EL7Ng2wORlq2gE-xdzFUdAX-tKppTaE3NoC8LRY=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn9CxxogSvznS7LNX7foD6dTrAMbyg9s3Nf_ZhE-ejScGYPTrVVaINa2JWxC6M_mKjGiJGLWBOTmZAhtSMkPn_Ki9CTaZ7GxD5d_iD_wbiK0-wO5a7zPPs8ROKvRiRX4F8DKKMZ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWn9CxxogSvznS7LNX7foD6dTrAMbyg9s3Nf_ZhE-ejScGYPTrVVaINa2JWxC6M_mKjGiJGLWBOTmZAhtSMkPn_Ki9CTaZ7GxD5d_iD_wbiK0-wO5a7zPPs8ROKvRiRX4F8DKKMZ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmbYTlmyBNcKGz-_oFi5M-NnowXRSncFLfuuwixMfJLYKhGOYqRlFl4Jtug6vKKMfwNFdZgFG9WI5_L3-q2pZ_qa-sxBxNmb3spMfSEYTsXgI2d0-FtwNV042sx-ZD1K4ixxUPwuQ=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmbYTlmyBNcKGz-_oFi5M-NnowXRSncFLfuuwixMfJLYKhGOYqRlFl4Jtug6vKKMfwNFdZgFG9WI5_L3-q2pZ_qa-sxBxNmb3spMfSEYTsXgI2d0-FtwNV042sx-ZD1K4ixxUPwuQ=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlW7WQHKDFHtXhpZSgh08Yq2Zkjk7bQA8zpf69ffYHxtdgB8HpStbB3GC5oNGjuV-PlNyLaAqyCKBoQW_aIExfvTz8cMrMLeC_Df1ucorESRSDRdxObiSXsNiTEhK2ogRhc3Cqk=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWlW7WQHKDFHtXhpZSgh08Yq2Zkjk7bQA8zpf69ffYHxtdgB8HpStbB3GC5oNGjuV-PlNyLaAqyCKBoQW_aIExfvTz8cMrMLeC_Df1ucorESRSDRdxObiSXsNiTEhK2ogRhc3Cqk=s10000"
+        },
+        {
+          "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnMuMc5Ux1z5GPV0A3ZptJKH6obiCugub815Y15xwLjXKmf_kL-tjYdEkB9GmzWDCQN3ZoGi8Re2bnjbO3j2DYaJQIAy72gOrOLsAQEbq_Klr4PyEFdmgOsAIKQC7U6f7eWTpNqiA=s287-w287-h192-n-k-no-v1",
+          "original": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnMuMc5Ux1z5GPV0A3ZptJKH6obiCugub815Y15xwLjXKmf_kL-tjYdEkB9GmzWDCQN3ZoGi8Re2bnjbO3j2DYaJQIAy72gOrOLsAQEbq_Klr4PyEFdmgOsAIKQC7U6f7eWTpNqiA=s10000"
+        }
+      ]
+    }
+  ],
+  "brands": [
+    {
+      "id": 33,
+      "title": "Accor Live Limitless",
+      "children": [
+        {
+          "id": 21,
+          "title": "Ibis"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Best Western International",
+      "children": [
+        {
+          "id": 155,
+          "title": "Best Western"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "records_from": 1,
+    "records_to": 20,
+    "next_page_token": "CBI="
+  }
+}

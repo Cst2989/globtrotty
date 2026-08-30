@@ -12,7 +12,7 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { ledgerSink } from '../src/repo/spend.js'
-import { mockSuppliers } from '../src/supplier/mock.js'
+import { liveSuppliers } from '../src/supplier/live.js'
 import { mockRunner } from '../src/tools.js'
 
 config({ path: '.env.local', override: false })
@@ -34,13 +34,16 @@ try {
   // showed. `TIER3=1 npm run trip`, with `npx netlify dev` running in another
   // terminal, posts to the background function instead and returns immediately:
   // the same submitMessage, a different tier doing the work.
+  const { suppliers, hotelSource } = liveSuppliers()
+  console.log(`suppliers: flights from kiwi (no key needed), hotels from ${hotelSource}`)
+
   const inProcess = async (turnId: string) => {
     console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
     const result = await turn(
       newConversation(conversationId),
       text,
       liveClient(),
-      mockRunner(mockSuppliers()),
+      mockRunner(suppliers),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in
         // the whole course that calls a live model and spends real dollars,
