@@ -23,6 +23,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-3 | Completion in one transaction | npm run migrate, then npm test (test/completion.test.ts) |
 | lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
 | lesson-3-5 | The sweeper | npm run migrate, then npm test (test/sweeper.test.ts) |
+| lesson-3-6 | The worker loop assembled | npm run migrate, then npm test (test/worker.test.ts, test/retry.test.ts), then npm run demo |
 
 Closed at lesson 3.5: the `queued` turn with no message that two presses of one
 key could leave behind is reaped as `stalled`, and its conversation goes back to

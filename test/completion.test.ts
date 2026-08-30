@@ -7,7 +7,7 @@ import { claimTurn, completeTurn, failTurn, FencedError, HEARTBEAT_STALE } from 
 import { describeDb, withTestDb } from './helpers/db.js'
 
 const USER = randomUUID()
-const EMPTY = { step: 0 }
+const EMPTY = { step: 0, messages: [] }
 const deps = (sql: postgres.Sql) => ({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} })
 
 async function seed(sql: postgres.Sql, key: string): Promise<{ conversationId: string; turnId: string }> {
@@ -29,7 +29,7 @@ describeDb('completeTurn', () => {
       const { conversationId, turnId } = await seed(sql, 'p1')
       const claim = (await claimTurn(sql, turnId))!
       await completeTurn(sql, claim, {
-        state: { step: 3 }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 1_250n,
+        state: { step: 3, messages: [] }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 1_250n,
       })
 
       const [t] = await sql`select status, finished_at, spend_usd_micros, state from course.turns where id = ${turnId}`
@@ -39,7 +39,7 @@ describeDb('completeTurn', () => {
       // A non-zero step, so this cannot pass on state's own default: a
       // regression that dropped state from the SET list would still pass with
       // { step: 0 }.
-      expect(t!.state).toEqual({ step: 3 })
+      expect(t!.state).toEqual({ step: 3, messages: [] })
 
       const [c] = await sql`select status, spend_usd_micros from course.conversations where id = ${conversationId}`
       // Parking is TERMINAL for the turn and visible on the conversation: she is

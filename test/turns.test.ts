@@ -32,7 +32,7 @@ describeDb('loadTurnInput', () => {
       })
       const claim = (await claimTurn(sql, submitted.turnId!))!
       await completeTurn(sql, claim, {
-        state: { step: 0 }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 0n,
+        state: { step: 0, messages: [] }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 0n,
       })
       expect(await loadTurnInput(sql, submitted.turnId!)).toBeNull()
     })
@@ -63,7 +63,7 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
       )
       const claim = (await claimTurn(sql, submitted.turnId!))!
       await completeTurn(sql, claim, {
-        state: { step: 1 }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 0n,
+        state: { step: 1, messages: [] }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 0n,
       })
       const msgs = await sql`select role, content from course.messages
                               where conversation_id = ${submitted.conversationId} order by seq`
@@ -185,17 +185,17 @@ describeDb('continue_later, through the path tier 3 takes', () => {
       )
       expect(result.outcome).toBe('continue_later')
 
-      await releaseForContinuation(sql, claim, { step: result.steps })
+      await releaseForContinuation(sql, claim, { step: result.steps, messages: [] })
 
       const [t] = await sql`select status, state from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('queued')
-      expect(t!.state).toEqual({ step: result.steps })
+      expect(t!.state).toEqual({ step: result.steps, messages: [] })
 
       // Claimable at once, not after a staleness window: the whole point of a
       // deliberate hand-back over leaving the row 'running'.
       const reclaimed = await claimTurn(sql, submitted.turnId!)
       expect(reclaimed?.attempts).toBe(2)
-      expect(reclaimed?.state).toEqual({ step: result.steps })
+      expect(reclaimed?.state).toEqual({ step: result.steps, messages: [] })
     })
   })
 })

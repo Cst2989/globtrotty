@@ -8,7 +8,7 @@ const LIMITS = {
 }
 
 const base = (over: Partial<DecideInput> = {}): DecideInput => ({
-  state: { step: 0 },
+  state: { step: 0, messages: [] },
   spend: { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n },
   limits: LIMITS,
   nowMs: 1_000,
@@ -34,7 +34,7 @@ describe('decideNext', () => {
   })
 
   it('stops at the step cap', () => {
-    expect(decideNext(base({ state: { step: 24 } }))).toEqual({ kind: 'stop', reason: 'step_cap' })
+    expect(decideNext(base({ state: { step: 24, messages: [] } }))).toEqual({ kind: 'stop', reason: 'step_cap' })
   })
 
   // The fifteen minute Netlify ceiling: hand off rather than be killed mid step.
@@ -57,14 +57,14 @@ describe('decideNext', () => {
   })
 
   it('stops on the step cap even when the deadline has also passed', () => {
-    const d = decideNext(base({ state: { step: 24 }, nowMs: 550_000 }))
+    const d = decideNext(base({ state: { step: 24, messages: [] }, nowMs: 550_000 }))
     expect(d).toEqual({ kind: 'stop', reason: 'step_cap' })
   })
 
   it('stops on the daily ceiling even when the step cap is also reached', () => {
     const d = decideNext(base({
       spend: { conversationMicros: 10n, dailyMicros: 15_000_000n, globalMicros: 0n },
-      state: { step: 24 },
+      state: { step: 24, messages: [] },
     }))
     expect(d).toEqual({ kind: 'stop', reason: 'limit_reached' })
   })
@@ -112,7 +112,7 @@ describe('decideNext: the global ceiling', () => {
   })
 
   it('stops on the global ceiling even when the step cap is also reached', () => {
-    const d = decideNext(base({ spend: accountOnly(50_000_000n), state: { step: 24 } }))
+    const d = decideNext(base({ spend: accountOnly(50_000_000n), state: { step: 24, messages: [] } }))
     expect(d).toEqual({ kind: 'stop', reason: 'limit_reached' })   // not step_cap
   })
 

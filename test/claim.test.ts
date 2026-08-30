@@ -138,11 +138,11 @@ describeDb('saveTurnState', () => {
       const second = (await claimTurn(sql, submitted.turnId!))!
       expect(second.attempts).toBe(2)
 
-      await saveTurnState(sql, second, { step: 3 })
-      await expect(saveTurnState(sql, first, { step: 1 })).rejects.toThrow(FencedError)
+      await saveTurnState(sql, second, { step: 3, messages: [] })
+      await expect(saveTurnState(sql, first, { step: 1, messages: [] })).rejects.toThrow(FencedError)
 
       const [row] = await sql`select state from course.turns where id = ${submitted.turnId}`
-      expect(row!.state).toEqual({ step: 3 })   // the live worker's state survived
+      expect(row!.state).toEqual({ step: 3, messages: [] })   // the live worker's state survived
     })
   })
 
@@ -153,7 +153,7 @@ describeDb('saveTurnState', () => {
       })
       const claim = (await claimTurn(sql, submitted.turnId!))!
       await sql`update course.turns set status = 'done' where id = ${submitted.turnId}`
-      await expect(saveTurnState(sql, claim, { step: 1 })).rejects.toThrow(FencedError)
+      await expect(saveTurnState(sql, claim, { step: 1, messages: [] })).rejects.toThrow(FencedError)
     })
   })
 })

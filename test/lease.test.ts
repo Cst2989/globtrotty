@@ -36,7 +36,7 @@ describeDb('the lease', () => {
       expect(second?.attempts).toBe(2)
       // What the dead worker loses. No hand-queueing this time: the lease
       // expired on its own, and the old token no longer matches.
-      await expect(saveTurnState(sql, first, { step: 1 })).rejects.toThrow(FencedError)
+      await expect(saveTurnState(sql, first, { step: 1, messages: [] })).rejects.toThrow(FencedError)
     })
   })
 
@@ -124,17 +124,17 @@ describeDb('releaseForContinuation', () => {
       const turnId = await queuedTurn(sql, 'l6')
       const claim = (await claimTurn(sql, turnId))!
 
-      await releaseForContinuation(sql, claim, { step: 1 })
+      await releaseForContinuation(sql, claim, { step: 1, messages: [] })
 
       const [row] = await sql`select status, state from course.turns where id = ${turnId}`
       expect(row!.status).toBe('queued')
-      expect(row!.state).toEqual({ step: 1 })
+      expect(row!.state).toEqual({ step: 1, messages: [] })
 
       // No staleness wait: the queued arm of claimTurn has no time condition at
       // all, which is the property saveTurnState alone cannot give.
       const second = await claimTurn(sql, turnId)
       expect(second?.attempts).toBe(2)
-      expect(second?.state).toEqual({ step: 1 })
+      expect(second?.state).toEqual({ step: 1, messages: [] })
     })
   })
 
@@ -144,7 +144,7 @@ describeDb('releaseForContinuation', () => {
       const first = (await claimTurn(sql, turnId))!
       await silentFor(sql, turnId, HEARTBEAT_STALE + 30)
       await claimTurn(sql, turnId)
-      await expect(releaseForContinuation(sql, first, { step: 9 })).rejects.toThrow(FencedError)
+      await expect(releaseForContinuation(sql, first, { step: 9, messages: [] })).rejects.toThrow(FencedError)
     })
   })
 })

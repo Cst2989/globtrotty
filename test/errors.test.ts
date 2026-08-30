@@ -74,17 +74,15 @@ describe('classifyError: the SDK taxonomy', () => {
     })
   })
 
-  it('maps a connection failure to provider_down: the retryable one that has no status', () => {
+  it('maps a connection failure to fetch_failed: the request never arrived', () => {
     const err = new APIConnectionError({ message: 'socket hang up' })
     expect(err.status).toBeUndefined()
-    expect(classifyError(err)).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
-    })
+    expect(classifyError(err)).toEqual<Classification>({ retryable: true, reason: 'fetch_failed' })
   })
 
-  it('maps a connection TIMEOUT to provider_down as well', () => {
+  it('maps a connection TIMEOUT to fetch_failed as well', () => {
     expect(classifyError(new APIConnectionTimeoutError({}))).toEqual<Classification>({
-      retryable: true, reason: 'provider_down',
+      retryable: true, reason: 'fetch_failed',
     })
   })
 

@@ -226,6 +226,13 @@ export async function releaseForContinuation(
  * A turn that has already finished is still excluded, so a stray invocation of
  * a `done` turn reads nothing; `claimTurn` refuses that turn first anyway, and
  * this filter is the second of the two answers rather than the only one.
+ *
+ * Used by nothing outside its own test file as of lesson 3.6: `runTurn`
+ * (src/worker.ts) reads a turn's transcript from `course.messages` directly,
+ * rather than a second query. Left here rather than deleted: module 5's driver
+ * is what reads a turn's opening message by this join, and deleting it now
+ * would delete the test that pins the reason it is a join on the turn and not
+ * on the conversation.
  */
 export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<TurnInput | null> {
   const rows = await sql`

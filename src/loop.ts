@@ -146,7 +146,7 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
       spend = { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
     }
     const decision = decideNext({
-      state: { step: steps },
+      state: { step: steps, messages: [] },
       spend,
       limits,
       nowMs: now(),

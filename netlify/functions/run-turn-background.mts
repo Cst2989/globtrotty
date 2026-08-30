@@ -3,11 +3,13 @@ import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
+import { httpInvoke } from '../../src/invoke.js'
+import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { claimTurn, completeTurn, failTurn, loadTurnInput, releaseForContinuation } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
-import { mockRunner } from '../../src/tools.js'
+import { ledgerRunner, mockRunner } from '../../src/tools.js'
+import { runTurn, type Agent } from '../../src/worker.js'
 
 /**
  * Tier 3: the background function. Netlify Functions v2 (esbuild bundled, .mts)
@@ -37,61 +39,57 @@ export default async (req: Request): Promise<Response> => {
 
   const startedMs = Date.now()
   const sql = connect(env.DATABASE_URL, 2)
-  try {
-    // Claim first, load second. The claim is the exclusion; the load is just a
-    // read. A second invocation of this same turn, from Netlify's own retry or
-    // from lesson 3.5's sweeper, gets null here and walks away without running
-    // anything, which is why it answers 200 rather than an error: nothing went
-    // wrong, somebody else has the work.
-    const claim = await claimTurn(sql, decision.turnId)
-    if (!claim) return new Response('already claimed', { status: 200 })
-    const input = await loadTurnInput(sql, decision.turnId)
-    // No message to run: the claim above already set 'running' and is not
-    // released here, so this turn is left for lesson 3.2's heartbeat sweeper
-    // to reap once that heartbeat goes stale, rather than walked back to
-    // 'queued' for an immediate retry.
-    if (!input) return new Response('nothing to do', { status: 200 })
+
+  /**
+   * Module 1's whole `turn()` as ONE agent step. That is the honest shape today:
+   * the driver decides and acts inside its own loop, so the harness can only see
+   * a turn start and a turn end, and a crash lands between turns rather than
+   * between model calls. Module 5 splits it into the driver's own steps; nothing
+   * in the harness changes when it does, which is the point of the Agent type.
+   */
+  const driverAgent: Agent = async ({ state, conversationId, userId, turnId, attempts }) => {
+    const last = [...state.messages].reverse().find((m) => m.role === 'user')
+    // ledgerRunner (src/tools.ts) fences its writes on a full Claim, not a bare
+    // turn id, since lesson 3.4's fix round: a superseded worker must not be
+    // able to write tool-call intent for a turn it no longer owns. Rebuilt here
+    // from the pieces AgentContext carries rather than handed the harness's own
+    // Claim object, which would let this driver bypass the loop's own closers.
+    const claim = { turnId, conversationId, userId, attempts, state }
     const result = await turn(
-      newConversation(input.conversationId),
-      input.message,
+      newConversation(conversationId),
+      last?.content ?? '',
       liveClient(),
-      mockRunner(new MockSupplier()),
+      // Every supplier call goes through the ledger, so a kill mid search costs
+      // one call and never two (lesson 3.4).
+      ledgerRunner(sql, claim, mockRunner(new MockSupplier())),
       {
         deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
-        record: ledgerSink(sql, { userId: input.userId, conversationId: input.conversationId, turnId: input.turnId }),
-        readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
+        record: ledgerSink(sql, { userId, conversationId, turnId }),
+        readSpend: () => readSpendFailClosed(sql, userId, conversationId),
       },
     )
-    // Three ways out, and the reason decides which. Every outcome the engine
-    // can name (src/engine.ts's FAIL_REASONS) is a failure with that reason on
-    // the row; 'done' and 'max_tokens' are the turn ending with an answer.
-    // `parked: true` because the agency has said its piece and she holds the
-    // next move; lesson 3.5's sweeper must never resurrect that.
-    //
-    // `continue_later` is not an ending: the budget ran out, not the work.
-    // Closing it here would record a turn with more to do as finished and
-    // tell her she holds the next move when she does not, and nothing could
-    // recover it afterward ('done' leaves both the live-turn index and the
-    // sweeper's predicate, migration 0004). releaseForContinuation
-    // (src/repo/turns.ts, lesson 3.2) hands the lease back instead, so the
-    // next invocation claims it at once.
-    //
-    // result.costMicros on both closer branches: this is the turn's own
-    // total, landing on turns.spend_usd_micros only. It is a different number
-    // from what ledgerSink already recorded onto conversation and daily spend
-    // as the turn went (lesson 2.6), not the same number twice, so passing it
-    // here does not double-count anything.
+    // 0n on both branches: ledgerSink already recorded every model call and
+    // incremented conversation and daily spend as it went, so a total here would
+    // be the same money counted twice.
     if (isFailReason(result.outcome)) {
-      await failTurn(sql, claim, result.outcome, result.costMicros, result.text === '' ? null : result.text)
-    } else if (result.outcome === 'continue_later') {
-      await releaseForContinuation(sql, claim, { step: result.steps })
-    } else {
-      await completeTurn(sql, claim, {
-        state: { step: result.steps }, agentMessage: result.text === '' ? null : result.text,
-        parked: true, spendMicros: result.costMicros,
-      })
+      return { kind: 'fail', reason: result.outcome, text: result.text || null, costMicros: 0n }
     }
-    console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)
+    return { kind: 'message', text: result.text, costMicros: 0n }
+  }
+
+  try {
+    await runTurn(
+      {
+        sql,
+        limits: DEFAULT_LIMITS,
+        agent: driverAgent,
+        now: Date.now,
+        deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
+        reinvoke: httpInvoke(env),
+      },
+      decision.turnId,
+    )
+    console.log(`turn ${decision.turnId}: finished in ${Date.now() - startedMs} ms`)
   } finally {
     await sql.end({ timeout: 5 })
   }

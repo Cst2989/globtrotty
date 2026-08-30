@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "trip": "tsx scripts/trip.ts",
+    "demo": "tsx scripts/demo.ts",
     "migrate": "tsx scripts/migrate.ts",
     "messages": "tsx scripts/messages.ts"
   },

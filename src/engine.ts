@@ -1,5 +1,14 @@
-/** What the harness knows about a turn in progress. Module 3 persists this. */
-export type TurnState = { step: number }
+/** One line of a turn's transcript, as the harness stores it. */
+export type LoopMessage = { role: 'user' | 'assistant' | 'tool'; content: string }
+
+/**
+ * What the harness knows about a turn in progress, and the whole of what a fresh
+ * worker gets when it resumes one. `messages` is the harness's own transcript,
+ * deliberately plain strings: module 5 replaces it with the model's content
+ * blocks when the driver moves inside the harness, and everything in module 3
+ * works the same way either side of that change.
+ */
+export type TurnState = { step: number; messages: LoopMessage[] }
 
 /**
  * Every terminal state a turn can be recorded in, as one array rather than a

@@ -6,7 +6,7 @@ import { newConversation, turn } from '../src/conversation.js'
 import { connect } from '../src/db.js'
 import { loadEnv } from '../src/env.js'
 import { submitMessage } from '../src/handler.js'
-import { HER_MESSAGE } from '../src/her.js'
+import { DEMO_USER, HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
@@ -18,9 +18,6 @@ import { mockRunner } from '../src/tools.js'
 config({ path: '.env.local', override: false })
 const env = loadEnv(process.env)
 
-// A demo user id, so the script can run without a login.
-const USER = '11111111-1111-1111-1111-111111111111'
-
 const sql = connect(env.DATABASE_URL)
 const text = process.argv[2] ?? HER_MESSAGE
 try {
@@ -30,7 +27,7 @@ try {
   // reply is written against a row nobody will read. Lesson 2.2's other path,
   // TIER3, does not need this: the background function loads the id from the
   // turn itself.
-  const [row] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+  const [row] = await sql`insert into course.conversations (user_id) values (${DEMO_USER}) returning id`
   const conversationId = row!.id as string
 
   // `npm run trip` runs the turn here, in this process, which is what lesson 2.1
@@ -55,7 +52,7 @@ try {
         // passed: this script records what it spends but does not enforce a
         // ceiling on itself, so a run here always completes rather than
         // stopping partway through the demo.
-        record: ledgerSink(sql, { userId: USER, conversationId, turnId }),
+        record: ledgerSink(sql, { userId: DEMO_USER, conversationId, turnId }),
       },
     )
     console.log(result.text)
@@ -67,7 +64,7 @@ try {
   const submitted = await submitMessage(
     { sql, invoke: process.env.TIER3 ? httpInvoke(env) : inProcess, limits: DEFAULT_LIMITS },
     {
-      userId: USER, conversationId, message: text,
+      userId: DEMO_USER, conversationId, message: text,
       // A real client sends the same key when it retries a press; here a fresh
       // key each run just means this script's one submit is never a retry.
       idempotencyKey: randomUUID(),

@@ -78,14 +78,16 @@ turn whose worker went silent or that nothing ever started, fails a turn that
 has used up its attempts and tells her so, and fails a turn that has no message
 to run so her conversation is not held shut by a turn nobody can execute.
 
-"Went silent" is aspirational until the worker loop wires up a heartbeat timer.
-Today the only thing that stamps a `running` turn's heartbeat is the claim
-itself, so this arm's actual rule is a ceiling on how long a turn may run:
-ninety seconds after the claim, it reaps a still-working worker exactly as
-readily as a silent one. That worker keeps going and pays for what it does
-after the requeue; the worker that claims the reissued turn pays again for the
-same turn, so a long turn can be billed twice until the worker loop ticks a
-heartbeat on a timer.
+"Went silent" is a real condition from this lesson on, because the worker loop
+stamps `heartbeat_at` every twenty-five seconds while a step runs. A turn whose
+worker keeps ticking is left alone however long it runs; a turn whose beat
+stops is requeued ninety seconds later, and the fencing token keeps the dead
+worker's late writes out.
+
+`npm run demo` narrates the harness against a real database with no model and no
+API key: a message becomes durable work, a retried press buys no second turn, a
+process dies mid tool call and the resumed turn does not run the tool again, a
+superseded worker is refused, and the ledger shows what it all cost.
 
 The attempt count is the sharper half of that. The requeue advances `attempts`,
 and the worker re-invoked for the reissued turn advances it again when it

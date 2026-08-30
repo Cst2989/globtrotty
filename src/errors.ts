@@ -43,8 +43,12 @@ import type { Message, RefusalStopDetails } from '@anthropic-ai/sdk/resources/me
  * the engine; the assignment in `worker.ts` is the compile-time check that every
  * value below is a real `FailReason`.
  *
- *  - `provider_down`      transient. The provider is unwell (429, 5xx, connection
- *                         reset, timeout). Retrying is the correct response.
+ *  - `provider_down`      transient. The provider is unwell (429, 5xx). Retrying
+ *                         is the correct response.
+ *  - `fetch_failed`       transient, and the request never arrived. The network
+ *                         did not reach the provider, so the provider has no
+ *                         opinion about it and its status page will not explain
+ *                         it. Retrying is correct, and looking upstream is not.
  *  - `provider_rejected`  permanent. The provider looked at THIS request and said
  *                         no, and will say no again: 400 malformed, 401 bad key,
  *                         403 not permitted, 404 wrong model. An operator must
@@ -59,7 +63,8 @@ import type { Message, RefusalStopDetails } from '@anthropic-ai/sdk/resources/me
  *                         these is a signal that the classifier needs a new rule:
  *                         a signal `provider_down` would have hidden.
  */
-export type ClassifiedReason = 'provider_down' | 'provider_rejected' | 'refused' | 'unclassified'
+export type ClassifiedReason =
+  | 'provider_down' | 'fetch_failed' | 'provider_rejected' | 'refused' | 'unclassified'
 
 /**
  * WHAT `retryable` DOES NOT MEAN.
@@ -80,6 +85,14 @@ export type ClassifiedReason = 'provider_down' | 'provider_rejected' | 'refused'
 export type Classification = { retryable: boolean; reason: ClassifiedReason }
 
 const TRANSIENT: Classification = { retryable: true, reason: 'provider_down' }
+/**
+ * Transient, and the request never reached the provider: a socket hung up, DNS
+ * failed, a timeout expired with no response at all. Separated from
+ * `provider_down` because a row that says one when it means the other sends
+ * whoever is on call to the wrong status page. Both are retryable, so this
+ * changes what we record and not what we do.
+ */
+const UNREACHED: Classification = { retryable: true, reason: 'fetch_failed' }
 const PERMANENT: Classification = { retryable: false, reason: 'provider_rejected' }
 const REFUSED: Classification = { retryable: false, reason: 'refused' }
 /**
@@ -186,7 +199,7 @@ export function classifyError(err: unknown): Classification {
   // abort: nothing is wrong upstream and the same call would abort again, so it is
   // not a provider failure and must not be recorded as one.
   if (err instanceof APIUserAbortError) return UNKNOWN
-  if (err instanceof APIConnectionError) return TRANSIENT
+  if (err instanceof APIConnectionError) return UNREACHED
 
   // Everything else the SDK raises with a status: 5xx, 409, 422, 408, and any
   // status the SDK does not (yet) mint a subclass for.
