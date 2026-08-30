@@ -4,7 +4,7 @@ import { isFailReason } from '../src/engine.js'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
-import { claimTurn, completeTurn, failTurn, loadTurnInput } from '../src/repo/turns.js'
+import { claimTurn, completeTurn, failTurn, loadTurnInput, releaseForContinuation } from '../src/repo/turns.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { mockRunner } from '../src/tools.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -122,6 +122,80 @@ describeDb('completeTurn, through the path tier 3 takes', () => {
       const msgs = await sql`select content from course.messages
                               where conversation_id = ${submitted.conversationId} order by seq`
       expect(msgs[1]!.content).toBe(LIMIT_REACHED_MESSAGE.conversation)
+    })
+  })
+
+  // Tier 3 (netlify/functions/run-turn-background.mts) passes result.costMicros
+  // to failTurn, not a hand-picked number. This forces the same limit_reached
+  // outcome one step later than the test above: under ceiling on turn()'s own
+  // top-of-turn read, so classify (and extract, since 'hi' does not parse as a
+  // faq) actually run and bill something, then over ceiling on the loop's
+  // first per-step read. The turn still ends with no model call inside the
+  // loop, but it is no longer free: a real cost was already spent getting
+  // there, and it has to land on the row rather than read as zero.
+  it('records the real cost through the real tier-3 path, not a hand-picked number', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(
+        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-7' },
+      )
+      const claim = (await claimTurn(sql, submitted.turnId!))!
+      const input = (await loadTurnInput(sql, submitted.turnId!))!
+      let reads = 0
+      const result = await turn(
+        newConversation(input.conversationId), input.message,
+        fakeClient([textMessage('never reached')]), mockRunner(new MockSupplier()),
+        {
+          readSpend: async () => {
+            reads += 1
+            return reads === 1
+              ? { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n }
+              : { conversationMicros: DEFAULT_LIMITS.conversationCeilingMicros, dailyMicros: 0n, globalMicros: 0n }
+          },
+        },
+      )
+      expect(result.outcome).toBe('limit_reached')
+      expect(result.costMicros).toBeGreaterThan(0n)
+      await failTurn(sql, claim, result.outcome as 'limit_reached', result.costMicros, result.text)
+      const [t] = await sql`select spend_usd_micros from course.turns where id = ${submitted.turnId}`
+      expect(BigInt(t!.spend_usd_micros as string)).toBe(result.costMicros)
+    })
+  })
+})
+
+// Tier 3's third branch: 'continue_later' is not an ending, so it must not
+// reach either closer. This mirrors run-turn-background.mts's own branch
+// exactly, rather than exercising the netlify function itself, which this
+// file's own docstring rules out (no Netlify test harness here).
+describeDb('continue_later, through the path tier 3 takes', () => {
+  it('hands the lease back rather than closing the turn', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(
+        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'turns-8' },
+      )
+      const claim = (await claimTurn(sql, submitted.turnId!))!
+      const input = (await loadTurnInput(sql, submitted.turnId!))!
+      // A deadline already past leaves no room for even one more step, so the
+      // loop hands back on its very first decision, before any model call.
+      const result = await turn(
+        newConversation(input.conversationId), input.message,
+        fakeClient([textMessage('never reached')]), mockRunner(new MockSupplier()),
+        { deadlineMs: Date.now() },
+      )
+      expect(result.outcome).toBe('continue_later')
+
+      await releaseForContinuation(sql, claim, { step: result.steps })
+
+      const [t] = await sql`select status, state from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('queued')
+      expect(t!.state).toEqual({ step: result.steps })
+
+      // Claimable at once, not after a staleness window: the whole point of a
+      // deliberate hand-back over leaving the row 'running'.
+      const reclaimed = await claimTurn(sql, submitted.turnId!)
+      expect(reclaimed?.attempts).toBe(2)
+      expect(reclaimed?.state).toEqual({ step: result.steps })
     })
   })
 })

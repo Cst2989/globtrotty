@@ -4,7 +4,7 @@ import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { claimTurn, completeTurn, failTurn, loadTurnInput } from '../../src/repo/turns.js'
+import { claimTurn, completeTurn, failTurn, loadTurnInput, releaseForContinuation } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
 import { mockRunner } from '../../src/tools.js'
@@ -62,23 +62,33 @@ export default async (req: Request): Promise<Response> => {
         readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
       },
     )
-    // Two ways out, and the reason decides which. Every outcome the engine can
-    // name (src/engine.ts's FAIL_REASONS) is a failure with that reason on the
-    // row; 'done', 'max_tokens' and 'continue_later' are the turn ending with an
-    // answer. `parked: true` because the agency has said its piece and she holds
-    // the next move; lesson 3.5's sweeper must never resurrect that.
+    // Three ways out, and the reason decides which. Every outcome the engine
+    // can name (src/engine.ts's FAIL_REASONS) is a failure with that reason on
+    // the row; 'done' and 'max_tokens' are the turn ending with an answer.
+    // `parked: true` because the agency has said its piece and she holds the
+    // next move; lesson 3.5's sweeper must never resurrect that.
     //
-    // 0n on both branches, not result.costMicros: this path's ledgerSink already
-    // recorded every model call and incremented conversation and daily spend as
-    // it went (lesson 2.6), so adding the total again here would double-count it
-    // on the turn row. Lesson 3.6's worker, whose agent steps are not metered by
-    // a sink, is what passes a real number.
+    // `continue_later` is not an ending: the budget ran out, not the work.
+    // Closing it here would record a turn with more to do as finished and
+    // tell her she holds the next move when she does not, and nothing could
+    // recover it afterward ('done' leaves both the live-turn index and the
+    // sweeper's predicate, migration 0004). releaseForContinuation
+    // (src/repo/turns.ts, lesson 3.2) hands the lease back instead, so the
+    // next invocation claims it at once.
+    //
+    // result.costMicros on both closer branches: this is the turn's own
+    // total, landing on turns.spend_usd_micros only. It is a different number
+    // from what ledgerSink already recorded onto conversation and daily spend
+    // as the turn went (lesson 2.6), not the same number twice, so passing it
+    // here does not double-count anything.
     if (isFailReason(result.outcome)) {
-      await failTurn(sql, claim, result.outcome, 0n, result.text === '' ? null : result.text)
+      await failTurn(sql, claim, result.outcome, result.costMicros, result.text === '' ? null : result.text)
+    } else if (result.outcome === 'continue_later') {
+      await releaseForContinuation(sql, claim, { step: result.steps })
     } else {
       await completeTurn(sql, claim, {
         state: { step: result.steps }, agentMessage: result.text === '' ? null : result.text,
-        parked: true, spendMicros: 0n,
+        parked: true, spendMicros: result.costMicros,
       })
     }
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)

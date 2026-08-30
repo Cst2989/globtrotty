@@ -29,13 +29,17 @@ describeDb('completeTurn', () => {
       const { conversationId, turnId } = await seed(sql, 'p1')
       const claim = (await claimTurn(sql, turnId))!
       await completeTurn(sql, claim, {
-        state: EMPTY, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 1_250n,
+        state: { step: 3 }, agentMessage: 'Two options near Faro.', parked: true, spendMicros: 1_250n,
       })
 
-      const [t] = await sql`select status, finished_at, spend_usd_micros from course.turns where id = ${turnId}`
+      const [t] = await sql`select status, finished_at, spend_usd_micros, state from course.turns where id = ${turnId}`
       expect(t!.status).toBe('done')
       expect(t!.finished_at).not.toBeNull()
       expect(BigInt(t!.spend_usd_micros as string)).toBe(1_250n)
+      // A non-zero step, so this cannot pass on state's own default: a
+      // regression that dropped state from the SET list would still pass with
+      // { step: 0 }.
+      expect(t!.state).toEqual({ step: 3 })
 
       const [c] = await sql`select status, spend_usd_micros from course.conversations where id = ${conversationId}`
       // Parking is TERMINAL for the turn and visible on the conversation: she is
@@ -50,6 +54,13 @@ describeDb('completeTurn', () => {
       expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
       expect(msgs[1]!.content).toBe('Two options near Faro.')
       expect(msgs[1]!.turn_id).toBe(turnId)
+
+      // Terminal means the slot is free: her next message opens a new turn
+      // rather than bouncing off the one-live-turn index as 'busy'.
+      const next = await submitMessage(deps(sql), {
+        userId: USER, conversationId, message: 'and the crib?', idempotencyKey: 'p1-next',
+      })
+      expect(next.status).toBe('queued')
     })
   })
 
@@ -93,12 +104,16 @@ describeDb('completeTurn', () => {
   /**
    * The fenced test above throws on the FIRST statement, the fencing update
    * itself, so it cannot tell a real transaction from three statements in a row:
-   * an unbatched version passes it too. This forces the failure on a LATER
-   * statement instead. The claim is live and correctly fenced, but its userId
-   * does not match the conversation's owner, so the turns update (keyed on id,
-   * attempts and status only) still matches and sets 'done', and then the
-   * messages insert violates the composite foreign key and throws. Only a real
-   * transaction rolls the first write back with it.
+   * an unbatched version passes it too. This forces the failure onto the LAST
+   * statement instead, the conversation update. The claim is live and correctly
+   * fenced, but its userId does not match the conversation's owner, so the
+   * turns update (keyed on id, attempts and status only) still matches and sets
+   * 'done'. `agentMessage: null` skips the messages insert on purpose: with a
+   * message present the composite foreign key on that insert would throw first,
+   * and this test would pass without ever reaching the conversation update it
+   * means to exercise, which is exactly what happened before that update
+   * checked its own row count. Now the conversation update itself matches zero
+   * rows and throws. Only a real transaction rolls the turns write back with it.
    */
   it('rolls back an earlier write when a later one fails, leaving the turn running', async () => {
     await withTestDb(async (sql) => {
@@ -107,8 +122,8 @@ describeDb('completeTurn', () => {
       const mismatched = { ...claim, userId: randomUUID() }
 
       await expect(completeTurn(sql, mismatched, {
-        state: EMPTY, agentMessage: 'will not survive', parked: true, spendMicros: 500n,
-      })).rejects.toThrow()
+        state: EMPTY, agentMessage: null, parked: true, spendMicros: 500n,
+      })).rejects.toThrow('completeTurn: conversation not found (fail closed)')
 
       const [t] = await sql`select status, spend_usd_micros from course.turns where id = ${turnId}`
       expect(t!.status).toBe('running')                       // fails against an unbatched version

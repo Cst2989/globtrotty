@@ -138,6 +138,8 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  * an oversight left for later cleanup: the shape of a fenced write is meant to
  * be visible whole at each of the three places lesson 3.2 uses it, rather
  * than hidden behind a shared helper the reader would have to open first.
+ * Lesson 3.3 adds two more, inside a transaction, and that is the point: five
+ * places now carry it, and each one still reads whole on its own.
  */
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
   const rows = await sql`
@@ -253,10 +255,14 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
  * conversation that is simply waiting on her, every heartbeat window, quietly
  * re-billing a state that is supposed to cost nothing.
  *
- * `spendMicros` is the running total this turn has spent, not a delta, and it
- * lands on `turns.spend_usd_micros` only. Conversation and daily spend accrue
- * through `recordSpend` (lesson 2.6) and adding them here as well would
- * double-count the conversation and bypass the daily counter a ceiling reads.
+ * `spendMicros` is the spend to add for this attempt, not a running total:
+ * both statements below write it as `spend_usd_micros + ...`. Today exactly
+ * one write ever lands, because parking and failing are both terminal, so
+ * add and overwrite agree; the `+` is what stays correct if a retried attempt
+ * (lesson 3.5) ever calls this a second time for the same turn. It lands on
+ * `turns.spend_usd_micros` only. Conversation and daily spend accrue through
+ * `recordSpend` (lesson 2.6) and adding them here as well would double-count
+ * the conversation and bypass the daily counter a ceiling reads.
  */
 export async function completeTurn(
   sql: postgres.Sql,
@@ -272,7 +278,7 @@ export async function completeTurn(
   await sql.begin(async (tx) => {
     const rows = await tx`
       update course.turns
-         set status = 'done', state = ${tx.json(opts.state as never)},
+         set status = 'done', state = ${tx.json(opts.state)},
              finished_at = now(), heartbeat_at = now(),
              spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
        where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
@@ -285,9 +291,17 @@ export async function completeTurn(
                        'agent', ${opts.agentMessage})`
     }
 
-    await tx`update course.conversations
-                set status = ${opts.parked ? 'awaiting_user' : 'active'}, updated_at = now()
-              where id = ${claim.conversationId} and user_id = ${claim.userId}`
+    // A zero-row update is a success to Postgres, not an error, so without this
+    // check a conversation row that does not match would let the transaction
+    // commit with the turn 'done' and the conversation silently still
+    // 'working' forever: the exact half-done state this function's opening
+    // sentence promises cannot happen. `recordSpend` (src/repo/spend.ts) checks
+    // this same statement for the same reason.
+    const conv = await tx`update course.conversations
+                             set status = ${opts.parked ? 'awaiting_user' : 'active'}, updated_at = now()
+                           where id = ${claim.conversationId} and user_id = ${claim.userId}
+                          returning id`
+    if (conv.length === 0) throw new Error('completeTurn: conversation not found (fail closed)')
   })
   // Anything that tells her the work is ready belongs AFTER this commit and may
   // never fail the turn: her work is already saved and already billed, and a
@@ -306,6 +320,18 @@ export async function completeTurn(
  * yet. A ceiling has one (src/limit-message.ts) and passes it here; `step_cap`
  * and `deadline_exceeded` do not, and pass nothing rather than an empty string
  * that would become a blank row.
+ *
+ * `failed` is terminal: neither arm of `claimTurn` admits it and the
+ * sweeper's index (migration 0004) does not cover it either, so a recorded
+ * failure is not retried. `MAX_ATTEMPTS` is spent only by workers that die
+ * without reaching either closer, which is what a crash loop actually looks
+ * like; an explicitly recorded failure is a decision, not an accident, and
+ * costs exactly one attempt.
+ *
+ * `heartbeat_at` is refreshed here too, for the same reason `completeTurn`
+ * refreshes it: neither matters, because both `done` and `failed` leave the
+ * sweeper's predicate, but a terminal row's heartbeat should read as "nothing
+ * is watching this any more" rather than sit at whatever it was mid-run.
  */
 export async function failTurn(
   sql: postgres.Sql,
@@ -318,7 +344,7 @@ export async function failTurn(
   await sql.begin(async (tx) => {
     const rows = await tx`
       update course.turns
-         set status = 'failed', fail_reason = ${reason}, finished_at = now(),
+         set status = 'failed', fail_reason = ${reason}, finished_at = now(), heartbeat_at = now(),
              spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
        where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
       returning id`
@@ -330,7 +356,12 @@ export async function failTurn(
                        'agent', ${agentMessage})`
     }
 
-    await tx`update course.conversations set status = ${conversationStatus}, updated_at = now()
-              where id = ${claim.conversationId} and user_id = ${claim.userId}`
+    // Same reasoning as completeTurn's matching check just above: a zero-row
+    // update here is a silent success to Postgres, and this transaction's
+    // whole promise is that either everything lands or nothing does.
+    const conv = await tx`update course.conversations set status = ${conversationStatus}, updated_at = now()
+                          where id = ${claim.conversationId} and user_id = ${claim.userId}
+                          returning id`
+    if (conv.length === 0) throw new Error('failTurn: conversation not found (fail closed)')
   })
 }
