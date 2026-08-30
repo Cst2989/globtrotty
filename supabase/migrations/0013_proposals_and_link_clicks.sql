@@ -86,8 +86,13 @@ create table course.link_clicks (
   rendered_at  timestamptz not null default now(),
   clicked_at   timestamptz,
   -- One link per item per proposal. A second hand-off of the same proposal is a
-  -- duplicate, not a second offer, and this is what makes emitting idempotent
-  -- underneath the tool-call ledger rather than only alongside it.
+  -- duplicate, not a second offer, and this makes the second write impossible
+  -- rather than idempotent: it is the last line of defence, not the mechanism.
+  -- What answers the model is the cashier, which reads this table for the
+  -- proposal and refuses before it re-quotes anything (src/cashier.ts, and
+  -- emittedForProposal in src/repo/linkClicks.ts), so reaching this constraint
+  -- means something has gone around that refusal and the caller gets a Postgres
+  -- error rather than an answer.
   unique (proposal_id, item_id)
 );
 create index link_clicks_by_turn on course.link_clicks (turn_id) where turn_id is not null;

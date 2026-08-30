@@ -103,6 +103,30 @@ describe('handOffMessage', () => {
     expect(text).toContain('€1,000.00')
   })
 
+  /**
+   * `verified` is an AND across every supplier in the set, so one adapter that
+   * cannot re-quote makes the whole hand-off unverified. "This supplier" then
+   * describes a set of two or three of them, and the sentence quietly says the
+   * others were checked. Both live adapters set `mayRequote: true` today, so
+   * this is only reachable through a configured mock; it stops being reachable
+   * only through a mock the day one of them cannot re-quote.
+   */
+  it('does not say "this supplier" about a set of several', () => {
+    const one = handOffMessage([link()], false, quotedAt, now)
+    expect(one).toMatch(/this supplier/i)
+    const many = handOffMessage(
+      [link(), link({ sourceId: 'ITEM-2', supplier: 'mock', url: 'https://example.invalid/book/x' })],
+      false, quotedAt, now,
+    )
+    expect(many).not.toMatch(/this supplier/i)
+    // It says which of them it means: not every one of them could be asked.
+    expect(many).toMatch(/not every supplier/i)
+    expect(many).toMatch(/asked them again/i)
+    // Still disclosure and still not a claim of verification, whichever it is.
+    expect(many).not.toMatch(/checked|verified|confirmed/i)
+    expect(many).toMatch(/check the total before you pay/i)
+  })
+
   it('describes an age in days once it is past a day', () => {
     const text = handOffMessage([link()], false, new Date('2026-08-14T12:00:00Z'), now)
     expect(text).toContain('2 days ago')

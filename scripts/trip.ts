@@ -74,6 +74,16 @@ try {
       // minus the ledger: one process, no crash to resume from, and nothing
       // here replays a tool call.
       //
+      // `hand_off_to_booking` is the one tool in this chain the missing ledger
+      // would matter for, and it is left out anyway. On tier 3 the ledger is
+      // what makes a crash between minting the course.link_clicks rows and
+      // recording the tool result end the turn `ambiguous_tool_call` instead of
+      // emitting a second set of links; here there is no second attempt to
+      // protect, because ctrl-c kills the only process there is and the row it
+      // leaves is the sweeper's to reap. The cashier's own refusal covers the
+      // rest: a proposal that already emitted is refused before it is
+      // re-quoted, whichever chain asks.
+      //
       // All four wrappers, not just the corpus one. The planning desk's tool
       // list is `DESK_TOOLS.planning` (src/desks.ts) and it holds
       // `propose_itinerary` and `hand_off_to_booking`, so a chain that stopped

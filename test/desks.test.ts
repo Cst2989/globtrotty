@@ -56,12 +56,33 @@ describe('desks', () => {
    * chain is composed inside a script whose first statement opens a database
    * connection and calls a live model, so there is nothing here to call without
    * a key, and the habit is what the guard has to be able to see.
+   *
+   * One wrapper per tool this desk publishes beyond the two searches, which is
+   * why the pairs below are derived from `DESK_TOOLS.planning` rather than
+   * listed twice: lesson 4.6 added `hand_off_to_booking` to that list and a
+   * guard that still only looked for `proposalRunner` would have watched the
+   * new tool go out unanswered, which is the exact regression this case exists
+   * to make impossible. Module 5.2 rebuilds the registry inside the harness; a
+   * chain that loses a wrapper there fails here first.
    */
-  it('wires the proposal gates into every driver that sends those tools', () => {
+  it('wires a runner for every tool the planning desk sends into every driver', () => {
+    const wrappers: Record<string, string> = {
+      propose_itinerary: 'proposalRunner',
+      hand_off_to_booking: 'cashierRunner',
+    }
+    // Derived, so a tool added to the desk with no wrapper named here fails
+    // this line rather than passing unnoticed.
+    const needed = DESK_TOOLS.planning
+      .filter((tool) => !tool.startsWith('search_'))
+      .map((tool) => wrappers[tool] ?? `NO WRAPPER NAMED FOR ${tool}`)
+    expect(needed).toEqual(['proposalRunner', 'cashierRunner'])
     expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'])
     for (const file of drivers()) {
       const source = readFileSync(path.join(REPO_ROOT, file), 'utf8')
-      expect(source, `${file} sends propose_itinerary and cannot answer it`).toMatch(/proposalRunner\(/)
+      for (const wrapper of needed) {
+        expect(source, `${file} sends a tool ${wrapper} answers and does not wrap it`)
+          .toMatch(new RegExp(`${wrapper}\\(`))
+      }
     }
   })
 })

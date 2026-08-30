@@ -6,6 +6,7 @@ import { submitMessage } from '../src/handler.js'
 import { recordLinkClicks } from '../src/repo/linkClicks.js'
 import { recordProposal } from '../src/repo/proposals.js'
 import { MAX_ATTEMPTS } from '../src/repo/turns.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { sweep } from '../src/sweeper.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withRealDb, withTestDb } from './helpers/db.js'
@@ -102,6 +103,169 @@ describeDb('after a link is emitted, the worker', () => {
       // reassurance the naive re-quote gives, arrived at from the other end.
       expect(m!.content).toContain('4 hours ago')
       expect(m!.content).not.toContain('just now')
+    })
+  })
+})
+
+/**
+ * The four ways `loop` ends a turn `failed` without ever throwing, so none of
+ * them reaches `runTurn`'s catch. The catch was the only reader of
+ * `course.link_clicks` until this fix round, which meant the rule held for a
+ * crash and not for an ordinary refusal: the model asks for the hand-off, gets
+ * two live booking URLs, and the NEXT model call in `turn()`'s own tool loop
+ * returns `provider_down`, at which point tier 3's driver
+ * (netlify/functions/run-turn-background.mts) maps that to a `fail` step and the
+ * turn she is in the middle of paying for is marked failed.
+ *
+ * One helper, `failTurnUnlessLinkEmitted` (src/worker.ts), so there is one copy
+ * of the check and a fifth exit added tomorrow has to go through it.
+ */
+describeDb('after a link is emitted, no exit from the loop fails the turn', () => {
+  /** What every case below asserts: `done`, no reason, and her own links back. */
+  async function expectHandedOff(sql: postgres.Sql, turnId: string) {
+    const [t] = await sql`select status, fail_reason from course.turns where id = ${turnId}`
+    expect(t!.status).toBe('done')
+    expect(t!.fail_reason).toBeNull()
+    const msgs = await sql`select content from course.messages
+                            where turn_id = ${turnId} and role = 'agent' order by seq`
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]!.content).toContain('example.invalid/book/hotel-0-1')
+    expect(msgs[0]!.content).not.toBe(TURN_FAILED_MESSAGE)
+  }
+
+  it('does not fail it at the step cap', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-6')
+      // `decideNext` stops before the agent is called at all, which is the one
+      // exit that can fire on a turn that has already done its work: a resumed
+      // turn arrives with `state.step` past the cap.
+      const never: Agent = async () => { throw new Error('the agent must not be called') }
+      const deps = { ...workerDeps(sql, never), limits: { ...DEFAULT_LIMITS, maxSteps: 0 } }
+      await runTurn(deps, submitted.turnId)
+      await expectHandedOff(sql, submitted.turnId)
+    })
+  })
+
+  it('does not fail it when the agent itself reports a failure', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-7')
+      // The reachable one. `turn()` emitted the links through the cashier and
+      // then lost the provider on its next model call; the driver classifies
+      // that and returns a `fail` step, with whatever partial text it has.
+      const failing: Agent = async () => ({
+        kind: 'fail', reason: 'provider_down', text: 'I could not finish that.', costMicros: 0n,
+      })
+      await runTurn(workerDeps(sql, failing), submitted.turnId)
+      await expectHandedOff(sql, submitted.turnId)
+    })
+  })
+
+  it('does not fail it when a tool call comes back ambiguous', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-8')
+      // Started and never finished (lesson 3.4): the pending row is already
+      // there when this attempt begins.
+      await sql`insert into course.tool_calls (turn_id, call_id, name, status)
+                values (${submitted.turnId}, 'call-1', 'search_flights', 'pending')`
+      const tooling: Agent = async () => ({
+        kind: 'tool', callId: 'call-1', name: 'search_flights',
+        run: async () => { throw new Error('the tool must not be run') }, costMicros: 0n,
+      })
+      await runTurn(workerDeps(sql, tooling), submitted.turnId)
+      await expectHandedOff(sql, submitted.turnId)
+      // The operator step lesson 3.4 wrote down is unchanged: the pending row
+      // stays, and it is still what somebody reads.
+      const [row] = await sql`select status from course.tool_calls
+                               where turn_id = ${submitted.turnId} and call_id = 'call-1'`
+      expect(row!.status).toBe('pending')
+    })
+  })
+
+  it('does not fail it when the last attempt hands back', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-9')
+      // One attempt short of the cap, so this run's claim IS the cap:
+      // `continueLater` has no attempt left to hand the turn back with and
+      // ends it `deadline_exceeded` instead.
+      await sql`update course.turns set attempts = ${MAX_ATTEMPTS - 1} where id = ${submitted.turnId}`
+      const handingBack: Agent = async () => ({ kind: 'continue_later', costMicros: 0n })
+      const deps = workerDeps(sql, handingBack)
+      await runTurn(deps, submitted.turnId)
+      await expectHandedOff(sql, submitted.turnId)
+      expect(deps.reinvoke).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describeDb('a turn that handed off twice', () => {
+  /**
+   * `emittedLinks` is scoped to a TURN, and a turn can hand off more than once:
+   * one proposal against a supplier that could re-quote, another against one
+   * that could not. Taking `verified` and the age off the first row then writes
+   * "We checked every price again just now" over the second set's unchecked,
+   * hours-old prices, which is the untrue reassurance this whole lesson exists
+   * to refuse, produced by the recovery it built.
+   */
+  it('is described by its stalest, least verified hand-off', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-10')
+      const second = randomUUID()
+      const proposalId = await recordProposal(sql, {
+        conversationId: submitted.conversationId, userId: USER, turnId: submitted.turnId,
+        refs: [{ sourceId: 'hotel-0-2', quantity: 1, slot: 'stay' }],
+      })
+      await recordLinkClicks(sql, {
+        proposalId, turnId: submitted.turnId, userId: USER,
+        verified: false, quotedAt: new Date(Date.now() - 4 * 3_600_000),
+        links: [{ id: second, sourceId: 'hotel-0-2', supplier: 'mock', trackingRef: second,
+                  url: `https://example.invalid/book/hotel-0-2?subid=${second}`,
+                  quoted: money(31_900n, 'EUR') }],
+      })
+      const dying: Agent = async () => { throw new Error('killed after emitting') }
+      await expect(runTurn(workerDeps(sql, dying), submitted.turnId))
+        .rejects.toThrow(/killed after emitting/)
+
+      const [m] = await sql`select content from course.messages
+                             where turn_id = ${submitted.turnId} and role = 'agent'`
+      // Verified only if every row is, and the age of the stalest number in
+      // the set, which is the same choice the cashier makes for one hand-off.
+      expect(m!.content).not.toMatch(/checked|verified|confirmed/i)
+      expect(m!.content).toContain('4 hours ago')
+      expect(m!.content).toContain('hotel-0-1')
+      expect(m!.content).toContain('hotel-0-2')
+    })
+  })
+
+  /**
+   * Two hand-offs in two currencies. `handOffMessage` sums them and `sumMoney`
+   * throws `CurrencyMismatchError` rather than inventing a currency, which is
+   * correct; what must not happen is that throw replacing the error the turn
+   * actually died of, which is what building the message inside
+   * `completeTurn`'s argument list did.
+   */
+  it('still propagates the original error when the set cannot be totalled', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-11')
+      const second = randomUUID()
+      const proposalId = await recordProposal(sql, {
+        conversationId: submitted.conversationId, userId: USER, turnId: submitted.turnId,
+        refs: [{ sourceId: 'hotel-0-3', quantity: 1, slot: 'stay' }],
+      })
+      await recordLinkClicks(sql, {
+        proposalId, turnId: submitted.turnId, userId: USER, verified: true, quotedAt: new Date(),
+        links: [{ id: second, sourceId: 'hotel-0-3', supplier: 'mock', trackingRef: second,
+                  url: `https://example.invalid/book/hotel-0-3?subid=${second}`,
+                  quoted: money(40_000n, 'USD') }],
+      })
+      const dying: Agent = async () => { throw new Error('killed after emitting') }
+      await expect(runTurn(workerDeps(sql, dying), submitted.turnId))
+        .rejects.toThrow(/killed after emitting/)
+      // Not CurrencyMismatchError, and not silence: the turn is left `running`
+      // for the sweeper, which reads the same table and stays quiet, and the
+      // reason it died is the one that reaches the log.
+      const msgs = await sql`select content from course.messages
+                              where turn_id = ${submitted.turnId} and role = 'agent'`
+      expect(msgs).toHaveLength(0)
     })
   })
 })

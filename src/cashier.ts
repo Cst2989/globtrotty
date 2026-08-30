@@ -3,7 +3,7 @@ import type postgres from 'postgres'
 import { exceedsAnyCeiling, whichCeiling, type Limits } from './engine.js'
 import type { ItemRef } from './gates/types.js'
 import { compareMoney, formatMoney, sumMoney, type Money } from './money.js'
-import { recordLinkClicks, type EmittedLink } from './repo/linkClicks.js'
+import { emittedForProposal, recordLinkClicks, type EmittedLink } from './repo/linkClicks.js'
 import { loadProposal } from './repo/proposals.js'
 import { readSpendFailClosed } from './repo/spend.js'
 import { rehydrate, searchParamsFor } from './repo/toolResults.js'
@@ -122,13 +122,21 @@ export function handOffMessage(
     return `We checked every price again just now. Your trip comes to ${formatMoney(total)}. `
          + `Open each link to book:\n${lines}`
   }
+  // Plural when the set came from more than one supplier. `verified` is an AND
+  // across all of them, so one adapter that cannot re-quote makes the whole
+  // hand-off unverified, and "this supplier" would then be describing two or
+  // three of them while quietly implying the others were checked.
+  const suppliers = new Set(links.map((l) => l.supplier))
+  const cannot = suppliers.size > 1
+    ? 'Not every supplier here can confirm a price on request, so we have not asked them again: '
+    // "not re-checked" is deliberately NOT the wording, though it is the
+    // plainer English: the whole rule is that an unverified hand-off must
+    // not contain the words a verified one does, and a reader scanning for
+    // "checked" would find it here in a sentence that means the opposite.
+    // test/cashier-links.test.ts pins that as a regex over this string.
+    : 'This supplier cannot confirm a price on request, so we have not asked it again: '
   return `This was ${formatMoney(total)} when we found it, ${describeAge(quotedAt, now)}. `
-       // "not re-checked" is deliberately NOT the wording, though it is the
-       // plainer English: the whole rule is that an unverified hand-off must
-       // not contain the words a verified one does, and a reader scanning for
-       // "checked" would find it here in a sentence that means the opposite.
-       // test/cashier-links.test.ts pins that as a regex over this string.
-       + 'This supplier cannot confirm a price on request, so we have not asked it again: '
+       + cannot
        + `prices move, so check the total before you pay.\n${lines}`
 }
 
@@ -179,6 +187,14 @@ export type HandOffRefusal =
   | { kind: 'limit_reached'; detail: string; sourceIds: string[] }
   | { kind: 'unverifiable'; detail: string; sourceIds: string[] }
   | { kind: 'moved'; detail: string; sourceIds: string[] }
+  /**
+   * This proposal has already been handed off. Not an error and not a retry:
+   * the links exist, she has them, and rule 6 says nothing may re-quote a set
+   * that has been emitted. It is a refusal rather than a replay because the
+   * message that went with those links was already given to the model, and
+   * saying it twice would tell her we checked the prices again just now.
+   */
+  | { kind: 'already_emitted'; detail: string; sourceIds: string[] }
 
 export type HandOff =
   | { ok: true; verified: boolean; links: EmittedLink[]; message: string }
@@ -206,6 +222,13 @@ function withinTolerance(before: Money, after: Money): boolean {
  * a different number about a different thing.
  */
 function sameItinerary(before: SupplierItem, after: SupplierItem): boolean {
+  // The id and the adapter first. Both live adapters re-quote by native id and
+  // hand back what they were asked about, so nothing on this branch can return
+  // a substitute; an adapter that answered "the nearest available room" would
+  // otherwise pass every check below and put her on a link to an item the gates
+  // never approved, stored under an `item_id` the unique constraint then fails
+  // to protect.
+  if (before.sourceId !== after.sourceId || before.supplier !== after.supplier) return false
   if (before.priceBasis !== after.priceBasis) return false
   if (before.price.currency !== after.price.currency) return false
   if (!isFlight(before) || !isFlight(after)) return true
@@ -236,8 +259,14 @@ function sameItinerary(before: SupplierItem, after: SupplierItem): boolean {
  *    URL (bookingUrl above, recordLinkClicks).
  * 6. Link emission is the point of no return. After it, nothing may mark the
  *    turn failed, nothing may re-quote that set, everything is best effort.
- *    Enforced in src/worker.ts's catch and src/sweeper.ts's crash arm, both of
- *    which read course.link_clicks for the turn before they write anything.
+ *    Enforced where a turn can END: src/worker.ts routes runTurn's catch and
+ *    every one of loop's failTurn exits through one helper that reads
+ *    course.link_clicks first, and src/sweeper.ts's crash arm reads the same
+ *    table in SQL. The re-quote half is enforced here, by the refusal above:
+ *    a second hand-off of a proposal that already emitted is refused before a
+ *    supplier is asked anything. What is NOT enforced anywhere is the two
+ *    paths that REQUEUE a turn instead of ending it (continueLater's hand-back
+ *    and the sweeper's requeue arm); README.md names that as a residual.
  *
  * The re-quote deliberately does NOT go through `ledgerRunner`. Every other
  * supplier call on this branch does, because a replayed search is a correct
@@ -257,6 +286,16 @@ export async function handOffToBooking(
     suppliers: SupplierPair
     limits: Limits
     now: Date
+    /**
+     * The fenced worker's own signal (`AgentContext.signal`, src/worker.ts),
+     * threaded into every `supplier.quote` below and checked once more before
+     * anything is written. A re-quote that runs to completion after this
+     * worker has been superseded writes `course.link_clicks` rows stamped with
+     * a turn the NEW worker owns and hands two live booking URLs to a model
+     * whose turn is already dead. Optional, because a script and a test have no
+     * signal to give, exactly like `Supplier.search` and `Supplier.quote`.
+     */
+    signal?: AbortSignal
   },
 ): Promise<HandOff> {
   // Rule 1. Read by (id, conversation_id), never by id alone: a proposal id
@@ -264,6 +303,25 @@ export async function handOffToBooking(
   const proposal = await loadProposal(sql, args.proposalId, args.conversationId)
   if (!proposal) {
     return refuse('no_proposal', `No proposal ${args.proposalId} in this conversation.`)
+  }
+  // The composite foreign key ties the proposal to the conversation's owner and
+  // every caller derives both ids from one claim, so these agree today. They
+  // are compared anyway because the two reads below do not: the ceiling is read
+  // for `args.userId`, and `link_clicks.user_id` is written from it with no key
+  // of its own, so a mismatch would check one person's ceiling and leave a row
+  // filed under the other. The same sentence as a proposal that does not exist,
+  // deliberately: from the model's side those are one fact, and a refusal that
+  // distinguished them would confirm that somebody else's proposal id is real.
+  if (proposal.userId !== args.userId) {
+    return refuse('no_proposal', `No proposal ${args.proposalId} in this conversation.`)
+  }
+  if (proposal.refs.length === 0) {
+    // `ProposalRefsSchema` has `.min(1)`, so `proposalRunner` cannot write this
+    // row; `loadProposal` returns `refs` straight out of `jsonb` with no
+    // validation and lesson 5.7 will be a second writer of this table. A
+    // refusal is cheaper than "Reduce of empty array" from the oldest-quote
+    // fold below.
+    return refuse('no_proposal', `Proposal ${proposal.id} carries no items to hand off.`)
   }
   if (proposal.decision !== 'accept' || !proposal.decidedAt) {
     return refuse('not_accepted',
@@ -274,6 +332,23 @@ export async function handOffToBooking(
     return refuse('stale_decision',
       `Proposal ${proposal.id} was accepted ${Math.round(ageSeconds / 60)} minutes ago; `
     + `an acceptance is good for ${DECISION_MAX_AGE_SECONDS / 60} minutes. Re-propose it.`)
+  }
+
+  // Rule 6, read from the other side: a set that has already been emitted may
+  // not be re-quoted, so a second hand-off of the same proposal is decided here
+  // and nothing is asked of a supplier. `unique (proposal_id, item_id)` makes
+  // the second write impossible either way, but as an unhandled Postgres error
+  // rather than an answer: rescued into a `done` turn on tier 3 by
+  // `runTurn`'s catch, and a dead script in `scripts/trip.ts` and
+  // `scripts/demo.ts`. The model reaches here with a fresh `callId`, so
+  // `ledgerRunner` replays nothing.
+  const already = await emittedForProposal(sql, proposal.id)
+  if (already.length > 0) {
+    return refuse('already_emitted',
+      `Proposal ${proposal.id} has already been handed off: ${already.length} booking `
+    + `link${already.length === 1 ? '' : 's'} went out, and the prices behind them may not be `
+    + 'asked again. She has them already; do not repeat them as if they were checked just now.',
+      already.map((l) => l.sourceId))
   }
 
   // The ceiling built in lesson 2.6, now standing between the model and a
@@ -302,7 +377,7 @@ export async function handOffToBooking(
       missing)
   }
 
-  const quoted: { item: SupplierItem; ref: ItemRef }[] = []
+  const quoted: { item: SupplierItem; ref: ItemRef; supplier: string }[] = []
   let verified = true
   for (const ref of proposal.refs) {
     const stored = corpus.get(ref.sourceId)!
@@ -313,15 +388,23 @@ export async function handOffToBooking(
     // cache with itself and reports agreement.
     if (!supplier.capabilities.mayRequote) {
       verified = false
-      quoted.push({ item: stored, ref })
+      quoted.push({ item: stored, ref, supplier: stored.supplier })
       continue
     }
 
-    // Rule 2. Not through the ledger, on purpose: see the docstring.
+    // Rule 2. Not through the ledger, on purpose: see the docstring. The
+    // caller's signal travels with it, so a fence landing mid re-quote cancels
+    // the request instead of paying for an answer nobody may act on.
     let outcome: QuoteOutcome
     try {
-      outcome = await supplier.quote(ref.sourceId, params.get(ref.sourceId)!)
+      outcome = await supplier.quote(ref.sourceId, params.get(ref.sourceId)!, args.signal)
     } catch (err) {
+      // An aborted call is not a supplier that could not confirm a price, and
+      // must not be described to the model as one: the turn is over. It leaves
+      // as the signal's own reason, which is the FencedError `withHeartbeat`
+      // captured, exactly as `supplierRunner` does with a cancelled search
+      // (src/tools.ts).
+      if (args.signal?.aborted) throw args.signal.reason
       return refuse('unverifiable',
         `Could not re-check ${ref.sourceId} with ${supplier.name}: ${err instanceof Error ? err.message : String(err)}. `
       + 'We do not hand over a price we could not confirm.', [ref.sourceId])
@@ -348,19 +431,27 @@ export async function handOffToBooking(
     }
     // The NEW price, not the accepted one: verifying one number and then
     // emitting another is worse than not verifying at all.
-    quoted.push({ item: outcome.item, ref })
+    quoted.push({ item: outcome.item, ref, supplier: stored.supplier })
   }
 
   // Rule 5. The id is minted here, before the URL exists, because it IS the
   // sub-id inside the URL.
-  const links: EmittedLink[] = quoted.map(({ item }) => {
+  //
+  // The link is addressed from the ACCEPTED reference and the corpus row's
+  // supplier, never from the re-quoted item: what she accepted is what she is
+  // sent to, and the re-quote's only job is the price. `sameItinerary` already
+  // refuses a re-quote whose id or adapter moved, so the two agree by the time
+  // this runs; building from the pair the gates approved means they cannot
+  // disagree even if that check is ever loosened. The PRICE is the new one, for
+  // the reason the loop above gives.
+  const links: EmittedLink[] = quoted.map(({ item, ref, supplier }) => {
     const id = randomUUID()
     return {
       id,
-      sourceId: item.sourceId,
-      supplier: item.supplier,
+      sourceId: ref.sourceId,
+      supplier,
       trackingRef: id,
-      url: bookingUrl(item.supplier, item.sourceId, id),
+      url: bookingUrl(supplier, ref.sourceId, id),
       quoted: item.price,
     }
   })
@@ -371,6 +462,14 @@ export async function handOffToBooking(
   const quotedAt = quoted
     .map(({ item }) => item.fetchedAt)
     .reduce((oldest, at) => (at < oldest ? at : oldest))
+
+  // The last moment this can be stopped for free. A fence that landed while the
+  // re-quote was in flight means another worker owns this turn now, and writing
+  // these rows would file them under a turn it is running from scratch and hand
+  // two live URLs to a model whose turn is dead. Checked here rather than only
+  // around the quote, because a set that needed no re-quote at all (rule 4)
+  // reaches this line without ever touching a supplier.
+  if (args.signal?.aborted) throw args.signal.reason
 
   // Rule 6 begins here. Everything above may refuse; nothing below may.
   await recordLinkClicks(sql, {
@@ -395,13 +494,19 @@ export type CashierContext = {
 
 /**
  * The `hand_off_to_booking` link of the runner chain, composed outside
- * `proposalRunner` and inside `ledgerRunner`:
+ * `proposalRunner` and, on tier 3, inside `ledgerRunner`:
  *
  *   ledgerRunner(sql, claim,
  *     cashierRunner(sql, ctx, deps,
  *       proposalRunner(sql, ctx,
  *         corpusRunner(sql, claim,
  *           supplierRunner(suppliers)))))
+ *
+ * That is netlify/functions/run-turn-background.mts. `scripts/trip.ts` composes
+ * the same four wrappers WITHOUT the ledger, on purpose (one process, no crash
+ * to resume from, nothing to replay), which means the paragraph below is a
+ * property of tier 3 and not of this function: `npm run trip` has no
+ * `beginToolCall` row standing behind its hand-off.
  *
  * Inside the ledger deliberately, and it is the one place on this branch where
  * that matters for a side effect rather than for a cost. A crash between
@@ -436,6 +541,7 @@ export function cashierRunner(
       suppliers: deps.suppliers,
       limits: deps.limits,
       now: deps.now(),
+      signal,
     })
     if (!result.ok) {
       return {

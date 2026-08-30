@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import {
-  DECISION_MAX_AGE_SECONDS, fitsBudget, handOffToBooking, totalOf,
+  DECISION_MAX_AGE_SECONDS, fitsBudget, handOffToBooking, TOLERANCE_BPS, totalOf,
 } from '../src/cashier.js'
 import type { ItemRef } from '../src/gates/types.js'
 import { submitMessage } from '../src/handler.js'
@@ -12,7 +12,7 @@ import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import type {
-  FlightSearch, HotelSearch, SearchParams, SupplierItem, SupplierPair,
+  FlightSearch, HotelSearch, SearchParams, Supplier, SupplierItem, SupplierPair,
 } from '../src/supplier/types.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { handlerDeps } from './helpers/turns.js'
@@ -160,9 +160,32 @@ describeDb('handOffToBooking', () => {
     return { conversationId, turnId, proposalId, items, suppliers }
   }
 
-  const args = (over: Record<string, unknown>) => ({
-    userId: USER, limits: DEFAULT_LIMITS, now: NOW, ...over,
-  }) as Parameters<typeof handOffToBooking>[1]
+  /**
+   * The three fields every case shares, with the rest supplied per case. Typed
+   * off `handOffToBooking`'s own parameter rather than cast to it: a
+   * `Record<string, unknown>` plus an assertion would let a renamed field
+   * compile here and refuse at runtime, which is the one thing a helper shared
+   * by twenty cases must not do.
+   */
+  type HandOffArgs = Parameters<typeof handOffToBooking>[1]
+  const args = (
+    over: Omit<HandOffArgs, 'userId' | 'limits' | 'now'> & Partial<HandOffArgs>,
+  ): HandOffArgs => ({ userId: USER, limits: DEFAULT_LIMITS, now: NOW, ...over })
+
+  /**
+   * The mock pair with the hotel's `quote` replaced, which is how the cases
+   * below watch what the cashier asks a supplier and when. A spread of a class
+   * instance copies its fields and not its prototype, so `search` does not
+   * survive it and TypeScript refuses the direct assertion for insufficient
+   * overlap; `as unknown as` is the same assertion the downgrade case makes,
+   * and it is safe for the same reason: `handOffToBooking` reads only
+   * `capabilities`, `quote` and `name` off a supplier.
+   */
+  function hotelQuoting(suppliers: SupplierPair, quote: Supplier['quote']): SupplierPair {
+    return { ...suppliers, hotel: { ...suppliers.hotel, quote } as unknown as Supplier }
+  }
+  const realQuote = (suppliers: SupplierPair): Supplier['quote'] =>
+    suppliers.hotel.quote.bind(suppliers.hotel)
 
   it('emits a link, on an allowlisted host, carrying its own tracking ref', async () => {
     await withTestDb(async (sql) => {
@@ -321,8 +344,9 @@ describeDb('handOffToBooking', () => {
   it('allows a move inside the half a percent tolerance', async () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId, proposalId, items } = await accepted(sql, 12)
-      // One tenth of one percent. The tolerance is explicit and both sides of it
-      // are pinned, because a boundary nobody tested is a boundary nobody chose.
+      // One tenth of one percent, comfortably inside. The boundary itself is
+      // pinned by the case below, on both sides and to the basis point, because
+      // a boundary nobody tested is a boundary nobody chose.
       const drift = items[0]!.price.minor / 1000n
       const nudged = mockSuppliers({ hotel: { now: () => QUOTED_AT, quoteDriftMinor: drift } })
       const res = await handOffToBooking(sql, args({
@@ -424,6 +448,203 @@ describeDb('handOffToBooking', () => {
       if (res.ok) throw new Error('unreachable')
       expect(res.refusal.kind).toBe('limit_reached')
       expect(res.refusal.detail).toContain('account')
+      expect(await sql`select 1 from course.link_clicks where turn_id = ${turnId}`).toHaveLength(0)
+    })
+  })
+
+  /**
+   * The tolerance itself, from both sides, in the same integer arithmetic
+   * `withinTolerance` uses. `drift * 10_000 <= before.minor * TOLERANCE_BPS` is
+   * a `<=`, so exactly half a percent is inside it and one minor unit more is
+   * not, whatever `price * 50 / 10_000` rounds to. Without these two, tightening
+   * that `<=` to a `<` while tidying leaves the suite green and starts blocking
+   * every supplier that rounds to exactly the tolerance.
+   */
+  it('takes a move of exactly the tolerance, and refuses one minor unit past it', async () => {
+    await withTestDb(async (sql) => {
+      const at = await accepted(sql, 19)
+      const exact = at.items[0]!.price.minor * TOLERANCE_BPS / 10_000n
+      const onTheLine = mockSuppliers({ hotel: { now: () => QUOTED_AT, quoteDriftMinor: exact } })
+      const ok = await handOffToBooking(sql, args({
+        proposalId: at.proposalId, conversationId: at.conversationId,
+        turnId: at.turnId, suppliers: onTheLine,
+      }))
+      expect(ok.ok).toBe(true)
+      if (!ok.ok) throw new Error('unreachable')
+      expect(ok.links[0]!.quoted.minor).toBe(at.items[0]!.price.minor + exact)
+
+      const over = await accepted(sql, 20)
+      // Recomputed from THIS proposal's price: the two conversations search
+      // different queries, so they hold different numbers, and a tolerance
+      // taken from the other one is not a boundary at all.
+      const justPast = over.items[0]!.price.minor * TOLERANCE_BPS / 10_000n + 1n
+      const past = mockSuppliers({ hotel: { now: () => QUOTED_AT, quoteDriftMinor: justPast } })
+      const blocked = await handOffToBooking(sql, args({
+        proposalId: over.proposalId, conversationId: over.conversationId,
+        turnId: over.turnId, suppliers: past,
+      }))
+      expect(blocked.ok).toBe(false)
+      if (blocked.ok) throw new Error('unreachable')
+      expect(blocked.refusal.kind).toBe('moved')
+      expect(await sql`select 1 from course.link_clicks where turn_id = ${over.turnId}`).toHaveLength(0)
+    })
+  })
+
+  /**
+   * The model has the links and calls the tool again in the same turn, with a
+   * different `callId`, so `ledgerRunner` does not replay it. Before this
+   * refusal the cashier re-quoted the whole set a second time (rule 6 says
+   * nothing may re-quote a set that has been emitted) and then hit
+   * `unique (proposal_id, item_id)` as an unhandled Postgres error, which in
+   * `scripts/trip.ts` and `scripts/demo.ts` is a dead script.
+   */
+  it('refuses a second hand-off of the same proposal, before it re-quotes anything', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId, proposalId, suppliers } = await accepted(sql, 21)
+      const asked: string[] = []
+      const counting = hotelQuoting(suppliers, async (id, params, signal) => {
+        asked.push(id)
+        return realQuote(suppliers)(id, params, signal)
+      })
+      const a = args({ proposalId, conversationId, turnId, suppliers: counting })
+      const first = await handOffToBooking(sql, a)
+      expect(first.ok).toBe(true)
+      expect(asked).toHaveLength(1)
+
+      const second = await handOffToBooking(sql, a)
+      expect(second.ok).toBe(false)
+      if (second.ok) throw new Error('unreachable')
+      expect(second.refusal.kind).toBe('already_emitted')
+      // The point: no second re-quote, so the refusal is decided before
+      // anything is asked of a supplier, and no second row.
+      expect(asked).toHaveLength(1)
+      expect(await sql`select 1 from course.link_clicks where turn_id = ${turnId}`).toHaveLength(1)
+    })
+  })
+
+  /**
+   * The signal lesson 4.2 threaded through every supplier call, now reaching
+   * the one call that is not a search. `withHeartbeat` (src/worker.ts) aborts
+   * the instant a tick discovers this worker has been superseded, and a
+   * re-quote that runs to completion afterwards writes `course.link_clicks`
+   * rows stamped with a turn the NEW worker owns.
+   */
+  it('hands its caller\'s own abort signal to every re-quote', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId, proposalId, suppliers } = await accepted(sql, 22)
+      const seen: (AbortSignal | undefined)[] = []
+      const watching = hotelQuoting(suppliers, async (id, params, signal) => {
+        seen.push(signal)
+        return realQuote(suppliers)(id, params, signal)
+      })
+      const controller = new AbortController()
+      const res = await handOffToBooking(sql, args({
+        proposalId, conversationId, turnId, suppliers: watching, signal: controller.signal,
+      }))
+      expect(res.ok).toBe(true)
+      // Identity, not "some signal": the whole point is that the fenced
+      // worker's own signal is the one that reaches the supplier.
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toBe(controller.signal)
+    })
+  })
+
+  it('emits nothing when the fence lands mid re-quote', async () => {
+    await withTestDb(async (sql) => {
+      // The re-quote comes back fine and the worker no longer owns the turn.
+      // Emitting now would hand a dead turn's model two live booking URLs and
+      // leave the rows under the new worker's turn id.
+      const won = await accepted(sql, 23)
+      const superseded = new AbortController()
+      const fenced = hotelQuoting(won.suppliers, async (id, params, signal) => {
+        superseded.abort(new Error('superseded by another worker'))
+        return realQuote(won.suppliers)(id, params, signal)
+      })
+      await expect(handOffToBooking(sql, args({
+        proposalId: won.proposalId, conversationId: won.conversationId,
+        turnId: won.turnId, suppliers: fenced, signal: superseded.signal,
+      }))).rejects.toThrow(/superseded by another worker/)
+      expect(await sql`select 1 from course.link_clicks where turn_id = ${won.turnId}`).toHaveLength(0)
+
+      // And an aborted call that throws leaves as the abort's own reason
+      // rather than as `unverifiable`: a cancelled request is not a supplier
+      // that could not confirm a price, and the model is not going to get
+      // another step in which to work around it (src/tools.ts says the same).
+      const lost = await accepted(sql, 24)
+      const cancelled = new AbortController()
+      const dies = hotelQuoting(lost.suppliers, async () => {
+        cancelled.abort(new Error('superseded mid flight'))
+        throw new Error('The operation was aborted')
+      })
+      await expect(handOffToBooking(sql, args({
+        proposalId: lost.proposalId, conversationId: lost.conversationId,
+        turnId: lost.turnId, suppliers: dies, signal: cancelled.signal,
+      }))).rejects.toThrow(/superseded mid flight/)
+      expect(await sql`select 1 from course.link_clicks where turn_id = ${lost.turnId}`).toHaveLength(0)
+    })
+  })
+
+  it('refuses a proposal recorded for another user', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId, proposalId, suppliers } = await accepted(sql, 25)
+      // Every caller derives both ids from one claim, so they agree today. If
+      // they ever stop agreeing, the ceiling below is read for one user and the
+      // link_clicks row is written for the other, and that row survives the
+      // cleanups in test/helpers/db.ts and scripts/demo.ts, which delete by
+      // user_id.
+      const res = await handOffToBooking(sql, args({
+        proposalId, conversationId, turnId, suppliers, userId: randomUUID(),
+      }))
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.refusal.kind).toBe('no_proposal')
+    })
+  })
+
+  it('refuses a proposal carrying no items rather than throwing on the total', async () => {
+    await withTestDb(async (sql) => {
+      const claim = await claimedTurn(sql)
+      // `ProposalRefsSchema` has `.min(1)`, so `proposalRunner` cannot write
+      // this one; `loadProposal` returns `refs` straight out of jsonb with no
+      // validation, and lesson 5.7 will be a second writer of this table. A
+      // refusal is cheaper than "Reduce of empty array".
+      const proposalId = await recordProposal(sql, {
+        conversationId: claim.conversationId, userId: USER, turnId: claim.turnId, refs: [],
+      })
+      await decideProposal(sql, {
+        proposalId, conversationId: claim.conversationId, decision: 'accept', at: DECIDED_AT,
+      })
+      const res = await handOffToBooking(sql, args({
+        proposalId, conversationId: claim.conversationId, turnId: claim.turnId,
+        suppliers: mockSuppliers(),
+      }))
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.refusal.kind).toBe('no_proposal')
+      expect(res.refusal.detail).toMatch(/no items/i)
+    })
+  })
+
+  it('refuses a re-quote that came back as a different item, and links to neither', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId, proposalId, suppliers, items } = await accepted(sql, 26)
+      // A substitute: same price, same currency, same kind, different id. Both
+      // live adapters find by native id so nothing can produce one today, and
+      // an adapter that offers "the nearest available room" would put her on a
+      // link to an item the gates never approved, stored under an item_id the
+      // unique constraint then fails to protect.
+      const substitute = hotelQuoting(suppliers, async (id, params, signal) => {
+        const real = await realQuote(suppliers)(id, params, signal)
+        if (real.status !== 'ok') throw new Error('unreachable')
+        return { status: 'ok', item: { ...real.item, sourceId: `${id}-substitute` } }
+      })
+      const res = await handOffToBooking(sql, args({
+        proposalId, conversationId, turnId, suppliers: substitute,
+      }))
+      expect(res.ok).toBe(false)
+      if (res.ok) throw new Error('unreachable')
+      expect(res.refusal.kind).toBe('moved')
+      expect(res.refusal.sourceIds).toEqual([items[0]!.sourceId])
       expect(await sql`select 1 from course.link_clicks where turn_id = ${turnId}`).toHaveLength(0)
     })
   })

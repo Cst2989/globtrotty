@@ -164,36 +164,14 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // must write nothing at all, and stamping a reason on a turn it no longer
     // owns would overwrite the run that took it over.
     if (err instanceof FencedError) return
-    // The point of no return (src/cashier.ts, rule 6). If this turn already
-    // emitted a booking link, she may be on a supplier's checkout page right
-    // now, and marking the turn failed would tell her a request that DID
-    // something did nothing. Nothing is re-quoted here and nothing is rebuilt:
-    // the rows carry the exact URLs and whether they were verified, so the same
-    // sentence can be said again. Everything after emission is best effort,
-    // which is why a failure to read or write here is logged and the original
-    // error still propagates.
-    const emitted = await emittedLinks(sql, claim.turnId).catch((e: unknown) => {
-      console.error(`emittedLinks for turn ${claim.turnId} failed`, e)
-      return { links: [], verified: false, quotedAt: null }
-    })
-    if (emitted.links.length > 0) {
-      const now = new Date(deps.now())
-      await completeTurn(sql, claim, {
-        state: progress.state,
-        // The age comes off course.link_clicks.quoted_at, never off the clock.
-        // An unverified message rebuilt against `now` would tell her a price
-        // quoted four hours ago was current just now, which is the untrue
-        // reassurance this whole lesson refuses. `?? now` is unreachable under
-        // the length check above and exists only because the type admits a null
-        // for the no-rows case.
-        agentMessage: handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now),
-        parked: true,
-        spendMicros: turnSpend.total,
-      }).catch((e: unknown) => {
-        console.error(`completeTurn after link emission for turn ${claim.turnId} failed`, e)
-      })
-      throw err
-    }
+    // The point of no return (src/cashier.ts, rule 6), through the same helper
+    // every exit in `loop` uses, so there is one copy of the read and one
+    // description of what it does. If this turn already emitted a booking link,
+    // she may be on a supplier's checkout page right now, and marking the turn
+    // failed would tell her a request that DID something did nothing. The
+    // original error still propagates either way: this changes what the turn
+    // SAYS, not whether the failure is reported.
+    if (await completeIfLinkEmitted(deps, claim, progress.state, turnSpend.total)) throw err
     // Everything else is classified rather than recorded as one word. There is
     // no retry mechanism for this to feed: failTurn is terminal and the sweeper
     // only ever looks at queued and running rows. It changes what the row SAYS,
@@ -226,6 +204,10 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // this comment is the honest list rather than a claim that every turn
     // ending without an answer says something.
     //
+    // The whole list describes a turn that emitted no booking link. Once one
+    // has gone out, every exit in it ends the turn `done` with the hand-off
+    // sentence instead, through `failTurnUnlessLinkEmitted` below.
+    //
     // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
     // itself ("conversation not found") or any other database error here is
     // exactly the evidence that a turn left `running` by a failed write needs.
@@ -236,6 +218,86 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     })
     throw err
   }
+}
+
+/**
+ * The point of no return (src/cashier.ts, rule 6) as one function, and the only
+ * place in this file that reads `course.link_clicks`.
+ *
+ * Returns true when this turn had already emitted a booking link, in which case
+ * it is now `done`, carrying the same sentence the hand-off said, and the
+ * caller must not mark it failed. Returns false when nothing went out and the
+ * caller is free to do whatever it was going to do.
+ *
+ * Nothing is re-quoted and nothing is recomputed: the rows carry the exact URLs
+ * she was given, whether they were verified, and when they were quoted, so the
+ * age comes off `quoted_at` and never off the clock. An unverified message
+ * rebuilt against `now` would tell her a price quoted four hours ago was
+ * current just now, which is the untrue reassurance this whole lesson refuses.
+ * `?? now` is unreachable under the length check and exists only because the
+ * type admits a null for the no-rows case.
+ *
+ * Best effort throughout, and deliberately so: after emission she may be on a
+ * supplier's checkout page, and everything here is about describing that world
+ * rather than changing it. A read that fails is logged and treated as "nothing
+ * emitted", because a database this cannot read is a database the caller's own
+ * `failTurn` cannot write to either. A write that fails is logged too, and that
+ * includes `handOffMessage` itself throwing: a turn that handed off twice in
+ * two currencies cannot be totalled (`sumMoney`, src/money.ts), and building
+ * the message inside the argument list let that throw escape and REPLACE the
+ * error the turn actually died of. Nothing here throws, so a caller that is
+ * already handling one failure is never handed a second.
+ */
+async function completeIfLinkEmitted(
+  deps: WorkerDeps, claim: Claim, state: TurnState, spendMicros: bigint,
+): Promise<boolean> {
+  const { sql } = deps
+  const emitted = await emittedLinks(sql, claim.turnId).catch((e: unknown) => {
+    console.error(`emittedLinks for turn ${claim.turnId} failed`, e)
+    return { links: [], verified: false, quotedAt: null }
+  })
+  if (emitted.links.length === 0) return false
+  const now = new Date(deps.now())
+  try {
+    await completeTurn(sql, claim, {
+      state,
+      agentMessage: handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now),
+      parked: true,
+      spendMicros,
+    })
+  } catch (e) {
+    console.error(`completeTurn after link emission for turn ${claim.turnId} failed`, e)
+  }
+  return true
+}
+
+/**
+ * The one way `loop` marks a turn failed.
+ *
+ * Four of its exits reach `failTurn` without ever throwing, so none of them
+ * passes through `runTurn`'s catch: the fail-closed spend read at the top of
+ * the next iteration, `decideNext` saying stop, an ambiguous tool call, and the
+ * agent's own `fail` step. The last is reachable in the product today
+ * (netlify/functions/run-turn-background.mts maps any classified failure out of
+ * `turn()` into a `fail` step), and it is the one that matters: the model calls
+ * `hand_off_to_booking`, the cashier writes `course.link_clicks` and returns
+ * two live booking URLs, the next model call inside `turn()` loses the
+ * provider, and the turn she is in the middle of paying for is marked failed
+ * with nothing to read. Routing all four through here rather than repeating the
+ * check at each means a fifth exit added tomorrow is guarded by construction.
+ *
+ * `continueLater`'s cap arm goes through it too, for the same reason: at
+ * `MAX_ATTEMPTS` there is no attempt left to hand back with, so it ends the
+ * turn rather than requeueing it, and ending it is the thing rule 6 forbids.
+ * Its other arm, the hand-back itself, does NOT read this table, and neither
+ * does the sweeper's requeue arm; README.md carries that as a named residual.
+ */
+async function failTurnUnlessLinkEmitted(
+  deps: WorkerDeps, claim: Claim, state: TurnState, spendMicros: bigint,
+  reason: FailReason, agentMessage: string | null = null,
+): Promise<void> {
+  if (await completeIfLinkEmitted(deps, claim, state, spendMicros)) return
+  await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
 }
 
 /**
@@ -302,7 +364,7 @@ async function continueLater(
 ): Promise<void> {
   const { sql } = deps
   if (claim.attempts >= MAX_ATTEMPTS) {
-    await failTurn(sql, claim, 'deadline_exceeded', turnSpend.total)
+    await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'deadline_exceeded')
     return
   }
   // State, ownership AND this attempt's spend in one statement, then schedule.
@@ -364,7 +426,7 @@ async function loop(
       () => readSpendFailClosed(sql, claim.userId, claim.conversationId),
     )
     if (read === 'limit_reached') {
-      await failTurn(sql, claim, 'limit_reached', turnSpend.total,
+      await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'limit_reached',
         limitReachedMessage('limit_reached', limits))
       return
     }
@@ -377,7 +439,7 @@ async function loop(
 
     switch (decision.kind) {
       case 'stop':
-        await failTurn(sql, claim, decision.reason, turnSpend.total,
+        await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, decision.reason,
           decision.reason === 'limit_reached' ? limitReachedMessage(read, limits) : null)
         return
       case 'continue_later':
@@ -445,7 +507,7 @@ async function loop(
 
     if (step.kind === 'fail') {
       await spend(deps, claim, turnSpend, step)
-      await failTurn(sql, claim, step.reason, turnSpend.total, step.text)
+      await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, step.reason, step.text)
       return
     }
 
@@ -477,7 +539,7 @@ async function loop(
       // is alive to finish the turn, which needs nobody's attention.
       // 'ambiguous_tool_call' is the one outcome in this module that genuinely
       // needs a person (src/repo/toolCalls.ts, src/sweeper.ts's runbook).
-      await failTurn(sql, claim, 'ambiguous_tool_call', turnSpend.total)
+      await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'ambiguous_tool_call')
       return
     } else {
       // Wrapped exactly like the agent call above: a real supplier request can

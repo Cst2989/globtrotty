@@ -259,12 +259,23 @@ checks the same global ceiling lesson 2.6 built, now standing between the model
 and a booking link.
 
 Link emission is the point of no return. `course.link_clicks` rows are written
-before the links are returned, and both places that could contradict them read
-that table first: `runTurn`'s catch completes such a turn with the link message
-instead of failing it, and the sweeper's crash arm reaps it without writing
-`TURN_FAILED_MESSAGE` and sends the conversation back to `awaiting_user`.
+before the links are returned, and every place that could END the turn by
+contradicting them reads that table first. In `src/worker.ts` that is one
+helper, `failTurnUnlessLinkEmitted`, which `runTurn`'s catch and all four of
+`loop`'s `failTurn` exits go through: the fail-closed spend read, `decideNext`
+saying stop, an ambiguous tool call and the agent's own `fail` step. Each of
+them completes the turn with the link message instead of failing it. The
+sweeper's crash arm reads the same table in SQL and reaps such a turn without
+writing `TURN_FAILED_MESSAGE`, sending the conversation back to `awaiting_user`.
+A second hand-off is refused by the cashier itself, before it re-quotes
+anything, which is the other half of the rule.
 
-Three residuals, all of them named where they live.
+On tier 3 the emission is also `beginToolCall`-protected, because `cashierRunner`
+sits inside `ledgerRunner` there. `npm run trip` is ledgerless by design, so it
+is not: one process, no crash to resume from, and nothing to replay. The comment
+above its chain says so.
+
+Four residuals, all of them named where they live.
 
 Nothing in production sets `decision`. `decideProposal` is written and tested,
 and its production caller is the accept button on a proposal card, which is
@@ -272,6 +283,16 @@ lesson 5.7: this module has no surface for a person's click. `npm run demo`'s
 sixth scenario answers for her in process, so the keyless proof does reach a
 real link, a real `course.link_clicks` row and a real hand-off message; what is
 missing is her own click, not the path behind it.
+
+The two paths that REQUEUE a turn rather than end it do not read the table:
+`continueLater`'s hand-back in `src/worker.ts` and the sweeper's requeue arm.
+Neither can emit the same link twice, because the cashier refuses a second
+hand-off of a proposal that already emitted and `unique (proposal_id, item_id)`
+stands behind that; a restarted turn that proposes again, though, gets a new
+proposal id, which that constraint does not cover. Nothing in production writes
+`proposals.decision` yet, so this is not reachable today. Closing it is the
+whole-branch review's, which already carries `failTurn`'s callers and `sweep`'s
+arms as a question.
 
 A worker that dies OUTRIGHT, so that even the catch does not run, leaves the
 sweeper to reap the turn silently. Her links exist, in `course.link_clicks`, and
