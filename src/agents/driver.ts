@@ -20,6 +20,7 @@ import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/no
 import { constraintsFromNotebook, runGates } from '../gates/pipeline.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
 
@@ -478,27 +479,3 @@ function renderItems(items: SupplierItem[]): string {
     .join('\n')
 }
 
-/** Above this a supplier-origin id is truncated, never rejected outright. */
-const MAX_SOURCE_ID_LEN = 128
-
-/**
- * Caps and escapes a supplier-origin `sourceId` before it lands in the
- * model's context, in `propose_itinerary`'s accepted-items line and its
- * per-gate violation lines. `sourceId` is written by `recordResults` from
- * whatever the supplier's response actually contained — untrusted, unlike the
- * gate's own `gate`/`detail` text, which this repo writes. Deliberately NOT
- * fencing the whole `propose_itinerary` result: that would tell the model to
- * disregard our own "fix these and propose again" instruction sitting right
- * next to it. Escaping and capping just the ids closes the injection surface
- * without muting the instruction.
- */
-function sanitizeSourceId(id: string): string {
-  // Printable ASCII only, and BEFORE capping — not after. A newline or control
-  // character in a supplier id could otherwise inject what reads as a new
-  // line of instructions into the tool result; '?' keeps the id recognisable
-  // rather than dropping it. Escaping first (rather than capping first, then
-  // escaping) matters: the '…' appended below is itself outside \x20-\x7e, so
-  // escaping AFTER capping would corrupt the marker this function just added.
-  const escaped = id.replace(/[^\x20-\x7e]/g, '?')
-  return escaped.length > MAX_SOURCE_ID_LEN ? `${escaped.slice(0, MAX_SOURCE_ID_LEN)}…` : escaped
-}
