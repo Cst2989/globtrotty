@@ -29,11 +29,16 @@ key could leave behind is reaped as `stalled`, and its conversation goes back to
 `active` so she can type again. `test/sweeper.test.ts` asserts the whole of it,
 including the `queued` she gets from the press that follows.
 
-A driver throw during a spend read escapes `turn()` today and strands the turn; since lesson 3.1 claims before running, that strand happens at `running` with a heartbeat already set, not at `queued`. Module 3's sweeper must reap it by that stale heartbeat or resume it, so a database outage ends as a denial she can see, not a turn that hangs forever.
+Closed at lesson 3.5: a turn stranded at `running` by a driver throw, with the
+claim's heartbeat already set, is requeued once that heartbeat goes stale by
+the heartbeat arm of `stale` (`test/sweeper.test.ts`, "requeues a turn whose
+worker went silent"), and once its attempts are used up it is failed as
+`crash_loop` with a sentence she can read, so a database outage ends in an
+answer rather than a spinner.
 
-Closed at lesson 3.5: a turn stranded at `queued` by a driver throw is requeued
-by the sweeper, and once its attempts are used up it is failed as `crash_loop`
-with a sentence she can read, so a database outage ends in an answer rather than
-a spinner.
-
-Lesson 3.4's ledger can fail a turn `ambiguous_tool_call` with a `pending` row left behind in `course.tool_calls`. Nothing in the code clears that row: a person reads `select * from course.tool_calls where status = 'pending'`, decides from the tool's own record whether the call actually landed, and deletes the row by hand once that is known. The sweeper module 3 builds must name this as the operator step for that fail reason, not retry the turn expecting the row to resolve itself.
+Closed at lesson 3.5: a turn failed `ambiguous_tool_call` (lesson 3.4) is
+`failed`, which sits outside both arms of `stale`, so the sweeper never retries
+it. The `pending` row it leaves behind in `course.tool_calls` is an operator
+step, not a sweeper job: run `select * from course.tool_calls where status =
+'pending'`, decide from the tool's own record whether the call actually
+landed, and delete the row by hand.

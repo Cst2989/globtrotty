@@ -58,11 +58,21 @@ export default async (): Promise<Response> => {
 
 /** The same POST tier 2 makes, with the same shared secret (lesson 2.2). */
 async function reinvoke(env: Env, turnId: string): Promise<void> {
-  await fetch(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
+  // Best effort on purpose: the turn is already queued, so the next sweep is
+  // the retry, and throwing here would fail a tick that did its real work.
+  // Not silent, though: src/handler.ts logs the identical POST's failure with
+  // the turn id for the reason it states there, and tier 4 has no user waiting
+  // to notice, which makes this log the only place a failure can appear.
+  const res = await fetch(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-worker-secret': env.WORKER_SHARED_SECRET },
     body: JSON.stringify({ turnId }),
-    // Best effort on purpose: the turn is already queued, so the next sweep is
-    // the retry, and throwing here would fail a tick that did its real work.
-  }).catch(() => {})
+  }).catch((err: unknown) => {
+    console.error(`sweep: re-invoke failed for turn ${turnId}`, err)
+    return null
+  })
+  // A resolved response is not a successful one: a rotated secret is a 401
+  // here, and swallowing it would make a permanently sweeping deploy look
+  // healthy in every log there is.
+  if (res && !res.ok) console.error(`sweep: re-invoke for turn ${turnId} returned ${res.status}`)
 }

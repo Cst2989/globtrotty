@@ -41,6 +41,28 @@ export type SweepResult = {
  * (`done`, with the conversation `awaiting_user`) is out of scope by
  * construction: the sweeper cannot resurrect a conversation that is waiting on
  * her and re-bill it every heartbeat window.
+ *
+ * The `running` half of `stale` is a ceiling on how long a worker's claim may
+ * last, not on how long its silence may last, until the worker loop exists.
+ * Today the only writer of `heartbeat_at` on any live path is `claimTurn`'s own
+ * stamp at the moment of the claim; the worker loop that ticks `heartbeat()` on
+ * a timer while a step is in flight is not wired up yet. Until it is, an
+ * ordinary multi-step planning turn that simply takes longer than
+ * HEARTBEAT_STALE seconds to run looks identical, to this arm, to a worker that
+ * has gone silent, and it gets requeued out from under the worker still running
+ * it. That worker keeps going and pays for every model call it makes after the
+ * requeue; the second worker that claims the reissued turn pays again for the
+ * same turn, so one press is billed twice. Fixing the cause belongs to the
+ * worker loop, not to this file; this arm ships anyway because a turn nobody
+ * ever reaps is worse, but a deploy of this tag should expect that cost until
+ * the worker loop starts ticking a heartbeat.
+ *
+ * A turn failed `ambiguous_tool_call` (lesson 3.4) is `failed`, which sits
+ * outside both arms of `stale`, so the sweeper never touches it, and never
+ * should: the `pending` row it leaves behind in `course.tool_calls` cannot be
+ * resolved by retrying the turn. It is an operator step: run `select * from
+ * course.tool_calls where status = 'pending'`, decide from the tool's own
+ * record whether the call actually landed, and delete the row by hand.
  */
 export async function sweep(
   sql: postgres.Sql,
@@ -104,6 +126,13 @@ export async function sweep(
    * never also counted as requeued. All four writes, the turn, her message and
    * the conversation, happen in one statement through chained CTEs, so a sweeper
    * killed mid statement leaves none of them.
+   *
+   * The conversation write is guarded by `c.status = 'working'`, the same
+   * clause the stalled reap above carries, and for the same reason failTurn
+   * gives it: a press that trips a ceiling while this turn is still live takes
+   * the ceiling branch and sets the conversation `limit_reached` on its own; if
+   * this reap then overwrote that to `failed` unconditionally, she would be told
+   * the system broke when she was in fact capped.
    */
   const reaped = await sql<{ id: string }[]>`
     with dead as (
@@ -122,19 +151,40 @@ export async function sweep(
     ),
     convo as (
       update course.conversations c set status = 'failed', updated_at = now()
-        from reap r where c.id = r.conversation_id and c.user_id = r.user_id
+        from reap r where c.id = r.conversation_id and c.user_id = r.user_id and c.status = 'working'
     )
     select id from reap`
 
-  // Counted before the batch is taken and NOT reduced by it: every row counted
-  // here is still stale after this sweep, because requeueing sets queued_at to
-  // now() and the next sweep will see it again only if nothing ran it. This is
-  // the number an alarm reads, so it has to mean "work waiting", not "work this
-  // tick declined to do".
+  // Counted before the batch is taken and NOT reduced by it. This is the
+  // number an alarm reads, so it has to mean "work waiting", not "work this
+  // tick declined to do". Requeueing sets queued_at to now(), which is what
+  // makes a row NOT stale, for the next QUEUED_STALE seconds; the count still
+  // lands on the same backlog across ticks only because QUEUED_STALE (120s) is
+  // shorter than the five-minute cron, so a requeued row goes stale again well
+  // before the next sweep runs. Move either number and that stops being true.
   const [count] = await sql<{ count: number }[]>`
     select count(*)::int as count from course.turns
      where (${stale}) and attempts < ${MAX_ATTEMPTS}`
 
+  /**
+   * The requeue's only write is `status`, `queued_at` and `heartbeat_at`; it
+   * does not need to carry the fencing token to do its job. Flipping `status`
+   * off `'running'` is enough on its own, because every fenced write in
+   * src/repo/turns.ts matches on `attempts = claim.attempts and status =
+   * 'running'` together, so the worker that was holding this turn loses its
+   * claim the instant this statement commits, and the next claimTurn is what
+   * moves the token forward.
+   *
+   * `attempts` is incremented here too, which changes what the column counts:
+   * not "times claimed" but "times tried". Without this a turn nobody ever
+   * invokes, a wrong SITE_URL, a rotated WORKER_SHARED_SECRET, tier 3 down, all
+   * of which produce zero claims, would sit at attempts = 0 and be requeued
+   * forever, holding her live-turn slot shut with no ending the crash arm above
+   * could ever reach. `heartbeat_at` is stamped fresh for the same reason
+   * releaseForContinuation stamps it fresh: a stale beat left on a `queued` row
+   * would sort a turn just handed back to the head of every future batch,
+   * forever, by the `order by` below.
+   */
   const rows = await sql<{ id: string }[]>`
     with batch as (
       select id from course.turns
@@ -143,7 +193,8 @@ export async function sweep(
        limit ${limit}
        for update skip locked
     )
-    update course.turns t set status = 'queued', queued_at = now()
+    update course.turns t set status = 'queued', queued_at = now(), heartbeat_at = now(),
+                              attempts = attempts + 1
       from batch where t.id = batch.id
     returning t.id`
 

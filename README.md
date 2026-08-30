@@ -44,26 +44,12 @@ npm run migrate
 Everything the course creates lives in its own `course` schema, so it never
 touches a product's tables in `public`.
 
-## Holes the tests admit to
-
-Most tests in this repo assert what already works. A few, marked `it.fails`,
-assert what should work but does not yet: the body is written the way we
-want the code to behave, and the test passes today only because that body
-still throws. `test/crash.test.ts` is one: a turn that crashes mid-search
-should let a retry pick up where it died instead of starting the notebook
-over and calling the supplier again, and the assertion that checks the
-supplier was called once is the one that fails. Vitest's `it.fails` lets
-that gap live in the suite, visibly red under the hood, instead of as a
-comment or a skipped test that quietly stops meaning anything. The next
-module turns it into a plain `it`, and the suite tells us the moment it
-does not yet deserve to.
-
 ## The four tiers, and the clock each one runs against
 
     tier 1                tier 2                      tier 3                     tier 4
     her browser           the request handler          the background function    the scheduled sweeper
     +-----------+         +-------------------+        +---------------------+    +-------------------+
-    |  she      |  POST   |  submitMessage    |  POST  |  run-turn-background|    |  every few        |
+    |  she      |  POST   |  submitMessage    |  POST  |  run-turn-background|    |  every five       |
     |  presses  | ------> |  writes the rows  | -----> |  .mts runs the turn |    |  minutes, it      |
     |  Send     | <------ |  and returns      |        |  and writes back    |    |  rescues turns    |
     +-----------+  turn   +-------------------+        +---------------------+    |  nobody finished  |
@@ -91,6 +77,15 @@ Tier 4 sends the same header, because it starts the same work. It requeues a
 turn whose worker went silent or that nothing ever started, fails a turn that
 has used up its attempts and tells her so, and fails a turn that has no message
 to run so her conversation is not held shut by a turn nobody can execute.
+
+"Went silent" is aspirational until the worker loop wires up a heartbeat timer.
+Today the only thing that stamps a `running` turn's heartbeat is the claim
+itself, so this arm's actual rule is a ceiling on how long a turn may run:
+ninety seconds after the claim, it reaps a still-working worker exactly as
+readily as a silent one. That worker keeps going and pays for what it does
+after the requeue; the worker that claims the reissued turn pays again for the
+same turn, so a long turn can be billed twice until the worker loop ticks a
+heartbeat on a timer.
 
 ## What is next
 

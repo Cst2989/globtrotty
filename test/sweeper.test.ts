@@ -3,7 +3,7 @@ import type postgres from 'postgres'
 import { submitMessage } from '../src/handler.js'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { HEARTBEAT_STALE, MAX_ATTEMPTS, claimTurn } from '../src/repo/turns.js'
+import { FencedError, HEARTBEAT_STALE, MAX_ATTEMPTS, claimTurn, heartbeat } from '../src/repo/turns.js'
 import { sweep, QUEUED_STALE } from '../src/sweeper.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
@@ -57,16 +57,21 @@ describeDb('the two abandoned turns module 2 handed over', () => {
     })
   })
 
-  it('a turn stranded at queued has nothing scheduled to pick it up', async () => {
+  it('a turn stranded at running has nothing scheduled to pick it up', async () => {
     await withTestDb(async (sql) => {
       const conversationId = await conversation(sql)
-      // The other hand-off: a driver throw during a spend read escaped the turn
-      // and the invocation ended. The row is durable and correct, and no timer,
-      // queue or retry anywhere in this codebase is going to look at it.
-      const turnId = await abandonedTurn(sql, conversationId, { key: 's1', status: 'queued', ageSeconds: 600 })
-      const [t] = await sql`select status, attempts from course.turns where id = ${turnId}`
-      expect(t!.status).toBe('queued')
-      expect(t!.attempts).toBe(0)      // nothing ever tried
+      // The other hand-off: a driver throw during a spend read escapes turn()
+      // after claimTurn has already flipped the row to running and stamped its
+      // heartbeat, and the invocation ends there. The row is durable and
+      // correct, and no timer, queue or retry anywhere in this codebase is
+      // going to look at it until that heartbeat goes stale.
+      const turnId = await abandonedTurn(sql, conversationId, {
+        key: 's1', status: 'running', attempts: 1, ageSeconds: 600,
+      })
+      const [t] = await sql`select status, attempts, heartbeat_at from course.turns where id = ${turnId}`
+      expect(t!.status).toBe('running')
+      expect(t!.attempts).toBe(1)          // the claim that started it
+      expect(t!.heartbeat_at).not.toBeNull()      // the claim's own stamp
     })
   })
 })
@@ -82,6 +87,23 @@ describeDb('sweep', () => {
       expect(out.requeued).toContain(turnId)
       const [t] = await sql`select status from course.turns where id = ${turnId}`
       expect(t!.status).toBe('queued')
+    })
+  })
+
+  it('fences the worker that was holding the turn it requeues', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await conversation(sql)
+      const turnId = await abandonedTurn(sql, cid, {
+        key: 'w10', status: 'running', attempts: 1, ageSeconds: HEARTBEAT_STALE + 60,
+      })
+      const claim = { turnId, conversationId: cid, userId: USER, attempts: 1, state: null }
+      expect((await sweep(sql)).requeued).toContain(turnId)
+      // The point of lessons 3.1 and 3.2, from the sweeper's side: the worker
+      // that was holding this turn cannot write to it any more. The requeue
+      // does not need to carry or bump the fencing token to get this; flipping
+      // status off 'running' is what every fenced write in src/repo/turns.ts
+      // already matches on.
+      await expect(heartbeat(sql, claim)).rejects.toThrow(FencedError)
     })
   })
 
@@ -114,10 +136,16 @@ describeDb('sweep', () => {
   it('does not touch a queued turn younger than the threshold', async () => {
     await withTestDb(async (sql) => {
       const cid = await conversation(sql)
+      // No message on this row either, which is exactly what the stalled arm's
+      // own copy of the threshold would wrongly reap if QUEUED_STALE were
+      // dropped from its WHERE: this test is guarding that copy, not the
+      // batch's.
       const turnId = await abandonedTurn(sql, cid, {
         key: 'w4', status: 'queued', ageSeconds: QUEUED_STALE - 5,
       })
-      expect((await sweep(sql)).requeued).not.toContain(turnId)
+      const out = await sweep(sql)
+      expect(out.requeued).not.toContain(turnId)
+      expect(out.stalled).not.toContain(turnId)
     })
   })
 
@@ -182,6 +210,16 @@ describeDb('sweep', () => {
                               where conversation_id = ${cid} order by seq`
       expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
       expect(msgs[1]!.content).toBe(TURN_FAILED_MESSAGE)
+
+      // 'failed' reads as the most terminal status in this codebase, but
+      // submitMessage never reads conversation status at all: the live-turn
+      // slot is what gates her, and this reap released it. Mirrors the stalled
+      // test below, so TURN_FAILED_MESSAGE's last sentence, "Please send it
+      // again", is a tested promise here too.
+      const again = await submitMessage(deps(sql), {
+        userId: USER, conversationId: cid, message: 'anything at all', idempotencyKey: 'w6-retry',
+      })
+      expect(again.status).toBe('queued')
     })
   })
 
@@ -194,6 +232,42 @@ describeDb('sweep', () => {
       expect((await sweep(sql)).reaped).not.toContain(turnId)
       const [t] = await sql`select status from course.turns where id = ${turnId}`
       expect(t!.status).toBe('running')
+    })
+  })
+
+  /**
+   * The turn nobody ever claims: a wrong SITE_URL, a rotated
+   * WORKER_SHARED_SECRET, or tier 3 being down, all of which produce exactly
+   * zero calls to claimTurn. `attempts` would never move without the requeue
+   * itself spending one, and a turn requeued forever at attempts = 0 never
+   * reaches crash_loop, holds her live-turn slot shut, and never ends. No
+   * claimTurn call anywhere in this test.
+   */
+  it('a turn nothing ever claims reaches crash_loop once the requeue count is spent', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await conversation(sql)
+      await sql`update course.conversations set status = 'working' where id = ${cid}`
+      const turnId = await abandonedTurn(sql, cid, {
+        key: 'w11', status: 'queued', ageSeconds: QUEUED_STALE + 60,
+      })
+      await sql`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+                values (${cid}, ${USER}, ${turnId}, 'user', 'a week in Portugal')`
+
+      for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+        expect((await sweep(sql)).requeued).toContain(turnId)
+        await sql`update course.turns
+                     set queued_at = now() - make_interval(secs => ${QUEUED_STALE + 60})
+                   where id = ${turnId}`
+      }
+
+      const out = await sweep(sql)
+      expect(out.reaped).toContain(turnId)
+      const [t] = await sql`select status, fail_reason, attempts from course.turns where id = ${turnId}`
+      expect(t!.status).toBe('failed')
+      expect(t!.fail_reason).toBe('crash_loop')
+      expect(t!.attempts).toBe(MAX_ATTEMPTS)      // spent by the requeue, not by a claim
+      const [c] = await sql`select status from course.conversations where id = ${cid}`
+      expect(c!.status).toBe('failed')
     })
   })
 
