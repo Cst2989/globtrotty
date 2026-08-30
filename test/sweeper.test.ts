@@ -98,11 +98,20 @@ describeDb('sweep', () => {
       })
       const claim = { turnId, conversationId: cid, userId: USER, attempts: 1, state: null }
       expect((await sweep(sql)).requeued).toContain(turnId)
+
       // The point of lessons 3.1 and 3.2, from the sweeper's side: the worker
       // that was holding this turn cannot write to it any more. The requeue
-      // does not need to carry or bump the fencing token to get this; flipping
-      // status off 'running' is what every fenced write in src/repo/turns.ts
-      // already matches on.
+      // moves `attempts` as well as `status`, and either one alone would fail
+      // the fenced predicate, so a bare throw here would not say which did it.
+      // Putting the token back to the claim's own value leaves the status flip
+      // as the only difference between this row and the one the claim was
+      // taken on, and that is the thing under test: flipping status off
+      // 'running' fences on its own, which is why a requeue never has to carry
+      // the token.
+      const [back] = await sql`update course.turns set attempts = ${claim.attempts}
+                                where id = ${turnId} returning attempts, status`
+      expect(back!.attempts).toBe(claim.attempts)
+      expect(back!.status).toBe('queued')
       await expect(heartbeat(sql, claim)).rejects.toThrow(FencedError)
     })
   })

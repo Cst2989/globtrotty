@@ -323,10 +323,11 @@ export async function completeTurn(
  *
  * `failed` is terminal: neither arm of `claimTurn` admits it and the
  * sweeper's index (migration 0004) does not cover it either, so a recorded
- * failure is not retried. `MAX_ATTEMPTS` is spent only by workers that die
- * without reaching either closer, which is what a crash loop actually looks
- * like; an explicitly recorded failure is a decision, not an accident, and
- * costs exactly one attempt.
+ * failure is not retried. `MAX_ATTEMPTS` is spent by workers that die without
+ * reaching either closer, and, from lesson 3.5, by the sweeper's own requeue,
+ * which advances the count with no worker involved at all so that a turn nothing
+ * ever invokes still reaches an ending; an explicitly recorded failure is a
+ * decision, not an accident, and costs exactly one attempt.
  *
  * `heartbeat_at` is refreshed here too, for the same reason `completeTurn`
  * refreshes it: neither matters, because both `done` and `failed` leave the

@@ -71,8 +71,12 @@ async function reinvoke(env: Env, turnId: string): Promise<void> {
     console.error(`sweep: re-invoke failed for turn ${turnId}`, err)
     return null
   })
-  // A resolved response is not a successful one: a rotated secret is a 401
-  // here, and swallowing it would make a permanently sweeping deploy look
-  // healthy in every log there is.
+  // A resolved response is not a successful one. It is not a rotated secret
+  // that shows up here, though: tier 3 is a background function, so it answers
+  // 202 whether or not the header matches, and a wrong secret is visible only
+  // in tier 3's own log. What a status check catches is a wrong SITE_URL, which
+  // is a 404, and a platform failure, which is a 5xx. Swallowing either would
+  // make a deploy that sweeps forever and re-invokes nothing look healthy in
+  // every log there is.
   if (res && !res.ok) console.error(`sweep: re-invoke for turn ${turnId} returned ${res.status}`)
 }

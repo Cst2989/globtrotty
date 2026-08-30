@@ -87,6 +87,14 @@ after the requeue; the worker that claims the reissued turn pays again for the
 same turn, so a long turn can be billed twice until the worker loop ticks a
 heartbeat on a timer.
 
+The attempt count is the sharper half of that. The requeue advances `attempts`,
+and the worker re-invoked for the reissued turn advances it again when it
+claims, so a live long turn spends two of its five attempts per ninety-second
+tick rather than one, and reaches `crash_loop` in about half the wall clock it
+otherwise would. At that point tier 4 writes the failure sentence into her
+thread and sets her conversation `failed` while workers are still running the
+turn. Both costs end when the worker loop starts ticking a heartbeat.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

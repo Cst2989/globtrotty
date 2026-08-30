@@ -52,10 +52,18 @@ export type SweepResult = {
  * has gone silent, and it gets requeued out from under the worker still running
  * it. That worker keeps going and pays for every model call it makes after the
  * requeue; the second worker that claims the reissued turn pays again for the
- * same turn, so one press is billed twice. Fixing the cause belongs to the
- * worker loop, not to this file; this arm ships anyway because a turn nobody
- * ever reaps is worse, but a deploy of this tag should expect that cost until
- * the worker loop starts ticking a heartbeat.
+ * same turn, so one press is billed twice.
+ *
+ * The sharper half of the same cost is the attempt count. The requeue below
+ * advances `attempts`, and the worker re-invoked for the reissued turn advances
+ * it again when it claims, so until the worker loop ticks a heartbeat a live
+ * long turn spends two of MAX_ATTEMPTS for every ninety-second tick it survives
+ * rather than one. It therefore reaches the crash arm above, which writes
+ * TURN_FAILED_MESSAGE into her thread and sets her conversation `failed` while
+ * workers are still running the turn, in about half the wall clock it otherwise
+ * would. Fixing the cause belongs to the worker loop, not to this file; this arm
+ * ships anyway because a turn nobody ever reaps is worse, but a deploy of this
+ * tag should expect both costs until the worker loop starts ticking a heartbeat.
  *
  * A turn failed `ambiguous_tool_call` (lesson 3.4) is `failed`, which sits
  * outside both arms of `stale`, so the sweeper never touches it, and never
@@ -167,20 +175,24 @@ export async function sweep(
      where (${stale}) and attempts < ${MAX_ATTEMPTS}`
 
   /**
-   * The requeue's only write is `status`, `queued_at` and `heartbeat_at`; it
-   * does not need to carry the fencing token to do its job. Flipping `status`
-   * off `'running'` is enough on its own, because every fenced write in
-   * src/repo/turns.ts matches on `attempts = claim.attempts and status =
-   * 'running'` together, so the worker that was holding this turn loses its
-   * claim the instant this statement commits, and the next claimTurn is what
-   * moves the token forward.
+   * The requeue writes four columns: `status`, `queued_at`, `heartbeat_at` and
+   * `attempts`. Only the first of them is doing the fencing. Every fenced write
+   * in src/repo/turns.ts matches on `attempts = claim.attempts and status =
+   * 'running'` together, so flipping `status` off `'running'` fails that
+   * predicate on its own, whatever the token says; the worker that was holding
+   * this turn loses its claim the instant this statement commits, and the next
+   * claimTurn is what moves the token forward for the worker that takes over.
+   * That is why a requeue never has to read or carry a claim's token to
+   * supersede it, and it stays true of the bump below rather than resting on it.
    *
-   * `attempts` is incremented here too, which changes what the column counts:
-   * not "times claimed" but "times tried". Without this a turn nobody ever
-   * invokes, a wrong SITE_URL, a rotated WORKER_SHARED_SECRET, tier 3 down, all
-   * of which produce zero claims, would sit at attempts = 0 and be requeued
-   * forever, holding her live-turn slot shut with no ending the crash arm above
-   * could ever reach. `heartbeat_at` is stamped fresh for the same reason
+   * The `attempts` increment is here for a different reason, and it changes what
+   * the column counts: not "times claimed" but "times tried". Without it a turn
+   * nobody ever invokes, a wrong SITE_URL, a rotated WORKER_SHARED_SECRET, tier
+   * 3 down, all of which produce zero claims, would sit at attempts = 0 and be
+   * requeued forever, holding her live-turn slot shut with no ending the crash
+   * arm above could ever reach. See the ceiling paragraph on sweep() for what
+   * this bump costs a live long turn while the worker loop is still missing.
+   * `heartbeat_at` is stamped fresh for the same reason
    * releaseForContinuation stamps it fresh: a stale beat left on a `queued` row
    * would sort a turn just handed back to the head of every future batch,
    * forever, by the `order by` below.
