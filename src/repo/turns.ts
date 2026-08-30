@@ -1,11 +1,100 @@
 import type postgres from 'postgres'
-import type { FailReason } from '../engine.js'
+import type { FailReason, TurnState } from '../engine.js'
 
 export type TurnInput = {
   turnId: string
   conversationId: string
   userId: string
   message: string
+}
+
+/**
+ * How many times one turn may be claimed before we stop trying. A turn that
+ * crashes its worker every time is a crash loop, and the fifth attempt costs
+ * exactly as much as the first four and produces the same nothing. Lesson 3.5's
+ * sweeper is what notices a turn stuck at this cap and ends it.
+ */
+export const MAX_ATTEMPTS = 5
+
+/**
+ * What one worker holds while it owns a turn. `attempts` is the fencing token:
+ * it is not a diagnostic counter, it is the value every subsequent write carries
+ * to prove it comes from the run that currently owns this row.
+ */
+export type Claim = {
+  turnId: string
+  conversationId: string
+  userId: string
+  attempts: number
+  state: TurnState | null
+}
+
+export class FencedError extends Error {
+  constructor(turnId: string) {
+    super(`Turn ${turnId} was claimed by another worker; this worker is superseded`)
+    this.name = 'FencedError'
+  }
+}
+
+type ClaimRow = {
+  id: string
+  conversation_id: string
+  user_id: string
+  attempts: number
+  state: TurnState | null
+}
+
+/**
+ * One statement whose WHERE names the state we are leaving. Postgres
+ * re-evaluates that predicate against the row's current state at lock time, so
+ * of two concurrent claims exactly one matches and the other updates zero rows
+ * and gets null back.
+ *
+ * `select ... for update skip locked` is what people reach for here and it
+ * protects less than its name suggests: it spreads a batch of claims across
+ * workers, which is a throughput property, not a safety one. The safety is the
+ * status re-check. A read and then a separate write in application code has a
+ * gap between the two statements, and that gap is where the second worker walks
+ * off owning a turn the first already owns.
+ *
+ * Returns null rather than throwing for a turn somebody else owns, because
+ * "another worker has this" is the ordinary case on a platform that retries
+ * invocations, and the correct response is to walk away quietly.
+ */
+export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Claim | null> {
+  const rows = await sql<ClaimRow[]>`
+    update course.turns
+       set status = 'running',
+           started_at = coalesce(started_at, now()),
+           heartbeat_at = now(),
+           attempts = attempts + 1
+     where id = ${turnId}
+       and attempts < ${MAX_ATTEMPTS}
+       and status = 'queued'
+    returning id, conversation_id, user_id, attempts, state`
+  const row = rows[0]
+  if (!row) return null
+  return {
+    turnId: row.id,
+    conversationId: row.conversation_id,
+    userId: row.user_id,
+    attempts: row.attempts,
+    state: row.state ?? null,
+  }
+}
+
+/**
+ * Saves progress and refreshes the lease, guarded by the fencing token. Zero
+ * rows back is not an empty update, it is proof that this worker no longer owns
+ * the turn, so it throws rather than returning quietly: a superseded worker that
+ * carries on doing work is the thing this whole file exists to stop.
+ */
+export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
+  const rows = await sql`
+    update course.turns set state = ${sql.json(state)}, heartbeat_at = now()
+     where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+    returning id`
+  if (rows.length === 0) throw new FencedError(claim.turnId)
 }
 
 /**
@@ -21,13 +110,19 @@ export type TurnInput = {
  * worker would then run "two, and I forgot the crib" against a turn opened for
  * "one". Inside one transaction that `order by` is not even stable, because
  * every row shares one transaction_timestamp().
+ *
+ * The status filter accepts a claimed turn as well as a queued one, because
+ * from lesson 3.1 the worker claims before it loads and a claim sets 'running'.
+ * A turn that has already finished is still excluded, so a stray invocation of
+ * a `done` turn reads nothing; `claimTurn` refuses that turn first anyway, and
+ * this filter is the second of the two answers rather than the only one.
  */
 export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<TurnInput | null> {
   const rows = await sql`
     select t.id, t.conversation_id, t.user_id, m.content
       from course.turns t
       join course.messages m on m.turn_id = t.id and m.role = 'user'
-     where t.id = ${turnId} and t.status = 'queued'`
+     where t.id = ${turnId} and t.status in ('queued', 'running')`
   const row = rows[0]
   if (!row) return null
   return {

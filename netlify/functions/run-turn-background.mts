@@ -4,7 +4,7 @@ import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { finishTurn, loadTurnInput } from '../../src/repo/turns.js'
+import { claimTurn, finishTurn, loadTurnInput } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
 import { mockRunner } from '../../src/tools.js'
@@ -38,6 +38,13 @@ export default async (req: Request): Promise<Response> => {
   const startedMs = Date.now()
   const sql = connect(env.DATABASE_URL, 2)
   try {
+    // Claim first, load second. The claim is the exclusion; the load is just a
+    // read. A second invocation of this same turn, from Netlify's own retry or
+    // from lesson 3.5's sweeper, gets null here and walks away without running
+    // anything, which is why it answers 200 rather than an error: nothing went
+    // wrong, somebody else has the work.
+    const claim = await claimTurn(sql, decision.turnId)
+    if (!claim) return new Response('already claimed', { status: 200 })
     const input = await loadTurnInput(sql, decision.turnId)
     if (!input) return new Response('nothing to do', { status: 200 })
     const result = await turn(
