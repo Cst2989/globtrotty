@@ -1,8 +1,10 @@
 /**
  * A narrated tour of the harness, against the real database.
  *
- * There is no model here and no supplier. Every claim it prints is about the
- * layer underneath both, which is exactly why it can run with no API key:
+ * There is no model here and no live supplier: the last scenario runs the gates
+ * and the cashier against the mock, which needs no key either. Every claim it
+ * prints is about the layer underneath the model, which is exactly why it can
+ * run with no API key:
  *
  *   npm run demo
  *
@@ -18,14 +20,21 @@
  */
 import 'dotenv/config'
 import { config } from 'dotenv'
+import { cashierRunner } from '../src/cashier.js'
 import { connect } from '../src/db.js'
 import type { TurnState } from '../src/engine.js'
+import { constraintsFromNotebook } from '../src/gates/pipeline.js'
+import { proposalRunner } from '../src/gates/runner.js'
 import { submitMessage } from '../src/handler.js'
 import { DEMO_SCRIPT_USER } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { emptyNotebook } from '../src/notebook.js'
+import { decideProposal } from '../src/repo/proposals.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
+import { mockSuppliers } from '../src/supplier/mock.js'
 import { sweep } from '../src/sweeper.js'
+import { corpusRunner, supplierRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 
 config({ path: '.env.local', override: false })
@@ -78,6 +87,10 @@ async function turnRow(id: string) {
 }
 
 async function cleanup() {
+  await sql`delete from course.link_clicks where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.proposals where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.gate_results where user_id = ${DEMO_SCRIPT_USER}`
+  await sql`delete from course.tool_results where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.model_calls where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.messages where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.turns where user_id = ${DEMO_SCRIPT_USER}`
@@ -188,6 +201,83 @@ async function main() {
   note('all three ceilings are read before every step. Only the conversation read')
   note('fails closed: a missing daily row and a sum over no rows are both honestly')
   note('zero, so neither can tell "nothing spent" from "no answer".')
+
+  head('References in, a link out',
+       'the model sends no price and no URL, and the link_clicks row exists before she is given the link')
+  const suppliers = mockSuppliers()
+  // Its own conversation, and a turn a worker has actually CLAIMED. The corpus
+  // write is fenced on that claim (src/repo/toolResults.ts, lesson 4.3), so a
+  // search run outside one records nothing at all and the gates would have
+  // nothing to rehydrate. A fresh thread rather than a third press on the first
+  // one, because scenario 4 deliberately left that conversation holding a live
+  // turn.
+  const booking = await submitMessage(deps, {
+    userId: DEMO_SCRIPT_USER, conversationId: null,
+    message: 'Book the Faro trip.', idempotencyKey: 'demo-3',
+  })
+  const bookingClaim = (await claimTurn(sql, booking.turnId!))!
+  const ctx = {
+    conversationId: booking.conversationId, userId: DEMO_SCRIPT_USER, turnId: bookingClaim.turnId,
+  }
+  // The chain tier 3 builds (netlify/functions/run-turn-background.mts), minus
+  // ledgerRunner: the ledger is scenario 3's subject rather than this one's.
+  const run = cashierRunner(
+    sql, ctx,
+    { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+    proposalRunner(
+      sql,
+      { ...ctx, notebook: constraintsFromNotebook(emptyNotebook()), now: () => new Date() },
+      corpusRunner(sql, bookingClaim, supplierRunner(suppliers)),
+    ),
+  )
+
+  step('the model searches, and every result lands in course.tool_results...')
+  const searched = await run('search_flights', {
+    from: 'BER', to: 'FAO', departureDate: '2026-09-12', returnDate: '2026-09-19',
+    adults: 2, children: 0,
+  }, 'demo-search')
+  const offers = JSON.parse(searched.content) as { sourceId: string }[]
+  ok(`${offers.length} offers recorded: ${offers.map((o) => o.sourceId).join(', ')}`)
+
+  step('it proposes two of them BY REFERENCE. There is no price field to tamper with...')
+  const proposed = await run('propose_itinerary', {
+    refs: [
+      { sourceId: offers[0]!.sourceId, quantity: 1, slot: 'outbound' },
+      { sourceId: offers[1]!.sourceId, quantity: 1, slot: 'inbound' },
+    ],
+  }, 'demo-propose')
+  const proposal = JSON.parse(proposed.content) as
+    { ok: boolean; proposalId: string; total: { minor: string; currency: string } }
+  ok(`gates passed. The SERVER's total is ${proposal.total.minor} ${proposal.total.currency}, `
+   + `read back out of the corpus; proposal ${proposal.proposalId.slice(0, 8)}`)
+  const gates = await sql<{ gate: string; passed: boolean | null }[]>`
+    select gate, passed from course.gate_results
+     where conversation_id = ${booking.conversationId} order by gate`
+  ok(`course.gate_results: ${gates.map((g) => `${g.gate}=${g.passed ?? 'not evaluated'}`).join(' ')}`)
+  note('budget and dates read "not evaluated" rather than "passed": nothing stores')
+  note('her notebook yet, so this script and tier 3 both derive constraints from')
+  note('an empty one, and a gate that never fired must not count as a pass.')
+
+  step('she accepts. In production that click is the proposal card (lesson 5.7);')
+  step('this script answers for her, in process, so the demo can reach a link...')
+  await decideProposal(sql, {
+    proposalId: proposal.proposalId, conversationId: booking.conversationId, decision: 'accept',
+  })
+
+  const handed = await run('hand_off_to_booking', { proposalId: proposal.proposalId }, 'demo-handoff')
+  const handOff = JSON.parse(handed.content) as
+    { ok: boolean; verified: boolean; links: { sourceId: string; url: string }[] }
+  ok(`verified ${handOff.verified}, ${handOff.links.length} links, every one on an allowlisted host`)
+  for (const l of handOff.links) note(l.url)
+  const clicks = await sql<{ url: string }[]>`
+    select url from course.link_clicks where proposal_id = ${proposal.proposalId} order by seq`
+  console.log(clicks.length === handOff.links.length
+      && clicks.every((c, i) => c.url === handOff.links[i]!.url)
+    ? `   ok  course.link_clicks holds the ${clicks.length} exact URLs she was given, `
+      + 'written BEFORE she was given them.'
+    : '   XX  a stored URL differs from the one emitted.')
+  note('that write is the point of no return: after it nothing may mark the turn')
+  note('failed, which is what src/worker.ts and src/sweeper.ts now both check for.')
 
   console.log(`\n== done ${'='.repeat(64)}`)
   note('cleaning up the demo rows...')

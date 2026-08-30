@@ -616,7 +616,8 @@ describeDb('proposalRunner', () => {
         refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }],
       }, 's1-b0')
       expect(outcome.isError).toBe(false)
-      const body = JSON.parse(outcome.content) as { ok: boolean; total: Record<string, string> }
+      const body = JSON.parse(outcome.content) as
+        { ok: boolean; proposalId: string; total: Record<string, string> }
       expect(body.ok).toBe(true)
       expect(body.total.minor).toBe(items[0]!.price.minor.toString())
       // The total reaches the model in the SAME shape as every other price on
@@ -630,6 +631,31 @@ describeDb('proposalRunner', () => {
       const onTheWire = itemForModel(items[0]!).price as Record<string, string>
       expect(Object.keys(body.total).sort()).toEqual(Object.keys(onTheWire).sort())
       expect(body.total.formatted).toBe(onTheWire.formatted)
+      // The id the model quotes back to `hand_off_to_booking` (lesson 4.6). It
+      // is the row's id and not a number the model chose, which is the whole
+      // reason the cashier reads a stored proposal rather than an itinerary.
+      expect(body.proposalId).toMatch(/^[0-9a-f-]{36}$/)
+    })
+  })
+
+  it('writes no proposal row when the gates reject', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId } = await seed(sql, 25)
+      const run = proposalRunner(
+        sql,
+        { conversationId, userId: USER, turnId: null, notebook, now: () => NOW },
+        async () => ({ content: 'not reached', isError: true }),
+      )
+      const outcome = await run('propose_itinerary', {
+        refs: [{ sourceId: 'GHOST', quantity: 1, slot: 'flight' }],
+      }, 's1-b0')
+      expect(outcome.isError).toBe(true)
+      // A rejected proposal is not something she can be asked to accept, so
+      // there is nothing for the cashier's precondition to read. A row here
+      // would be a proposal id the model could hand off against a set of
+      // references the gates refused.
+      expect(await sql`select 1 from course.proposals where conversation_id = ${conversationId}`)
+        .toHaveLength(0)
     })
   })
 

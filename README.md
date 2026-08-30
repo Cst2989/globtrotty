@@ -244,11 +244,41 @@ with a real budget in the context. Module 5.2 moves
 the registry inside the harness, where the turn's own notebook is in scope, and
 closes both.
 
-What is still missing is the last few seconds. Every gate reads what the corpus
-holds, and the freshness gate's promise is only that the price was quoted within
-its supplier's window: an item fifteen minutes old passes, and fifteen minutes
-is long enough for a fare to move. Nothing re-asks the supplier before she is
-handed a link. Lesson 4.6 is the cashier.
+From lesson 4.6 there is a cashier. It refuses unless a stored proposal row for
+this conversation carries `decision = 'accept'` decided within thirty minutes;
+it re-quotes every item against a supplier that says it can re-quote, and blocks
+on any item it could not confirm, because unknown is not unchanged; it compares
+per item, on flight numbers and currency and price basis as well as on price,
+with an explicit half a percent tolerance, because a total that fell when a
+refundable fare became basic economy is a downgrade she never accepted; where a
+supplier says it CANNOT re-quote, it does not claim verification and the copy
+becomes disclosure with the price's age; it builds every link itself from
+`(supplier, sourceId, tracking ref)` against a fixed template and an allowlisted
+host, minting the `link_clicks` id first and embedding it as the sub-id; and it
+checks the same global ceiling lesson 2.6 built, now standing between the model
+and a booking link.
+
+Link emission is the point of no return. `course.link_clicks` rows are written
+before the links are returned, and both places that could contradict them read
+that table first: `runTurn`'s catch completes such a turn with the link message
+instead of failing it, and the sweeper's crash arm reaps it without writing
+`TURN_FAILED_MESSAGE` and sends the conversation back to `awaiting_user`.
+
+Three residuals, all of them named where they live.
+
+Nothing in production sets `decision`. `decideProposal` is written and tested,
+and its production caller is the accept button on a proposal card, which is
+lesson 5.7: this module has no surface for a person's click. `npm run demo`'s
+sixth scenario answers for her in process, so the keyless proof does reach a
+real link, a real `course.link_clicks` row and a real hand-off message; what is
+missing is her own click, not the path behind it.
+
+A worker that dies OUTRIGHT, so that even the catch does not run, leaves the
+sweeper to reap the turn silently. Her links exist, in `course.link_clicks`, and
+she was never shown them; reading them is an operator step, like the `pending`
+tool-call row from lesson 3.4.
+
+The affiliate id in every link is a placeholder, not an account.
 
 ## What is next
 

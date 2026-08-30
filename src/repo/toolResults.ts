@@ -165,3 +165,32 @@ export async function rehydrate(
   }
   return out
 }
+
+/**
+ * The search that found each of these items, newest first, for the cashier's
+ * re-quote.
+ *
+ * `Supplier.quote(sourceId, params)` re-runs the stored search and finds by
+ * native id (src/supplier/kiwi.ts, src/supplier/searchapi.ts), so a re-quote
+ * that could not reproduce its own search would have to invent one, and an
+ * invented search is a different search: the same id may not be in its results
+ * at all, and the cashier would call a live fare gone.
+ *
+ * A separate reader rather than a field on `SupplierItem`, because the params
+ * are a property of the FETCH and not of the item: two searches can legitimately
+ * return the same item, and only the corpus knows which one this row came from.
+ */
+export async function searchParamsFor(
+  sql: postgres.Sql,
+  conversationId: string,
+  sourceIds: string[],
+): Promise<Map<string, SearchParams>> {
+  if (sourceIds.length === 0) return new Map()
+  const rows = await sql<{ source_id: string; search_params: SearchParams }[]>`
+    select distinct on (source_id) source_id, search_params
+      from course.tool_results
+     where conversation_id = ${conversationId}
+       and source_id = any(${sourceIds})
+     order by source_id, fetched_at desc, seq desc`
+  return new Map(rows.map((r) => [r.source_id, r.search_params]))
+}

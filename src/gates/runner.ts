@@ -1,5 +1,6 @@
 import type postgres from 'postgres'
 import { formatMoney } from '../money.js'
+import { recordProposal } from '../repo/proposals.js'
 import { runGates } from './pipeline.js'
 import type { NotebookConstraints } from './notebookConstraints.js'
 import type { ToolRunner } from '../tools.js'
@@ -77,9 +78,20 @@ export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: T
         isError: true,
       }
     }
+    // The row the cashier's precondition reads. Written from the refs the gates
+    // VALIDATED, never from the raw input: the row is our record of what we
+    // approved, not of what we were asked to approve. Written only on a pass,
+    // because a rejected proposal is not something she can be asked to accept.
+    const proposalId = await recordProposal(sql, {
+      conversationId: ctx.conversationId,
+      userId: ctx.userId,
+      turnId: ctx.turnId,
+      refs: outcome.items.map((i) => i.ref),
+    })
     return {
       content: JSON.stringify({
         ok: true,
+        proposalId,
         // The server's own total, in minor units and formatted, the same shape
         // every price on this wire takes (src/tools.ts's itemForModel), through
         // the same formatter.

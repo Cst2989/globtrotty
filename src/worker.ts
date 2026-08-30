@@ -1,9 +1,11 @@
 import type postgres from 'postgres'
+import { handOffMessage } from './cashier.js'
 import { decideNext, type FailReason, type Limits, type TurnState } from './engine.js'
 import { classifyError } from './errors.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
+import { emittedLinks } from './repo/linkClicks.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import {
@@ -149,14 +151,49 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
   // Accumulated across every step of this run, so whichever exit fires records
   // what the turn actually spent rather than always writing zero.
   const turnSpend = { total: 0n }
+  // The last state the loop reached, so the catch below can complete a turn
+  // that already emitted a booking link rather than failing it. A box for the
+  // same reason turnSpend is one: `loop` owns it and `runTurn`'s catch has to
+  // be able to read it after `loop` has thrown.
+  const progress = { state: emptyState() }
 
   try {
-    await loop(deps, claim, turnSpend)
+    await loop(deps, claim, turnSpend, progress)
   } catch (err) {
     // FencedError returns FIRST and is never classified. A superseded worker
     // must write nothing at all, and stamping a reason on a turn it no longer
     // owns would overwrite the run that took it over.
     if (err instanceof FencedError) return
+    // The point of no return (src/cashier.ts, rule 6). If this turn already
+    // emitted a booking link, she may be on a supplier's checkout page right
+    // now, and marking the turn failed would tell her a request that DID
+    // something did nothing. Nothing is re-quoted here and nothing is rebuilt:
+    // the rows carry the exact URLs and whether they were verified, so the same
+    // sentence can be said again. Everything after emission is best effort,
+    // which is why a failure to read or write here is logged and the original
+    // error still propagates.
+    const emitted = await emittedLinks(sql, claim.turnId).catch((e: unknown) => {
+      console.error(`emittedLinks for turn ${claim.turnId} failed`, e)
+      return { links: [], verified: false, quotedAt: null }
+    })
+    if (emitted.links.length > 0) {
+      const now = new Date(deps.now())
+      await completeTurn(sql, claim, {
+        state: progress.state,
+        // The age comes off course.link_clicks.quoted_at, never off the clock.
+        // An unverified message rebuilt against `now` would tell her a price
+        // quoted four hours ago was current just now, which is the untrue
+        // reassurance this whole lesson refuses. `?? now` is unreachable under
+        // the length check above and exists only because the type admits a null
+        // for the no-rows case.
+        agentMessage: handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now),
+        parked: true,
+        spendMicros: turnSpend.total,
+      }).catch((e: unknown) => {
+        console.error(`completeTurn after link emission for turn ${claim.turnId} failed`, e)
+      })
+      throw err
+    }
     // Everything else is classified rather than recorded as one word. There is
     // no retry mechanism for this to feed: failTurn is terminal and the sweeper
     // only ever looks at queued and running rows. It changes what the row SAYS,
@@ -286,9 +323,18 @@ async function continueLater(
   })
 }
 
-async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }): Promise<void> {
+async function loop(
+  deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }, progress: { state: TurnState },
+): Promise<void> {
   const { sql, limits } = deps
   let state: TurnState = claim.state ?? emptyState()
+  // Reported after every assignment to `state`, so `runTurn`'s catch can
+  // complete a turn that emitted a link with the transcript it actually
+  // reached. The DECLARATION counts as one of the three: a RESUMED turn
+  // already carries `claim.state` and skips the seeding block below entirely,
+  // so without this line a resumed turn that emitted a link and then died
+  // would be completed with an empty state.
+  progress.state = state
 
   if (state.messages.length === 0) {
     // A fresh claim of a turn nobody has worked yet: seed the transcript from
@@ -306,6 +352,7 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       ...state,
       messages: input ? [{ role: 'user', content: input.message }] : [],
     }
+    progress.state = state
   }
 
   for (;;) {
@@ -447,6 +494,7 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
       step: state.step + 1,
       messages: [...state.messages, { role: 'tool', content: JSON.stringify(result) }],
     }
+    progress.state = state
     await saveTurnState(sql, claim, state)
   }
 }

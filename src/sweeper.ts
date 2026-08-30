@@ -71,6 +71,18 @@ export type SweepResult = {
  * being at risk from THIS arm; that is a fencing and retry-budget question
  * `src/worker.ts` and `src/retry.ts` answer, not a gap in this sweeper.
  *
+ * A turn that already emitted a booking link is reaped like any other, and it
+ * is not told about. Link emission is the point of no return (src/cashier.ts):
+ * she may be on a supplier's checkout page, so TURN_FAILED_MESSAGE would be
+ * false, and the conversation goes back to `awaiting_user` rather than
+ * `failed`. The sweeper cannot rebuild the hand-off sentence, because that
+ * would mean assembling it in SQL from course.link_clicks, so it writes
+ * nothing at all rather than something that contradicts what she was already
+ * shown. src/worker.ts's own catch DOES rebuild it and is the path that
+ * normally runs; this arm only sees a turn whose worker died outright. The
+ * residual is named in README.md: a link she was never shown is in
+ * course.link_clicks and reading it is an operator step.
+ *
  * A turn failed `ambiguous_tool_call` (lesson 3.4) is `failed`, which sits
  * outside both arms of `stale`, so the sweeper never touches it, and never
  * should: the `pending` row it leaves behind in `course.tool_calls` cannot be
@@ -181,9 +193,14 @@ export async function sweep(
     said as (
       insert into course.messages (conversation_id, user_id, turn_id, role, content)
       select r.conversation_id, r.user_id, r.id, 'agent', ${TURN_FAILED_MESSAGE} from reap r
+       where not exists (select 1 from course.link_clicks l where l.turn_id = r.id)
     ),
     convo as (
-      update course.conversations c set status = 'failed', updated_at = now()
+      update course.conversations c
+         set status = case
+               when exists (select 1 from course.link_clicks l where l.turn_id = r.id)
+               then 'awaiting_user' else 'failed' end,
+             updated_at = now()
         from reap r where c.id = r.conversation_id and c.user_id = r.user_id and c.status = 'working'
     )
     select id from reap`

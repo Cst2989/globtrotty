@@ -7,9 +7,11 @@ describe('tools', () => {
   const run = mockRunner()
   it('describes every tool with a JSON schema the API accepts', () => {
     // Literal, and it grows with the product: `propose_itinerary` joined in
-    // lesson 4.5. A list derived from TOOLS would assert only that TOOLS equals
-    // itself, and this is the one place a tool added by accident is caught.
-    expect(TOOLS.map((t) => t.name)).toEqual(['search_flights', 'search_hotels', 'propose_itinerary'])
+    // lesson 4.5 and `hand_off_to_booking` in lesson 4.6. A list derived from
+    // TOOLS would assert only that TOOLS equals itself, and this is the one
+    // place a tool added by accident is caught.
+    expect(TOOLS.map((t) => t.name))
+      .toEqual(['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
     for (const tool of TOOLS) expect(tool.input_schema.type).toBe('object')
   })
   it('publishes the quantity bounds the gate boundary actually enforces', () => {

@@ -26,7 +26,7 @@ describe('desks', () => {
   })
   it('lets the planning desk search and propose, and nothing else', () => {
     expect(toolsFor(loadDesk('planning')).map((t) => t.name))
-      .toEqual(['search_flights', 'search_hotels', 'propose_itinerary'])
+      .toEqual(['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
   })
   it('seats the front desk on Haiku and the planning desk on Opus', () => {
     expect(loadDesk('front').seat.model).toBe('claude-haiku-4-5-20251001')

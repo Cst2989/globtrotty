@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import 'dotenv/config'
 import { config } from 'dotenv'
+import { cashierRunner } from '../src/cashier.js'
 import { liveClient } from '../src/client.js'
 import { newConversation, turn } from '../src/conversation.js'
 import { connect } from '../src/db.js'
@@ -63,6 +64,7 @@ try {
     // command produces records `budget` and `dates` as not evaluated with a
     // reason. The day a conversation stores a notebook, this line reads that
     // one and nothing else in the chain moves.
+    const ctx = { conversationId, userId: DEMO_USER, turnId }
     const notebook = constraintsFromNotebook(emptyNotebook())
     const result = await turn(
       newConversation(conversationId),
@@ -70,18 +72,32 @@ try {
       liveClient(),
       // The same chain tier 3 runs (netlify/functions/run-turn-background.mts),
       // minus the ledger: one process, no crash to resume from, and nothing
-      // here replays a tool call. The other three layers are not optional. The
-      // planning desk is handed `propose_itinerary` on every path (src/desks.ts)
-      // and is told in its prompt to use it, so a chain without `proposalRunner`
-      // answers the model "Unknown tool propose_itinerary" from the innermost
-      // link and this command can search but never propose. The corpus records
-      // what a search returned, and the searches ask for the SAME currency the
-      // gates expect, off the same constraints object, so a corpus and the
-      // currency gate cannot disagree by construction.
-      proposalRunner(
-        sql,
-        { conversationId, userId: DEMO_USER, turnId, notebook, now: () => new Date() },
-        corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+      // here replays a tool call.
+      //
+      // All four wrappers, not just the corpus one. The planning desk's tool
+      // list is `DESK_TOOLS.planning` (src/desks.ts) and it holds
+      // `propose_itinerary` and `hand_off_to_booking`, so a chain that stopped
+      // at `supplierRunner` would publish two tools to the model and answer
+      // "Unknown tool" to both. That is not a missing feature the model can
+      // route around: it reads as an outage, and the reply it writes tells her
+      // our proposal system is down. The chain is the product's, so this script
+      // runs the product's. The searches ask for the SAME currency the gates
+      // expect, off the same constraints object, so a corpus and the currency
+      // gate cannot disagree by construction.
+      //
+      // The notebook is empty here for the same reason it is empty in tier 3:
+      // nothing on this branch stores one, and `turn()` builds its own inside
+      // itself while this runner is constructed outside it. So `budget` and
+      // `dates` record as not evaluated on every proposal this command makes,
+      // which is what the README says of the path a reader can run.
+      cashierRunner(
+        sql, ctx,
+        { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+        proposalRunner(
+          sql,
+          { ...ctx, notebook, now: () => new Date() },
+          corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+        ),
       ),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in

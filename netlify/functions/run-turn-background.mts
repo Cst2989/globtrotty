@@ -1,3 +1,4 @@
+import { cashierRunner } from '../../src/cashier.js'
 import { liveClient } from '../../src/client.js'
 import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
@@ -110,26 +111,40 @@ export default async (req: Request): Promise<Response> => {
     // drives proposalRunner, this exact seam, with a real budget in it
     // (test/gate-pipeline.test.ts).
     const notebook = constraintsFromNotebook(emptyNotebook())
-    // Four wrappers, outermost first. The ledger decides whether the tool runs
-    // at all (lesson 3.4); the proposal runner puts a proposal through the
-    // gates (lesson 4.5); the corpus records what a search returned (lesson
-    // 4.3); the supplier runner makes the call. Each layer knows one thing, and
-    // the live adapters get all of it by being handed to the innermost one.
+    const gateCtx = { conversationId, userId, turnId }
+    // ONE pair, built once and shared by the searches and by the cashier's
+    // re-quote. A cashier re-quoting against a different supplier instance than
+    // the one that searched would be checking one system's price against
+    // another's, and the mock's own `quote` keeps the results of the search it
+    // just ran (src/supplier/mock.ts), so two instances would not even be
+    // asking the same question.
+    const suppliers = liveSuppliers().suppliers
+    // Five wrappers, outermost first. The ledger decides whether the tool runs
+    // at all (lesson 3.4); the cashier re-quotes and emits the links (lesson
+    // 4.6); the proposal runner puts a proposal through the gates (lesson 4.5);
+    // the corpus records what a search returned (lesson 4.3); the supplier
+    // runner makes the call. Each layer knows one thing, and the live adapters
+    // get all of it by being handed to the innermost one.
     // The two that WRITE fenced take the same claim, because a worker this
     // driver has already lost cannot record a tool call and cannot append to
     // the corpus either; `gate_results` is an observation and is deliberately
-    // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids.
+    // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids,
+    // and the cashier takes the same three for the same reason.
     const baseRunner = ledgerRunner(
       sql, claim,
-      proposalRunner(
-        sql,
-        { conversationId, userId, turnId, notebook, now: () => new Date() },
-        // The searches ask for the SAME currency the gates expect, off the same
-        // constraints object, so a corpus and the currency gate cannot disagree
-        // by construction. Null on this branch, which supplierRunner reads as
-        // TRIP_CURRENCY (lesson 4.5); a stored USD budget makes both sides USD
-        // in one move.
-        corpusRunner(sql, claim, supplierRunner(liveSuppliers().suppliers, notebook.currency)),
+      cashierRunner(
+        sql, gateCtx,
+        { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+        proposalRunner(
+          sql,
+          { ...gateCtx, notebook, now: () => new Date() },
+          // The searches ask for the SAME currency the gates expect, off the same
+          // constraints object, so a corpus and the currency gate cannot disagree
+          // by construction. Null on this branch, which supplierRunner reads as
+          // TRIP_CURRENCY (lesson 4.5); a stored USD budget makes both sides USD
+          // in one move.
+          corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+        ),
       ),
     )
     const runner: ToolRunner = async (name, input, callId, sig) => {

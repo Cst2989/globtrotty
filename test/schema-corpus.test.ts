@@ -232,3 +232,101 @@ describeDb('0012 the gate_results verdicts, an audit contract', () => {
     })
   })
 })
+
+describeDb('0013 proposals and link clicks', () => {
+  it('refuses a decision with no time, and a time with no decision', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const insert = (decision: string | null, decidedAt: string | null) =>
+        sql.begin((tx) => tx`
+          insert into course.proposals (conversation_id, user_id, refs, decision, decided_at)
+          values (${c!.id}, ${USER}, ${sql.json([])}, ${decision}, ${decidedAt})`)
+      await expect(insert('accept', null)).rejects.toThrow(/check constraint/i)
+      await expect(insert(null, '2026-08-16T12:00:00Z')).rejects.toThrow(/check constraint/i)
+      await expect(insert('maybe', '2026-08-16T12:00:00Z')).rejects.toThrow(/check constraint/i)
+      // Both null is the state every proposal starts in.
+      await insert(null, null)
+      const [ok] = await sql`select 1 as ok`
+      expect(ok!.ok).toBe(1)
+    })
+  })
+
+  it('refuses two links for one item of one proposal', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const [p] = await sql`insert into course.proposals (conversation_id, user_id, refs)
+                            values (${c!.id}, ${USER}, ${sql.json([])}) returning id`
+      const link = (id: string, ref: string) => sql`
+        insert into course.link_clicks
+          (id, proposal_id, user_id, item_id, supplier, url, tracking_ref, quoted_minor,
+           currency, verified, quoted_at)
+        values (${id}, ${p!.id}, ${USER}, 'ITEM', 'mock', 'https://example.invalid/x',
+                ${ref}, 1, 'EUR', true, now())`
+      await link(randomUUID(), 'ref-1')
+      // A second hand-off of the same proposal is a duplicate, not a second
+      // offer, and this is what makes emission idempotent underneath the ledger
+      // rather than only alongside it.
+      await expect(sql.begin(() => link(randomUUID(), 'ref-2'))).rejects.toThrow(/duplicate key|unique/i)
+    })
+  })
+
+  it('refuses two clicks sharing one tracking ref', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const [p] = await sql`insert into course.proposals (conversation_id, user_id, refs)
+                            values (${c!.id}, ${USER}, ${sql.json([])}) returning id`
+      const link = (item: string, ref: string) => sql`
+        insert into course.link_clicks
+          (id, proposal_id, user_id, item_id, supplier, url, tracking_ref, quoted_minor,
+           currency, verified, quoted_at)
+        values (${randomUUID()}, ${p!.id}, ${USER}, ${item}, 'mock', 'https://example.invalid/x',
+                ${ref}, 1, 'EUR', true, now())`
+      await link('A', 'shared-ref')
+      // Module 7 lands a reported conversion on this column. A ref resolving to
+      // two clicks is a conversion nobody can attribute.
+      await expect(sql.begin(() => link('B', 'shared-ref'))).rejects.toThrow(/duplicate key|unique/i)
+    })
+  })
+
+  it('cascades proposals and their links when the conversation is deleted', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const [p] = await sql`insert into course.proposals (conversation_id, user_id, refs)
+                            values (${c!.id}, ${USER}, ${sql.json([])}) returning id`
+      await sql`insert into course.link_clicks
+                  (id, proposal_id, user_id, item_id, supplier, url, tracking_ref, quoted_minor,
+           currency, verified, quoted_at)
+                values (${randomUUID()}, ${p!.id}, ${USER}, 'A', 'mock', 'https://example.invalid/x',
+                        ${randomUUID()}, 1, 'EUR', true, now())`
+      await sql`insert into course.gate_results (conversation_id, user_id, proposal_id, gate, passed)
+                values (${c!.id}, ${USER}, ${p!.id}, 'provenance', true)`
+      await sql`delete from course.conversations where id = ${c!.id}`
+      expect(await sql`select 1 from course.proposals where id = ${p!.id}`).toHaveLength(0)
+      expect(await sql`select 1 from course.link_clicks where proposal_id = ${p!.id}`).toHaveLength(0)
+      expect(await sql`select 1 from course.gate_results where conversation_id = ${c!.id}`).toHaveLength(0)
+    })
+  })
+
+  it('leaves no foreign-key child column in the course schema unindexed', async () => {
+    await withTestDb(async (sql) => {
+      // The catalogue-wide audit rather than a hand-kept list of tables. main
+      // filed this finding against three tables and a re-run turned up a fourth
+      // in the same migration with the same defect: the enumeration was the
+      // bug. An unindexed FK child column added anywhere from here on fails
+      // this rather than waiting for somebody to think to look.
+      const rows = await sql<{ child: string }[]>`
+        select c.conrelid::regclass::text || '.' || a.attname as child
+          from pg_constraint c
+          join unnest(c.conkey) with ordinality k(attnum, ord) on true
+          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+         where c.contype = 'f'
+           and c.connamespace = 'course'::regnamespace
+           and k.ord = 1
+           and not exists (
+             select 1 from pg_index i where i.indrelid = c.conrelid and i.indkey[0] = a.attnum
+           )
+         order by child`
+      expect(rows.map((r) => r.child)).toEqual([])
+    })
+  })
+})

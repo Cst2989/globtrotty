@@ -76,6 +76,10 @@ const ProposeInput = z.object({
   })).min(1).max(24).describe('The items you propose, as references. There is no price field: the server reads every price back out of its own record of the search'),
 })
 
+const HandOffInput = z.object({
+  proposalId: z.string().describe('The id propose_itinerary returned for the proposal she accepted'),
+})
+
 /** Every tool the product owns, in one list; a desk sees a subset (lesson 1.6). */
 export const TOOLS: Tool[] = [
   {
@@ -92,6 +96,11 @@ export const TOOLS: Tool[] = [
     name: 'propose_itinerary',
     description: 'Propose a set of search results as her trip. Send references only: {sourceId, quantity, slot}. Never send a price, a total or a name; the server reads all of those from its own record of the search and will reject a proposal that carries any of them. Returns the server-computed total when every check passes, and the list of problems when they do not.',
     input_schema: z.toJSONSchema(ProposeInput) as Tool['input_schema'],
+  },
+  {
+    name: 'hand_off_to_booking',
+    description: 'Hand her over to the supplier to book a proposal she has accepted. Send the proposal id and nothing else: the server re-checks every price with the supplier, builds every link itself, and refuses if anything moved or could not be confirmed. Returns the links and the exact wording to show her.',
+    input_schema: z.toJSONSchema(HandOffInput) as Tool['input_schema'],
   },
 ]
 

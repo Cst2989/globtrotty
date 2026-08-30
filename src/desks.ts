@@ -20,7 +20,7 @@ export type Desk = {
 /** The doors out of each desk. The front desk has none, so an FAQ can never start a search. */
 export const DESK_TOOLS: Record<DeskName, string[]> = {
   front: [],
-  planning: ['search_flights', 'search_hotels', 'propose_itinerary'],
+  planning: ['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'],
 }
 
 const DESK_SEATS: Record<DeskName, Seat> = { front: SEATS.cheap, planning: SEATS.driver }
