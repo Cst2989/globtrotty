@@ -31,8 +31,8 @@ async function submit(sql: postgres.Sql, message = 'a week in Portugal', key = '
   )
 }
 
-const apiError = (status: number): unknown =>
-  APIError.generate(status, { type: 'error', error: { type: 'api_error', message: 'boom' } }, undefined, new Headers())
+const apiError = (status: number, headers = new Headers()): unknown =>
+  APIError.generate(status, { type: 'error', error: { type: 'api_error', message: 'boom' } }, undefined, headers)
 
 describeDb('runTurn', () => {
   it('answers her, parks the conversation, and records what the turn spent', async () => {
@@ -279,6 +279,33 @@ describeDb('runTurn', () => {
       const [t] = await sql`select status from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('queued')
       expect(await claimTurn(sql, r.turnId!)).not.toBeNull()   // immediately claimable
+    })
+  })
+
+  // R1 from the fix-round-1 re-review: a retry that would cross the
+  // invocation's own remaining budget must not be classified and failed as
+  // a provider outage. The work is still retryable and the provider is not
+  // the problem; a platform ceiling on THIS invocation is a reason to hand
+  // the lease back, exactly like decideNext's own continue_later, not a
+  // reason to end the turn.
+  it('hands the lease back rather than failing the turn when a retry would cross the budget', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'hi', 'w7b')
+      const headers = new Headers({ 'retry-after': '900' })      // fifteen minutes
+      let calls = 0
+      const agent: Agent = async () => { calls += 1; throw apiError(429, headers) }
+      const deps = workerDeps(sql, agent)
+      deps.deadlineMs = () => Date.now() + 120_000              // two minutes left
+      await runTurn(deps, r.turnId!)
+
+      expect(calls).toBe(1)                                     // gave up rather than sleep past the budget
+      expect(deps.reinvoke).toHaveBeenCalledWith(r.turnId)
+      const [t] = await sql`select status, state, attempts from course.turns where id = ${r.turnId}`
+      expect(t!.status).toBe('queued')
+      expect(t!.state).toEqual({ step: 0, messages: [{ role: 'user', content: 'hi' }] })
+      expect(t!.attempts).toBe(1)                               // continueLater does not bump it itself
+      const [c] = await sql`select status from course.conversations where id = ${r.conversationId}`
+      expect(c!.status).toBe('working')                         // untouched: no closer ever ran
     })
   })
 

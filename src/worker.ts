@@ -9,7 +9,7 @@ import {
   claimTurn, completeTurn, failTurn, heartbeat, loadTurnInput, releaseForContinuation, saveTurnState,
   FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim,
 } from './repo/turns.js'
-import { withRetry } from './retry.js'
+import { withRetry, RetryBudgetExceededError } from './retry.js'
 
 export type AgentContext = {
   state: TurnState
@@ -59,9 +59,21 @@ export type AgentStep =
    * `decideNext`'s check at the top of this file's own loop, and a step that
    * starts with plenty of room can still cross that inner deadline before it
    * returns. Neither a fail reason (nothing went wrong) nor a message (there
-   * is nothing to say yet): the work so far is simply unfinished, and the
-   * turn must be handed back and re-invoked exactly the way `decideNext`'s own
-   * `continue_later` is, not recorded as `done` with an empty reply.
+   * is nothing to say yet), so the turn is handed back and re-invoked exactly
+   * the way `decideNext`'s own `continue_later` is, not recorded as `done`
+   * with an empty reply.
+   *
+   * This is a RESTART, not a resume, for as long as one agent step is the
+   * whole of `turn()`: the harness's own `state.messages` holds only the one
+   * seeded user line, carries none of the driver's internal notebook or
+   * conversation, and the re-invoked driver calls `turn()` again from
+   * scratch. `classify`, `extract` and every tool step it already paid for
+   * are paid for again, up to `MAX_ATTEMPTS` times for one press, bounded
+   * only by the conversation ceiling. Strictly better than recording the
+   * turn `done` with a blank reply, which is what a review caught this
+   * lesson doing before this type existed; module 5, which moves the
+   * driver's own steps inside the harness, is where a continuation resumes
+   * instead of restarting.
    */
   | { kind: 'continue_later' }
 
@@ -281,14 +293,30 @@ async function loop(deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint }
     // wrapping the whole step is the wrap this lesson has, over a single
     // agent-defined unit of work; wrapping only the model call the 429 or 5xx
     // actually came from is the narrower fix, and is not this lesson's.
-    const step = await withHeartbeat(deps, claim, (signal) =>
-      withRetry(
-        () => deps.agent({
-          state, conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
-          attempts: claim.attempts, signal,
-        }),
-        { sleep: deps.sleep, random: deps.random, remainingMs: () => deps.deadlineMs() - deps.now() },
-      ))
+    let step: AgentStep
+    try {
+      step = await withHeartbeat(deps, claim, (signal) =>
+        withRetry(
+          () => deps.agent({
+            state, conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+            attempts: claim.attempts, signal,
+          }),
+          { sleep: deps.sleep, random: deps.random, remainingMs: () => deps.deadlineMs() - deps.now() },
+        ))
+    } catch (err) {
+      // A wait `withRetry` refused to sleep because it would cross what is
+      // left of THIS invocation's budget (src/retry.ts). The work is still
+      // retryable and the provider is not the problem, so this is not
+      // `provider_down`: it is the same fact as `decideNext`'s own
+      // `continue_later`, arriving from inside the step instead of before
+      // it, and it takes the identical hand-back rather than being
+      // classified and failing a turn that only needs a later attempt.
+      if (err instanceof RetryBudgetExceededError) {
+        await continueLater(deps, claim, state, turnSpend)
+        return
+      }
+      throw err
+    }
 
     if (step.kind === 'continue_later') {
       await continueLater(deps, claim, state, turnSpend)

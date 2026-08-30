@@ -19,6 +19,26 @@ export type RetryOptions = {
   remainingMs?: () => number
 }
 
+/**
+ * Thrown instead of the underlying provider error when a wait would cross
+ * `remainingMs()`, so a caller can tell "gave up because the budget ran out"
+ * apart from "gave up because the error was not retryable" or "gave up
+ * because the attempt cap was reached". The distinction matters because the
+ * three mean different things to a caller that ends a turn: the work here is
+ * still retryable, the provider is not the problem, and a platform ceiling on
+ * this invocation is not the same fact as the provider being down. `runTurn`
+ * (src/worker.ts) catches this one specifically and hands the lease back
+ * through `continueLater()` rather than classifying it and failing the turn.
+ * `original` keeps the provider's own error reachable for anyone logging
+ * this one.
+ */
+export class RetryBudgetExceededError extends Error {
+  constructor(readonly original: unknown) {
+    super("withRetry: a wait would cross the caller's remaining budget; giving up rather than oversleeping")
+    this.name = 'RetryBudgetExceededError'
+  }
+}
+
 const DEFAULT_MAX_ATTEMPTS = 3
 const BASE_MS = 1_000
 const JITTER_MS = 500
@@ -58,10 +78,13 @@ function retryAfterMs(err: unknown): number | null {
  * invocation is not wrong to ask, but honouring it verbatim would sleep the
  * process past the moment the platform kills it: the turn is left `running`
  * with a heartbeat seconds old, unrecoverable for a further staleness window,
- * and the whole invocation bought nothing. Giving up here instead lets the
- * caller's OWN deadline handling decide what "not now" means for it (tier 3's
- * `continue_later`, which hands the lease back and reschedules), rather than
- * this function gambling the rest of the budget on a single sleep.
+ * and the whole invocation bought nothing. This function does not know what
+ * its caller does about that; it only refuses to gamble the rest of the
+ * budget on one sleep, and throws `RetryBudgetExceededError` (carrying the
+ * provider's own error as `original`) instead of the provider error itself,
+ * so a caller that has a "not now" path of its own (`runTurn`'s
+ * `continueLater`, src/worker.ts) can recognise this specific reason and take
+ * it, rather than the error being classified as a provider outage it never was.
  */
 export async function withRetry<T>(work: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
@@ -78,7 +101,7 @@ export async function withRetry<T>(work: () => Promise<T>, options: RetryOptions
       const base = told ?? BASE_MS * 2 ** (attempt - 1)
       const wait = base + random() * JITTER_MS
       const budget = options.remainingMs?.() ?? Infinity
-      if (wait >= budget) throw err
+      if (wait >= budget) throw new RetryBudgetExceededError(err)
       await sleep(wait)
     }
   }

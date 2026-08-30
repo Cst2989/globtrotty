@@ -5,8 +5,7 @@ import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
-import type { ModelCallSink } from '../../src/repo/model-calls.js'
-import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
+import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../../src/tools.js'
@@ -57,24 +56,27 @@ export default async (req: Request): Promise<Response> => {
     // Claim object, which would let this driver bypass the loop's own closers.
     const claim = { turnId, conversationId, userId, attempts, state }
 
-    // Checked before the underlying write in both wrappers below, not after: a
-    // fence discovered mid-turn must stop the NEXT model or tool call from
-    // ever being billed, and a `turn()` running fourteen minutes' worth of
-    // classify/extract/tool-loop calls has no other boundary this driver can
-    // reach without threading an abort signal through src/loop.ts itself. The
-    // call already in flight when the fence lands still finishes and is
-    // billed once; nothing after it is. Throwing the signal's own `reason`
-    // (the captured FencedError, `src/worker.ts`'s withHeartbeat) rather than
-    // a fresh error means it lands in runTurn's catch exactly the way a tick's
-    // own deferred throw would: written nowhere, because whoever fenced this
-    // turn is alive and already finishing it.
-    const baseSink = ledgerSink(sql, { userId, conversationId, turnId })
-    const record: ModelCallSink = async (facts) => {
-      if (signal.aborted) throw signal.reason
-      await baseSink(facts)
-    }
+    // A `turn()` running fourteen minutes' worth of classify/extract/tool-loop
+    // calls has no boundary this driver can reach mid-call without threading
+    // an abort signal through src/loop.ts itself, so both guards below only
+    // ever stop the NEXT call, never the one already in flight when a fence
+    // lands; that one still finishes and is billed once. Throwing the
+    // signal's own `reason` (the captured FencedError, `src/worker.ts`'s
+    // withHeartbeat) rather than a fresh error means it lands in runTurn's
+    // catch exactly the way a tick's own deferred throw would: written
+    // nowhere, because whoever fenced this turn is alive and already
+    // finishing it.
+    // fencedModelCallSink (src/repo/spend.ts) records every call
+    // unconditionally, since it already happened and already cost real money
+    // at the provider by the time this sink runs, and only refuses the NEXT
+    // one once a fence is discovered.
+    const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
     const baseRunner = ledgerRunner(sql, claim, mockRunner(new MockSupplier()))
     const runner: ToolRunner = async (name, input, callId) => {
+      // A tool call is the opposite case: checked BEFORE it starts, so a
+      // fence refuses to run the tool at all rather than recording one that
+      // already fired. Nothing has happened yet at this point, unlike the
+      // model call above, so there is no row to lose by refusing here.
       if (signal.aborted) throw signal.reason
       return baseRunner(name, input, callId)
     }

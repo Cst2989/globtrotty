@@ -86,9 +86,14 @@ worker's writes out once it loses its claim, `saveTurnState` and the rest of
 `src/repo/turns.ts` included; it does not, by itself, stop a worker that is
 NOT dead but has merely been superseded from still calling the model for the
 rest of its own budget after the fact. `src/worker.ts`'s abort signal is the
-part that answers that: a heartbeat tick that discovers the fence aborts it,
-and a driver that checks the signal between its own model and tool calls
-stops billing before the fence is even a full tick old.
+part that answers that, and only partly: a heartbeat tick discovers the fence
+and aborts the signal, but that discovery is up to one heartbeat interval
+late, and a driver that checks the signal (tier 3's does, between its own
+model and tool calls) only stops at its NEXT call boundary, not mid-call. One
+model or tool call already in flight when the fence lands still finishes and
+is billed once. Threading the signal all the way through module 1's
+`TurnOptions`, so a call already in flight could be cancelled outright, is
+parked rather than done this lesson.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before this lesson, a requeue advanced

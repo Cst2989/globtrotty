@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { describeDb, withTestDb } from './helpers/db.js'
-import { ledgerSink, readSpendFailClosed, recordSpend } from '../src/repo/spend.js'
+import { fencedModelCallSink, ledgerSink, readSpendFailClosed, recordSpend } from '../src/repo/spend.js'
 
 // Fresh per run, the same reason withRealDb invents one (test/helpers/db.ts):
 // a fixed id is also `scripts/trip.ts`'s demo user, so a reader's own live
@@ -166,6 +166,65 @@ describeDb('ledgerSink', () => {
       expect(BigInt(rows[0]!.cost_micros)).toBe(750n)
       const [conv] = await sql`select spend_usd_micros from course.conversations where id = ${c!.id}`
       expect(BigInt(conv!.spend_usd_micros)).toBe(750n)
+    })
+  })
+})
+
+// R2 from Task 6's fix-round-1 re-review: a fenced worker's model call, once
+// made, already cost real money at the provider, whether or not the worker
+// learns about the fence before or after that call settles. Dropping the row
+// would make a real charge invisible to course.model_calls and to the
+// ceiling it feeds, which src/repo/model-calls.ts's own pgSink refuses to do
+// for its own write failures; fencedModelCallSink must not do it either.
+describeDb('fencedModelCallSink', () => {
+  const facts = {
+    seat: 'driver' as const, promptVersion: 'p1',
+    modelRequested: 'claude-opus-5', modelReturned: 'claude-opus-5',
+    usage: { input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    costMicros: 750n, latencyMs: 12,
+  }
+
+  it('records a call that already happened even when the signal is already aborted', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning *`
+      const controller = new AbortController()
+      controller.abort(new Error('fenced'))
+      const sink = fencedModelCallSink(
+        ledgerSink(sql, { userId: USER, conversationId: c!.id, turnId: null }),
+        controller.signal,
+      )
+      // The call the provider already answered is recorded even though the
+      // fence was discovered before this sink ever ran: nothing about a
+      // fence, past or future, is a reason to lose a row for money already
+      // spent.
+      await expect(sink(facts)).rejects.toThrow('fenced')
+      const rows = await sql`select cost_micros from course.model_calls where conversation_id = ${c!.id}`
+      expect(rows).toHaveLength(1)
+      expect(BigInt(rows[0]!.cost_micros)).toBe(750n)
+      const [conv] = await sql`select spend_usd_micros from course.conversations where id = ${c!.id}`
+      expect(BigInt(conv!.spend_usd_micros)).toBe(750n)
+    })
+  })
+
+  it('refuses only the call AFTER the one that was already made', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning *`
+      const controller = new AbortController()
+      const sink = fencedModelCallSink(
+        ledgerSink(sql, { userId: USER, conversationId: c!.id, turnId: null }),
+        controller.signal,
+      )
+      await sink(facts)                                  // not yet fenced: records and returns
+      controller.abort(new Error('fenced mid-turn'))
+      await expect(sink({ ...facts, costMicros: 999n })).rejects.toThrow('fenced mid-turn')
+      const rows = await sql`select cost_micros from course.model_calls where conversation_id = ${c!.id} order by created_at`
+      // Each call to this sink represents one call that already happened at
+      // the provider (that is `callAndRecord`'s own contract, src/metered.ts),
+      // so both are recorded here; the fence's job is to stop a THIRD call
+      // from ever being attempted, which is the caller's (toolLoop's) own
+      // responsibility once this throws.
+      expect(rows).toHaveLength(2)
+      expect(rows.map((r) => BigInt(r.cost_micros))).toEqual([750n, 999n])
     })
   })
 })

@@ -24,5 +24,12 @@ export const DEMO_USER = '11111111-1111-1111-1111-111111111111'
  * shared id would delete a live conversation `npm run trip` had just paid
  * for. A reader can safely run both against the same `DATABASE_URL` because
  * of this line, not despite it.
+ *
+ * The same rule as `DEMO_USER` applies here too, and for the identical
+ * reason: this is an id every database test must NOT use. `npm run demo`
+ * commits and deletes real rows for it OUTSIDE any test's rolled-back
+ * transaction, so a test sharing this id would have its own rows deleted out
+ * from under it by the next `npm run demo` a reader happens to run, and the
+ * failure would look like a flake rather than a name collision.
  */
 export const DEMO_SCRIPT_USER = '22222222-2222-2222-2222-222222222222'

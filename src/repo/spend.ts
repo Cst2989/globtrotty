@@ -172,3 +172,29 @@ export function ledgerSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
     }
   }
 }
+
+/**
+ * Wraps any `ModelCallSink` so it refuses to make the NEXT call once `signal`
+ * aborts, without ever skipping the write for a call that already happened.
+ * `callAndRecord` (src/metered.ts) calls the model FIRST and hands the sink
+ * the result afterwards, so by the time any sink runs, the call already cost
+ * real money at the provider; recording it is unconditional here for exactly
+ * the reason `pgSink`'s own comment gives for its write failures ("a row
+ * that fails to write must not take a finished turn down with it") - a real
+ * charge with no row anywhere is worse than the row this wrap might still
+ * refuse a moment later. The fence still works: the throw runs AFTER the
+ * write, so a caller like `toolLoop`'s per-iteration catch (src/loop.ts)
+ * stops the call AFTER this one from ever being attempted.
+ *
+ * `netlify/functions/run-turn-background.mts`'s tier-3 driver is the one
+ * production caller, wrapping a fenced turn's own `ledgerSink`; it lives here
+ * rather than inline there because there is no Netlify test harness in this
+ * repository (that file's own docstring), and this is the one part of it
+ * worth a test of its own.
+ */
+export function fencedModelCallSink(sink: ModelCallSink, signal: AbortSignal): ModelCallSink {
+  return async (facts) => {
+    await sink(facts)
+    if (signal.aborted) throw signal.reason
+  }
+}
