@@ -1,5 +1,7 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages'
+import type postgres from 'postgres'
 import { z } from 'zod'
+import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
 import { offerForModel } from './supplier/mock.js'
 import type { MockSupplier } from './supplier/mock.js'
 
@@ -34,7 +36,13 @@ export const TOOLS: Tool[] = [
 ]
 
 export type ToolOutcome = { content: string; isError: boolean }
-export type ToolRunner = (name: string, input: unknown) => Promise<ToolOutcome>
+/**
+ * `callId` identifies this call WITHIN its turn, so a resumed turn can recognise
+ * a call it already made. A runner that does not care about identity, like
+ * `mockRunner` below, simply declares two parameters and still satisfies this
+ * type, so no existing call site changes.
+ */
+export type ToolRunner = (name: string, input: unknown, callId: string) => Promise<ToolOutcome>
 
 /** Runs a tool against the mock supplier; a bad input comes back as an error the model can read and correct. */
 export function mockRunner(supplier: MockSupplier): ToolRunner {
@@ -50,5 +58,26 @@ export function mockRunner(supplier: MockSupplier): ToolRunner {
     } catch (err) {
       return { content: `Invalid input for ${name}: ${err instanceof Error ? err.message : String(err)}`, isError: true }
     }
+  }
+}
+
+/**
+ * Any runner, made safe to run twice. The ledger decides whether the inner
+ * runner is called at all, so a crash between the supplier answering and the
+ * turn recording it costs one wasted call and never a second one.
+ *
+ * Wrapping rather than teaching `mockRunner` about the database keeps one
+ * responsibility per file: `mockRunner` knows about the supplier, this knows
+ * about crashes, and lesson 4's live adapters get the same protection by being
+ * wrapped in exactly the same way.
+ */
+export function ledgerRunner(sql: postgres.Sql, turnId: string, inner: ToolRunner): ToolRunner {
+  return async (name, input, callId) => {
+    const outcome = await beginToolCall(sql, turnId, callId, name)
+    if (outcome.status === 'replayed') return outcome.result as ToolOutcome
+    if (outcome.status === 'ambiguous') throw new AmbiguousToolCallError(callId, name)
+    const result = await inner(name, input, callId)
+    await finishToolCall(sql, turnId, callId, result)
+    return result
   }
 }

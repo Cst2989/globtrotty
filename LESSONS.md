@@ -21,6 +21,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-1 | The claim with a fencing token | npm test (test/claim.test.ts) |
 | lesson-3-2 | Heartbeats and leases | npm test (test/lease.test.ts) |
 | lesson-3-3 | Completion in one transaction | npm run migrate, then npm test (test/completion.test.ts) |
+| lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
 
 Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a turn with no message. Since lesson 3.1's worker claims before it loads, that turn now reaches the sweeper as `running` with a fresh heartbeat rather than `queued`; the stalled-turn sweeper module 3 builds must reap it once that heartbeat goes stale, not by looking for a queued turn with no heartbeat.
 

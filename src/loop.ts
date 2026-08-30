@@ -10,8 +10,9 @@ import { costMicros, usageOf, type Usage } from './pricing.js'
 import type { ModelCallSink } from './repo/model-calls.js'
 import { limitReachedMessage } from './limit-message.js'
 import { SpendUnconfirmedError } from './repo/spend.js'
+import { AmbiguousToolCallError } from './repo/toolCalls.js'
 import { withSeat, type Seat } from './seats.js'
-import type { ToolRunner } from './tools.js'
+import type { ToolOutcome, ToolRunner } from './tools.js'
 
 export type ToolTrace = { name: string; input: unknown; content: string; isError: boolean }
 
@@ -208,9 +209,25 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
 
     messages.push({ role: 'assistant', content: message.content })
     const results: ContentBlockParam[] = []
-    for (const block of message.content) {
+    for (const [index, block] of message.content.entries()) {
       if (block.type !== 'tool_use') continue
-      const outcome = await options.run(block.name, block.input)
+      // Position, not `block.id`. A resumed turn asks the model the same
+      // questions and gets fresh toolu_ ids back for the same calls, so an id
+      // from the reply cannot recognise a call we already made. Step number and
+      // block index can, because a turn replayed from its own transcript asks in
+      // the same order.
+      const callId = `s${steps}-b${index}`
+      let outcome: ToolOutcome
+      try {
+        outcome = await options.run(block.name, block.input, callId)
+      } catch (err) {
+        // The one error the runner is allowed to end a turn with. A tool that
+        // was started and never finished may already have changed something
+        // outside this process; guessing either way is worse than stopping, so
+        // the turn ends as 'fenced' and a person decides.
+        if (!(err instanceof AmbiguousToolCallError)) throw err
+        return finish('fenced', '')
+      }
       toolTrace.push({ name: block.name, input: block.input, ...outcome })
       results.push({ type: 'tool_result', tool_use_id: block.id, content: outcome.content, is_error: outcome.isError })
     }

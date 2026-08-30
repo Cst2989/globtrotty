@@ -1,19 +1,30 @@
+import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import { newConversation, turn } from '../src/conversation.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { beginToolCall } from '../src/repo/toolCalls.js'
 import { MockSupplier } from '../src/supplier/mock.js'
-import { mockRunner, type ToolRunner } from '../src/tools.js'
+import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
-const USER = '11111111-1111-1111-1111-111111111111'
+const USER = randomUUID()
 
-/** Counts supplier calls, the side effect a crash must not double. */
-function countingRunner(): { run: ToolRunner; calls: number } {
+/** Counts supplier calls, the side effect a crash must not double, and keeps the last answer. */
+function countingRunner(): { run: ToolRunner; calls: number; lastContent: string } {
   const inner = mockRunner(new MockSupplier())
-  const counter = { calls: 0, run: (async (name, input) => { counter.calls += 1; return inner(name, input) }) as ToolRunner }
+  const counter = {
+    calls: 0,
+    lastContent: '',
+    run: (async (name, input, callId) => {
+      counter.calls += 1
+      const outcome = await inner(name, input, callId)
+      counter.lastContent = outcome.content
+      return outcome
+    }) as ToolRunner,
+  }
   return counter
 }
 
@@ -51,16 +62,57 @@ describeDb('when the process dies mid-search', () => {
   })
 })
 
-describe('when the process dies mid-search, the work itself', () => {
-  // Still open. The turn restarts from the beginning, so the supplier is called
-  // twice. Lesson 3.4 closes this with a tool-call ledger and turns .fails into a
-  // plain it.
-  it.fails('is not repeated, and the supplier is called once', async () => {
-    const supplier = countingRunner()
-    const dying = fakeClient([label, requirements, search, crash])
-    await expect(turn(newConversation(), HER_MESSAGE, dying, supplier.run)).rejects.toThrow('process killed')
-    const retry = fakeClient([label, requirements, search, textMessage('Here are two hotels near the beach.')])
-    await turn(newConversation(), HER_MESSAGE, retry, supplier.run)
-    expect(supplier.calls).toBe(1)
+describeDb('when the process dies mid-search, the work itself', () => {
+  it('is not repeated, and the supplier is called once', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(
+        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-2' },
+      )
+      const turnId = submitted.turnId!
+      const supplier = countingRunner()
+      const run = ledgerRunner(sql, turnId, supplier.run)
+
+      // The run that dies: the supplier answers, and the process is killed
+      // before the reply is written.
+      const dying = fakeClient([label, requirements, search, crash])
+      await expect(turn(newConversation(submitted.conversationId), HER_MESSAGE, dying, run))
+        .rejects.toThrow('process killed')
+      expect(supplier.calls).toBe(1)
+
+      // The resumed run asks the same questions in the same order, so it reaches
+      // the same call id and the ledger hands back what the supplier already said.
+      const retry = fakeClient([label, requirements, search, textMessage('Here are two hotels near the beach.')])
+      const second = await turn(newConversation(submitted.conversationId), HER_MESSAGE, retry, run)
+
+      expect(second.outcome).toBe('done')
+      expect(supplier.calls).toBe(1)                       // still one, across a crash and a resume
+      expect(second.toolTrace[0]?.content).toBe(supplier.lastContent)
+      const rows = await sql`select call_id, status from course.tool_calls where turn_id = ${turnId}`
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.status).toBe('done')
+    })
+  })
+
+  it('stops the turn rather than guess, when a call was started and never finished', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(
+        { sql, invoke: async () => {}, limits: DEFAULT_LIMITS },
+        { userId: USER, conversationId: null, message: HER_MESSAGE, idempotencyKey: 'crash-3' },
+      )
+      const turnId = submitted.turnId!
+      const supplier = countingRunner()
+      // A pending row with no result: the previous attempt died between writing
+      // the intent and recording the outcome.
+      await beginToolCall(sql, turnId, 's1-b0', 'search_hotels')
+
+      const client = fakeClient([label, requirements, search, textMessage('unreachable')])
+      const result = await turn(
+        newConversation(submitted.conversationId), HER_MESSAGE, client,
+        ledgerRunner(sql, turnId, supplier.run),
+      )
+      expect(result.outcome).toBe('fenced')
+      expect(supplier.calls).toBe(0)                       // it did not guess and run it again
+    })
   })
 })
