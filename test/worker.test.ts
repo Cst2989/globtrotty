@@ -9,21 +9,11 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { claimTurn, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { sweep } from '../src/sweeper.js'
-import { echoAgent, runTurn, type Agent, type WorkerDeps } from '../src/worker.js'
+import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
-
-const workerDeps = (sql: postgres.Sql, agent: Agent = echoAgent): WorkerDeps => ({
-  sql,
-  limits: DEFAULT_LIMITS,
-  agent,
-  now: () => Date.now(),
-  deadlineMs: () => Date.now() + 600_000,
-  reinvoke: vi.fn().mockResolvedValue(undefined),
-  sleep: async () => {},
-  random: () => 0,
-})
 
 async function submit(sql: postgres.Sql, message = 'a week in Portugal', key = 'w1') {
   return submitMessage(

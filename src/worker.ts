@@ -144,6 +144,20 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // sweeper writes when it reaps a crash loop (src/failure-message.ts), so a
     // failure reads the same whether the worker noticed it or the floor walk did.
     //
+    // This closes the throw path and ONLY the throw path, so the rest of the
+    // file is worth reading with that in mind. Ending with something for her to
+    // read: this catch, the two `limit_reached` exits (which write
+    // `limitReachedMessage` instead, because a ceiling is her news rather than
+    // ours), an agent's own `fail` step when it supplies text, and of course a
+    // completed turn. Ending with nothing in her thread, every one of which sets
+    // `conversations.status = 'failed'` and so stops her spinner on an empty
+    // conversation: `continueLater`'s `deadline_exceeded`, the `stop` branch for
+    // any reason other than `limit_reached`, and `ambiguous_tool_call`. Those
+    // three are not oversights this lesson is fixing, and they are not covered
+    // by the guarantee above either; closing them is a later lesson's, and until
+    // then this comment is the honest list rather than a claim that every failed
+    // turn says something.
+    //
     // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
     // itself ("conversation not found") or any other database error here is
     // exactly the evidence that a turn left `running` by a failed write needs.
