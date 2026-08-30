@@ -148,15 +148,26 @@ recorded responses, so `npm test` still needs no key of any kind and touches
 no network; the two `*.live.test.ts` files are the only exception and they
 skip unless `LIVE_SUPPLIERS=1`.
 
-From lesson 4.3 every search writes rows. `course.tool_results` holds one row
-per item per fetch, untrimmed and append-only: a re-search of an item appends a
-second row and the first one stays, so the corpus can answer "what price did we
-see for this id, and when?" rather than only "what does it hold now". The model
+From lesson 4.3 every search a turn makes writes rows. `course.tool_results`
+holds one row per item per fetch, untrimmed and append-only: a re-search of an
+item appends a second row and the first one stays, so the corpus can answer
+"what price did we see for this id, and when?" rather than only "what does it
+hold now". Tier 3's driver and `npm run trip` run the same chain, so a run of
+either leaves its rows behind it and prints how many; the tests are what still
+search without recording, because they hold no claim to write under. The model
 still reads a trimmed view of the same search and the two are deliberately not
 the same object. What is missing is anything that MAKES the model use it: the
 offer it writes is still text with numbers in it, and lesson 1.4's provenance
 check still passes a price that came from the right conversation and the wrong
 item. Lesson 4.4 is where an offer becomes a list of references.
+
+The write is fenced like every other write a worker makes: `recordResults`
+takes the claim and appends only while the turn is still this worker's, so a
+superseded worker cannot leave a price behind that would then win rehydration
+for being the newest. What it costs when it does refuse is a `pending` row in
+`course.tool_calls` that only a person clears, the same operator step lesson
+3.4 wrote down, and a search is read-only so nothing outside the system is left
+ambiguous by it.
 
 Two costs this table has and does not pay yet. It grows without bound and
 nothing prunes it; module 7's retention schedule is where that is answered. And

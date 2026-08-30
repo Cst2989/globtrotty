@@ -91,12 +91,12 @@ export default async (req: Request): Promise<Response> => {
     // runs at all (lesson 3.4); the corpus records what it returned (lesson
     // 4.3); the supplier runner makes the call. Each layer knows one thing, and
     // the live adapters get all of it by being handed to the innermost one.
+    // Both outer layers take the same claim, because both write: a worker this
+    // driver has already lost cannot record a tool call and cannot append to
+    // the corpus either.
     const baseRunner = ledgerRunner(
       sql, claim,
-      corpusRunner(
-        sql, { conversationId, userId, turnId },
-        supplierRunner(liveSuppliers().suppliers),
-      ),
+      corpusRunner(sql, claim, supplierRunner(liveSuppliers().suppliers)),
     )
     const runner: ToolRunner = async (name, input, callId, sig) => {
       // A tool call is the opposite case: checked BEFORE it starts, so a

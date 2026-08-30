@@ -12,8 +12,9 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
 import { ledgerSink } from '../src/repo/spend.js'
+import { claimTurn } from '../src/repo/turns.js'
 import { liveSuppliers } from '../src/supplier/live.js'
-import { mockRunner } from '../src/tools.js'
+import { corpusRunner, supplierRunner } from '../src/tools.js'
 
 config({ path: '.env.local', override: false })
 const env = loadEnv(process.env)
@@ -39,11 +40,31 @@ try {
 
   const inProcess = async (turnId: string) => {
     console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
+    // Claim the turn before running it, which this script did not have to do
+    // while it recorded nothing. From lesson 4.3 it writes to the provenance
+    // corpus, and every write a worker makes carries the claim's fencing token
+    // (src/repo/toolResults.ts), so a script that ran the turn as nobody could
+    // not append a row. Claiming is also the truer description of what this
+    // process is doing: it is the worker for this turn, in the same sense
+    // tier 3's background function is for its own.
+    //
+    // What it does NOT do is close the turn afterwards. `runTurn`
+    // (src/worker.ts) is what completes a turn, and this script deliberately
+    // stays the two-file demo lesson 2.1 built; the row it leaves behind is
+    // module 3's sweeper's to reap, exactly as the queued row it used to leave
+    // was.
+    const claim = await claimTurn(sql, turnId)
+    if (!claim) throw new Error(`trip: turn ${turnId} is owned by another worker`)
     const result = await turn(
       newConversation(conversationId),
       text,
       liveClient(),
-      mockRunner(suppliers),
+      // The same corpus chain tier 3 runs (netlify/functions/run-turn-background.mts),
+      // minus the ledger: one process, no crash to resume from, and nothing
+      // here replays a tool call. What it shares is the part that matters for
+      // this lesson, that a search made against the live suppliers leaves rows
+      // in course.tool_results behind it.
+      corpusRunner(sql, claim, supplierRunner(suppliers)),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in
         // the whole course that calls a live model and spends real dollars,
@@ -75,6 +96,12 @@ try {
   )
 
   console.log(`conversation ${submitted.conversationId}, turn ${submitted.turnId}, ${submitted.status}`)
+  // What lesson 4.3 added, read back rather than asserted: one row per item per
+  // search this conversation made, still there after the reply is written.
+  const [corpus] = await sql`
+    select count(*)::int as rows, count(distinct source_id)::int as ids
+      from course.tool_results where conversation_id = ${conversationId}`
+  console.log(`corpus: ${corpus!.rows} rows in course.tool_results, ${corpus!.ids} distinct source ids`)
 } finally {
   await sql.end({ timeout: 5 })
 }

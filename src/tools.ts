@@ -241,32 +241,36 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
 
 /**
  * The plain runner: a search against whichever `SupplierPair` it is handed, as
- * a tool result, with nothing recorded. The name is older than the pair.
- * Nothing about this function is a mock; only the DEFAULT is, and from lesson
- * 4.2 the two call sites that matter hand it real ones
- * (`liveSuppliers().suppliers`, in scripts/trip.ts and in the tier 3
- * background function), so `mockRunner` is what calls Kiwi in production. The
- * default is what keeps every test and script that has no opinion about
- * suppliers from needing one. Lesson 4.3 wraps `supplierRunner` in
- * `corpusRunner` instead, and from then on this is the runner for code paths
- * with no conversation to attach a corpus row to.
+ * a tool result, with nothing recorded. The name is older than the pair, and
+ * nothing about the function is a mock; only the DEFAULT is, a fresh pair of
+ * mocks so every test that had no opinion about suppliers still has none.
+ *
+ * From lesson 4.3 nothing that runs a real turn uses it. Tier 3's driver
+ * (netlify/functions/run-turn-background.mts) and `npm run trip`
+ * (scripts/trip.ts) both wrap `supplierRunner` in `corpusRunner` instead, so a
+ * search made by either writes its rows. What is left here is the tests, which
+ * hold no claim to fence a corpus write on and are asserting something other
+ * than provenance when they call a tool at all.
  */
 export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunner {
   const inner = supplierRunner(suppliers)
   return async (name, input, callId, signal) => (await inner(name, input, callId, signal)).outcome
 }
 
-/** Whose conversation a corpus row belongs to. Everything `recordResults` needs and nothing else. */
-export type CorpusContext = { conversationId: string; userId: string; turnId: string | null }
-
 /**
  * Records every search into the provenance corpus on its way back to the model.
  *
- * Composed as `ledgerRunner(sql, claim, corpusRunner(sql, ctx,
+ * Composed as `ledgerRunner(sql, claim, corpusRunner(sql, claim,
  * supplierRunner(suppliers)))`, so the ledger decides whether the search runs
  * at all and this decides what happens to the answer. One path for the mock and
  * for the live adapters, because a corpus the mock skipped would make every
  * eval in module 6 test a system nobody ships.
+ *
+ * It takes the same `Claim` the ledger does, and for the same reason:
+ * `recordResults` is a fenced write (src/repo/toolResults.ts), so a worker
+ * superseded while its search was in flight appends nothing. That is what
+ * decides the shape of this signature. Three loose ids would have been enough
+ * to address the row and not enough to prove the write may still happen.
  *
  * The write happens BEFORE the outcome is handed back, which is what makes the
  * ordering right: `finishToolCall` (inside `ledgerRunner`, one layer out) marks
@@ -275,25 +279,38 @@ export type CorpusContext = { conversationId: string; userId: string; turnId: st
  * corpus and nothing else; a result the model can see and the gate cannot is
  * exactly the split this module exists to close.
  *
- * A failed corpus write is therefore an ambiguous tool call and not an error
- * result. The supplier answered and we cannot write down what it said, so the
- * model must not be handed items it can propose and no gate can rehydrate. It
- * leaves by the same door `finishToolCall`'s own failure uses (see
- * `ledgerRunner` below): the turn ends `ambiguous_tool_call` and a person
- * decides, which is the operator step lesson 3.4 wrote down.
+ * The count is checked, like every writer on this branch: a search of three
+ * items that recorded two is a corpus that answers two thirds of a proposal,
+ * so it is treated as a failed write rather than a partial success.
+ *
+ * A failed corpus write is an ambiguous tool call and not an error result. The
+ * supplier answered and we cannot write down what it said, so the model must
+ * not be handed items it can propose and no gate can rehydrate. It leaves by
+ * the same door `finishToolCall`'s own failure uses (see `ledgerRunner` below):
+ * the turn ends `ambiguous_tool_call` and a person decides, which is the
+ * operator step lesson 3.4 wrote down. A `FencedError` from `recordResults`
+ * leaves the same way, exactly as one from `finishToolCall` does, and costs
+ * nothing extra: every write that would record the ending is fenced too, so a
+ * superseded worker ends its own run and not the turn.
+ *
+ * The cost of that door, stated because it is real: a search is read-only, so
+ * unlike a hold placed or an email sent there is nothing ambiguous about the
+ * outside world here. A transient corpus write failure still leaves a `pending`
+ * row in `course.tool_calls` that only a person clears (src/repo/toolCalls.ts).
+ * Recovering automatically would mean deciding that a search may be re-run,
+ * which is true of a search and not of the tools this ledger will hold later.
  */
-export function corpusRunner(sql: postgres.Sql, ctx: CorpusContext, inner: SupplierRunner): ToolRunner {
+export function corpusRunner(sql: postgres.Sql, claim: Claim, inner: SupplierRunner): ToolRunner {
   return async (name, input, callId, signal) => {
     const { outcome, record } = await inner(name, input, callId, signal)
     if (!record) return outcome
     try {
-      await recordResults(sql, {
-        conversationId: ctx.conversationId,
-        userId: ctx.userId,
-        turnId: ctx.turnId,
-        params: record.params,
-        items: record.items,
-      })
+      const written = await recordResults(sql, claim, { params: record.params, items: record.items })
+      if (written !== record.items.length) {
+        throw new Error(
+          `corpusRunner: recorded ${written} of ${record.items.length} items for ${callId} (${name})`,
+        )
+      }
     } catch (err) {
       console.error(`corpusRunner: recordResults failed for ${callId} (${name})`, err)
       throw new AmbiguousToolCallError(callId, name)
