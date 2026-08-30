@@ -1,6 +1,7 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import type postgres from 'postgres'
 import { z } from 'zod'
+import { SLOT_NAMES } from './gates/rehydrateGate.js'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
 import { recordResults } from './repo/toolResults.js'
@@ -47,6 +48,27 @@ const HotelInput = z.object({
   children: z.number().int().min(0),
 })
 
+/**
+ * What the model may propose, as a JSON schema the API can publish.
+ *
+ * Deliberately a SECOND declaration of the same shape `ProposalRefsSchema`
+ * (src/gates/rehydrateGate.ts) enforces, rather than the same object. Two
+ * reasons. `ProposalRefsSchema` carries a `.refine` for duplicate ids, and
+ * `z.toJSONSchema` cannot represent a refinement, so publishing it directly is
+ * not possible. And the two have different jobs: this one is documentation the
+ * model reads, with a `describe` on every field, and that one is the boundary
+ * that decides. `runGates` re-parses the raw input with the real schema, so
+ * this being wrong is a worse tool description and never a weaker gate. The
+ * slot list is shared, not copied.
+ */
+const ProposeInput = z.object({
+  refs: z.array(z.object({
+    sourceId: z.string().describe('The sourceId of a search result from THIS conversation, exactly as the search returned it'),
+    quantity: z.int().describe('Always 1. Every price here already covers the whole booking: a flight price covers the party, a hotel price covers the stay'),
+    slot: z.enum(SLOT_NAMES).describe('Which part of the trip this item is'),
+  })).min(1).max(24).describe('The items you propose, as references. There is no price field: the server reads every price back out of its own record of the search'),
+})
+
 /** Every tool the product owns, in one list; a desk sees a subset (lesson 1.6). */
 export const TOOLS: Tool[] = [
   {
@@ -59,23 +81,35 @@ export const TOOLS: Tool[] = [
     description: 'Search hotels in a city for a stay. Returns offers priced for the whole stay, with the price\'s age. Quote those prices exactly, never a total you worked out yourself.',
     input_schema: z.toJSONSchema(HotelInput) as Tool['input_schema'],
   },
+  {
+    name: 'propose_itinerary',
+    description: 'Propose a set of search results as her trip. Send references only: {sourceId, quantity, slot}. Never send a price, a total or a name; the server reads all of those from its own record of the search and will reject a proposal that carries any of them. Returns the server-computed total when every check passes, and the list of problems when they do not.',
+    input_schema: z.toJSONSchema(ProposeInput) as Tool['input_schema'],
+  },
 ]
 
 export type FlightToolInput = z.infer<typeof FlightInput>
 export type HotelToolInput = z.infer<typeof HotelInput>
 
 /**
- * The trip currency, until the notebook's budget currency can reach a tool.
+ * The trip currency when nothing better is known.
  *
- * Every search in this branch asks for one currency, and it is this one, not
- * because EUR is special but because a search that asked for whatever each
- * supplier defaults to would produce a mixed corpus and a currency violation on
- * every proposal. The notebook already knows the real answer
- * (`budget.value.currency`), and the tool runner is built outside `turn()` and
- * cannot see it: closing that is module 5.2's, where the tool registry moves
- * inside the harness and a tool gets the turn's own context. Named as a
- * constant rather than inlined at two call sites so that change has one place
- * to land.
+ * The search currency comes from her budget, which is the one place the
+ * notebook states a currency at all (`constraintsFromNotebook`,
+ * src/gates/notebookConstraints.ts). A search that asked for something else
+ * would build a corpus the currency gate rejects on every proposal, with no
+ * re-search able to fix it, because the search is the thing that was wrong.
+ *
+ * EUR is the fallback for the case the notebook is honestly silent about. A
+ * traveller who has named no budget has named no currency, and asking each
+ * supplier for whatever it defaults to would build a MIXED corpus, which is the
+ * fault `checkCurrency` files even with nothing to compare against. So the
+ * fallback is one currency rather than none, and it is named here so it has a
+ * single place to land rather than two call sites that can drift.
+ *
+ * Threaded as a parameter rather than read out of this module by the mappers,
+ * so two runners alive in one process cannot disagree about which trip they are
+ * searching for.
  */
 export const TRIP_CURRENCY = 'EUR'
 
@@ -87,7 +121,7 @@ export const TRIP_CURRENCY = 'EUR'
  * connection is the traveller's problem. Neither is a value the model may set,
  * because neither is a thing she asked for.
  */
-export function flightSearchFrom(input: FlightToolInput): FlightSearch {
+export function flightSearchFrom(input: FlightToolInput, currency: string | null = null): FlightSearch {
   return {
     kind: 'flight',
     from: input.from, to: input.to,
@@ -95,20 +129,20 @@ export function flightSearchFrom(input: FlightToolInput): FlightSearch {
     flexDays: 0,
     adults: input.adults, children: input.children, infants: 0,
     cabinClass: 'Economy',
-    currency: TRIP_CURRENCY,
+    currency: currency ?? TRIP_CURRENCY,
     maxStops: null,
     allowSelfTransfer: false,
   }
 }
 
 /** The model's hotel tool call, as a supplier search. `city` is the supplier's free-text query. */
-export function hotelSearchFrom(input: HotelToolInput): HotelSearch {
+export function hotelSearchFrom(input: HotelToolInput, currency: string | null = null): HotelSearch {
   return {
     kind: 'hotel',
     query: input.city,
     checkIn: input.checkIn, checkOut: input.checkOut,
     adults: input.adults,
-    currency: TRIP_CURRENCY,
+    currency: currency ?? TRIP_CURRENCY,
   }
 }
 
@@ -200,7 +234,7 @@ function messageOf(err: unknown): string {
  * aborted call is the one thing that does leave here as a throw, for the
  * reason written at the catch below: it is neither of those two failures.
  */
-export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
+export function supplierRunner(suppliers: SupplierPair, tripCurrency: string | null = null): SupplierRunner {
   return async (name, input, _callId, signal) => {
     if (name !== 'search_flights' && name !== 'search_hotels') {
       return { outcome: { content: `Unknown tool ${name}`, isError: true }, record: null }
@@ -208,8 +242,8 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
     let params: SearchParams
     try {
       params = name === 'search_flights'
-        ? flightSearchFrom(FlightInput.parse(input))
-        : hotelSearchFrom(HotelInput.parse(input))
+        ? flightSearchFrom(FlightInput.parse(input), tripCurrency)
+        : hotelSearchFrom(HotelInput.parse(input), tripCurrency)
     } catch (err) {
       return {
         outcome: { content: `Invalid input for ${name}: ${messageOf(err)}`, isError: true },

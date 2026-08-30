@@ -134,22 +134,25 @@ shared database, requeues or fails every other user's stale turns too.
 The supplier port arrived in lesson 4.1: a `SupplierItem` says who quoted it,
 when, for how long it stays quotable and whether it can be checked again, and
 `MockSupplier` answers all four honestly for a supplier that invents its prices
-from a hash. One seam is open and the suite cannot see it: every search asks
-for `TRIP_CURRENCY`, so flights come back in euros, while the recorded reply
-`test/provenance-v0.test.ts` replays still quotes them in dollars, and
-`offeredAmounts` compares whole-unit numbers without ever looking at a currency.
-That helper moved to `test/helpers/provenance.ts` in lesson 4.4 and gained a
-second caller there, `test/tampered-price.test.ts`, so the blind comparison
-spread rather than closed. It survives only because both sides reduce to the
-same whole number today.
+from a hash. One seam ran through the suite from there to lesson 4.4: every
+search asked for one hard-coded currency, so flights came back in euros while
+the recorded reply `test/provenance-v0.test.ts` replays quotes them in dollars,
+and `offeredAmounts` compares whole-unit numbers without ever looking at a
+currency, so that test passed on a coincidence. The helper moved to
+`test/helpers/provenance.ts` in lesson 4.4 and gained a second caller there,
+`test/tampered-price.test.ts`, so the blind comparison spread rather than
+closed.
 
-Lesson 4.4 leaves the check itself exactly as lesson 1.4 wrote it, because an
-offer stops carrying amounts at all and no price a gate reads goes near that
-comparison. The seam belongs to lesson 4.5's `currency` gate: when that gate
-replaces the articles' check for good, `offeredAmounts` either learns to compare
-currencies or retires with the check it was written for. Until then it is open,
-and a change to a mock price, a supplier currency or `TRIP_CURRENCY` turns two
-test files red at once.
+Lesson 4.5 settles it by RETIRING that helper rather than teaching it
+currencies. `checkCurrency` (src/gates/checks.ts) is what judges a currency now:
+it compares codes, it refuses instead of converting, and it is the gate every
+real proposal goes through. `offeredAmounts` keeps exactly one job, which is to
+be the check lesson 1.4 shipped, inside the two files that exist to show what
+that check waves through. Being currency-blind is part of what those two
+demonstrate, so making it currency-aware would falsify the demonstration rather
+than close anything, and its own comment now says which of the two answers this
+was. The seam underneath it is closed separately, by the search currency
+described below.
 
 Two suppliers are real from lesson 4.2. Flights come from Kiwi's MCP
 endpoint, which needs no key; hotels come from SearchApi's Google Hotels
@@ -164,10 +167,12 @@ holds one row per item per fetch, untrimmed and append-only: a re-search of an
 item appends a second row and the first one stays, so the corpus can answer
 "what price did we see for this id, and when?" rather than only "what does it
 hold now". Tier 3's driver and `npm run trip` run the same chain, so a run of
-either leaves its rows behind it and prints how many; the tests are what still
-search without recording, because what they wrap is `supplierRunner` or
-`mockRunner` rather than `corpusRunner`, and a search records when it runs
-through `corpusRunner` and not otherwise. A claim is not the separator:
+either leaves its rows behind it and prints how many; the tests that run a turn
+through `mockRunner` or a bare `supplierRunner` are what still search without
+recording, with `test/toolResults.test.ts` and `test/gate-rehydrate.test.ts` as
+the deliberate exception, since provenance is what those two are about and they
+record on purpose. A search records when it runs through `corpusRunner`, and not
+otherwise. A claim is not the separator:
 `test/crash.test.ts` and `test/turns.test.ts` both claim their turn and record
 nothing, because they are asserting something other than provenance. The model
 still reads a trimmed view of the same search and the two are deliberately not
@@ -199,12 +204,40 @@ the id half is the source articles' `checkProvenance`, reproduced in that file
 because no such function exists at any tag here, and the amount half is
 `quotedAmounts` and `offeredAmounts`, which is what lesson 1.4 actually shipped.
 
-One hole is open and it is named in `src/supplier/types.ts` and in
-`src/gates/rehydrateGate.ts`: `quantity` is a number the model still controls,
-and a total is the sum of price times quantity. Nothing yet judges its value.
-Lesson 4.5's `checkTotals` is what closes it, and the answer is that for every
-supplier this branch ships, the price already covers the whole booking, so the
-only correct quantity is 1.
+From lesson 4.5 a proposal goes through six deterministic gates in order:
+freshness, currency, slots, totals, budget, dates, with provenance ahead of them
+from lesson 4.4. Every fault comes back in one reply rather than one per model
+call, and `course.gate_results` records a row for every gate that ran, passes
+included, with three verdicts: true, false, and null for a gate that ran and
+could not reach one, with `detail` saying which of exactly three reasons applies.
+`quantity` is judged there too, by `checkTotals`, and the answer is that for
+every supplier this branch ships the price already covers the whole booking, so
+the only correct quantity is 1.
+
+The search currency now comes from her budget rather than from a constant. That
+is the same `currency` the gates expect, off the same object, so a corpus and
+the currency gate cannot disagree by construction; `TRIP_CURRENCY` stays as the
+fallback for a traveller who has named no budget and therefore no currency. Not
+doing this would have deadlocked the currency gate for every trip priced outside
+the euro area, which the course's own EUR example would never have shown.
+
+Two of the six still have nothing to check against, and both say so on the row
+rather than reporting a pass. The dates gate has no travel window, because this
+branch's notebook carries a month and not two dates; widening it touches
+`src/extract.ts` and its recorded fixtures and belongs to module 5. And on the
+path you can run, the budget gate has no budget: nothing stores a notebook, so
+tier 3 derives its constraints from an empty one and every live proposal records
+`budget: not evaluated` with the reason. The gate itself is exercised in
+`test/gate-pipeline.test.ts` through `proposalRunner`, the same seam and the same
+`runGates` call tier 3 makes, with a real budget in the context. Module 5.2 moves
+the registry inside the harness, where the turn's own notebook is in scope, and
+closes both.
+
+What is still missing is the last few seconds. Every gate reads what the corpus
+holds, and the freshness gate's promise is only that the price was quoted within
+its supplier's window: an item fifteen minutes old passes, and fifteen minutes
+is long enough for a fare to move. Nothing re-asks the supplier before she is
+handed a link. Lesson 4.6 is the cashier.
 
 ## What is next
 

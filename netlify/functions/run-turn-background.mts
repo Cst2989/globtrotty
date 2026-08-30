@@ -2,9 +2,12 @@ import { liveClient } from '../../src/client.js'
 import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
+import { constraintsFromNotebook } from '../../src/gates/pipeline.js'
+import { proposalRunner } from '../../src/gates/runner.js'
 import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
+import { emptyNotebook } from '../../src/notebook.js'
 import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
@@ -87,16 +90,45 @@ export default async (req: Request): Promise<Response> => {
     // branch, so nothing is stamped on a turn this worker no longer owns. That
     // post-check is load bearing here in a way it was not before 4.2.
     const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
-    // Three wrappers, outermost first. The ledger decides whether the search
-    // runs at all (lesson 3.4); the corpus records what it returned (lesson
+    // Her constraints, DERIVED through the one mapper rather than written here
+    // as three literal nulls. Nothing on this branch stores a notebook: `turn()`
+    // builds an empty one at the top of every turn (src/conversation.ts), fills
+    // it from her message and drops it when the turn ends, and this runner is
+    // constructed outside `turn()` in any case. So this call receives an empty
+    // notebook and every field really is null, which is the same three values
+    // the literal had and a different claim: this line reads a notebook, and
+    // the day the conversation stores one it reads that one instead and nothing
+    // else in the chain moves. Module 5.2 puts the tool registry inside the
+    // harness, where the turn's own notebook is in scope, and this becomes
+    // constraintsFromNotebook(conversation.notebook).
+    //
+    // What that costs today, on the record: the pipeline writes `budget` and
+    // `dates` as not evaluated WITH A REASON on every proposal a live run
+    // produces, rather than as passes. It is the only path a reader can run,
+    // which is why lesson 4.5's own proof drives proposalRunner, this exact
+    // seam, with a real budget in it (test/gate-pipeline.test.ts).
+    const notebook = constraintsFromNotebook(emptyNotebook())
+    // Four wrappers, outermost first. The ledger decides whether the tool runs
+    // at all (lesson 3.4); the proposal runner puts a proposal through the
+    // gates (lesson 4.5); the corpus records what a search returned (lesson
     // 4.3); the supplier runner makes the call. Each layer knows one thing, and
     // the live adapters get all of it by being handed to the innermost one.
-    // Both outer layers take the same claim, because both write: a worker this
+    // The two that WRITE fenced take the same claim, because a worker this
     // driver has already lost cannot record a tool call and cannot append to
-    // the corpus either.
+    // the corpus either; `gate_results` is an observation and is deliberately
+    // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids.
     const baseRunner = ledgerRunner(
       sql, claim,
-      corpusRunner(sql, claim, supplierRunner(liveSuppliers().suppliers)),
+      proposalRunner(
+        sql,
+        { conversationId, userId, turnId, notebook, now: () => new Date() },
+        // The searches ask for the SAME currency the gates expect, off the same
+        // constraints object, so a corpus and the currency gate cannot disagree
+        // by construction. Null on this branch, which supplierRunner reads as
+        // TRIP_CURRENCY (lesson 4.5); a stored USD budget makes both sides USD
+        // in one move.
+        corpusRunner(sql, claim, supplierRunner(liveSuppliers().suppliers, notebook.currency)),
+      ),
     )
     const runner: ToolRunner = async (name, input, callId, sig) => {
       // A tool call is the opposite case: checked BEFORE it starts, so a
