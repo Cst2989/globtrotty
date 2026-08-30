@@ -284,16 +284,22 @@ describeDb('tool_results repo', () => {
     })
   })
 
-  // Pre-0011 rows have '{}'::jsonb from the column default, never a real
-  // search. The guard must tell that apart from a genuine search — an empty
-  // object is not a search with no filters, it is the absence of one — so the
-  // cashier never re-quotes against a fabricated search.
+  // A row with '{}'::jsonb from the search_params column default, never a
+  // real search — legitimate for a row written by something other than
+  // recordResults (a manual seed, a future bypass insert, a restore), NOT a
+  // historical "pre-0011" state: recordResults has written a real
+  // SearchParams value since its first commit, which predates migration
+  // 0011, and 0011 never touched search_params or its default. The guard
+  // must tell this apart from a genuine search — an empty object is not a
+  // search with no filters, it is the absence of one — so the cashier never
+  // re-quotes against a fabricated search.
   it('reports a search-less row as null rather than an empty search', async () => {
     await withTestDb(async (sql) => {
       const { userId, conversationId } = await convo(sql, '12')
       const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
       await recordResults(sql, { conversationId, userId, turnId: null, params, items: [item!] })
-      // Simulate a pre-0011 row: the column default, never a real search.
+      // Simulate a row written by something other than recordResults, left
+      // on the column default rather than a real search.
       await sql`update tool_results set search_params = '{}'::jsonb
                  where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
       const got = await rehydrate(sql, conversationId, [item!.sourceId])

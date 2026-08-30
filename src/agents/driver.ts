@@ -435,9 +435,16 @@ async function execute(
       const { refs } = input as { refs: unknown[] }
       // Derived, not hardcoded: driver.md instructs the model to fix and
       // propose again, so a SECOND proposal in this turn must land as round 1,
-      // not a second round-0 row set. `gate_results.round` still has no
-      // uniqueness constraint (docs/backlog-plan.md Tier 1) — that is left to
-      // a later plan; this only makes the value itself honest.
+      // not a second round-0 row set. `gate_results.round` DOES now carry a
+      // uniqueness constraint — migration 0013's
+      // `gate_results_one_row_per_gate_per_round`, a unique index on
+      // `(turn_id, round, gate)` where `turn_id is not null`. That means this
+      // `round` value is load-bearing, not merely descriptive: any caller that
+      // runs the gates twice for the same turn without this count having
+      // advanced collides on insert, and `recordGateResults` has no
+      // `on conflict` clause, so the turn fails outright rather than silently
+      // double-counting (see `countPriorProposals`'s doc comment in
+      // src/repo/toolCalls.ts for the precondition this now enforces).
       const round = await countPriorProposals(sql, ctx.turnId, callId)
       const outcome = await runGates(sql, {
         conversationId: ctx.conversationId,
