@@ -77,8 +77,19 @@ export async function recordModelCall(
      * `capturePolicyFor` returns `'full'` — see the `redactedRequest` comment
      * below for why the cheap seats' truncated/sampled-out rows store NULL
      * instead of a second copy of the same request.
+     *
+     * Typed `Record<string, unknown>` — exactly `buildRequest`'s return type —
+     * rather than `unknown`. `unknown` would accept `undefined`, and on a
+     * `'full'` seat `JSON.stringify(undefined)` returns the VALUE `undefined`
+     * (not the string `"undefined"`), which `redactCredentials` below then
+     * calls `.replace` on. That throws inside this function's own try/catch,
+     * which is caught and only `console.error`-logged — so a caller with no
+     * request object (`front_desk` and `reviewer` are both hardwired `'full'`
+     * by `capturePolicyFor`) would silently write NO `model_calls` row at all.
+     * `Record<string, unknown>` makes passing `undefined` here a compile error
+     * instead. See test/modelCalls.test.ts for the type-level proof.
      */
-    requestShape: unknown
+    requestShape: Record<string, unknown>
     /** What we asked the provider to do about thinking, e.g. 'adaptive'. */
     thinkingMode: string | null
     costMicros: bigint

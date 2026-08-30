@@ -50,6 +50,31 @@ describe('redactCredentials', () => {
   })
 })
 
+/**
+ * A TYPE-LEVEL test, not a runtime one — `recordModelCall` is never actually
+ * called here. `requestShape` is typed `Record<string, unknown>`, exactly
+ * `buildRequest`'s return type, specifically so `undefined` is a compile
+ * error rather than a value that silently reaches `JSON.stringify` (which
+ * returns the literal value `undefined` for it) and then `redactCredentials`'
+ * `.replace` call, throwing inside `recordModelCall`'s own try/catch and
+ * dropping the row with only a `console.error` — see IMPORTANT 2 in the
+ * whole-branch review. `@ts-expect-error` makes `tsc --noEmit` the assertion:
+ * if the type ever widens back to `unknown` (or anything else that admits
+ * `undefined`), the directive itself becomes unused and `tsc` fails the
+ * build — this is a real, checked guarantee, not a comment repeating the type.
+ */
+function _typeOnly_requestShapeRejectsUndefined(): void {
+  const sql = {} as unknown as Parameters<typeof recordModelCall>[0]
+  void recordModelCall(sql, {
+    conversationId: null, turnId: null, userId: 'x',
+    seat: 'driver', seatConfig: SEATS.driver, result: ok,
+    systemPrompt: '', userPrompt: '', thinkingMode: null,
+    // @ts-expect-error requestShape is Record<string, unknown> — undefined must not compile
+    requestShape: undefined, costMicros: 0n,
+  })
+}
+void _typeOnly_requestShapeRejectsUndefined
+
 describeDb('recordModelCall', () => {
   const seed = async (sql: any, n: string) => {
     const userId = `00000000-0000-4000-8000-0000000004${n}`

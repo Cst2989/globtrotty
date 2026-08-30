@@ -83,6 +83,29 @@ describeDb('driver', () => {
     })
   })
 
+  it('stores the ACTUAL request the transport received as request_shape, not a reconstruction', async () => {
+    // This is the branch's headline property (spec section 7's drift clause),
+    // and every other request_shape test (test/modelCalls.test.ts) hand-builds
+    // `requestShape: { model: 'claude-opus-5' }` and calls `recordModelCall`
+    // directly — none of them go through the driver, so none of them would
+    // catch the driver writing a fabricated shape instead of the real one.
+    // `create.mock.calls[0][0]` is exactly what `callModel` (src/model/client.ts)
+    // handed the transport, since `transport.create(buildRequest(args), ...)` is
+    // the only call the mock ever receives — comparing against it, not against a
+    // hand-built literal, is what makes this test able to catch a driver that
+    // stops passing the real assembled request.
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '26')
+      const create = vi.fn().mockResolvedValue(textResponse('Faro in September, then.'))
+      await makeDriver(deps(sql, create))(ctx(s))
+      expect(create.mock.calls.length).toBe(1)
+      const sentRequest = create.mock.calls[0]![0]
+      const [row] = await sql<{ request_shape: unknown }[]>`
+        select request_shape from model_calls where conversation_id = ${s.conversationId}`
+      expect(row!.request_shape).toEqual(sentRequest)
+    })
+  })
+
   it('reserves BEFORE the call and reconciles after, leaving the real cost', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '02')
