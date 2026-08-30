@@ -146,10 +146,23 @@ engine when `GOOGLE_SEARCH_API` is set and from the mock when it is not, and
 `npm run trip` prints which one it used. Both parsers are pure functions over
 recorded responses, so `npm test` still needs no key of any kind and touches
 no network; the two `*.live.test.ts` files are the only exception and they
-skip unless `LIVE_SUPPLIERS=1`. What is still missing is a record: a search
-result exists only inside the turn that made it, so nothing can answer "what
-did we quote for this id, and when?" once the reply is written. Lesson 4.3 is
-where a search becomes a row.
+skip unless `LIVE_SUPPLIERS=1`.
+
+From lesson 4.3 every search writes rows. `course.tool_results` holds one row
+per item per fetch, untrimmed and append-only: a re-search of an item appends a
+second row and the first one stays, so the corpus can answer "what price did we
+see for this id, and when?" rather than only "what does it hold now". The model
+still reads a trimmed view of the same search and the two are deliberately not
+the same object. What is missing is anything that MAKES the model use it: the
+offer it writes is still text with numbers in it, and lesson 1.4's provenance
+check still passes a price that came from the right conversation and the wrong
+item. Lesson 4.4 is where an offer becomes a list of references.
+
+Two costs this table has and does not pay yet. It grows without bound and
+nothing prunes it; module 7's retention schedule is where that is answered. And
+row isolation is not enforced on it: the composite foreign key keeps a row
+attached to the right user, nothing else does, and the RLS worker role is
+lesson 5.7. Both are stated on the table itself, in `0010`.
 
 ## What is next
 

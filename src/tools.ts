@@ -3,6 +3,7 @@ import type postgres from 'postgres'
 import { z } from 'zod'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
+import { recordResults } from './repo/toolResults.js'
 import type { Claim } from './repo/turns.js'
 import { mockSuppliers } from './supplier/mock.js'
 import type {
@@ -253,6 +254,52 @@ export function supplierRunner(suppliers: SupplierPair): SupplierRunner {
 export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunner {
   const inner = supplierRunner(suppliers)
   return async (name, input, callId, signal) => (await inner(name, input, callId, signal)).outcome
+}
+
+/** Whose conversation a corpus row belongs to. Everything `recordResults` needs and nothing else. */
+export type CorpusContext = { conversationId: string; userId: string; turnId: string | null }
+
+/**
+ * Records every search into the provenance corpus on its way back to the model.
+ *
+ * Composed as `ledgerRunner(sql, claim, corpusRunner(sql, ctx,
+ * supplierRunner(suppliers)))`, so the ledger decides whether the search runs
+ * at all and this decides what happens to the answer. One path for the mock and
+ * for the live adapters, because a corpus the mock skipped would make every
+ * eval in module 6 test a system nobody ships.
+ *
+ * The write happens BEFORE the outcome is handed back, which is what makes the
+ * ordering right: `finishToolCall` (inside `ledgerRunner`, one layer out) marks
+ * the call done only after this returns, so a replay of that call can never
+ * hand the model a result whose corpus rows are not there. The gate reads the
+ * corpus and nothing else; a result the model can see and the gate cannot is
+ * exactly the split this module exists to close.
+ *
+ * A failed corpus write is therefore an ambiguous tool call and not an error
+ * result. The supplier answered and we cannot write down what it said, so the
+ * model must not be handed items it can propose and no gate can rehydrate. It
+ * leaves by the same door `finishToolCall`'s own failure uses (see
+ * `ledgerRunner` below): the turn ends `ambiguous_tool_call` and a person
+ * decides, which is the operator step lesson 3.4 wrote down.
+ */
+export function corpusRunner(sql: postgres.Sql, ctx: CorpusContext, inner: SupplierRunner): ToolRunner {
+  return async (name, input, callId, signal) => {
+    const { outcome, record } = await inner(name, input, callId, signal)
+    if (!record) return outcome
+    try {
+      await recordResults(sql, {
+        conversationId: ctx.conversationId,
+        userId: ctx.userId,
+        turnId: ctx.turnId,
+        params: record.params,
+        items: record.items,
+      })
+    } catch (err) {
+      console.error(`corpusRunner: recordResults failed for ${callId} (${name})`, err)
+      throw new AmbiguousToolCallError(callId, name)
+    }
+    return outcome
+  }
 }
 
 /**

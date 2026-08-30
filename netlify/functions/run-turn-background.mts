@@ -8,7 +8,7 @@ import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
-import { ledgerRunner, mockRunner, type ToolRunner } from '../../src/tools.js'
+import { corpusRunner, ledgerRunner, supplierRunner, type ToolRunner } from '../../src/tools.js'
 import { runTurn, type Agent } from '../../src/worker.js'
 
 /**
@@ -87,7 +87,17 @@ export default async (req: Request): Promise<Response> => {
     // branch, so nothing is stamped on a turn this worker no longer owns. That
     // post-check is load bearing here in a way it was not before 4.2.
     const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
-    const baseRunner = ledgerRunner(sql, claim, mockRunner(liveSuppliers().suppliers))
+    // Three wrappers, outermost first. The ledger decides whether the search
+    // runs at all (lesson 3.4); the corpus records what it returned (lesson
+    // 4.3); the supplier runner makes the call. Each layer knows one thing, and
+    // the live adapters get all of it by being handed to the innermost one.
+    const baseRunner = ledgerRunner(
+      sql, claim,
+      corpusRunner(
+        sql, { conversationId, userId, turnId },
+        supplierRunner(liveSuppliers().suppliers),
+      ),
+    )
     const runner: ToolRunner = async (name, input, callId, sig) => {
       // A tool call is the opposite case: checked BEFORE it starts, so a
       // fence refuses to run the tool at all rather than recording one that

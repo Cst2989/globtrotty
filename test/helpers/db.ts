@@ -47,6 +47,7 @@ export async function withRealDb<T>(fn: (sql: postgres.Sql, userId: string) => P
     return await fn(sql, userId)
   } finally {
     await sql`delete from course.model_calls where user_id = ${userId}`
+    await sql`delete from course.tool_results where user_id = ${userId}`
     await sql`delete from course.messages where user_id = ${userId}`
     await sql`delete from course.turns where user_id = ${userId}`
     await sql`delete from course.conversations where user_id = ${userId}`

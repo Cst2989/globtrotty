@@ -27,6 +27,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-7 | Building the harness with agents | npm run migrate, then npm test (test/regressions.test.ts) |
 | lesson-4-1 | The supplier port | npm test (test/supplier-types.test.ts, test/supplier-mock.test.ts, test/supplier-dates.test.ts) |
 | lesson-4-2 | Live adapters | npm test (test/supplier-kiwi.test.ts, test/supplier-searchapi.test.ts), then LIVE_SUPPLIERS=1 npm test for the two live files |
+| lesson-4-3 | The provenance corpus | npm run migrate, then npm test (test/toolResults.test.ts, test/schema-corpus.test.ts) |
 
 ## How this branch was built
 
