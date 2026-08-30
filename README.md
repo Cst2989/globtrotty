@@ -78,7 +78,7 @@ does not yet deserve to.
     tier 1  as long as she is willing to wait
     tier 2  about ten seconds, so it only writes and returns
     tier 3  fifteen minutes, which is where the turn runs
-    tier 4  every few minutes, and it is module 3
+    tier 4  every five minutes, netlify/functions/sweep.mts runs src/sweeper.ts
 
 The arrow from tier 2 to tier 3 carries `x-worker-secret`. Tier 3 is reachable by
 anyone who knows the URL and it starts work that costs money, so a call without
@@ -86,6 +86,11 @@ that header is refused before its body is read. Tier 3 is a background
 function, so the caller's socket gets an immediate 202 whether or not the
 secret matches; a wrong secret is observed only in tier 3's own log and in
 `test/tier3.test.ts`'s unit tests, never in a status code sent back to tier 2.
+
+Tier 4 sends the same header, because it starts the same work. It requeues a
+turn whose worker went silent or that nothing ever started, fails a turn that
+has used up its attempts and tells her so, and fails a turn that has no message
+to run so her conversation is not held shut by a turn nobody can execute.
 
 ## What is next
 

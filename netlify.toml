@@ -5,3 +5,6 @@
 [functions]
   node_bundler = "esbuild"
   directory = "netlify/functions"
+
+[functions."sweep"]
+  schedule = "*/5 * * * *"

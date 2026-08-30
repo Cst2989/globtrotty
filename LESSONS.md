@@ -22,9 +22,18 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-2 | Heartbeats and leases | npm test (test/lease.test.ts) |
 | lesson-3-3 | Completion in one transaction | npm run migrate, then npm test (test/completion.test.ts) |
 | lesson-3-4 | The tool-call intent ledger | npm run migrate, then npm test (test/tool-calls.test.ts, test/crash.test.ts) |
+| lesson-3-5 | The sweeper | npm run migrate, then npm test (test/sweeper.test.ts) |
 
-Handoff to module 3: two presses of one key can straddle the moment a ceiling trips and leave a turn with no message. Since lesson 3.1's worker claims before it loads, that turn now reaches the sweeper as `running` with a fresh heartbeat rather than `queued`; the stalled-turn sweeper module 3 builds must reap it once that heartbeat goes stale, not by looking for a queued turn with no heartbeat.
+Closed at lesson 3.5: the `queued` turn with no message that two presses of one
+key could leave behind is reaped as `stalled`, and its conversation goes back to
+`active` so she can type again. `test/sweeper.test.ts` asserts the whole of it,
+including the `queued` she gets from the press that follows.
 
 A driver throw during a spend read escapes `turn()` today and strands the turn; since lesson 3.1 claims before running, that strand happens at `running` with a heartbeat already set, not at `queued`. Module 3's sweeper must reap it by that stale heartbeat or resume it, so a database outage ends as a denial she can see, not a turn that hangs forever.
+
+Closed at lesson 3.5: a turn stranded at `queued` by a driver throw is requeued
+by the sweeper, and once its attempts are used up it is failed as `crash_loop`
+with a sentence she can read, so a database outage ends in an answer rather than
+a spinner.
 
 Lesson 3.4's ledger can fail a turn `ambiguous_tool_call` with a `pending` row left behind in `course.tool_calls`. Nothing in the code clears that row: a person reads `select * from course.tool_calls where status = 'pending'`, decides from the tool's own record whether the call actually landed, and deletes the row by hand once that is known. The sweeper module 3 builds must name this as the operator step for that fail reason, not retry the turn expecting the row to resolve itself.
