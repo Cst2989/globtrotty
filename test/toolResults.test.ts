@@ -200,24 +200,71 @@ describeDb('tool_results repo', () => {
     })
   })
 
-  it('rehydrates deterministically when two fetches share a fetched_at', async () => {
+  /**
+   * Re-running the SAME query against STATIC data in the SAME session tends to
+   * return ties in the same order every time regardless of `id desc` — that's
+   * just plan caching, not evidence the tiebreak does anything. (An earlier
+   * version of this test made exactly that mistake: it reran one query 10
+   * times in a loop and never once observed disagreement, with or without the
+   * tiebreak, because nothing about the query or the data ever changed
+   * between reads.)
+   *
+   * Postgres does not promise any particular order for tied `(source_id,
+   * fetched_at)` rows without `id desc` — the SQL standard leaves it
+   * unspecified, not "random". It happens to be stable for a small, static
+   * row set read repeatedly with one plan. It is NOT stable once the ties are
+   * numerous enough, and the query is forced through *different* plan shapes
+   * (seq scan vs. index scan vs. bitmap scan), each of which can walk the same
+   * tied rows in a different physical order. `id desc` is what pins the
+   * winner regardless of which plan shape postgres picks.
+   *
+   * Row ids are random UUIDs assigned by `gen_random_uuid()`, independent of
+   * insertion order by construction, so seeding many same-`fetched_at` rows in
+   * insertion order already decouples id order from physical/insertion order
+   * — no extra shuffling needed.
+   */
+  it('rehydrates the same row across seq/index/bitmap scans when many fetches share a fetched_at', async () => {
     await withTestDb(async (sql) => {
       const { userId, conversationId } = await convo(sql, '10')
       const same = new Date('2026-08-03T10:00:00Z')
-      const [item] = await new MockSupplier({ kind: 'flight', now: () => same }).search(params)
-      const first = { ...item!, price: money(100_00n, 'EUR'), fetchedAt: same }
-      const second = { ...item!, price: money(200_00n, 'EUR'), fetchedAt: same }
+      const [template] = await new MockSupplier({ kind: 'flight', now: () => same }).search(params)
+      const sourceId = template!.sourceId
 
-      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [first] })
-      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [second] })
+      // 500 separate fetches (real write path, one recordResults call each —
+      // one call per item so the in-call dedup never collapses them). Fired
+      // concurrently so postgres.js pipelines them on the one connection
+      // instead of paying 500 network round trips serially.
+      const ROWS = 500
+      await Promise.all(Array.from({ length: ROWS }, (_, i) => {
+        const item = { ...template!, price: money(template!.price.minor + BigInt(i), 'EUR'), fetchedAt: same }
+        return recordResults(sql, { conversationId, userId, turnId: null, params, items: [item] })
+      }))
 
-      // Ten reads must all agree. Without the `id desc` tiebreak this is a coin flip.
+      // Force the planner through each scan shape in turn, and confirm
+      // `rehydrate` picks the same winner regardless of which one it used.
+      const planShapes: Array<[seq: 'on' | 'off', idx: 'on' | 'off', bitmap: 'on' | 'off']> = [
+        ['on', 'off', 'off'],
+        ['off', 'on', 'off'],
+        ['off', 'off', 'on'],
+      ]
       const seen = new Set<string>()
-      for (let i = 0; i < 10; i++) {
-        const got = await rehydrate(sql, conversationId, [item!.sourceId])
-        seen.add(got.get(item!.sourceId)!.price.minor.toString())
+      try {
+        for (const [seq, idx, bitmap] of planShapes) {
+          // 'on'/'off' come from the fixed tuple above, never external input —
+          // safe to splice into a raw statement; postgres SET does not accept
+          // these as bind parameters.
+          await sql.unsafe(`set local enable_seqscan = ${seq}`)
+          await sql.unsafe(`set local enable_indexscan = ${idx}`)
+          await sql.unsafe(`set local enable_bitmapscan = ${bitmap}`)
+          const got = await rehydrate(sql, conversationId, [sourceId])
+          seen.add(got.get(sourceId)!.price.minor.toString())
+        }
+      } finally {
+        await sql.unsafe('reset enable_seqscan')
+        await sql.unsafe('reset enable_indexscan')
+        await sql.unsafe('reset enable_bitmapscan')
       }
       expect(seen.size).toBe(1)
     })
-  })
+  }, 30_000)
 })
