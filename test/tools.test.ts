@@ -1,6 +1,6 @@
 import { ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
-import type { Supplier } from '../src/supplier/types.js'
+import { UnusableResponseError, type Supplier } from '../src/supplier/types.js'
 import { itemForModel, mockRunner, TOOLS } from '../src/tools.js'
 
 describe('tools', () => {
@@ -67,6 +67,37 @@ describe('tools', () => {
     )
     expect(outcome.isError).toBe(true)
     expect(outcome.content).toContain('HTTP 503')
+    expect(outcome.content).not.toContain('Invalid input')
+  })
+  /**
+   * The third failure, and the one the whole-branch review named. Kiwi refuses
+   * a whole frame over one fare priced at or below zero
+   * (`parseKiwiResponse`, src/supplier/kiwi.ts), which is deliberate and is
+   * pinned in test/supplier-kiwi.test.ts. What was wrong was the sentence: the
+   * model was told "kiwi search failed", which is what it is told when the
+   * supplier is down, so it re-issued the identical call, got the identical
+   * throw, and spent its step budget doing it. The supplier is up and the
+   * answer is the thing that was refused, and those are different next moves.
+   */
+  it('describes a refused response as a refusal, not as an outage', async () => {
+    const nonsense: Supplier = {
+      name: 'kiwi',
+      kind: 'flight',
+      capabilities: { live: true, mayRequote: true, maxAgeSeconds: 900, pricePersistence: 'session' },
+      search: async () => { throw new UnusableResponseError('kiwi: unusable price 0 on it-3') },
+      quote: async () => ({ status: 'gone' }),
+    }
+    const outcome = await mockRunner({ ...mockSuppliers(), flight: nonsense })(
+      'search_flights',
+      { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: null, adults: 2, children: 1 },
+      's0-b0',
+    )
+    expect(outcome.isError).toBe(true)
+    expect(outcome.content).toContain('unusable price 0 on it-3')
+    expect(outcome.content).toContain('refused')
+    expect(outcome.content).toContain('The supplier is up')
+    // The two words that send it back around the same loop.
+    expect(outcome.content).not.toContain('search failed')
     expect(outcome.content).not.toContain('Invalid input')
   })
   /**

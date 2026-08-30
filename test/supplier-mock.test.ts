@@ -62,6 +62,40 @@ describe('MockSupplier', () => {
   })
 
   /**
+   * Three implementations of one port, and this is the one the whole suite runs
+   * on. `src/supplier/kiwi.ts` and `src/supplier/searchapi.ts` both scale their
+   * float price by `10 ** minorUnitExponent(params.currency)`; this one scaled
+   * by a hard-coded hundred until the whole-branch review, which was invisible
+   * only because every currency the suite searched in (EUR, GBP, USD) has
+   * exponent 2.
+   *
+   * From lesson 4.5 the search currency follows her budget, so the currency in
+   * these params is hers, and `src/money.ts` holds JPY at exponent 0 and KWD at
+   * 3. A hundred everywhere prices a JPY hotel at a hundred times her budget,
+   * which the budget gate rejects forever, and a KWD trip at a tenth of it,
+   * which the budget gate PASSES and `handOffMessage` then shows her against a
+   * real booking link.
+   *
+   * The three amounts are the SAME three every EUR case in this file pins,
+   * because the hash input carries no currency: only the scale moves, which is
+   * exactly the property that keeps lesson 1.4's twelve recorded prices intact.
+   */
+  it('scales prices by the currency exponent rather than by a hard-coded hundred', async () => {
+    const flightsIn = async (currency: string) =>
+      (await new MockSupplier({ kind: 'flight' }).search({ ...search, currency }))
+        .map((i) => i.price.minor)
+    const hotelsIn = async (currency: string) =>
+      (await new MockSupplier({ kind: 'hotel' }).search({ ...stay, currency }))
+        .map((i) => i.price.minor)
+
+    expect(await flightsIn('EUR')).toEqual([38800n, 14700n, 27800n])   // exponent 2, unmoved
+    expect(await flightsIn('JPY')).toEqual([388n, 147n, 278n])         // exponent 0
+    expect(await flightsIn('KWD')).toEqual([388000n, 147000n, 278000n]) // exponent 3
+    expect(await hotelsIn('EUR')).toEqual([72100n, 84000n, 69300n])
+    expect(await hotelsIn('JPY')).toEqual([721n, 840n, 693n])
+  })
+
+  /**
    * The deliberately dishonest supplier, and the only reason it exists: lesson
    * 4.5's currency gate needs a set of items that mix currencies, and the only
    * honest way to produce one from a mock that otherwise answers in the

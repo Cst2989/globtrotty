@@ -26,7 +26,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-3-6 | The worker loop assembled | npm run migrate, then npm test (test/worker.test.ts, test/retry.test.ts), then npm run demo |
 | lesson-3-7 | Building the harness with agents | npm run migrate, then npm test (test/regressions.test.ts) |
 | lesson-4-1 | The supplier port | npm test (test/supplier-types.test.ts, test/supplier-mock.test.ts, test/supplier-dates.test.ts) |
-| lesson-4-2 | Live adapters | npm test (test/supplier-kiwi.test.ts, test/supplier-searchapi.test.ts), then LIVE_SUPPLIERS=1 npm test for the two live files |
+| lesson-4-2 | Live adapters | npm test (test/supplier-kiwi.test.ts, test/supplier-searchapi.test.ts), then LIVE_SUPPLIERS=1 npm test for the two live files. Kiwi needs no key; the SearchApi file skips, and prints why, without GOOGLE_SEARCH_API |
 | lesson-4-3 | The provenance corpus | npm run migrate, then npm test (test/toolResults.test.ts, test/schema-corpus.test.ts) |
 | lesson-4-4 | The rehydration gate | npm run migrate, then npm test (test/tampered-price.test.ts, test/gate-rehydrate.test.ts) |
 | lesson-4-5 | Freshness, currency, slots, totals, budget, dates | npm run migrate, then npm test (test/gate-freshness-currency.test.ts, test/gate-totals-budget-dates.test.ts, test/gate-pipeline.test.ts) |
@@ -34,8 +34,9 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 
 ## How this branch was built
 
-Seven lessons, one tag each, and a review between every one of them. What the
-reviews actually caught, and what it cost to catch it:
+Module 3's seven lessons and module 4's six, one tag each, and a review between
+every one of them. What the reviews actually caught, across both, and what it
+cost to catch it:
 
 **Tests that pass against the wrong implementation.** The commonest defect in the
 whole build, by a distance. A fifty-press test that pressed against a
@@ -49,7 +50,7 @@ watch it fail, restore it, and paste both outputs.
 
 **Evidence, not assertions.** "I added a test that discriminates" is worth
 roughly nothing between two agents. A pasted failing output is worth a great
-deal. Every fix round in this module ends with a command and its output.
+deal. Every fix round in both modules ends with a command and its output.
 
 **A wrong comment on a contract is worse than no comment.** Every instance had
 the same shape: a correct decision recorded with a reason that was not true. A
@@ -98,9 +99,15 @@ defect class this file already names as the worst one, and the only way to catch
 it is to check each claim against the branch it is landing on.
 
 **A correction to an audit contract is a commit, not a rewrite.** Migration 0005
-said two functions write `turns.spend_usd_micros` and three do, from lesson 3.6
-on. Migrations are byte-identical after their tag, so 0011 corrects it and 0005
-stays wrong in the history, which is what a history is for.
+said two functions write `turns.spend_usd_micros` and three do, from lesson 3.7
+on: `releaseForContinuation` grew its `spend_usd_micros = spend_usd_micros + ...`
+in that lesson's fix round, and `git show lesson-3-6:src/repo/turns.ts` has no
+spend in it at all. Migrations are byte-identical after their tag, so 0011
+corrects it and 0005 stays wrong in the history, which is what a history is for.
+0011's own `--` header dates the change to 3.6, one lesson early, and it stays
+that way for the same rule that produced it: a migration is frozen after its
+tag, the wrong line is a comment that is never applied to a database, and
+editing it to be right would break the thing the file exists to demonstrate.
 
 **Audit the catalogue, never a list of tables.** Lesson 4.6's schema test asks
 Postgres which foreign-key child columns have no index leading on them, rather
@@ -132,6 +139,20 @@ step, not a sweeper job: run `select * from course.tool_calls where status =
 'pending'`, decide from the tool's own record whether the call actually
 landed, and delete the row by hand.
 
+Closed at lesson 4.6's whole-branch fix: a worker that dies outright, so that
+even `runTurn`'s catch does not run, leaves the sweeper to end the turn, and the
+sweeper now ends it the way the worker would have. Its crash arm calls
+`completeIfLinkEmitted` (src/worker.ts) rather than carrying a second copy of
+the decision in SQL, so a turn that emitted is `done` with the hand-off sentence
+rebuilt from her own `course.link_clicks` rows and the conversation parks on
+`awaiting_user`. It used to be reaped `failed, crash_loop` and merely not told
+about, which is a weaker promise than rule 6 states.
+`test/point-of-no-return.test.ts` holds both halves, including the `queued` turn
+at the cap that `completeTurn`'s own fence would have skipped. The one case it
+cannot close is a turn that handed off twice in two currencies, which
+`handOffMessage` cannot total; that turn is logged and left for the next walk
+rather than failed, and README.md names it.
+
 Open at lesson 4.6: nothing in production writes `proposals.decision`. The
 accept button is a person's click on a proposal card, which is lesson 5.7.
 `decideProposal` exists and is tested directly, `test/cashier.test.ts` calls it
@@ -139,13 +160,18 @@ in its own fixture, and `npm run demo`'s sixth scenario calls it in process so
 the keyless proof reaches a real booking link rather than a refusal. What is
 missing is her click, not the path behind it.
 
-Open at lesson 4.6: a worker that dies outright, so that even `runTurn`'s catch
-does not run, leaves the sweeper to reap the turn. The sweeper deliberately
-writes her nothing, because `TURN_FAILED_MESSAGE` would be false and it cannot
-rebuild the hand-off sentence in SQL, and it parks the conversation on
-`awaiting_user`. Her links are in `course.link_clicks` and she was never shown
-them; reading them is an operator step, like the `pending` tool-call row from
-lesson 3.4.
+Open at lesson 4.6: the two paths that REQUEUE a turn rather than end it do not
+read `course.link_clicks`. They are `continueLater`'s hand-back in
+`src/worker.ts` and the sweeper's requeue arm, and this is the unenforced half
+of the module's headline invariant, which is why it is worth naming here rather
+than only in README. Neither can emit the same link twice today: the cashier
+refuses a second hand-off of a proposal that already emitted, and `unique
+(proposal_id, item_id)` stands behind that. A requeued turn that PROPOSES again
+gets a new proposal id, which that constraint does not cover, so the second set
+of links for one trip becomes reachable the moment something in production
+writes `proposals.decision`. That is lesson 5.7, the accept button, and it is
+the same lesson that makes the first residual above reachable. Whoever writes
+5.7 owns both.
 
 Open at lesson 4.6: the affiliate id inside every emitted link is one
 placeholder shared by all three templates, not a per-supplier account. The shape

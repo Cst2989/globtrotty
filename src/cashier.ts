@@ -258,15 +258,23 @@ function sameItinerary(before: SupplierItem, after: SupplierItem): boolean {
  *    link_clicks id FIRST and embed it as the sub-id; store the exact emitted
  *    URL (bookingUrl above, recordLinkClicks).
  * 6. Link emission is the point of no return. After it, nothing may mark the
- *    turn failed, nothing may re-quote that set, everything is best effort.
- *    Enforced where a turn can END: src/worker.ts routes runTurn's catch and
- *    every one of loop's failTurn exits through one helper that reads
- *    course.link_clicks first, and src/sweeper.ts's crash arm reads the same
- *    table in SQL. The re-quote half is enforced here, by the refusal above:
- *    a second hand-off of a proposal that already emitted is refused before a
- *    supplier is asked anything. What is NOT enforced anywhere is the two
- *    paths that REQUEUE a turn instead of ending it (continueLater's hand-back
- *    and the sweeper's requeue arm); README.md names that as a residual.
+ *    turn failed, nothing may tell her the request failed, nothing may
+ *    re-quote that set, everything is best effort. Enforced where a turn can
+ *    END, and through ONE function rather than two agreeing implementations:
+ *    `completeIfLinkEmitted` (src/worker.ts) reads course.link_clicks and, if
+ *    anything went out, ends the turn `done` with the sentence handOffMessage
+ *    said. runTurn's catch calls it directly; loop's four failTurn exits and
+ *    continueLater's cap arm call it through failTurnUnlessLinkEmitted; and
+ *    src/sweeper.ts's crash arm calls it too, with its own closer, because a
+ *    worker that died outright never reached any of those. Five failing exits
+ *    plus the catch plus the floor walk, and none of them can write
+ *    `status = 'failed'` on a turn that emitted.
+ *
+ *    The re-quote half is enforced here, by the refusal above: a second
+ *    hand-off of a proposal that already emitted is refused before a supplier
+ *    is asked anything. What is NOT enforced anywhere is the two paths that
+ *    REQUEUE a turn instead of ending it (continueLater's hand-back and the
+ *    sweeper's requeue arm); README.md names that as a residual.
  *
  * The re-quote deliberately does NOT go through `ledgerRunner`. Every other
  * supplier call on this branch does, because a replayed search is a correct

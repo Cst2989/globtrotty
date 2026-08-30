@@ -260,13 +260,30 @@ and a booking link.
 
 Link emission is the point of no return. `course.link_clicks` rows are written
 before the links are returned, and every place that could END the turn by
-contradicting them reads that table first. In `src/worker.ts` that is one
-helper, `failTurnUnlessLinkEmitted`, which `runTurn`'s catch and all four of
-`loop`'s `failTurn` exits go through: the fail-closed spend read, `decideNext`
-saying stop, an ambiguous tool call and the agent's own `fail` step. Each of
-them completes the turn with the link message instead of failing it. The
-sweeper's crash arm reads the same table in SQL and reaps such a turn without
-writing `TURN_FAILED_MESSAGE`, sending the conversation back to `awaiting_user`.
+contradicting them reads that table first, through one function.
+
+That function is `completeIfLinkEmitted` in `src/worker.ts`. It reads the table
+and, if anything went out, ends the turn `done` carrying the sentence the
+hand-off said. `runTurn`'s catch calls it directly, because it has an error to
+re-throw afterwards and never wanted `failTurn` at all. Five failing exits call
+it through a second helper, `failTurnUnlessLinkEmitted`, which is that function
+plus the `failTurn` to fall back to when nothing went out: `loop`'s four, the
+fail-closed spend read, `decideNext` saying stop, an ambiguous tool call and the
+agent's own `fail` step, plus `continueLater`'s `MAX_ATTEMPTS` arm, which ends
+the turn rather than handing it back and so is covered by the same rule. Six
+ways for a turn to end badly, one read of the table, one description of what it
+does.
+
+The sweeper's crash arm calls the same function, with a closer of its own
+(`completeReapedTurn`, `src/repo/turns.ts`), because a worker that died outright
+never reached any of the six. It holds no claim and the turn it finds is as
+often `queued` as `running`, which is the one clause that differs. So a
+crash-looped turn that emitted is `done` with her links in front of her and its
+conversation back on `awaiting_user`, not `failed` with `crash_loop`: that row
+used to exist, and a reader partitioning `course.turns` by `fail_reason` would
+have filed a turn that emitted two live booking links as a failure with no
+links.
+
 A second hand-off is refused by the cashier itself, before it re-quotes
 anything, which is the other half of the rule.
 
@@ -275,14 +292,20 @@ sits inside `ledgerRunner` there. `npm run trip` is ledgerless by design, so it
 is not: one process, no crash to resume from, and nothing to replay. The comment
 above its chain says so.
 
-Four residuals, all of them named where they live.
+## Residuals
+
+Everything module 4 knows about and did not close, each with an owner. The
+first four are the module's own; the rest are what the whole-branch review found
+across all six lessons and decided was worth naming rather than fixing under a
+frozen tag. An owner is a lesson, a module, or a person, and "a person" means
+there is nothing to design: somebody has to type it.
 
 Nothing in production sets `decision`. `decideProposal` is written and tested,
 and its production caller is the accept button on a proposal card, which is
 lesson 5.7: this module has no surface for a person's click. `npm run demo`'s
 sixth scenario answers for her in process, so the keyless proof does reach a
 real link, a real `course.link_clicks` row and a real hand-off message; what is
-missing is her own click, not the path behind it.
+missing is her own click, not the path behind it. Owner: lesson 5.7.
 
 The two paths that REQUEUE a turn rather than end it do not read the table:
 `continueLater`'s hand-back in `src/worker.ts` and the sweeper's requeue arm.
@@ -290,16 +313,79 @@ Neither can emit the same link twice, because the cashier refuses a second
 hand-off of a proposal that already emitted and `unique (proposal_id, item_id)`
 stands behind that; a restarted turn that proposes again, though, gets a new
 proposal id, which that constraint does not cover. Nothing in production writes
-`proposals.decision` yet, so this is not reachable today. Closing it is the
-whole-branch review's, which already carries `failTurn`'s callers and `sweep`'s
-arms as a question.
+`proposals.decision` yet, so this is not reachable today, and it stops being
+unreachable in the same commit that closes the residual above. Owner: lesson
+5.7, both halves together.
 
-A worker that dies OUTRIGHT, so that even the catch does not run, leaves the
-sweeper to reap the turn silently. Her links exist, in `course.link_clicks`, and
-she was never shown them; reading them is an operator step, like the `pending`
-tool-call row from lesson 3.4.
+The sweeper's crash arm can leave exactly one turn alive-looking: one that
+handed off twice in two currencies, which `handOffMessage` cannot total
+(`sumMoney` refuses to combine two codes). There is no sentence to write, so the
+failure is logged and the row is left for the next walk rather than marked
+failed, which rule 6 forbids. The cashier refuses a second hand-off today, so
+nothing in production can build such a turn. Owner: module 5, alongside the
+requeue paths.
 
-The affiliate id in every link is a placeholder, not an account.
+The affiliate id in every link is a placeholder, not an account. Owner: a
+person, with a supplier contract in hand.
+
+`src/notebook.ts`'s comment on the `relaxes` currency branch still points
+forward at "module 4's supplier lesson, when a tool starts writing the
+notebook". Module 4 is over and no tool writes the notebook: `applyRequirements`
+has one production caller, `src/conversation.ts`, and it passes `'user'`. The
+file was never touched in the range, which is why no task review saw it. Owner:
+module 5.2, where the registry moves inside the harness and the turn's notebook
+comes into scope.
+
+`course.link_clicks.user_id` carries no constraint of its own. `proposal_id` has
+a single-column foreign key to `course.proposals(id)`, and nothing in the schema
+ties a link row's user to its proposal's user, because `course.proposals` has
+`unique (id, conversation_id)` and no `unique (id, user_id)`, so the composite
+key every other child table here carries is not available. The one writer
+compares them in code and refuses a mismatch (`src/cashier.ts`), and lesson 5.7
+adds the second writer. Owner: module 5, in the migration that next touches this
+table; 0013 is frozen.
+
+`gate_results.proposal_id` is always null and `round` is always zero. `runGates`
+accepts both and no caller in `src`, `scripts` or `netlify` supplies either,
+because `proposalRunner` records the proposal AFTER the gates return. So
+`gate_results_by_proposal` indexes a column nothing writes, and 0012's own
+column comment, which says a non-first round carries a proposal id, describes a
+run this branch cannot produce. Owner: module 5, when a rejected proposal is
+re-run and rounds start to mean something.
+
+`recordResults` assigns `seq` from a `jsonb_to_recordset` scan with no `order
+by`, so it relies on Postgres emitting a single array's elements in array order.
+It does, and there is no plan shape here that would reorder it, and
+`test/toolResults.test.ts` asserts which of two rows sharing a `fetched_at` wins
+rehydration, which is only true if that holds. It is undocumented and untested
+as an assumption. Owner: a person, one sentence in the docstring.
+
+`test/helpers/provenance.ts` says its guard covers "any file" naming
+`offeredAmounts`. It enumerates `testFiles()` only, so a `src/` file naming it
+would pass. The test's own name is accurate; the helper's docstring is the
+broader claim. Owner: a person, one word.
+
+`LESSONS.md`'s "How this branch was built" heading counted module 3's seven
+lessons and then grew module 4's bullets underneath it. Corrected in the same
+round that wrote this list, so it is here for the record rather than as work.
+Owner: nobody.
+
+`src/cashier.ts` describes lesson 4.6 in the future tense, four hundred lines
+above the code that lesson landed. Harmless as history, and the rest of the file
+reads in the present. Owner: a person, one word.
+
+`supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
+document outside this repository may be cited from code, and `git ls-tree` finds
+no `docs` at any tag here, so a reader has nothing to open. The migration is
+frozen and stays as it is; the reference belongs in the lesson prose. Owner:
+module 6.
+
+The paragraph above on `test/tampered-price.test.ts` calls the old check "two
+functions from two places" and then names three: `checkProvenance`,
+`quotedAmounts` and `offeredAmounts`. Two PLACES is right and the count is not,
+and it is the module's most carefully argued paragraph, so a reader counting
+three has to decide which one the sentence forgot. Owner: a person, one word
+either way.
 
 ## What is next
 

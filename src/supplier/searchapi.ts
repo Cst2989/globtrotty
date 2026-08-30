@@ -1,8 +1,9 @@
 import { money, minorUnitExponent } from '../money.js'
 import { nightsBetween } from './dates.js'
-import type {
-  Supplier, SupplierItem, SupplierCapabilities, SearchParams, HotelSearch,
-  QuoteOutcome, PriceBasis,
+import {
+  UnusableResponseError,
+  type Supplier, type SupplierItem, type SupplierCapabilities, type SearchParams,
+  type HotelSearch, type QuoteOutcome, type PriceBasis,
 } from './types.js'
 
 const ENDPOINT = 'https://www.searchapi.io/api/v1/search'
@@ -60,7 +61,7 @@ export function parseSearchApiHotels(body: string, params: HotelSearch, now: Dat
   // the real API.
   const echoed = data.search_parameters?.currency
   if (echoed !== params.currency) {
-    throw new Error(
+    throw new UnusableResponseError(
       `searchapi: requested currency ${params.currency} but response is `
     + `${echoed ?? 'absent, the response did not say and we do not assume'}`)
   }

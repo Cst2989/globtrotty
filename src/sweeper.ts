@@ -1,6 +1,8 @@
 import type postgres from 'postgres'
+import type { TurnState } from './engine.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
-import { HEARTBEAT_STALE, MAX_ATTEMPTS } from './repo/turns.js'
+import { completeReapedTurn, HEARTBEAT_STALE, MAX_ATTEMPTS } from './repo/turns.js'
+import { completeIfLinkEmitted } from './worker.js'
 
 /**
  * Seconds a `queued` turn may sit before the sweeper treats it as orphaned: the
@@ -22,6 +24,13 @@ export type SweepResult = {
   requeued: string[]
   /** Turns failed as crash loops: out of attempts, and she has been told. */
   reaped: string[]
+  /**
+   * Turns out of attempts that had already emitted a booking link, so they are
+   * `done` with the hand-off sentence rather than failed. Rule 6
+   * (src/cashier.ts): nothing may tell her a request that DID something did
+   * nothing.
+   */
+  handedOff: string[]
   /** Turns failed as stalled: nothing could ever have run them. */
   stalled: string[]
   /** Every stale turn under the attempt cap, including the ones this batch took. */
@@ -71,17 +80,28 @@ export type SweepResult = {
  * being at risk from THIS arm; that is a fencing and retry-budget question
  * `src/worker.ts` and `src/retry.ts` answer, not a gap in this sweeper.
  *
- * A turn that already emitted a booking link is reaped like any other, and it
- * is not told about. Link emission is the point of no return (src/cashier.ts):
- * she may be on a supplier's checkout page, so TURN_FAILED_MESSAGE would be
- * false, and the conversation goes back to `awaiting_user` rather than
- * `failed`. The sweeper cannot rebuild the hand-off sentence, because that
- * would mean assembling it in SQL from course.link_clicks, so it writes
- * nothing at all rather than something that contradicts what she was already
- * shown. src/worker.ts's own catch DOES rebuild it and is the path that
- * normally runs; this arm only sees a turn whose worker died outright. The
- * residual is named in README.md: a link she was never shown is in
- * course.link_clicks and reading it is an operator step.
+ * A turn that already emitted a booking link is NOT reaped. Link emission is
+ * the point of no return (src/cashier.ts, rule 6): she may be on a supplier's
+ * checkout page, and a row saying `failed, crash_loop` is a row a module 5
+ * reader partitioning `course.turns` by `fail_reason` will file as a failure
+ * with no links. Such a turn ends `done`, with the hand-off sentence rebuilt
+ * from her own `course.link_clicks` rows, and its conversation goes back to
+ * `awaiting_user`.
+ *
+ * It ends that way through `completeIfLinkEmitted` (src/worker.ts), the same
+ * function every exit in the worker goes through, rather than through a second
+ * copy of the decision written in SQL. Until lesson 4.6's whole-branch fix this
+ * arm had that second copy: it reaped the turn like any other and merely stayed
+ * QUIET, skipping TURN_FAILED_MESSAGE and parking the conversation, which is a
+ * weaker promise than rule 6 states and the one place the rule's own statement
+ * of itself was untrue. Rebuilding her sentence in SQL was never possible, and
+ * that was the reason for the silence; calling the function that already
+ * rebuilds it costs one round trip per reaped turn, and there are at most
+ * `batchSize` of them.
+ *
+ * The two REQUEUE arms still do not read that table, and README.md carries
+ * that as a named residual: neither can emit the same link twice, because the
+ * cashier refuses a second hand-off of a proposal that already emitted.
  *
  * A turn failed `ambiguous_tool_call` (lesson 3.4) is `failed`, which sits
  * outside both arms of `stale`, so the sweeper never touches it, and never
@@ -162,15 +182,75 @@ export async function sweep(
     select id from reap`
 
   /**
-   * Then the crash loop. A turn at MAX_ATTEMPTS can never be claimed again,
-   * because claimTurn's own guard refuses it, so without this it bounces between
-   * stale `running` and requeued `queued` forever: alive-looking, never worked,
-   * its conversation stuck on `working` and its live-turn slot never released.
+   * Then the crash loop, in two halves, because a turn that emitted a booking
+   * link may not be told it failed.
+   *
+   * This half is the turns that DID emit. They are taken out of the reap below
+   * by the `not exists` in its `dead` set and ended here instead, one round
+   * trip each, through the same `completeIfLinkEmitted` src/worker.ts routes
+   * every one of its own exits through. `completeReapedTurn` is passed as the
+   * closer because this process holds no claim: see src/repo/turns.ts for the
+   * one clause that differs from `completeTurn`, and why matching
+   * `status = 'running'` alone would miss the common case.
+   *
+   * `attempts` is carried from the row into the fence, so a turn another
+   * sweeper requeued between this select and this write is left alone rather
+   * than closed against a stale token.
+   *
+   * A close that throws is logged inside `completeIfLinkEmitted` and the row is
+   * left where it is, to be tried again on the next walk. That is deliberate
+   * and it is the one turn this arm can leave alive-looking: the only way the
+   * sentence cannot be built is a turn that handed off twice in two currencies,
+   * which `sumMoney` (src/money.ts) refuses to total and the cashier refuses to
+   * create. Failing it instead would break the rule this half exists to keep.
+   * README.md names it beside the other residuals.
+   */
+  const emitted = await sql<{
+    id: string; conversation_id: string; user_id: string; attempts: number; state: TurnState | null
+  }[]>`
+    select t.id, t.conversation_id, t.user_id, t.attempts, t.state
+      from course.turns t
+     where t.attempts >= ${MAX_ATTEMPTS} and (${stale})
+       and exists (select 1 from course.link_clicks l where l.turn_id = t.id)
+     limit ${limit}`
+
+  const handedOff: string[] = []
+  for (const row of emitted) {
+    const closed = await completeIfLinkEmitted(
+      { sql, now: () => Date.now() },
+      {
+        turnId: row.id,
+        conversationId: row.conversation_id,
+        userId: row.user_id,
+        attempts: row.attempts,
+        state: row.state,
+      },
+      row.state ?? { step: 0, messages: [] },
+      0n,
+      completeReapedTurn,
+    )
+    if (closed) handedOff.push(row.id)
+  }
+
+  /**
+   * The other half: a turn at MAX_ATTEMPTS that emitted nothing. It can never be
+   * claimed again, because claimTurn's own guard refuses it, so without this it
+   * bounces between stale `running` and requeued `queued` forever:
+   * alive-looking, never worked, its conversation stuck on `working` and its
+   * live-turn slot never released.
    *
    * Reaped BEFORE the batch below is chosen, so a turn that is out of attempts is
-   * never also counted as requeued. All four writes, the turn, her message and
+   * never also counted as requeued. All three writes, the turn, her message and
    * the conversation, happen in one statement through chained CTEs, so a sweeper
    * killed mid statement leaves none of them.
+   *
+   * The `not exists` sits in `dead` rather than on the message insert, which is
+   * where it used to sit. That is the whole of B10 in SQL: a turn with a
+   * `link_clicks` row is not a candidate for this statement at all now, so it
+   * cannot be marked `failed` here, and the message and the conversation no
+   * longer have to ask the table a second time each to decide what to write.
+   * The subquery is aliased against `t` for a reason worth keeping: bare `id`
+   * inside it resolves to `course.link_clicks.id`, not to the turn's.
    *
    * The conversation write is guarded by `c.status = 'working'`, the same
    * clause the stalled reap above carries, and for the same reason failTurn
@@ -181,8 +261,9 @@ export async function sweep(
    */
   const reaped = await sql<{ id: string }[]>`
     with dead as (
-      select id from course.turns
-       where attempts >= ${MAX_ATTEMPTS} and (${stale})
+      select t.id from course.turns t
+       where t.attempts >= ${MAX_ATTEMPTS} and (${stale})
+         and not exists (select 1 from course.link_clicks l where l.turn_id = t.id)
        for update skip locked
     ),
     reap as (
@@ -193,14 +274,9 @@ export async function sweep(
     said as (
       insert into course.messages (conversation_id, user_id, turn_id, role, content)
       select r.conversation_id, r.user_id, r.id, 'agent', ${TURN_FAILED_MESSAGE} from reap r
-       where not exists (select 1 from course.link_clicks l where l.turn_id = r.id)
     ),
     convo as (
-      update course.conversations c
-         set status = case
-               when exists (select 1 from course.link_clicks l where l.turn_id = r.id)
-               then 'awaiting_user' else 'failed' end,
-             updated_at = now()
+      update course.conversations c set status = 'failed', updated_at = now()
         from reap r where c.id = r.conversation_id and c.user_id = r.user_id and c.status = 'working'
     )
     select id from reap`
@@ -257,6 +333,7 @@ export async function sweep(
   return {
     requeued: rows.map((r) => r.id),
     reaped: reaped.map((r) => r.id),
+    handedOff,
     stalled: stalled.map((r) => r.id),
     backlog: count!.count,
   }

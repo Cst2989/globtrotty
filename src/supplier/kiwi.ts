@@ -1,6 +1,6 @@
 import { money, minorUnitExponent } from '../money.js'
 import {
-  DEFAULT_MAX_AGE_SECONDS,
+  DEFAULT_MAX_AGE_SECONDS, UnusableResponseError,
   type Supplier, type SupplierItem, type SupplierCapabilities, type SearchParams,
   type FlightSearch, type QuoteOutcome, type LegSummary,
 } from './types.js'
@@ -73,7 +73,7 @@ export function parseKiwiResponse(body: string, params: FlightSearch, now: Date)
   // unchanged. The captured fixture always carries `currency: "EUR"`, so
   // requiring it costs nothing against the real API.
   if (data.currency !== params.currency) {
-    throw new Error(
+    throw new UnusableResponseError(
       `kiwi: requested currency ${params.currency} but response is `
     + `${data.currency ?? 'absent, the response did not say and we do not assume'}`)
   }
@@ -84,11 +84,27 @@ export function parseKiwiResponse(body: string, params: FlightSearch, now: Date)
     // `> 0`, not merely finite. A zero or negative price sails through a
     // finiteness check and is then the cheapest option in every budget and
     // ranking comparison: the most attractive possible answer and an entirely
-    // fictional one. Symmetrical with `pickPrice` in searchapi.ts, which drops
-    // a property rather than default it to zero; here there is no fallback
-    // price to fall back TO, so the whole response is refused.
+    // fictional one.
+    //
+    // ASYMMETRICAL with `pickPrice` in searchapi.ts, deliberately, and it is
+    // worth naming the asymmetry rather than calling the two the same shape.
+    // SearchApi drops the one property whose price it cannot read and returns
+    // the other nineteen. This throws out of the whole parse, so twenty
+    // itineraries are lost over one of them. The reason is not that this
+    // itinerary cannot be rescued, which would only justify dropping it: it is
+    // that a Kiwi frame carries ONE currency and ONE price field per
+    // itinerary, so a nonsense number in that field is evidence about the feed
+    // that produced the frame rather than about one fare, and the nineteen
+    // survivors would be nineteen numbers from the same feed with nothing to
+    // check them against. test/supplier-kiwi.test.ts pins refuse-all, and
+    // lesson 4.2 teaches it as the design.
+    //
+    // What the MODEL is told is the other half. `UnusableResponseError`
+    // (types.ts) is how `supplierRunner` (src/tools.ts) knows to say the fare
+    // failed to parse and the search was refused, rather than "kiwi search
+    // failed", which reads as an outage and is a thing a model retries.
     if (!Number.isFinite(it.price) || it.price <= 0) {
-      throw new Error(`kiwi: unusable price ${it.price} on ${it.id}`)
+      throw new UnusableResponseError(`kiwi: unusable price ${it.price} on ${it.id}`)
     }
     // The ONE float to bigint conversion. Round, never truncate: 8.29 * 100
     // lands on 828.9999999999999 in binary floating point and Math.trunc would

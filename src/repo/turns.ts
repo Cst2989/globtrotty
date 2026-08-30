@@ -338,6 +338,81 @@ export async function completeTurn(
 }
 
 /**
+ * What a closer looks like, so `completeIfLinkEmitted` (src/worker.ts) can be
+ * handed one rather than owning the only one. Two exist, and only two:
+ * `completeTurn` above, and `completeReapedTurn` below.
+ */
+export type TurnCloser = (
+  sql: postgres.Sql,
+  claim: Claim,
+  opts: { state: TurnState; agentMessage: string | null; parked: boolean; spendMicros: bigint },
+) => Promise<void>
+
+/**
+ * `completeTurn` for a caller that holds no claim: the sweeper (src/sweeper.ts).
+ *
+ * From lesson 4.6's fix round the crash-loop arm no longer marks a turn that
+ * emitted a booking link `failed`. It ends it `done` with the hand-off sentence
+ * rebuilt from `course.link_clicks`, through the same `completeIfLinkEmitted`
+ * every exit in the worker goes through, which is what makes rule 6
+ * (src/cashier.ts) one rule with one implementation rather than a worker rule
+ * the floor walk contradicts.
+ *
+ * ONE clause differs from `completeTurn`, and it is worth being exact about
+ * which, because the rest of the fence is intact. A worker's claim is proof it
+ * is the live holder of a `running` row, so `completeTurn` matches on
+ * `status = 'running'`. The sweeper holds no claim and by definition arrives at
+ * a turn no worker is holding, which is `running` with a dead heartbeat OR
+ * `queued` after a requeue it has already made, and that second case is the
+ * common one: a turn reaches MAX_ATTEMPTS by being requeued, and `claimTurn`
+ * then refuses it, so it sits `queued` for ever. Matching `'running'` alone
+ * would leave exactly the turns this exists for untouched.
+ *
+ * `attempts = claim.attempts` is kept and is doing real work: a sweeper that
+ * read the row a moment before another sweeper requeued it finds the token
+ * moved and writes nothing, so two floor walks cannot both close one turn. The
+ * caller learns that from the throw, like every other fenced writer here.
+ *
+ * `spendMicros` is 0 from the sweeper and the `+` is still written, for the
+ * reason `completeTurn`'s docstring gives: whatever is in the column is the sum
+ * of the attempts that came before and must not be overwritten.
+ */
+export async function completeReapedTurn(
+  sql: postgres.Sql,
+  claim: Claim,
+  opts: {
+    state: TurnState
+    agentMessage: string | null
+    parked: boolean
+    spendMicros: bigint
+  },
+): Promise<void> {
+  await sql.begin(async (tx) => {
+    const rows = await tx`
+      update course.turns
+         set status = 'done', state = ${tx.json(opts.state)},
+             finished_at = now(), heartbeat_at = now(),
+             spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
+       where id = ${claim.turnId} and attempts = ${claim.attempts}
+         and status in ('running', 'queued')
+      returning id`
+    if (rows.length === 0) throw new FencedError(claim.turnId)
+
+    if (opts.agentMessage !== null) {
+      await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       'agent', ${opts.agentMessage})`
+    }
+
+    const conv = await tx`update course.conversations
+                             set status = ${opts.parked ? 'awaiting_user' : 'active'}, updated_at = now()
+                           where id = ${claim.conversationId} and user_id = ${claim.userId}
+                          returning id`
+    if (conv.length === 0) throw new Error('completeReapedTurn: conversation not found (fail closed)')
+  })
+}
+
+/**
  * The other way a turn ends. Same transaction, same fencing token, and the
  * conversation status mirrors the reason rather than collapsing to 'failed':
  * `submitMessage` (src/handler.ts) sets 'limit_reached' for the identical

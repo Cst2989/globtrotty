@@ -188,3 +188,26 @@ export function isFlight(i: SupplierItem): i is SupplierItem & { detail: FlightD
 export function isHotel(i: SupplierItem): i is SupplierItem & { detail: HotelDetail } {
   return i.detail.kind === 'hotel'
 }
+
+/**
+ * The supplier answered and the answer could not be trusted, which is not the
+ * same failure as the supplier being down.
+ *
+ * Both live adapters refuse a whole response rather than repair part of it: a
+ * currency the response did not echo back, or, in `parseKiwiResponse`, a fare
+ * priced at or below zero. `supplierRunner` (src/tools.ts) reads this class to
+ * decide what the MODEL is told, because "kiwi search failed" reads as an
+ * outage and an outage is a thing a model retries. A refused response is not:
+ * the identical call gets the identical refusal, and the step is better spent
+ * on the other desk or on asking her.
+ *
+ * One class, not a taxonomy. Telling a bad payload apart from a timeout apart
+ * from a rate limit, and giving each its own instruction to the model, is
+ * module 5's supplier error taxonomy; README.md carries that as a residual.
+ */
+export class UnusableResponseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnusableResponseError'
+  }
+}

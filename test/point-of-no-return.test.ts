@@ -9,7 +9,7 @@ import { MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { sweep } from '../src/sweeper.js'
 import { runTurn, type Agent } from '../src/worker.js'
-import { describeDb, withRealDb, withTestDb } from './helpers/db.js'
+import { describeDb, withTestDb } from './helpers/db.js'
 import { handlerDeps } from './helpers/turns.js'
 import { workerDeps } from './helpers/worker.js'
 
@@ -260,9 +260,12 @@ describeDb('a turn that handed off twice', () => {
       const dying: Agent = async () => { throw new Error('killed after emitting') }
       await expect(runTurn(workerDeps(sql, dying), submitted.turnId))
         .rejects.toThrow(/killed after emitting/)
-      // Not CurrencyMismatchError, and not silence: the turn is left `running`
-      // for the sweeper, which reads the same table and stays quiet, and the
-      // reason it died is the one that reaches the log.
+      // Not CurrencyMismatchError: the reason the turn died is the one that
+      // reaches the log, and no message is written, because there is no
+      // sentence to write. The turn is left `running` for the sweeper, which
+      // reaches the same wall through the same helper, logs it and leaves the
+      // row rather than failing it; that is the one turn the crash arm can
+      // leave alive-looking, and README.md names it.
       const msgs = await sql`select content from course.messages
                               where turn_id = ${submitted.turnId} and role = 'agent'`
       expect(msgs).toHaveLength(0)
@@ -270,40 +273,124 @@ describeDb('a turn that handed off twice', () => {
   })
 })
 
+/**
+ * `withTestDb`, not `withRealDb`, and that is the finding rather than a style
+ * choice. These two cases are about what the sweeper DECIDES, not about
+ * concurrency, and `sweep()` is global by design: its reap selects
+ * `for update skip locked` over every committed row in the database. Committed
+ * by `withRealDb`, this file's turns were visible to `test/sweeper.test.ts`
+ * running in a parallel worker, which locked or reaped them first, and the
+ * assertion below then saw a turn some other file's transaction had taken and
+ * rolled back. That is the flake the ledger recorded at 58e2e82, and rerunning
+ * this file alone is exactly the condition under which it cannot happen.
+ *
+ * Rolled back, these rows are invisible to every other worker, and `sweep()`
+ * runs on this transaction's own handle. The assertions are scoped to this
+ * file's own turn for the other direction of the same problem: this sweep sees
+ * everybody else's committed rows, so a count of what it reaped globally is a
+ * test that fails on a machine where somebody ran `npm run demo`.
+ */
 describeDb('after a link is emitted, the sweeper', () => {
-  it('does not tell her the request failed', async () => {
-    await withRealDb(async (sql, userId) => {
-      const submitted = await turnWithALink(sql, userId, 'ponr-3')
+  /**
+   * The whole-branch review's B10. Rule 6 says nothing may tell her the turn
+   * failed after a link went out, and until this fix round the sweeper marked
+   * such a turn `failed` with `crash_loop` and only stayed QUIET about it,
+   * which is a weaker promise than the rule states and than
+   * `src/worker.ts` keeps two files away. A module 5 reader partitioning
+   * `course.turns` by `fail_reason` would file a turn that emitted two live
+   * booking links as a failure with no links.
+   *
+   * It now goes through the same `completeIfLinkEmitted` the worker's five
+   * failing exits go through, so she gets the hand-off sentence rebuilt from
+   * her own `course.link_clicks` rows rather than silence, and the operator
+   * step that used to be the only way she ever heard about them is closed for
+   * this arm.
+   */
+  it('completes a crash-looped turn that emitted a link, and never fails it', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-3')
       // Out of attempts and silent: the crash-loop arm's exact condition.
       await sql`update course.turns
                    set attempts = ${MAX_ATTEMPTS}, status = 'running',
                        heartbeat_at = now() - interval '10 minutes'
                  where id = ${submitted.turnId}`
       const result = await sweep(sql)
-      expect(result.reaped).toContain(submitted.turnId)
+      // Scoped to this turn, never to a global count: sweep() is global and
+      // this transaction sees every committed row in the database.
+      expect(result.reaped).not.toContain(submitted.turnId)
+      expect(result.requeued).not.toContain(submitted.turnId)
+
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('done')
+      expect(t!.fail_reason).toBeNull()
 
       const msgs = await sql`select content from course.messages
-                              where turn_id = ${submitted.turnId} and role = 'agent'`
-      // No TURN_FAILED_MESSAGE. The sweeper cannot rebuild the link sentence in
-      // SQL and it will not write one that contradicts it, so it writes
-      // nothing; the conversation goes back to awaiting_user rather than
-      // failed, and the rows are in course.link_clicks for an operator.
-      expect(msgs).toHaveLength(0)
+                              where turn_id = ${submitted.turnId} and role = 'agent' order by seq`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.content).toContain('example.invalid/book/hotel-0-1')
+      expect(msgs[0]!.content).not.toBe(TURN_FAILED_MESSAGE)
       const [c] = await sql`select status from course.conversations where id = ${submitted.conversationId}`
       expect(c!.status).toBe('awaiting_user')
     })
   })
 
-  it('still tells her when a crash-looped turn emitted nothing', async () => {
-    await withRealDb(async (sql, userId) => {
-      const submitted = await submitMessage(handlerDeps(sql), {
-        userId, conversationId: null, message: 'plan it', idempotencyKey: 'ponr-4',
-      })
+  /**
+   * The same case one sweep later. A turn already `done` sits outside both arms
+   * of `stale`, so the second walk cannot close it twice, write her a second
+   * sentence, or hand the conversation back again.
+   */
+  it('leaves a turn it has already completed alone', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-3b')
       await sql`update course.turns
                    set attempts = ${MAX_ATTEMPTS}, status = 'running',
                        heartbeat_at = now() - interval '10 minutes'
                  where id = ${submitted.turnId}`
       await sweep(sql)
+      await sweep(sql)
+      const msgs = await sql`select content from course.messages
+                              where turn_id = ${submitted.turnId} and role = 'agent'`
+      expect(msgs).toHaveLength(1)
+      const [t] = await sql`select status from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('done')
+    })
+  })
+
+  /**
+   * The requeue path a turn actually reaches MAX_ATTEMPTS by: the sweeper hands
+   * it back, `claimTurn` refuses it at the cap, and it sits `queued` for ever.
+   * `completeTurn`'s own fence matches `status = 'running'` and would have
+   * skipped exactly this row, which is why the sweeper closes through
+   * `completeReapedTurn` (src/repo/turns.ts) instead.
+   */
+  it('completes a queued turn at the cap that emitted a link', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await turnWithALink(sql, USER, 'ponr-3c')
+      await sql`update course.turns
+                   set attempts = ${MAX_ATTEMPTS}, status = 'queued',
+                       queued_at = now() - interval '10 minutes'
+                 where id = ${submitted.turnId}`
+      await sweep(sql)
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('done')
+      expect(t!.fail_reason).toBeNull()
+    })
+  })
+
+  it('still tells her when a crash-looped turn emitted nothing', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(handlerDeps(sql), {
+        userId: USER, conversationId: null, message: 'plan it', idempotencyKey: 'ponr-4',
+      })
+      await sql`update course.turns
+                   set attempts = ${MAX_ATTEMPTS}, status = 'running',
+                       heartbeat_at = now() - interval '10 minutes'
+                 where id = ${submitted.turnId}`
+      const result = await sweep(sql)
+      expect(result.reaped).toContain(submitted.turnId!)
+      const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
+      expect(t!.status).toBe('failed')
+      expect(t!.fail_reason).toBe('crash_loop')
       const msgs = await sql`select content from course.messages
                               where turn_id = ${submitted.turnId} and role = 'agent'`
       expect(msgs[0]!.content).toBe(TURN_FAILED_MESSAGE)

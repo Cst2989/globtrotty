@@ -1,6 +1,6 @@
 import { SearchApiHotels } from '../src/supplier/searchapi.js'
 import type { HotelSearch } from '../src/supplier/types.js'
-import { describeLive, requireSearchApiKey } from './helpers/live.js'
+import { describeLiveSearchApi, requireSearchApiKey } from './helpers/live.js'
 
 const checkIn = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10)
 const checkOut = new Date(Date.now() + 67 * 86_400_000).toISOString().slice(0, 10)
@@ -9,7 +9,7 @@ const params: HotelSearch = {
   kind: 'hotel', query: 'Faro Portugal', checkIn, checkOut, adults: 2, currency: 'EUR',
 }
 
-describeLive('SearchApiHotels (live)', () => {
+describeLiveSearchApi('SearchApiHotels (live)', () => {
   it('returns priced hotels in the requested currency, over the requested window', async () => {
     // Inside the `it`, never in the describe callback. See test/helpers/live.ts.
     const items = await new SearchApiHotels(requireSearchApiKey()).search(params)

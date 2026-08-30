@@ -27,24 +27,30 @@ export type ProposalContext = {
 
 /**
  * The `propose_itinerary` link of the runner chain, composed outside
- * `corpusRunner` and inside `ledgerRunner`:
+ * `corpusRunner` and inside `cashierRunner` (lesson 4.6), which is itself
+ * inside `ledgerRunner`:
  *
  *   ledgerRunner(sql, claim,
- *     proposalRunner(sql, ctx,
- *       corpusRunner(sql, claim,
- *         supplierRunner(suppliers, ctx.notebook.currency))))
+ *     cashierRunner(sql, ctx, deps,
+ *       proposalRunner(sql, ctx,
+ *         corpusRunner(sql, claim,
+ *           supplierRunner(suppliers, ctx.notebook.currency)))))
  *
  * Outside the corpus because a proposal is judged against what the corpus
  * already holds and writes nothing to it; inside the ledger because a replayed
  * proposal is correct, and running the gates twice against the same corpus at
- * the same instant produces the same verdict anyway. Every other tool name
- * falls through to `inner`, so each layer knows exactly one thing.
+ * the same instant produces the same verdict anyway. Inside the cashier because
+ * the hand-off re-quotes a proposal this link has already judged. Every other
+ * tool name falls through to `inner`, so each layer knows exactly one thing.
  *
- * `npm run trip` (scripts/trip.ts) builds the same three inner layers and drops
- * the ledger, since it is one process with no crash to resume from. It is not
- * free to drop THIS one: both drivers send the planning desk's tools, so a
- * chain without this link advertises `propose_itinerary` and then answers the
- * model "Unknown tool propose_itinerary" out of `supplierRunner`.
+ * That is netlify/functions/run-turn-background.mts, five wrappers.
+ * `npm run trip` (scripts/trip.ts) builds the same FOUR inner layers, cashier
+ * included, and drops the ledger, since it is one process with no crash to
+ * resume from. It is not free to drop THIS one: both drivers send the planning
+ * desk's tools, so a chain without this link advertises `propose_itinerary` and
+ * then answers the model "Unknown tool propose_itinerary" out of
+ * `supplierRunner`, and a chain without the cashier link answers the same way
+ * for `hand_off_to_booking`.
  *
  * A rejection comes back as `isError: true` carrying the violations as JSON,
  * and not as a failed turn. `FAIL_REASONS` (src/engine.ts) does not grow a

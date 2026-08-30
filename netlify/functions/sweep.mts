@@ -40,6 +40,11 @@ export default async (): Promise<Response> => {
   // the requeue count and both mean a turn ended without doing its work.
   if (result.reaped.length > 0) console.error('sweep: reaped crash-loop turns', result.reaped)
   if (result.stalled.length > 0) console.error('sweep: reaped turns with no message', result.stalled)
+  // Not an error. A turn here ended `done` with her booking links in front of
+  // her, and the only thing that went wrong is that a worker died after
+  // emitting them; it is worth a line because an operator watching this
+  // function should be able to see that the crash arm took the rule 6 road.
+  if (result.handedOff.length > 0) console.warn('sweep: completed turns that had emitted links', result.handedOff)
 
   for (let i = 0; i < result.requeued.length; i += CONCURRENCY) {
     await Promise.all(result.requeued.slice(i, i + CONCURRENCY).map((turnId) => reinvoke(env, turnId)))
@@ -49,6 +54,7 @@ export default async (): Promise<Response> => {
     JSON.stringify({
       requeued: result.requeued.length,
       reaped: result.reaped.length,
+      handedOff: result.handedOff.length,
       stalled: result.stalled.length,
       backlog: result.backlog,
     }),

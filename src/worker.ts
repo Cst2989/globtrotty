@@ -10,7 +10,7 @@ import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import {
   claimTurn, completeTurn, failTurn, heartbeat, loadTurnInput, releaseForContinuation, saveTurnState,
-  FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim,
+  FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim, type TurnCloser,
 } from './repo/turns.js'
 import { withRetry, RetryBudgetExceededError } from './retry.js'
 
@@ -164,9 +164,12 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // must write nothing at all, and stamping a reason on a turn it no longer
     // owns would overwrite the run that took it over.
     if (err instanceof FencedError) return
-    // The point of no return (src/cashier.ts, rule 6), through the same helper
-    // every exit in `loop` uses, so there is one copy of the read and one
-    // description of what it does. If this turn already emitted a booking link,
+    // The point of no return (src/cashier.ts, rule 6), through
+    // `completeIfLinkEmitted`, which is the same helper the five failing exits
+    // reach through `failTurnUnlessLinkEmitted`, so there is one copy of the
+    // read and one description of what it does. It is called directly here
+    // because there is no `failTurn` wanted on this path: the error below is
+    // re-thrown either way. If this turn already emitted a booking link,
     // she may be on a supplier's checkout page right now, and marking the turn
     // failed would tell her a request that DID something did nothing. The
     // original error still propagates either way: this changes what the turn
@@ -206,7 +209,13 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     //
     // The whole list describes a turn that emitted no booking link. Once one
     // has gone out, every exit in it ends the turn `done` with the hand-off
-    // sentence instead, through `failTurnUnlessLinkEmitted` below.
+    // sentence instead, through one of two helpers below. This catch calls
+    // `completeIfLinkEmitted` directly, because it has an error to re-throw
+    // afterwards and never wanted `failTurn` at all. The five exits that DO
+    // want it, `continueLater`'s cap arm and `loop`'s four, call
+    // `failTurnUnlessLinkEmitted`, which is `completeIfLinkEmitted` plus the
+    // `failTurn` to fall back to when nothing went out. Two helpers, one read
+    // of `course.link_clicks`, one description of what it does.
     //
     // Logged, not discarded: a fail-closed throw from completeTurn/failTurn
     // itself ("conversation not found") or any other database error here is
@@ -222,12 +231,27 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
 
 /**
  * The point of no return (src/cashier.ts, rule 6) as one function, and the only
- * place in this file that reads `course.link_clicks`.
+ * place in this codebase that reads `course.link_clicks` in order to decide how
+ * a turn ends.
  *
  * Returns true when this turn had already emitted a booking link, in which case
  * it is now `done`, carrying the same sentence the hand-off said, and the
  * caller must not mark it failed. Returns false when nothing went out and the
  * caller is free to do whatever it was going to do.
+ *
+ * Exported for one caller outside this file, `sweep` (src/sweeper.ts), which
+ * reaches the same state by a different road: a worker that died outright, so
+ * that not even `runTurn`'s catch ran. Until lesson 4.6's whole-branch fix the
+ * sweeper carried its own SQL version of this decision and reached a different
+ * answer, marking such a turn `failed` with `crash_loop` and merely staying
+ * quiet about it, so rule 6 was a worker rule the floor walk contradicted. It
+ * is one rule with one implementation now. The sweeper holds no claim, so it
+ * passes `completeReapedTurn` (src/repo/turns.ts) as `close`; every other
+ * caller takes the default.
+ *
+ * `deps` is narrowed to the two things this actually uses, so the sweeper does
+ * not have to invent an `Agent`, a deadline and a reinvoker to close one turn.
+ * A `WorkerDeps` satisfies it as it stands.
  *
  * Nothing is re-quoted and nothing is recomputed: the rows carry the exact URLs
  * she was given, whether they were verified, and when they were quoted, so the
@@ -248,8 +272,10 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
  * error the turn actually died of. Nothing here throws, so a caller that is
  * already handling one failure is never handed a second.
  */
-async function completeIfLinkEmitted(
-  deps: WorkerDeps, claim: Claim, state: TurnState, spendMicros: bigint,
+export async function completeIfLinkEmitted(
+  deps: { sql: postgres.Sql; now: () => number },
+  claim: Claim, state: TurnState, spendMicros: bigint,
+  close: TurnCloser = completeTurn,
 ): Promise<boolean> {
   const { sql } = deps
   const emitted = await emittedLinks(sql, claim.turnId).catch((e: unknown) => {
@@ -259,14 +285,14 @@ async function completeIfLinkEmitted(
   if (emitted.links.length === 0) return false
   const now = new Date(deps.now())
   try {
-    await completeTurn(sql, claim, {
+    await close(sql, claim, {
       state,
       agentMessage: handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now),
       parked: true,
       spendMicros,
     })
   } catch (e) {
-    console.error(`completeTurn after link emission for turn ${claim.turnId} failed`, e)
+    console.error(`closing turn ${claim.turnId} after link emission failed`, e)
   }
   return true
 }

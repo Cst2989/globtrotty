@@ -1,4 +1,4 @@
-import { money } from '../money.js'
+import { minorUnitExponent, money } from '../money.js'
 import { nightsBetween } from './dates.js'
 import { DEFAULT_MAX_AGE_SECONDS } from './types.js'
 import type {
@@ -137,6 +137,24 @@ export class MockSupplier implements Supplier {
     return this.cfg.currency ?? params.currency
   }
 
+  /**
+   * Whole units to minor units, the way `src/supplier/kiwi.ts` and
+   * `src/supplier/searchapi.ts` do it, and for the same reason: `src/money.ts`
+   * holds JPY at exponent 0 and KWD at 3, and from lesson 4.5 the search
+   * currency follows her budget rather than being EUR forever. A hard-coded
+   * hundred here priced a JPY stay at a hundred times what it meant, which the
+   * budget gate then rejects for ever, and a KWD trip at a tenth of it, which
+   * the budget gate PASSES and `handOffMessage` shows her beside a real link.
+   *
+   * The hash input above carries no currency, so `whole` does not move: for
+   * every exponent-2 currency this returns exactly what `whole * 100` returned,
+   * which is what keeps lesson 1.4's twelve recorded prices, and the fixture
+   * that quotes them, byte for byte where they were.
+   */
+  private minor(whole: number, currency: string): number {
+    return whole * 10 ** minorUnitExponent(currency)
+  }
+
   private flight(params: FlightSearch, i: number): SupplierItem {
     // The hash input is lesson 1.4's, string for string: change it and every
     // price moves. `seed` stays first so a second seeded world is a different
@@ -146,6 +164,7 @@ export class MockSupplier implements Supplier {
     const amount = 140 + ((base >>> (i * 5)) % 260)
     const sourceId = `flight-${carrier.toLowerCase()}-${(base % 9000) + i}`
     const stops = i % 3
+    const currency = this.currencyFor(params)
     // Departures at 06:00, 10:30, 14:00, 18:30 and around again, so `count`
     // above four still produces a legal naive timestamp rather than hour 26.
     const depHour = 6 + ((i * 4) % 16)
@@ -156,7 +175,7 @@ export class MockSupplier implements Supplier {
       supplier: this.name,
       kind: 'flight',
       name: `${carrier} ${params.from} to ${params.to}`,
-      price: money(amount * 100, this.currencyFor(params)),
+      price: money(this.minor(amount, currency), currency),
       priceBasis: 'total',
       fetchedAt: this.cfg.now(),
       ttlSeconds: this.capabilities.maxAgeSeconds,
@@ -210,12 +229,13 @@ export class MockSupplier implements Supplier {
     // and an entirely fictional one.
     const nights = Math.max(1, nightsBetween(params.checkIn, params.checkOut))
     const sourceId = `hotel-${i}-${base % 9000}`
+    const currency = this.currencyFor(params)
     return {
       sourceId,
       supplier: this.name,
       kind: 'hotel',
       name: `${HOTEL_NAMES[i % HOTEL_NAMES.length]}, ${params.query}`,
-      price: money(perNight * nights * 100, this.currencyFor(params)),
+      price: money(this.minor(perNight * nights, currency), currency),
       priceBasis: 'total',
       fetchedAt: this.cfg.now(),
       ttlSeconds: this.capabilities.maxAgeSeconds,

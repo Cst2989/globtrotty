@@ -36,10 +36,12 @@ type Row = {
  * system that then tells her the request failed is describing a world she is
  * not in.
  *
- * What enforces it, exactly: `src/worker.ts` reads this table through one
- * helper that every one of `loop`'s `failTurn` calls and `runTurn`'s catch go
- * through, and `src/sweeper.ts`'s crash arm reads it in SQL before it writes a
- * message or fails a conversation. What does NOT read it: the two paths that
+ * What enforces it, exactly: `completeIfLinkEmitted` (src/worker.ts) reads this
+ * table, and it is the only reader that decides how a turn ends. `runTurn`'s
+ * catch calls it, `loop`'s four `failTurn` exits and `continueLater`'s cap arm
+ * call it through `failTurnUnlessLinkEmitted`, and `src/sweeper.ts`'s crash arm
+ * calls it as well, with a closer of its own, rather than carrying a second
+ * copy of the decision in SQL. What does NOT read it: the two paths that
  * REQUEUE a turn rather than end it, `continueLater`'s hand-back and the
  * sweeper's requeue arm. Neither can re-emit against the same proposal
  * (`unique (proposal_id, item_id)`, and the cashier refuses a second hand-off
@@ -95,8 +97,9 @@ export async function recordLinkClicks(
  * Every link this turn emitted, in the order it emitted them, whether they were
  * verified, and when their prices were quoted.
  *
- * Read by `runTurn`'s catch and by the sweeper before either decides what to
- * write about a turn that did not finish. `verified` and `quotedAt` both come
+ * Read by `completeIfLinkEmitted` (src/worker.ts), which is what `runTurn`'s
+ * catch, `loop`'s failing exits and the sweeper's crash arm all reach in order
+ * to decide what to write about a turn that did not finish. `verified` and `quotedAt` both come
  * off the rows rather than being recomputed: recomputing `verified` would mean
  * re-quoting, which is precisely what rule 6 forbids after emission, and
  * recomputing the age from the clock would tell her a price quoted hours ago

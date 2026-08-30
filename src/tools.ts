@@ -7,8 +7,9 @@ import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/to
 import { recordResults } from './repo/toolResults.js'
 import type { Claim } from './repo/turns.js'
 import { mockSuppliers } from './supplier/mock.js'
-import type {
-  FlightSearch, HotelSearch, SearchParams, SupplierItem, SupplierPair,
+import {
+  UnusableResponseError,
+  type FlightSearch, type HotelSearch, type SearchParams, type SupplierItem, type SupplierPair,
 } from './supplier/types.js'
 
 /**
@@ -277,6 +278,30 @@ export function supplierRunner(suppliers: SupplierPair, tripCurrency: string | n
       // signal's own reason, which is the FencedError withHeartbeat captured,
       // so it lands in runTurn's catch and is written nowhere.
       if (signal?.aborted) throw signal.reason
+      // A refused response is not an outage either, and the difference is the
+      // model's next step. Both live adapters throw `UnusableResponseError`
+      // (src/supplier/types.ts) when the supplier ANSWERED and the answer could
+      // not be trusted: a currency it did not echo back, or one fare priced at
+      // or below zero, which `parseKiwiResponse` refuses the whole frame over.
+      // Told "search failed", a model re-issues the identical call, gets the
+      // identical throw and spends its step budget on it. Told what actually
+      // happened, it has something to do instead.
+      //
+      // One sentence for every refusal, not one per cause. A taxonomy that
+      // separates a bad payload from a timeout from a rate limit, each with its
+      // own instruction, is module 5's; README.md carries it as a residual.
+      if (err instanceof UnusableResponseError) {
+        return {
+          outcome: {
+            content: `${supplier.name} answered and the response was refused: ${messageOf(err)}. `
+              + 'The supplier is up. One value in the response could not be parsed, and the whole '
+              + 'response was refused rather than trusted in part, so the identical search will be '
+              + 'refused identically. Try the other desk, a different date, or ask her.',
+            isError: true,
+          },
+          record: null,
+        }
+      }
       return {
         outcome: { content: `${supplier.name} search failed: ${messageOf(err)}`, isError: true },
         record: null,
@@ -316,11 +341,16 @@ export function mockRunner(suppliers: SupplierPair = mockSuppliers()): ToolRunne
 /**
  * Records every search into the provenance corpus on its way back to the model.
  *
- * Composed as `ledgerRunner(sql, claim, corpusRunner(sql, claim,
- * supplierRunner(suppliers)))`, so the ledger decides whether the search runs
- * at all and this decides what happens to the answer. One path for the mock and
- * for the live adapters, because a corpus the mock skipped would make every
- * eval in module 6 test a system nobody ships.
+ * This is the innermost link but one: `supplierRunner` is wrapped directly by
+ * this, and this is wrapped directly by `proposalRunner` (src/gates/runner.ts),
+ * which draws the whole chain and is the one place that does. Naming one link
+ * out and one link in rather than a composition is deliberate: lesson 4.5 and
+ * lesson 4.6 each inserted a wrapper above this one, and a composition written
+ * here would have gone stale twice. What matters at this level is that
+ * `ledgerRunner`, the outermost link, decides whether the search runs at all,
+ * `supplierRunner` makes the call, and this decides what happens to the answer.
+ * One path for the mock and for the live adapters, because a corpus the mock
+ * skipped would make every eval in module 6 test a system nobody ships.
  *
  * It takes the same `Claim` the ledger does, and for the same reason:
  * `recordResults` is a fenced write (src/repo/toolResults.ts), so a worker
