@@ -21,17 +21,15 @@ import type { SupplierItem, SupplierKind } from '../supplier/types.js'
  * `passed: true`, which is an unwired gate silently recording a pass on every
  * proposal. Nothing in the type system catches that.
  *
- * What catches it is the pair of assertions lesson 4.5 writes into
- * test/gate-pipeline.test.ts, which pin the full seven-name row set against
- * LITERAL expected values. Those literals look redundant next to this constant
- * and they are not: replacing either with something derived from GATE_NAMES
- * would make the test assert only that the code agrees with itself. Leave them
- * literal.
+ * Nothing at this tag catches it either, because there is nothing to catch yet:
+ * `runGates`, the `gate_results` table and the writer that fills it all arrive
+ * in lesson 4.5. Whatever pins the row set against this constant has to live
+ * beside that writer, so it is lesson 4.5's to state and not this file's to
+ * predict.
  *
  * 'reviewer' is deliberately NOT here. It needs a model and it arrives in
- * module 5; lesson 4.5's migration 0012 writes a `gate_results.gate` that
- * accepts the value, so the seam costs nothing, and keeping it out of
- * `GateName` is what stops the pipeline writing a row claiming a reviewer ran.
+ * module 5, and keeping it out of `GateName` is what stops the pipeline writing
+ * a row claiming a reviewer ran.
  */
 export const GATE_NAMES = [
   'provenance', 'freshness', 'slots', 'currency', 'totals', 'budget', 'dates',

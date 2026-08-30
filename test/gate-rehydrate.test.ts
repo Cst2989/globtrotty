@@ -255,4 +255,36 @@ describeDb('rehydrateRefs', () => {
       expect(res.items[0]!.item.price.minor).toBe(items[0]!.price.minor + 4200n)
     })
   })
+
+  /**
+   * The `ref` that comes back is built field by field, not handed back. What
+   * that buys is narrow and worth pinning anyway: nothing the CALLER still holds
+   * is reachable through the result, so a caller that keeps its parsed model
+   * JSON and goes on writing to it cannot reach into a proposal the gate has
+   * already approved. Against zod's own output the rebuild is belt and braces,
+   * because `strictObject` returns a fresh object with exactly the declared
+   * keys; against the caller's array it is the whole difference, and this case
+   * fails if the function returns the object it was given.
+   */
+  it('rebuilds the ref rather than handing back the object it was given', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, 10)
+      const input = { sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' }
+      const res = await rehydrateRefs(sql, conversationId, [input])
+      expect(res.ok).toBe(true)
+      if (!res.ok) throw new Error('unreachable')
+
+      const ref = res.items[0]!.ref
+      expect(ref).not.toBe(input)
+      expect(Object.keys(ref).sort()).toEqual(['quantity', 'slot', 'sourceId'])
+      expect(ref).toEqual({ sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' })
+
+      // Writing to what the caller still holds, including the price field the
+      // schema refused, changes nothing the gate returned.
+      input.quantity = 99
+      ;(input as Record<string, unknown>).price = 8900
+      expect(res.items[0]!.ref.quantity).toBe(1)
+      expect(Object.keys(res.items[0]!.ref).sort()).toEqual(['quantity', 'slot', 'sourceId'])
+    })
+  })
 })

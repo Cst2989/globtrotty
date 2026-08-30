@@ -1,6 +1,6 @@
 import { ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
 import { HER_MESSAGE } from '../src/her.js'
-import { formatMoney, money } from '../src/money.js'
+import { formatMoney, minorUnitExponent, money } from '../src/money.js'
 import { handle } from '../src/router.js'
 import { mockRunner } from '../src/tools.js'
 import { offeredAmounts, quotedAmounts } from './helpers/provenance.js'
@@ -9,11 +9,16 @@ import { replayClient } from './model/replay.js'
 type WireOffer = { sourceId: string; name: string; price: { minor: string; currency: string } }
 
 /**
- * The article's `checkProvenance`, reproduced here rather than imported,
+ * The source articles' `checkProvenance`, reproduced here rather than imported,
  * because it is the version this lesson replaces and this demonstration has to
  * keep working afterwards. Same shape as module 3's trick of writing tier 3's
  * old body out in raw SQL: the point of a reproduced defect is that it stays
  * reproducible.
+ *
+ * Reproduced rather than imported for a second reason: it is not on this branch
+ * to import. Lesson 1.4 shipped `quotedAmounts` and `offeredAmounts`, which is
+ * the amount half, and no id check at all, so `git checkout lesson-1-4` finds
+ * `test/provenance-v0.test.ts` and nothing named `checkProvenance`.
  *
  * It validates that a sourceId was SEEN. It never looks at the values attached
  * to it, which is the whole of the flaw.
@@ -27,7 +32,7 @@ function citesOnlySeenIds(offer: { sourceId: string }[], trace: { content: strin
   return offer.every((item) => seen.has(item.sourceId))
 }
 
-describe('the provenance check lesson 1.4 shipped', () => {
+describe('the old provenance check: the articles\' id check and lesson 1.4\'s amounts', () => {
   it('passes an offer that moved one hotel\'s price onto another hotel', async () => {
     const client = replayClient('loop-portugal')
     const handled = await handle(HER_MESSAGE, client, mockRunner())
@@ -46,7 +51,8 @@ describe('the provenance check lesson 1.4 shipped', () => {
       `I recommend ${cited.name} (${cited.sourceId}) at `
     + `${formatMoney(money(BigInt(other.price.minor), other.price.currency))} for the week.`
 
-    // Both halves of lesson 1.4's check say yes.
+    // Both halves of the old check say yes: the articles' id check, then the
+    // amount check lesson 1.4 actually shipped.
     expect(citesOnlySeenIds([{ sourceId: cited.sourceId }], handled.toolTrace)).toBe(true)
     const offered = offeredAmounts(handled.toolTrace)
     const quoted = quotedAmounts(reply)
@@ -54,7 +60,8 @@ describe('the provenance check lesson 1.4 shipped', () => {
     for (const amount of quoted) expect(offered).toContain(amount)
 
     // And the number she reads is not the number that item costs.
-    expect(Number(cited.price.minor) / 100).not.toBe(quoted[0])
+    expect(Number(cited.price.minor) / 10 ** minorUnitExponent(cited.price.currency))
+      .not.toBe(quoted[0])
   })
 
   it('passes an offer whose price was invented, because the check reads prose', async () => {

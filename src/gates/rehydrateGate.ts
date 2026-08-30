@@ -20,12 +20,16 @@ export const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
 /**
  * The model may send references and NOTHING ELSE.
  *
- * This is the structural fix for the flaw lesson 1.4's `checkProvenance`
- * carries, and `test/tampered-price.test.ts` is the demonstration: that version
- * validates that a sourceId was SEEN and never checks the values attached to
- * it, so a model can cite a genuine hotel with a genuine id, attach the price
- * of the hotel beside it, pass provenance, and have the budget check then
- * validate the wrong number.
+ * This is the structural fix for the flaw the source articles' `checkProvenance`
+ * carries, which lesson 1.4's own check shares. Lesson 1.4 shipped
+ * `quotedAmounts` and `offeredAmounts` and nothing else; the id-seen half is the
+ * articles' version, reproduced in `test/tampered-price.test.ts` rather than
+ * imported, because no such function exists at any tag of this branch. Both
+ * halves have the same hole and the demonstration runs both: the id check
+ * validates that a sourceId was SEEN and never looks at the values attached to
+ * it, and the amount check scans prose. So a model can cite a genuine hotel with
+ * a genuine id, attach the price of the hotel beside it, pass provenance, and
+ * have the budget check then validate the wrong number.
  *
  * There is no price field here to tamper with. `strictObject` makes an attempt
  * to supply one a hard parse failure rather than a silently ignored key:
@@ -93,9 +97,10 @@ export async function rehydrateRefs(
 
   // Report ALL missing ids together. One at a time costs a model round trip per
   // bad reference, and the model cannot see the pattern in its own error.
-  // Deduplicated because a direct call, not mediated by the schema, could in
-  // principle repeat an id.
-  const missing = [...new Set(safeRefs.filter((r) => !found.has(r.sourceId)).map((r) => r.sourceId))]
+  // Not deduplicated, and it does not need to be: the schema's `.refine` above
+  // rejects a proposal that repeats a sourceId, and it is re-applied on every
+  // call, so `safeRefs` cannot hold one twice.
+  const missing = safeRefs.filter((r) => !found.has(r.sourceId)).map((r) => r.sourceId)
   if (missing.length > 0) {
     return {
       ok: false,
@@ -112,9 +117,14 @@ export async function rehydrateRefs(
     ok: true,
     items: safeRefs.map((ref) => {
       const item = found.get(ref.sourceId)!
-      // Rebuild rather than alias the caller's ref object: every output field is
-      // discarded and rebuilt from validated data, which is the whole premise
-      // here and not only true of `item`.
+      // Rebuild rather than alias, so nothing the caller still holds is reachable
+      // through the result: every output field is rebuilt from validated data,
+      // which is the whole premise here and not only true of `item`. Against the
+      // PARSED refs this is belt and braces, because zod hands back fresh objects
+      // carrying exactly the declared keys; against the caller's own array it is
+      // the difference between a returned ref and a live alias of model JSON.
+      // `test/gate-rehydrate.test.ts`'s 'rebuilds the ref rather than handing
+      // back the object it was given' is what holds it.
       //
       // `lineTotal` is computed from the REHYDRATED price and the ref's
       // quantity, and the quantity has not been judged yet: `checkTotals` owns

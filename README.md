@@ -136,12 +136,20 @@ when, for how long it stays quotable and whether it can be checked again, and
 `MockSupplier` answers all four honestly for a supplier that invents its prices
 from a hash. One seam is open and the suite cannot see it: every search asks
 for `TRIP_CURRENCY`, so flights come back in euros, while the recorded reply
-`test/provenance-v0.test.ts` replays still quotes them in dollars, and that
-test's `offeredAmounts` compares whole-unit numbers without ever looking at a
-currency. Lesson 4.4 leaves that test exactly as lesson 1.4 wrote it and takes the
-weight off it instead: an offer stops carrying amounts at all, so no price a
-gate reads has been through a currency-blind comparison. The `currency` gate in
-lesson 4.5 is what judges a currency.
+`test/provenance-v0.test.ts` replays still quotes them in dollars, and
+`offeredAmounts` compares whole-unit numbers without ever looking at a currency.
+That helper moved to `test/helpers/provenance.ts` in lesson 4.4 and gained a
+second caller there, `test/tampered-price.test.ts`, so the blind comparison
+spread rather than closed. It survives only because both sides reduce to the
+same whole number today.
+
+Lesson 4.4 leaves the check itself exactly as lesson 1.4 wrote it, because an
+offer stops carrying amounts at all and no price a gate reads goes near that
+comparison. The seam belongs to lesson 4.5's `currency` gate: when that gate
+replaces the articles' check for good, `offeredAmounts` either learns to compare
+currencies or retires with the check it was written for. Until then it is open,
+and a change to a mock price, a supplier currency or `TRIP_CURRENCY` turns two
+test files red at once.
 
 Two suppliers are real from lesson 4.2. Flights come from Kiwi's MCP
 endpoint, which needs no key; hotels come from SearchApi's Google Hotels
@@ -181,8 +189,11 @@ any other key outright, and `rehydrateRefs` reads every field of every item back
 out of `course.tool_results` and throws away whatever the caller supplied, so
 there is no price field for a model to move or invent.
 `test/tampered-price.test.ts` holds both halves of that: the two offers that
-passed lesson 1.4's check, still passing it, and the same two offers refused by
-the schema.
+passed the old check, still passing it, and the same two offers refused by the
+schema. "The old check" is two functions from two places, and the test says so:
+the id half is the source articles' `checkProvenance`, reproduced in that file
+because no such function exists at any tag here, and the amount half is
+`quotedAmounts` and `offeredAmounts`, which is what lesson 1.4 actually shipped.
 
 One hole is open and it is named in `src/supplier/types.ts` and in
 `src/gates/rehydrateGate.ts`: `quantity` is a number the model still controls,
