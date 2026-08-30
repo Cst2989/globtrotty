@@ -24,7 +24,7 @@ export type FailReason = (typeof FAIL_REASONS)[number]
 
 /**
  * Narrows any `Outcome` (src/loop.ts) to a `FailReason`: everything but
- * `'done'`, `'max_tokens'` and `'continue_later'` is one. `finishTurn`'s
+ * `'done'`, `'max_tokens'` and `'continue_later'` is one. `failTurn`'s
  * caller (netlify/functions/run-turn-background.mts) uses this to decide what
  * to write to `turns.fail_reason`, so a reason added to `FAIL_REASONS` is
  * recorded there without that call site needing to know its name.

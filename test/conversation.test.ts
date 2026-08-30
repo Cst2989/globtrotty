@@ -66,7 +66,7 @@ describe('a conversation', () => {
   // per-step guard ever gets a chance to run.
   // `turn()` resolving here, rather than rejecting, is the assertion that
   // matters: run-turn-background.mts awaits turn() in a try/finally with no
-  // catch, so anything but a resolved TurnResult would leave finishTurn
+  // catch, so anything but a resolved TurnResult would leave the turn's closer
   // unreached and her spinner never stopping.
   it('ends the turn instead of throwing when the first spend read cannot confirm', async () => {
     const client = fakeClient([textMessage('should never be reached')])

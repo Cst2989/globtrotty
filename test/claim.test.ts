@@ -120,8 +120,8 @@ describeDb('claimTurn', () => {
  * the platform kills the function and not the statement Postgres has already
  * received, so a dead worker's late save can land on top of a live worker's
  * state. `attempts` is the fencing token: the claim already computed it, and
- * `saveTurnState`'s write carries it or is refused. The completion write still
- * goes through `finishTurn`, unfenced, until lesson 3.3 replaces it.
+ * `saveTurnState`'s write carries it or is refused. The completion write
+ * (`completeTurn`, `failTurn`, from lesson 3.3) carries this same token now.
  */
 describeDb('saveTurnState', () => {
   it('rejects a write from a superseded worker and keeps the live one', async () => {

@@ -129,14 +129,14 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  * carries on doing work is the thing this whole file exists to stop.
  *
  * This guard covers only the write this function makes. The turn's completion
- * write still goes through `finishTurn`, which carries no token at all until
- * lesson 3.3 replaces it, so a superseded worker can still land that write.
+ * write (`completeTurn`, `failTurn`, below, from lesson 3.3) carries this same
+ * token now, so a superseded worker can no longer land that write either.
  *
  * This function, `heartbeat` and `releaseForContinuation` below all end in the
  * same four-line fenced tail: match on id, attempts and status = 'running',
  * return id, throw FencedError on nothing. That repetition is deliberate, not
  * an oversight left for later cleanup: the shape of a fenced write is meant to
- * be visible whole at each of the three places this lesson uses it, rather
+ * be visible whole at each of the three places lesson 3.2 uses it, rather
  * than hidden behind a shared helper the reader would have to open first.
  */
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
@@ -242,43 +242,95 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
 }
 
 /**
- * Writes the answer and closes the turn. Two statements in one transaction, so a
- * crash between them cannot leave a finished turn with no reply. Lesson 3.3
- * takes this much further; the transaction is the part that matters today.
+ * Ends a turn in one transaction: its state, its status, its spend, her reply
+ * and the conversation's status all land together or not at all. A crash between
+ * any two of these used to leave a `done` turn with no reply and a conversation
+ * that reads as still working, and the sweeper cannot rescue that: it only ever
+ * looks at live turns.
  *
- * `failReason`, when passed, is written to `turns.fail_reason`: every outcome
- * the engine can record (src/engine.ts's `FAIL_REASONS`) carries its own
- * reason here, not just a capped turn. Only `'limit_reached'` also moves the
- * conversation off `'active'`, because it is the one reason tier 2 already
- * has its own status for (src/handler.ts sets `conversations.status =
- * 'limit_reached'` on its own denial, with no turn row at all); the others
- * are a turn ending without a real answer, which module 3's retry handles,
- * not a state the conversation itself needs to reflect yet.
+ * Parking is TERMINAL for the turn. A parked turn is `done`, not `running`.
+ * Left `running`, lesson 3.5's sweeper would reclaim and re-execute a
+ * conversation that is simply waiting on her, every heartbeat window, quietly
+ * re-billing a state that is supposed to cost nothing.
+ *
+ * `spendMicros` is the running total this turn has spent, not a delta, and it
+ * lands on `turns.spend_usd_micros` only. Conversation and daily spend accrue
+ * through `recordSpend` (lesson 2.6) and adding them here as well would
+ * double-count the conversation and bypass the daily counter a ceiling reads.
  */
-export async function finishTurn(
+export async function completeTurn(
   sql: postgres.Sql,
-  input: TurnInput,
-  reply: string,
-  failReason?: FailReason,
+  claim: Claim,
+  opts: {
+    state: TurnState
+    /** Null writes no row: an empty bubble in her thread reads worse than nothing. */
+    agentMessage: string | null
+    parked: boolean
+    spendMicros: bigint
+  },
 ): Promise<void> {
-  const status = failReason === 'limit_reached' ? 'limit_reached' : 'active'
   await sql.begin(async (tx) => {
-    // An empty reply is not a message: it would render as a blank bubble in
-    // her thread, which reads as worse than no reply at all. A capped turn
-    // no longer hits this (src/limit-message.ts gives it a real sentence on
-    // both tiers); step_cap and deadline_exceeded still finish with '' until
-    // they earn a sentence of their own, and this is where that empty text
-    // stops rather than becoming a row.
-    if (reply !== '') {
+    const rows = await tx`
+      update course.turns
+         set status = 'done', state = ${tx.json(opts.state as never)},
+             finished_at = now(), heartbeat_at = now(),
+             spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
+       where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+      returning id`
+    if (rows.length === 0) throw new FencedError(claim.turnId)
+
+    if (opts.agentMessage !== null) {
       await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
-               values (${input.conversationId}, ${input.userId}, ${input.turnId}, 'agent', ${reply})`
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       'agent', ${opts.agentMessage})`
     }
-    // Every turn this module closes ends 'done', with `fail_reason` beside it
-    // naming why when there was one; `'failed'` in turns_status_check is
-    // reserved for module 3's crash handling, not written here yet.
-    await tx`update course.turns set status = 'done', finished_at = now(), fail_reason = ${failReason ?? null}
-              where id = ${input.turnId}`
-    await tx`update course.conversations set status = ${status}, updated_at = now()
-              where id = ${input.conversationId} and user_id = ${input.userId}`
+
+    await tx`update course.conversations
+                set status = ${opts.parked ? 'awaiting_user' : 'active'}, updated_at = now()
+              where id = ${claim.conversationId} and user_id = ${claim.userId}`
+  })
+  // Anything that tells her the work is ready belongs AFTER this commit and may
+  // never fail the turn: her work is already saved and already billed, and a
+  // failed notification that took the turn's status down with it would tell her
+  // that finished work does not exist.
+}
+
+/**
+ * The other way a turn ends. Same transaction, same fencing token, and the
+ * conversation status mirrors the reason rather than collapsing to 'failed':
+ * `submitMessage` (src/handler.ts) sets 'limit_reached' for the identical
+ * condition hit before the turn was queued, so hitting it one step in has to
+ * read the same way to her.
+ *
+ * `agentMessage` is optional because not every failure has earned a sentence
+ * yet. A ceiling has one (src/limit-message.ts) and passes it here; `step_cap`
+ * and `deadline_exceeded` do not, and pass nothing rather than an empty string
+ * that would become a blank row.
+ */
+export async function failTurn(
+  sql: postgres.Sql,
+  claim: Claim,
+  reason: FailReason,
+  spendMicros: bigint,
+  agentMessage: string | null = null,
+): Promise<void> {
+  const conversationStatus = reason === 'limit_reached' ? 'limit_reached' : 'failed'
+  await sql.begin(async (tx) => {
+    const rows = await tx`
+      update course.turns
+         set status = 'failed', fail_reason = ${reason}, finished_at = now(),
+             spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
+       where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
+      returning id`
+    if (rows.length === 0) throw new FencedError(claim.turnId)
+
+    if (agentMessage !== null) {
+      await tx`insert into course.messages (conversation_id, user_id, turn_id, role, content)
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       'agent', ${agentMessage})`
+    }
+
+    await tx`update course.conversations set status = ${conversationStatus}, updated_at = now()
+              where id = ${claim.conversationId} and user_id = ${claim.userId}`
   })
 }

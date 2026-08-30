@@ -4,7 +4,7 @@ import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { isFailReason } from '../../src/engine.js'
 import { ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
-import { claimTurn, finishTurn, loadTurnInput } from '../../src/repo/turns.js'
+import { claimTurn, completeTurn, failTurn, loadTurnInput } from '../../src/repo/turns.js'
 import { MockSupplier } from '../../src/supplier/mock.js'
 import { authorize } from '../../src/tier3.js'
 import { mockRunner } from '../../src/tools.js'
@@ -62,12 +62,25 @@ export default async (req: Request): Promise<Response> => {
         readSpend: () => readSpendFailClosed(sql, input.userId, input.conversationId),
       },
     )
-    // Every outcome the engine can name (src/engine.ts's FAIL_REASONS) is
-    // passed through to `turns.fail_reason`; 'done', 'max_tokens' and
-    // 'continue_later' are not fail reasons and finishTurn records nothing
-    // for them, exactly as before. The ceiling denial is the one reason that
-    // also leaves the same record behind tier 2's own (src/handler.ts).
-    await finishTurn(sql, input, result.text, isFailReason(result.outcome) ? result.outcome : undefined)
+    // Two ways out, and the reason decides which. Every outcome the engine can
+    // name (src/engine.ts's FAIL_REASONS) is a failure with that reason on the
+    // row; 'done', 'max_tokens' and 'continue_later' are the turn ending with an
+    // answer. `parked: true` because the agency has said its piece and she holds
+    // the next move; lesson 3.5's sweeper must never resurrect that.
+    //
+    // 0n on both branches, not result.costMicros: this path's ledgerSink already
+    // recorded every model call and incremented conversation and daily spend as
+    // it went (lesson 2.6), so adding the total again here would double-count it
+    // on the turn row. Lesson 3.6's worker, whose agent steps are not metered by
+    // a sink, is what passes a real number.
+    if (isFailReason(result.outcome)) {
+      await failTurn(sql, claim, result.outcome, 0n, result.text === '' ? null : result.text)
+    } else {
+      await completeTurn(sql, claim, {
+        state: { step: result.steps }, agentMessage: result.text === '' ? null : result.text,
+        parked: true, spendMicros: 0n,
+      })
+    }
     console.log(`turn ${input.turnId}: ${result.outcome} in ${Date.now() - startedMs} ms`)
   } finally {
     await sql.end({ timeout: 5 })

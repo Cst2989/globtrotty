@@ -155,10 +155,10 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
     })
     // A capped turn is the one stop reason that reaches her as a real
     // sentence, from src/limit-message.ts, the same one tier 2 writes on its
-    // own denial (src/handler.ts) and `finishTurn` records with `fail_reason`
+    // own denial (src/handler.ts) and `failTurn` records with `fail_reason`
     // set. step_cap and deadline_exceeded have not earned a sentence of their
-    // own yet, so they still return empty text, and `finishTurn` now skips
-    // the agent row rather than write a blank one.
+    // own yet, so they still return empty text, and `failTurn` skips the
+    // agent row rather than write a blank one.
     if (decision.kind === 'stop') {
       const text = decision.reason === 'limit_reached' ? limitReachedMessage(spend, limits) : ''
       return finish(decision.reason, text)
