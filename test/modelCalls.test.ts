@@ -64,7 +64,7 @@ describeDb('recordModelCall', () => {
         conversationId, turnId: null, userId,
         seat: 'driver', seatConfig: SEATS.driver, result: ok,
         systemPrompt: 'sys', userPrompt: 'usr', thinkingMode: 'adaptive',
-        costMicros: 1_000n,
+        requestShape: { model: 'claude-opus-5' }, costMicros: 1_000n,
       })
       const [row] = await sql`
         select seat, model, model_config_id, effort, thinking_mode, cost_micros,
@@ -99,7 +99,7 @@ describeDb('recordModelCall', () => {
         conversationId, turnId: null, userId,
         seat: 'driver', seatConfig: SEATS.driver, result: refused,
         systemPrompt: 'sys', userPrompt: 'usr', thinkingMode: 'adaptive',
-        costMicros: 0n,
+        requestShape: { model: 'claude-opus-5' }, costMicros: 0n,
       })
       const [row] = await sql`
         select response, response->>'stop_reason' as stop_reason
@@ -123,7 +123,7 @@ describeDb('recordModelCall', () => {
         conversationId, turnId: null, userId,
         seat: 'driver', seatConfig: SEATS.driver, result: ok,
         systemPrompt: 'key is sk-ant-api03-LEAKEDLEAKEDLEAK', userPrompt: 'usr',
-        thinkingMode: 'adaptive', costMicros: 1n,
+        thinkingMode: 'adaptive', requestShape: { model: 'claude-opus-5' }, costMicros: 1n,
       })
       const [row] = await sql`
         select system_prompt from model_calls where conversation_id = ${conversationId}`
@@ -145,7 +145,8 @@ describeDb('recordModelCall', () => {
       await recordModelCall(sql, {
         conversationId, turnId: null, userId,
         seat: 'scout', seatConfig: SEATS.scout, result: ok,
-        systemPrompt: cjk, userPrompt: '', thinkingMode: null, costMicros: 1n,
+        systemPrompt: cjk, userPrompt: '', thinkingMode: null,
+        requestShape: { model: 'claude-haiku-4-5-20251001' }, costMicros: 1n,
       })
       const [row] = await sql`
         select capture_policy from model_calls where conversation_id = ${conversationId}`
@@ -175,7 +176,8 @@ describeDb('recordModelCall', () => {
       await recordModelCall(sql, {
         conversationId, turnId: null, userId,
         seat: 'driver', seatConfig: SEATS.driver, result: leaky,
-        systemPrompt: 'sys', userPrompt: 'usr', thinkingMode: 'adaptive', costMicros: 1n,
+        systemPrompt: 'sys', userPrompt: 'usr', thinkingMode: 'adaptive',
+        requestShape: { model: 'claude-opus-5' }, costMicros: 1n,
       })
       const [row] = await sql`
         select response from model_calls where conversation_id = ${conversationId}`
@@ -190,6 +192,58 @@ describeDb('recordModelCall', () => {
     })
   })
 
+  it('stores the assembled request, redacted, for a full-capture seat', async () => {
+    // driver is hardwired 'full' by capturePolicyFor, so this exercises the
+    // branch that writes request_shape rather than nulling it.
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await seed(sql, '07')
+      await recordModelCall(sql, {
+        conversationId, turnId: null, userId,
+        seat: 'driver', seatConfig: SEATS.driver, result: ok,
+        systemPrompt: 'you are a desk', userPrompt: 'lisbon in september',
+        thinkingMode: 'adaptive',
+        requestShape: {
+          model: 'claude-opus-5',
+          system: [{ type: 'text', text: 'you are a desk' }],
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'sk-ant-api03-LEAKEDLEAKEDLEAK' }] }],
+        },
+        costMicros: 1_000n,
+      })
+      const [row] = await sql<{ request_shape: unknown }[]>`
+        select request_shape from model_calls where conversation_id = ${conversationId}`
+      const shape = row!.request_shape as Record<string, unknown>
+      // Stored as a jsonb OBJECT, not a string scalar — a string scalar makes
+      // request_shape->>'model' null forever.
+      expect(shape.model).toBe('claude-opus-5')
+      // Redacted on the way in, exactly like `response`.
+      expect(JSON.stringify(shape)).not.toContain('sk-ant-api03-LEAKEDLEAKEDLEAK')
+      expect(JSON.stringify(shape)).toContain('[REDACTED]')
+    })
+  })
+
+  it('stores no request shape when the seat is truncated, not a second copy of the request', async () => {
+    // capturePolicyFor's other reachable non-full branch (sampled_out is
+    // currently dead code — it hardwires 'full' for driver/front_desk/reviewer
+    // and 'truncated' above 8KB for everything else). request_shape is only
+    // written when policy === 'full', so the truncated branch must write NULL:
+    // a missing trace stays distinguishable from a dropped one.
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await seed(sql, '08')
+      const oversized = 'a'.repeat(9_000)   // > TRUNCATE_ABOVE_BYTES (8_192)
+      await recordModelCall(sql, {
+        conversationId, turnId: null, userId,
+        seat: 'scout', seatConfig: SEATS.scout, result: ok,
+        systemPrompt: oversized, userPrompt: '', thinkingMode: null,
+        requestShape: { model: 'claude-haiku-4-5-20251001' },
+        costMicros: 1n,
+      })
+      const [row] = await sql<{ request_shape: unknown; capture_policy: string }[]>`
+        select request_shape, capture_policy from model_calls where conversation_id = ${conversationId}`
+      expect(row!.capture_policy).toBe('truncated')
+      expect(row!.request_shape).toBeNull()
+    })
+  })
+
   it('never fails the work it observes', async () => {
     // A span is best-effort. The spend is not — that is reserve/reconcile.
     const broken = {
@@ -199,7 +253,8 @@ describeDb('recordModelCall', () => {
     await expect(recordModelCall(broken, {
       conversationId: null, turnId: null, userId: '00000000-0000-4000-8000-000000000499',
       seat: 'driver', seatConfig: SEATS.driver, result: ok,
-      systemPrompt: 's', userPrompt: 'u', thinkingMode: 'adaptive', costMicros: 1n,
+      systemPrompt: 's', userPrompt: 'u', thinkingMode: 'adaptive',
+      requestShape: { model: 'claude-opus-5' }, costMicros: 1n,
     })).resolves.toBeUndefined()
     expect(spy).toHaveBeenCalled()   // swallowed, but never silently
     spy.mockRestore()

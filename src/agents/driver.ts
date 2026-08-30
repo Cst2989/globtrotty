@@ -5,7 +5,7 @@ import { firstCeilingReached, type Limits, type LoopMessage } from '../engine.js
 import { classifyError } from '../errors.js'
 import { SEATS } from '../model/seats.js'
 import {
-  buildCountTokensRequest, callModel, estimateInputTokens,
+  buildCountTokensRequest, buildRequest, callModel, estimateInputTokens,
   type CallArgs, type ModelResult, type Transport,
 } from '../model/client.js'
 import { SYSTEM_CACHE_TTL } from '../model/cache.js'
@@ -167,6 +167,12 @@ export function makeDriver(deps: DriverDeps): Agent {
       conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
       seat: 'driver', seatConfig: seat, result,
       systemPrompt: args.system, userPrompt: lastUserText(ctx.state.messages),
+      // The request as actually assembled, not a reconstruction. `buildRequest`
+      // is pure and is the single assembly path (src/model/client.ts), so
+      // calling it here a second time yields exactly what `callModel` sent —
+      // preserving that single-assembly-path invariant is why this calls
+      // `buildRequest(args)` again rather than having `callModel` return it.
+      requestShape: buildRequest(args),
       thinkingMode: 'adaptive', costMicros: actual,
     })
 
