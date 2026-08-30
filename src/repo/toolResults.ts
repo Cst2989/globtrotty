@@ -1,12 +1,23 @@
 import type postgres from 'postgres'
 import { money } from '../money.js'
-import type { SupplierItem, SearchParams, FlightDetail, HotelDetail } from '../supplier/types.js'
+import type { SupplierItem, SearchParams, StoredItem, FlightDetail, HotelDetail } from '../supplier/types.js'
 
 type Row = {
   source_id: string; supplier: string; kind: 'flight' | 'hotel'; name: string
   price_minor: string; currency: string; price_basis: 'total' | 'pre_tax'
   booking_url: string | null; payload: FlightDetail | HotelDetail
-  fetched_at: Date; ttl_seconds: number
+  fetched_at: Date; ttl_seconds: number; search_params: unknown
+}
+
+/**
+ * `search_params` is jsonb: whatever is in the column is `unknown`, and the
+ * column default `'{}'` is a legitimate value that is not a search. A cast
+ * would hand the cashier an object with no `kind` and let it re-quote against
+ * nothing. Checking the discriminant is the whole guard.
+ */
+function isSearchParams(v: unknown): v is SearchParams {
+  return typeof v === 'object' && v !== null
+    && ((v as { kind?: unknown }).kind === 'flight' || (v as { kind?: unknown }).kind === 'hotel')
 }
 
 /**
@@ -104,17 +115,17 @@ export async function rehydrate(
   sql: postgres.Sql,
   conversationId: string,
   sourceIds: string[],
-): Promise<Map<string, SupplierItem>> {
+): Promise<Map<string, StoredItem>> {
   if (sourceIds.length === 0) return new Map()
   const rows = await sql<Row[]>`
     select distinct on (source_id)
            source_id, supplier, kind, name, price_minor, currency, price_basis,
-           booking_url, payload, fetched_at, ttl_seconds
+           booking_url, payload, fetched_at, ttl_seconds, search_params
       from tool_results
      where conversation_id = ${conversationId}
        and source_id = any(${sourceIds})
      order by source_id, fetched_at desc, id desc`
-  const out = new Map<string, SupplierItem>()
+  const out = new Map<string, StoredItem>()
   for (const r of rows) {
     out.set(r.source_id, {
       sourceId: r.source_id,
@@ -127,6 +138,7 @@ export async function rehydrate(
       ttlSeconds: r.ttl_seconds,
       bookingUrl: r.booking_url,
       detail: r.payload,
+      searchParams: isSearchParams(r.search_params) ? r.search_params : null,
     })
   }
   return out

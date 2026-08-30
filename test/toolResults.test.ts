@@ -267,4 +267,37 @@ describeDb('tool_results repo', () => {
       expect(seen.size).toBe(1)
     })
   }, 30_000)
+
+  it('rehydrate returns the search that found each item', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '11')
+      const searchParams: FlightSearch = { ...params, from: 'LGW', to: 'FAO', departureDate: '2026-09-12' }
+      const [item] = await new MockSupplier({ kind: 'flight' }).search(searchParams)
+      await recordResults(sql, {
+        conversationId, userId, turnId: null, params: searchParams, items: [item!],
+      })
+
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      const stored = got.get(item!.sourceId)!
+      expect(stored.searchParams).not.toBeNull()
+      expect(stored.searchParams).toMatchObject({ kind: 'flight', from: 'LGW', to: 'FAO' })
+    })
+  })
+
+  // Pre-0011 rows have '{}'::jsonb from the column default, never a real
+  // search. The guard must tell that apart from a genuine search — an empty
+  // object is not a search with no filters, it is the absence of one — so the
+  // cashier never re-quotes against a fabricated search.
+  it('reports a search-less row as null rather than an empty search', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '12')
+      const [item] = await new MockSupplier({ kind: 'flight' }).search(params)
+      await recordResults(sql, { conversationId, userId, turnId: null, params, items: [item!] })
+      // Simulate a pre-0011 row: the column default, never a real search.
+      await sql`update tool_results set search_params = '{}'::jsonb
+                 where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
+      const got = await rehydrate(sql, conversationId, [item!.sourceId])
+      expect(got.get(item!.sourceId)!.searchParams).toBeNull()
+    })
+  })
 })
