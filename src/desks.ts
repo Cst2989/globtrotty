@@ -63,16 +63,38 @@ function withoutComments(text: string): string {
   return text.replace(/<!--[\s\S]*?-->[ \t]*\n?/g, '').replace(/^\n+/, '')
 }
 
+/**
+ * Any prompt file this product owns, loaded the one way a prompt may be loaded:
+ * comments out before the bytes are sent, and the version hashed over what was
+ * sent rather than over what was on disk.
+ *
+ * Extracted from `loadDesk` at lesson 5.4's fix round, because the scout prompt
+ * (src/agents/prompts/scout.md) is a prompt we own that does not live in
+ * src/desks, has no `{{slot}}` and no seat of its own, and was reading its file
+ * raw. Two consequences followed from that, and both are closed by routing it
+ * through here. Its `<!-- scout -->` marker was on the wire, so it would have
+ * carried a sentinel to the model the moment one was added, and its
+ * `course.model_calls.prompt_version` hashed bytes including the marker, so a
+ * comment-only edit minted a new prompt version on the scout seat and not on
+ * any desk seat. Lesson 5.7's monitor reads those rows.
+ *
+ * `marker` is checked against the RAW file, because the marker is one of the
+ * comments `withoutComments` removes: a prompt that has lost its marker is a
+ * file somebody copied without reading, and the whole point is to catch that
+ * before it is sent.
+ */
+export function loadPrompt(
+  file: string | URL, marker: string,
+): { prompt: string; promptVersion: string } {
+  const raw = readFileSync(file, 'utf8')
+  if (!raw.startsWith(marker)) throw new Error(`${String(file)} must start with ${marker}`)
+  const prompt = withoutComments(raw)
+  return { prompt, promptVersion: promptVersion(prompt) }
+}
+
 export function loadDesk(name: Desk): LoadedDesk {
-  const file = readFileSync(path.join(DIR, `${name}-desk.md`), 'utf8')
-  const sentinel = `<!-- desk: ${name} -->`
-  // Checked against the FILE, because the marker is one of the comments the
-  // line below removes: a desk whose prompt has lost its marker is a file
-  // somebody copied without reading, and the whole point is to catch that
-  // before it is sent.
-  if (!file.startsWith(sentinel)) throw new Error(`${name}-desk.md must start with ${sentinel}`)
-  const prompt = withoutComments(file)
-  return { name, seat: DESK_SEATS[name], prompt, promptVersion: promptVersion(prompt) }
+  const loaded = loadPrompt(path.join(DIR, `${name}-desk.md`), `<!-- desk: ${name} -->`)
+  return { name, seat: DESK_SEATS[name], ...loaded }
 }
 
 /** Fills {{name}} slots; a slot with no value is an error, because a half-filled prompt reads as an instruction. */

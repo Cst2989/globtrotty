@@ -4,7 +4,7 @@ import type { ModelClient } from '../client.js'
 import { TODAY } from '../conversation.js'
 import { loadDesk, renderPrompt } from '../desks.js'
 import { textOfBlocks, whichCeiling, type ContentBlock, type Limits } from '../engine.js'
-import { classifyError } from '../errors.js'
+import { isUnbilled } from '../errors.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
 import type { Provenance } from '../notebook.js'
@@ -150,7 +150,8 @@ export function makeDriver(deps: DriverDeps): Agent {
     // than with a generation, so nothing was billed and the whole reservation is
     // refunded. That is both halves of the taxonomy that carry a status,
     // `provider_rejected` (the remaining 4xx) and `provider_down` (408, 409,
-    // 429 and every 5xx), and `isUnbilled` below names both. A connection
+    // 429 and every 5xx), and `isUnbilled` (src/errors.ts) names both, from
+    // lesson 5.4 where the scouts became its second caller. A connection
     // failure, a timeout with no response at all or our own abort keeps the
     // debit, because the provider may have generated and billed a response we
     // never saw.
@@ -463,7 +464,8 @@ export type DeskChoice =
  * capped conversation still costs one call and up to three under `withRetry`.
  *
  * The reservation is refunded when the call comes back with an error BODY, on
- * exactly the terms `makeDriver` refunds its own (`isUnbilled` below). Without
+ * exactly the terms `makeDriver` refunds its own (`isUnbilled`, src/errors.ts).
+ * Without
  * that, a provider outage would strand one Haiku reservation per attempt in
  * course.daily_usage, which `readSpendFailClosed` sums across all users for the
  * global ceiling: the same leak lesson 5.1 closed for the driver's call, one
@@ -564,30 +566,4 @@ export function provenanceFor(ctx: AgentContext): Provenance {
     (m) => m.content.some((b) => b.type === 'tool_result'),
   )
   return tainted ? 'inferred' : 'user'
-}
-
-/**
- * Did a response body reach us? An error body carries no `usage`, so nothing was
- * billed and the reservation can be refunded in full. Anything with no body at
- * all, a connection failure, a timeout, our own abort, or an error we cannot
- * name, keeps the debit.
- *
- * Derived from the branch's own classifier rather than from a second list of
- * statuses: `provider_rejected` and `provider_down` are exactly the two reasons
- * `classifyError` (src/errors.ts) produces from an HTTP STATUS, which is to say
- * from a response the provider sent. It rejected the request (400, 401, 403,
- * 404) or it could not serve it (408, 409, 429, 5xx); either way it did not
- * generate tokens, and a 429 in an outage is no more billed than a 400 is.
- *
- * The two that are left out are the two with no response behind them.
- * `fetch_failed` is `APIConnectionError`: the request never reached the
- * provider, or a timeout expired with nothing coming back, and a timeout is the
- * case where a generation may well have been produced and billed after we
- * stopped listening. `unclassified` covers our own abort and anything we cannot
- * name, where we know nothing at all. Both keep the debit, which is the
- * conservative direction on a guardrail.
- */
-function isUnbilled(err: unknown): boolean {
-  const { reason } = classifyError(err)
-  return reason === 'provider_rejected' || reason === 'provider_down'
 }

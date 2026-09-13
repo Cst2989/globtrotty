@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { APIConnectionError } from '@anthropic-ai/sdk'
 import type postgres from 'postgres'
-import { batchInputTokens, runScouts, type ScoutBrief } from '../src/agents/scout.js'
+import { batchInputTokens, runScouts, SCOUT_PROMPT, type ScoutBrief } from '../src/agents/scout.js'
 import { costMicros } from '../src/pricing.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { estimateBatchMicros, estimateMicros } from '../src/repo/reservation.js'
@@ -9,9 +10,14 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { exceedsAnyCeiling } from '../src/engine.js'
 import { SEATS } from '../src/seats.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
-import { doorRunner, itemForModel, ledgerRunner, mockRunner, scoutRunner } from '../src/tools.js'
+import { emptyNotebook } from '../src/notebook.js'
+import {
+  doorRunner, itemForModel, ledgerRunner, mockRunner, scoutRunner, scoutStayFrom,
+} from '../src/tools.js'
 import { fenceResult } from '../src/tools/validate.js'
+import { SENTINELS } from '../scripts/sentinels.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { apiError } from './helpers/errors.js'
 import { textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
 
@@ -77,6 +83,78 @@ describe('what a per-call ceiling check admits', () => {
   })
 })
 
+describe('the stay a scouting search asks about', () => {
+  it('reads her notebook, and never asks for a check-in in the past', () => {
+    // `research_destination` carries a city and a question and no dates, and a
+    // hotel search needs some. They come off her notebook rather than off the
+    // model, which is the same rule `hotelSearchFrom` follows for every field
+    // the tool does not publish.
+    const stated = scoutStayFrom(
+      { ...emptyNotebook(), month: { value: 'october', source: 'user', at: AT.toISOString() },
+        nights: { value: 5, source: 'user', at: AT.toISOString() },
+        partySize: { value: { adults: 2, children: 1, infants: 0 }, source: 'user', at: AT.toISOString() } },
+      '2026-09-13')
+    expect(stated).toEqual({ checkIn: '2026-10-01', checkOut: '2026-10-06', adults: 2, currency: null })
+
+    // Her month has already started. `travelWindowFrom` runs the window from the
+    // FIRST of that month, which is behind us, and a live adapter refuses a
+    // check-in in the past.
+    const midMonth = scoutStayFrom(
+      { ...emptyNotebook(), month: { value: 'september', source: 'user', at: AT.toISOString() } },
+      '2026-09-13')
+    expect(midMonth.checkIn).toBe('2026-09-14')
+    expect(midMonth.checkOut).toBe('2026-09-21')
+
+    // She has named nothing at all: a week, a month out, one adult.
+    expect(scoutStayFrom(emptyNotebook(), '2026-09-13'))
+      .toEqual({ checkIn: '2026-10-13', checkOut: '2026-10-20', adults: 1, currency: null })
+  })
+})
+
+describe('the scout prompt', () => {
+  it('carries a sentinel, and sends neither it nor any other comment', () => {
+    // The scout prompt is a prompt this product owns, it lives under `src/`,
+    // which Netlify uploads, and until this round it was the one prompt on the
+    // branch `npm run sentinels` could not protect. Adding the marker is only
+    // half of it: the other half is that `scout.ts` reads the file through the
+    // same comment-stripping loader `loadDesk` uses, so the string that "must
+    // never appear in anything we deploy" is not itself sent to a model that
+    // can repeat its instructions into a reply `completeTurn` writes to
+    // course.messages.
+    const raw = readFileSync(new URL('../src/agents/prompts/scout.md', import.meta.url), 'utf8')
+    expect(raw).toContain('GLOBETROTTY-SCOUT-PROMPT-DO-NOT-SHIP')
+    expect(SCOUT_PROMPT).not.toContain('<!--')
+    for (const s of SENTINELS) {
+      expect(s.pattern.test(SCOUT_PROMPT), `the scout prompt sends ${s.name}`).toBe(false)
+    }
+    // And the marker is in the SENTINELS list, so the grep looks for it at all.
+    expect(SENTINELS.map((s) => s.name)).toContain('scout-prompt')
+  })
+})
+
+describe('a batch with nothing in it', () => {
+  it('refuses an empty list before it computes anything from it', async () => {
+    // `batchInputTokens` is `Math.max(...[])`, which is -Infinity, and
+    // `estimateMicros` feeds that to `BigInt(Math.ceil(NaN))`, which is a
+    // RangeError about NaN. `estimateBatchMicros`'s own `n < 1` guard is never
+    // reached, so the guard `test/reservation.test.ts` pins protects that
+    // function's other callers and not this one. The guard has to run FIRST,
+    // before any arithmetic, and the message has to be the one a reader of the
+    // reservation guard would recognise.
+    //
+    // `cities: z.array(...).min(1)` in the registry makes this unreachable
+    // through the door, so the exposure is a direct caller of the exported
+    // `runScouts`. `sql` is never touched, which is why this case needs no
+    // database.
+    await expect(runScouts(EMPTY_DEPS, [])).rejects.toThrow(/at least 1/)
+  })
+})
+
+const EMPTY_DEPS = {
+  sql: null as never, client: null as never, conversationId: 'c', userId: 'u',
+  turnId: 't', callId: 's3-b0', limits: DEFAULT_LIMITS, now: () => 0,
+}
+
 /**
  * What the driver would have handed a scout: one search of Faro, rendered the
  * way `itemForModel` renders it. Built from the mock supplier rather than
@@ -98,7 +176,7 @@ describeDb('a real brief, replayed', () => {
       const client = replayClient('scout-faro')
       const [result] = await runScouts(
         { sql, client, conversationId: c!.id as string, userId: USER, turnId: null as never,
-          callId: 'toolu_x', limits: DEFAULT_LIMITS, now: () => 0 },
+          callId: 's3-b0', limits: DEFAULT_LIMITS, now: () => 0 },
         [{ city: 'Faro', question: 'Is the old town walkable from the beach with a toddler?',
            results: await faroResults() }],
       )
@@ -124,6 +202,15 @@ describeDb('a real brief, replayed', () => {
     })
   })
 })
+
+/**
+ * A fixed clock for the mock supplier and the stay a scouting search asks
+ * about. `itemForModel` puts `fetchedAt` on the wire, so two mocks on the
+ * default `new Date()` clock render two different payloads and the case below
+ * could only ever compare substrings.
+ */
+const AT = new Date('2026-08-20T09:00:00.000Z')
+const STAY = { checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, currency: 'EUR' }
 
 const THREE: ScoutBrief[] = ['Faro', 'Lisbon', 'Porto'].map((city) => ({
   city, question: 'Is the old town walkable from the beach with a toddler?', results: '[]',
@@ -157,6 +244,53 @@ async function conversationSpend(sql: postgres.Sql, id: string): Promise<bigint>
   return BigInt(row!.spend_usd_micros)
 }
 
+/**
+ * The OTHER counter a stranded reservation lands in, and the one that does the
+ * damage. `readSpendFailClosed` (src/limits.ts) sums `course.daily_usage`
+ * across every user for the global ceiling, so micros stranded here cap the
+ * whole product rather than one conversation. Summed over the user's days
+ * rather than read for "today", because `reserve` writes the UTC day and this
+ * project's vitest config pins a non-UTC zone.
+ */
+async function dailySpend(sql: postgres.Sql, userId: string): Promise<bigint> {
+  const [row] = await sql<{ total: string }[]>`
+    select coalesce(sum(cost_micros), 0)::text as total
+      from course.daily_usage where user_id = ${userId}`
+  return BigInt(row!.total)
+}
+
+/**
+ * The same `sql`, with the FIRST `reconcile` of the batch failing.
+ *
+ * `reserve` and `reconcile` are the only two writes in `runScouts` that open a
+ * transaction (`src/repo/reservation.ts`), and `reserve` is awaited before any
+ * call is dispatched, so `begin` number 1 is the reservation and number 2 is
+ * whichever scout reaches its reconcile first. Which scout that is does not
+ * matter and is not asserted; that exactly one share is lost does.
+ *
+ * A wrapper rather than a broken argument, because every other way of making
+ * `reconcile` fail (a conversation id nobody owns, a bad day) would break
+ * `reserve` in the same breath, and the case is about a write that fails AFTER
+ * the model answered.
+ */
+function sqlWithOneFailingReconcile(sql: postgres.Sql): postgres.Sql {
+  let begins = 0
+  const failing = (fn: never): unknown => {
+    begins += 1
+    if (begins === 2) return Promise.reject(new Error('reconcile: pool exhausted'))
+    return sql.begin(fn)
+  }
+  return new Proxy(sql, {
+    get(target, prop) {
+      if (prop === 'begin') return failing
+      const value = Reflect.get(target, prop) as unknown
+      return typeof value === 'function'
+        ? (value as (...a: never[]) => unknown).bind(target)
+        : value
+    },
+  })
+}
+
 describeDb('three scouts, one reservation', () => {
   it('debits the batch before any call is made, and refuses one it cannot afford', async () => {
     await withTestDb(async (sql) => {
@@ -169,7 +303,7 @@ describeDb('three scouts, one reservation', () => {
                  where id = ${conversationId}`
       const client = slowClient([0, 0, 0])
       const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
-                     callId: 'toolu_x', now: Date.now, limits: DEFAULT_LIMITS }
+                     callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
       await expect(runScouts(deps, THREE)).rejects.toThrow(/limit_reached/)
       // The batch is refused before a single call leaves, which is the whole
       // difference from lesson-5-3, where all three were dispatched and the
@@ -192,7 +326,7 @@ describeDb('three scouts, one reservation', () => {
         if (i === 0) spendAtFirstCall = await conversationSpend(sql, conversationId)
       })
       const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
-                     callId: 'toolu_x', now: Date.now, limits: DEFAULT_LIMITS }
+                     callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
       await runScouts(deps, THREE)
       expect(spendAtFirstCall).toBe(
         before + estimateBatchMicros(SEATS.scout, batchInputTokens(THREE), 3))
@@ -202,24 +336,32 @@ describeDb('three scouts, one reservation', () => {
   it('runs them at once, so the wall clock is one call and not three', async () => {
     await withTestDb(async (sql) => {
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
-      // Two assertions, because the wall clock of `runScouts` is not the wall
-      // clock of the fan-out. One reserve, three reconciles and three
+      // The claim rides on the DISPATCH SPREAD, and the elapsed time is printed
+      // and not asserted. The wall clock of `runScouts` is not the wall clock of
+      // the fan-out: one reserve, three reconciles and three
       // course.model_calls inserts are in here too, `withTestDb` opens a pool of
       // ONE connection so they cannot overlap each other, and against a remote
-      // database that is most of a second whatever the model does.
+      // database that is most of a second whatever the model does. Measured at
+      // 1,819ms against a 3,000ms sum, which leaves roughly 800ms of the budget
+      // to the database; a database two and a half times slower than that one
+      // turns an `elapsed < sum` assertion red for a reason that has nothing to
+      // do with the fan-out, under a failure message naming the fan-out. A
+      // bound that can only be stated relative to a machine nobody else has is
+      // not a bound, so it is a `console.log` instead.
       //
-      // The delays are therefore a second each rather than the 100ms a local
-      // stub would need: sequential is three seconds plus the database, parallel
-      // is one second plus the same database, and the gap has to be wider than
-      // the round trips to mean anything.
+      // The spread is load-independent and is the stronger half anyway: all
+      // three map callbacks run to their first real await in the same microtask
+      // tick, so `starts` holds three timestamps before any delay begins and the
+      // spread is 0ms unless the dispatch actually becomes sequential. The
+      // delays stay a second each so the printed figure stays readable next to
+      // the database's own cost.
       const delays = [1_000, 1_000, 1_000]
-      // When each call was dispatched. This is the half of the claim that does
-      // not care how slow the database is: all three were in flight at once if
-      // the last one started before the first one's delay had run out.
+      // When each call was dispatched: all three were in flight at once if the
+      // last one started before the first one's delay had run out.
       const starts: number[] = []
       const client = slowClient(delays, () => { starts.push(Date.now()) })
       const deps = { sql, client, conversationId: c!.id as string, userId: USER,
-                     turnId: null as never, callId: 'toolu_x', now: Date.now, limits: DEFAULT_LIMITS }
+                     turnId: null as never, callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
       const started = Date.now()
       const results = await runScouts(deps, THREE)
       const elapsed = Date.now() - started
@@ -227,9 +369,52 @@ describeDb('three scouts, one reservation', () => {
       const spread = Math.max(...starts) - Math.min(...starts)
       expect(starts).toHaveLength(3)
       expect(spread).toBeLessThan(delays[0]!)
-      expect(elapsed).toBeLessThan(delays.reduce((a, b) => a + b, 0))
       console.log(`wall clock: ${elapsed}ms for three ${delays[0]}ms calls `
         + `(sum would be ${delays.reduce((a, b) => a + b, 0)}ms); dispatch spread ${spread}ms`)
+    })
+  })
+
+  it("sends each scout that city's own supplier payload", async () => {
+    await withTestDb(async (sql) => {
+      // The reason the door exists. A scout absorbs a supplier payload on the
+      // cheap seat so the driver never has to read one, and the scout prompt
+      // tells the model it is being given "search results for that city that
+      // came from a supplier". Until this round `scoutRunner` passed
+      // `results: ''`, so every one of those sentences was false and the twenty
+      // to one saving the lesson opens on could not be realised, because the
+      // payload the scout exists to absorb never reached it.
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const sent: string[] = []
+      const client = {
+        calls: 0,
+        async create(request: { messages: { content: { text?: string }[] }[] }) {
+          client.calls += 1
+          sent.push(request.messages[0]!.content.map((b) => b.text ?? '').join(''))
+          return textMessage('The old town is a short walk from the sand.')
+        },
+      }
+      const run = scoutRunner(sql, {
+        client: client as never, suppliers: mockSuppliers({ hotel: { now: () => AT } }),
+        stay: STAY, conversationId: c!.id as string, userId: USER,
+        turnId: null as never, limits: DEFAULT_LIMITS, now: Date.now,
+      }, mockRunner())
+      await run('research_destination',
+        { cities: ['Faro', 'Lisbon'], question: 'walkable?' }, 's3-b0', undefined)
+
+      // Exactly what `search_hotels` would have returned for Faro, rendered the
+      // way the model reads it, built from a second mock on the same fixed
+      // clock so the comparison is the whole payload and not a substring of it.
+      const items = await mockSuppliers({ hotel: { now: () => AT } }).hotel.search({
+        kind: 'hotel', query: 'Faro', checkIn: STAY.checkIn, checkOut: STAY.checkOut,
+        adults: STAY.adults, currency: STAY.currency ?? 'EUR',
+      })
+      const payload = JSON.stringify(items.map(itemForModel))
+      expect(payload).toContain('sourceId')
+      expect(sent[0]).toContain(payload)
+      // And each scout gets ITS city's payload rather than the batch's, which is
+      // the property a single shared results string would also satisfy.
+      expect(sent[1]).not.toContain(payload)
+      expect(sent[1]).toContain('Lisbon')
     })
   })
 
@@ -245,16 +430,17 @@ describeDb('three scouts, one reservation', () => {
       const claim = await claimedTurn(sql)
       const client = slowClient([0, 0, 0])
       const run = ledgerRunner(sql, claim, scoutRunner(sql, {
-        client, conversationId: claim.conversationId, userId: USER,
+        client, suppliers: mockSuppliers(), stay: STAY,
+        conversationId: claim.conversationId, userId: USER,
         turnId: claim.turnId, limits: DEFAULT_LIMITS, now: Date.now,
       }, mockRunner()))
       const out = await run('research_destination',
-        { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 'toolu_x', undefined)
+        { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 's3-b0', undefined)
       expect(out.isError).toBe(false)
 
       const ledger = await sql<{ call_id: string }[]>`
         select call_id from course.tool_calls where turn_id = ${claim.turnId} order by call_id`
-      expect(ledger.map((r) => r.call_id)).toEqual(['toolu_x'])
+      expect(ledger.map((r) => r.call_id)).toEqual(['s3-b0'])
 
       const calls = await sql<{ seat: string }[]>`
         select seat from course.model_calls where turn_id = ${claim.turnId} order by seq`
@@ -266,18 +452,22 @@ describeDb('three scouts, one reservation', () => {
 
   it('carries the derived id back on every result, so a brief can be traced to its call', async () => {
     await withTestDb(async (sql) => {
-      // Ruling 12's id format, asserted where the ids actually live. They are
-      // not ledger keys and the case above says why; they are how a log line and
-      // the parent's own result name which city said what.
+      // Ruling 12's id format, asserted where the ids actually live, and on the
+      // parent id production actually passes: `s<step>-b<block>`, the driver's
+      // positional ledger id, never the provider's `toolu_` id, which never
+      // enters the runner chain at all. Every case in this file used to pass the
+      // literal 'toolu_x', so nothing caught the drift the docstring described.
+      // They are not ledger keys and the case above says why; they are how a log
+      // line and the parent's own result name which city said what.
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
       const client = slowClient([0, 0, 0])
       const results = await runScouts(
         { sql, client, conversationId: c!.id as string, userId: USER, turnId: null as never,
-          callId: 'toolu_x', now: Date.now, limits: DEFAULT_LIMITS },
+          callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS },
         THREE,
       )
       expect(results.map((r) => r.callId))
-        .toEqual(['toolu_x-scout0', 'toolu_x-scout1', 'toolu_x-scout2'])
+        .toEqual(['s3-b0-scout0', 's3-b0-scout1', 's3-b0-scout2'])
       expect(results.map((r) => r.city)).toEqual(['Faro', 'Lisbon', 'Porto'])
       console.log(`call ids: ${JSON.stringify(results.map((r) => r.callId))}`)
     })
@@ -297,7 +487,7 @@ describeDb('three scouts, one reservation', () => {
         },
       }
       const deps = { sql, client, conversationId: c!.id as string, userId: USER,
-                     turnId: null as never, callId: 'toolu_x', now: Date.now, limits: DEFAULT_LIMITS }
+                     turnId: null as never, callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
       const results = await runScouts(deps, THREE)
       // Promise.allSettled and not Promise.all: one bad call must not lose two
       // good briefs, and the driver can plan from two cities.
@@ -306,6 +496,84 @@ describeDb('three scouts, one reservation', () => {
       // And the two that worked are real briefs rather than placeholders.
       expect(results[0]!.brief.length).toBeGreaterThan(20)
       expect(results[2]!.brief.length).toBeGreaterThan(20)
+    })
+  })
+
+  it('strands nothing when every call in the batch comes back 503', async () => {
+    await withTestDb(async (sql) => {
+      // The leak this case exists for. `reserve` debits three times the per-call
+      // bound before any call leaves; a throw out of `callModel` skips the
+      // `reconcile` that would give the share back, so without a refund the
+      // whole batch stays debited for ever on BOTH counters. A 503 is the
+      // clearest case there is: an error body carries no usage, so nothing was
+      // billed, and `isUnbilled` (src/errors.ts) is the driver's own rule for
+      // exactly that.
+      //
+      // Both counters are read, because they are damaged differently.
+      // `course.conversations.spend_usd_micros` caps one conversation;
+      // `course.daily_usage.cost_micros` is summed across ALL USERS for the $50
+      // global ceiling, so stranding there caps the product.
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const conversationId = c!.id as string
+      const beforeConversation = await conversationSpend(sql, conversationId)
+      const beforeDaily = await dailySpend(sql, USER)
+      const client = {
+        calls: 0,
+        async create() {
+          client.calls += 1
+          throw apiError(503)
+        },
+      }
+      const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
+                     callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
+      const results = await runScouts(deps, THREE)
+      // `Promise.allSettled`, so the batch still answers: three manufactured
+      // sentences and no throw. That is what made the leak invisible.
+      expect(client.calls).toBe(3)
+      expect(results.map((r) => r.brief.includes('the scout call failed'))).toEqual([true, true, true])
+      expect(await conversationSpend(sql, conversationId)).toBe(beforeConversation)
+      expect(await dailySpend(sql, USER)).toBe(beforeDaily)
+    })
+  })
+
+  it('keeps the brief, the row and the real cost when a reconcile fails', async () => {
+    await withTestDb(async (sql) => {
+      // A transient pool error on one scout's `reconcile`, AFTER the model
+      // answered and was billed. Three things must still be true, and until
+      // this round none of them was: the brief stands, the
+      // `course.model_calls` row is written, and the result reports what the
+      // call really cost rather than `0n`. What is lost is the refund, and
+      // losing a refund fails closed.
+      const claim = await claimedTurn(sql)
+      const before = await conversationSpend(sql, claim.conversationId)
+      const client = slowClient([0, 0, 0])
+      const deps = { sql: sqlWithOneFailingReconcile(sql), client,
+                     conversationId: claim.conversationId, userId: USER, turnId: claim.turnId,
+                     callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
+      const results = await runScouts(deps, THREE)
+
+      // Three real briefs, each carrying its own cost.
+      expect(results.map((r) => r.city)).toEqual(['Faro', 'Lisbon', 'Porto'])
+      for (const r of results) {
+        expect(r.brief).not.toContain('the scout call failed')
+        expect(r.costMicros).toBeGreaterThan(0n)
+      }
+      // Three observability rows, on the real figures. A lost refund is not a
+      // lost row: lesson 5.7's monitor reads this table.
+      const rows = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.model_calls where turn_id = ${claim.turnId} order by seq`
+      expect(rows).toHaveLength(3)
+      expect(rows.reduce((sum, r) => sum + BigInt(r.cost_micros), 0n))
+        .toBe(results.reduce((sum, r) => sum + r.costMicros, 0n))
+
+      // And exactly one share is stranded: the refund the failed write would
+      // have made, which is the per-call bound minus what that call cost.
+      const perCall = estimateMicros(SEATS.scout, batchInputTokens(THREE))
+      const billed = results.reduce((sum, r) => sum + r.costMicros, 0n)
+      const stranded = perCall - results[0]!.costMicros
+      expect(await conversationSpend(sql, claim.conversationId)).toBe(before + billed + stranded)
+      console.log(`one reconcile lost: ${stranded} micros stranded, `
+        + `${rows.length} model_calls rows written, ${billed} micros billed`)
     })
   })
 
@@ -331,11 +599,12 @@ describeDb('three scouts, one reservation', () => {
         },
       }
       const run = doorRunner('planning', scoutRunner(sql, {
-        client: hostile, conversationId: c!.id as string, userId: USER,
+        client: hostile, suppliers: mockSuppliers(), stay: STAY,
+        conversationId: c!.id as string, userId: USER,
         turnId: null as never, limits: DEFAULT_LIMITS, now: Date.now,
       }, mockRunner()))
       const out = await run('research_destination',
-        { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 'toolu_x', undefined)
+        { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 's3-b0', undefined)
       // One opening delimiter and one closing one, whatever the middle brief
       // wrote. Matched loosely enough to survive lesson 5.5 putting a nonce in
       // the tag, since the property under test is "exactly one of each".

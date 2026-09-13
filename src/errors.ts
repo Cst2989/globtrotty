@@ -237,3 +237,36 @@ export function classifyError(err: unknown): Classification {
    */
   return UNKNOWN
 }
+
+/**
+ * Did a response body reach us? An error body carries no `usage`, so nothing was
+ * billed and the reservation can be refunded in full. Anything with no body at
+ * all, a connection failure, a timeout, our own abort, or an error we cannot
+ * name, keeps the debit.
+ *
+ * It lives HERE, beside `classifyError`, rather than inside `src/agents/driver.ts`
+ * where lesson 5.1 first wrote it. Lesson 5.4 gave it a second caller, the scout
+ * fan-out in `src/agents/scout.ts`, and two copies of a refund rule is two
+ * answers to "was this call billed?" with nothing to notice when they drift.
+ * It is the only rule in this file that decides what happens to MONEY; the rest
+ * decide what is recorded and what is retried.
+ *
+ * Derived from the branch's own classifier rather than from a second list of
+ * statuses: `provider_rejected` and `provider_down` are exactly the two reasons
+ * `classifyError` above produces from an HTTP STATUS, which is to say
+ * from a response the provider sent. It rejected the request (400, 401, 403,
+ * 404) or it could not serve it (408, 409, 429, 5xx); either way it did not
+ * generate tokens, and a 429 in an outage is no more billed than a 400 is.
+ *
+ * The two that are left out are the two with no response behind them.
+ * `fetch_failed` is `APIConnectionError`: the request never reached the
+ * provider, or a timeout expired with nothing coming back, and a timeout is the
+ * case where a generation may well have been produced and billed after we
+ * stopped listening. `unclassified` covers our own abort and anything we cannot
+ * name, where we know nothing at all. Both keep the debit, which is the
+ * conservative direction on a guardrail.
+ */
+export function isUnbilled(err: unknown): boolean {
+  const { reason } = classifyError(err)
+  return reason === 'provider_rejected' || reason === 'provider_down'
+}

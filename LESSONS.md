@@ -115,7 +115,13 @@ recorded nothing and module 5 records exactly one reply: a scout's brief, in
 hand-written in `test/model/fake.ts` or is a pure assertion over an assembled
 request. The brief is recorded because the claim being tested is that a REAL
 model's prose is untrusted text, and a brief we wrote ourselves would be
-untrusted text from a trusted author, which proves nothing about the fence.
+untrusted text from a trusted author, which proves nothing about the fence. It
+was re-recorded once, under the same name, when the scout prompt started being
+read through the desks' comment-stripping loader: the bytes in the `system`
+field changed, and a fixture whose request is not the request the code sends is
+a contract with a past that never happened. Re-recording to fish for a nicer
+reply would be the other thing, and is not what happened: the brief still
+declines, for the reason it declined the first time.
 
 **The check that was green for three modules.** `test/provenance-v0.test.ts`
 passed at every tag from lesson 1.4 and it does not do what its name says: it

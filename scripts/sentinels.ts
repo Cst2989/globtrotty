@@ -50,18 +50,26 @@ export const SENTINELS: readonly Sentinel[] = [
     pattern: /GLOBETROTTY-PLANNING-DESK-PROMPT-DO-NOT-SHIP/,
     why: 'The planning desk prompt reached something we deploy, as above.',
   },
+  {
+    name: 'scout-prompt',
+    pattern: /GLOBETROTTY-SCOUT-PROMPT-DO-NOT-SHIP/,
+    why: 'The scout prompt reached something we deploy. It is read from '
+      + 'src/agents/prompts at run time, through the same comment-stripping loader the desks '
+      + 'use, and is never inlined anywhere.',
+  },
 ]
 
 export type Finding = { file: string; line: number; sentinel: string; excerpt: string }
 
 /**
- * The two files that legitimately hold the sentinels: the prompts themselves,
- * which are the source of truth, and this file, which names the patterns.
+ * The files that legitimately hold the sentinels: the prompts themselves, which
+ * are the source of truth, and this file, which names the patterns.
  * Everything else is a finding. Listed by suffix, and matched against the
  * RESOLVED path, so the check works whether it was handed `src` or an absolute
  * root and from whatever working directory it was started in.
  */
-const ALLOWED = ['/src/desks/front-desk.md', '/src/desks/planning-desk.md', '/scripts/sentinels.ts']
+const ALLOWED = ['/src/desks/front-desk.md', '/src/desks/planning-desk.md',
+                 '/src/agents/prompts/scout.md', '/scripts/sentinels.ts']
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist'])
 

@@ -67,7 +67,7 @@ describe('the sentinel grep', () => {
   it('allows the prompts to contain their own sentinels', () => {
     // The prompt files are the source of truth for those strings. A check that
     // flagged them would be a check nobody could ever make pass.
-    expect(findSentinels(['src/desks'])).toEqual([])
+    expect(findSentinels(['src/desks', 'src/agents/prompts'])).toEqual([])
   })
 
   it('names a reason for every pattern', () => {

@@ -19,7 +19,8 @@ import { estimateMicros } from '../src/repo/reservation.js'
 import { SEATS } from '../src/seats.js'
 import { liveSuppliers } from '../src/supplier/live.js'
 import {
-  corpusRunner, doorRunner, notebookRunner, scoutRunner, supplierRunner, type ToolRunner,
+  corpusRunner, doorRunner, notebookRunner, scoutRunner, scoutStayFrom, supplierRunner,
+  type ToolRunner,
 } from '../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../src/worker.js'
 
@@ -77,8 +78,11 @@ try {
         turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
         attempts: ctx.attempts, state: ctx.state,
       }
-      const notebook = constraintsFromNotebook(
-        await loadNotebook(sql, ctx.conversationId, ctx.userId), TODAY)
+      // The raw notebook is kept as well as the constraints: the gates want the
+      // three fields `constraintsFromNotebook` keeps, and a scouting search
+      // wants her nights and her party size, which it drops.
+      const nb = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+      const notebook = constraintsFromNotebook(nb, TODAY)
       const gateCtx = { conversationId, userId: DEMO_USER, turnId }
       return doorRunner('planning', notebookRunner(
         sql,
@@ -95,7 +99,8 @@ try {
         scoutRunner(
           sql,
           {
-            client, conversationId, userId: DEMO_USER, turnId,
+            client, suppliers, stay: scoutStayFrom(nb, TODAY),
+            conversationId, userId: DEMO_USER, turnId,
             limits: DEFAULT_LIMITS, now: Date.now,
           },
           cashierRunner(

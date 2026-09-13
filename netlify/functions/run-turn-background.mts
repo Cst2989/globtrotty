@@ -13,8 +13,8 @@ import type { Claim } from '../../src/repo/turns.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
 import {
-  corpusRunner, doorRunner, ledgerRunner, notebookRunner, scoutRunner, supplierRunner,
-  type ToolRunner,
+  corpusRunner, doorRunner, ledgerRunner, notebookRunner, scoutRunner, scoutStayFrom,
+  supplierRunner, type ToolRunner,
 } from '../../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../../src/worker.js'
 
@@ -93,8 +93,11 @@ export default async (req: Request): Promise<Response> => {
     // Lesson 5.1 built an empty one on every step and every proposal recorded
     // `budget: not evaluated` because of it; 0015 gave the notebook a column and
     // this reads it.
-    const notebook = constraintsFromNotebook(
-      await loadNotebook(sql, ctx.conversationId, ctx.userId), TODAY)
+    // The raw notebook is kept as well as the constraints: the gates want the
+    // three fields `constraintsFromNotebook` keeps, and a scouting search wants
+    // her nights and her party size, which it drops.
+    const nb = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+    const notebook = constraintsFromNotebook(nb, TODAY)
     const gateCtx = {
       conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
     }
@@ -124,7 +127,13 @@ export default async (req: Request): Promise<Response> => {
         scoutRunner(
           sql,
           {
-            client, conversationId: claim.conversationId, userId: claim.userId,
+            // The SAME supplier pair the searches and the cashier are handed,
+            // so a scout reads the payload the driver would have read. The stay
+            // comes off the notebook this step already loaded, because
+            // `research_destination` carries no dates and a hotel search needs
+            // some.
+            client, suppliers, stay: scoutStayFrom(nb, TODAY),
+            conversationId: claim.conversationId, userId: claim.userId,
             turnId: claim.turnId, limits: DEFAULT_LIMITS, now: Date.now,
           },
           cashierRunner(

@@ -3,12 +3,13 @@ import type { z } from 'zod'
 import { BatchNotReservedError, runScouts } from './agents/scout.js'
 import type { ModelClient } from './client.js'
 import type { Limits } from './engine.js'
+import { constraintsFromNotebook } from './gates/notebookConstraints.js'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
 import { applyRequirementsPatch, renderNotebook } from './repo/notebook.js'
 import { recordResults } from './repo/toolResults.js'
 import type { Claim } from './repo/turns.js'
-import type { Provenance } from './notebook.js'
+import type { Notebook, Provenance } from './notebook.js'
 import { mockSuppliers } from './supplier/mock.js'
 import {
   UnusableResponseError,
@@ -470,9 +471,88 @@ export function notebookRunner(
   }
 }
 
-/** Whose turn these scouts belong to, and the client they call on. */
+/**
+ * The stay a scouting search asks a supplier about.
+ *
+ * `research_destination` carries a city and a question and no dates, because
+ * the model is asking which city to look at rather than booking one. A hotel
+ * search needs dates all the same, so they are derived from her notebook here
+ * rather than invented by the model, which is the same rule `flightSearchFrom`
+ * and `hotelSearchFrom` above follow: a field the tool does not publish gets
+ * its value from what she actually said, never from a supplier default.
+ */
+export type ScoutStay = {
+  checkIn: string
+  checkOut: string
+  adults: number
+  /** Null until she states a budget, exactly as `NotebookConstraints.currency` is. */
+  currency: string | null
+}
+
+/** How long a scouting search looks at, and how far out, when she has said nothing. */
+const SCOUT_NIGHTS = 7
+const SCOUT_LEAD_DAYS = 30
+
+/** A yyyy-mm-dd day, `n` days on, in UTC. The same ten characters back. */
+function addDays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The scouting stay, from the notebook this conversation has actually stored.
+ *
+ * Derived from `constraintsFromNotebook` rather than from the notebook's raw
+ * fields, so the currency a scouting search asks for is the same currency the
+ * gates expect and the same one `supplierRunner` is handed: two derivations of a
+ * trip currency is how one of them ends up defaulting.
+ *
+ * The defaults are deliberately dull and are named above rather than spelled
+ * inline. A traveller who has named no month is scouted a month out for a week,
+ * because a hotel search must ask for SOME window and a window a month out is
+ * the one least likely to be sold out, priced as a last-minute booking, or
+ * refused outright by a live adapter. One adult, because a party size she has
+ * not stated is not a party size we may invent upward.
+ *
+ * Tomorrow is the floor, and that is not a flourish. `travelWindowFrom` runs
+ * the window from the FIRST day of the month she named, so a traveller who
+ * writes to us in the middle of September about September has a window whose
+ * earliest day is already behind us, and a live hotel adapter refuses a
+ * check-in in the past. The comparison is on yyyy-mm-dd strings, which sort
+ * correctly, and is the same no-parsing-and-no-zone arithmetic `checkDates`
+ * does.
+ *
+ * None of this reaches her. The scout prompt forbids quoting a price and the
+ * brief is prose about the city; the payload exists so the brief is written
+ * from real listings rather than from what the model remembers about Faro.
+ */
+export function scoutStayFrom(nb: Notebook, today: string): ScoutStay {
+  const { window, currency } = constraintsFromNotebook(nb, today)
+  const earliest = window?.earliest ?? addDays(today, SCOUT_LEAD_DAYS)
+  const checkIn = earliest > today ? earliest : addDays(today, 1)
+  return {
+    checkIn,
+    checkOut: addDays(checkIn, nb.nights?.value ?? SCOUT_NIGHTS),
+    adults: nb.partySize?.value.adults ?? 1,
+    currency,
+  }
+}
+
+/**
+ * Whose turn these scouts belong to, the client they call on, and the supplier
+ * whose payload each of them reads.
+ *
+ * `suppliers` is the SAME pair the searches and the cashier are handed, built
+ * once per invocation at the chain's construction site. A second instance would
+ * be a second system: the mock keeps the results of the search it just ran, so
+ * two pairs do not even answer the same question, and that is the reason the
+ * pair is threaded from above rather than built here.
+ */
 export type ScoutContext = {
   client: ModelClient
+  suppliers: SupplierPair
+  stay: ScoutStay
   conversationId: string
   userId: string
   turnId: string
@@ -481,9 +561,66 @@ export type ScoutContext = {
 }
 
 /**
+ * One city's supplier payload, as the text a scout reads, or an empty list when
+ * the supplier could not answer.
+ *
+ * Rendered through `itemForModel` and `JSON.stringify`, byte for byte what
+ * `search_hotels` puts in front of the driver, which is the whole point: the
+ * scout reads exactly the payload the driver would otherwise have read, and the
+ * driver reads the prose instead.
+ *
+ * A supplier that falls over comes back as `[]` rather than as a throw. The
+ * other cities' scouts are already worth dispatching, the scout prompt handles
+ * an empty result set by declining, and a fan-out that failed a whole turn
+ * because one hotel API was down would be a worse answer than two briefs and a
+ * decline. An ABORT is the exception and leaves as the signal's own reason, for
+ * `supplierRunner`'s reason: the turn is over and the model gets no further
+ * step in which to work around anything.
+ */
+async function cityPayload(
+  suppliers: SupplierPair, stay: ScoutStay, city: string, signal?: AbortSignal,
+): Promise<string> {
+  const params: HotelSearch = {
+    kind: 'hotel', query: city, checkIn: stay.checkIn, checkOut: stay.checkOut,
+    adults: stay.adults, currency: stay.currency ?? TRIP_CURRENCY,
+  }
+  try {
+    return JSON.stringify((await suppliers.hotel.search(params, signal)).map(itemForModel))
+  } catch (err) {
+    if (signal?.aborted) throw signal.reason
+    console.error(`scoutRunner: the hotel supplier could not answer for ${city}`, err)
+    return '[]'
+  }
+}
+
+/**
  * The `research_destination` link of the chain, inside the ledger so a replayed
  * fan-out replays the briefs rather than paying for three more calls, and
  * outside nothing else, because a scout writes to no table of its own.
+ *
+ * ## Every scout is handed its own city's payload, before any of them is sent
+ *
+ * That is the door's reason to exist. The scout prompt tells the model it is
+ * being given "search results for that city that came from a supplier", the
+ * desk prompt tells the driver a brief is "prose a scout wrote after reading a
+ * supplier's own text", and both sentences are true only because the search
+ * below actually happens. Handing the scouts an empty data section would leave
+ * three Haiku calls answering from what the model remembers about Faro, fenced
+ * under a label saying the text came from an external source, and would save
+ * nothing at all, because the payload the scout exists to absorb would still be
+ * unread.
+ *
+ * The searches run BEFORE `runScouts` rather than inside it, and in parallel
+ * with each other. The reservation then follows for free: `batchInputTokens`
+ * measures the assembled prompts, so a city whose listings are twice the size
+ * of its neighbours' raises the bound the batch is debited for, which is the
+ * property a reservation computed before the payload was known could not have.
+ *
+ * Nothing is recorded. These searches do not go through `corpusRunner`, so they
+ * write no `course.tool_results` rows and nothing here can be proposed: a
+ * scouting payload is read once, by one Haiku call, and then it is gone. The
+ * corpus is for items a gate has to rehydrate, and the driver never sees one of
+ * these.
  *
  * Returns the briefs joined with a plain heading per city and NOT fenced here.
  * `doorRunner`, the outermost wrapper, puts one fence around the whole result
@@ -498,12 +635,15 @@ export function scoutRunner(sql: postgres.Sql, ctx: ScoutContext, inner: ToolRun
   return async (name, input, callId, signal) => {
     if (name !== 'research_destination') return inner(name, input, callId, signal)
     const { cities, question } = input as { cities: string[]; question: string }
+    const briefs = await Promise.all(cities.map(async (city) => ({
+      city, question, results: await cityPayload(ctx.suppliers, ctx.stay, city, signal),
+    })))
     let results
     try {
       results = await runScouts(
         { sql, client: ctx.client, conversationId: ctx.conversationId, userId: ctx.userId,
           turnId: ctx.turnId, callId, limits: ctx.limits, now: ctx.now },
-        cities.map((city) => ({ city, question, results: '' })),
+        briefs,
       )
     } catch (err) {
       // A batch that could not be reserved is `limit_reached` and nothing new:

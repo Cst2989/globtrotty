@@ -148,9 +148,10 @@ misrouted to planning is answered correctly and costs five times as much.
 
 `npm run sentinels` greps `src/`, `netlify/` and `public/` for the service role
 key, a literal `sk-ant-` key, a `NEXT_PUBLIC_` variable carrying a secret, and
-the two desk prompts' own sentinel lines. Those sentinel lines are HTML
-comments, and `loadDesk` strips every comment out of a prompt before it is
-assembled, so the string the check calls undeployable is not in the bytes we send
+the three prompts' own sentinel lines: the two desks', and from lesson 5.4 the
+scout's. Those sentinel lines are HTML comments, and `loadPrompt` strips every
+comment out of a prompt before it is assembled, which is the loader all three go
+through, so the string the check calls undeployable is not in the bytes we send
 either: the grep reads files, and the one exfiltration path a prompt really has
 here is the model repeating its instructions into a reply. It runs inside `npm test` as well as
 on its own, so a leak fails the suite rather than a deploy step somebody can
@@ -174,6 +175,19 @@ instead of three supplier payloads, and it re-reads the briefs rather than the
 payloads on every remaining step of the turn, which is where most of the saving
 is.
 
+The payload is real, and fetching it is what the tool is for. `scoutRunner`
+runs one hotel search per city before any scout is dispatched, against the same
+supplier pair the driver's own searches and the cashier's re-quote are handed,
+rendered by `itemForModel` exactly as `search_hotels` renders it. The stay comes
+off her notebook, because the tool carries a city and a question and no dates
+and a hotel search needs some; a month she has not named is scouted a month out
+for a week, and a party size she has not stated is one adult. A scout handed an
+empty data section would answer from what the model remembers about Faro, under
+a fence labelling it text an external source returned, and would save nothing at
+all. Nothing those searches return is recorded: a scouting payload is read once,
+by one Haiku call, and no gate ever has to rehydrate it, so `course.tool_results`
+stays the record of searches the driver actually made.
+
 One reservation covers the batch, taken before the first call leaves. A per-call
 check is not a bound on a fan-out: three calls dispatched together each read a
 counter the other two have not moved, so a conversation with room for two used
@@ -190,8 +204,15 @@ brief separately would be worse rather than better, because the outer escape
 would eat the inner delimiters and hand the driver three broken fences. The
 delimiter is still a fixed string here, which is the shape lesson 5.5 attacks.
 
-Scout call ids are the parent tool call's id with `-scout0`, `-scout1` and
-`-scout2` on the end, and they are identifiers rather than ledger keys. A
+Scout call ids are the parent call's id with `-scout0`, `-scout1` and `-scout2`
+on the end, and that parent id is the driver's own POSITIONAL ledger id,
+`s<step>-b<block>`, never the provider's `toolu_` id, which rides on the
+transcript and never enters the runner chain. In production they read
+`s3-b0-scout0`. That is also what makes them survive a resume, for the opposite
+reason to the obvious one: a provider mints a fresh `toolu_` id every time it
+answers, including its answer to a re-ask of the identical transcript, while the
+step number and the block index do not move. They are identifiers rather than
+ledger keys. A
 fan-out writes three rows to `course.model_calls`, one per city on the scout
 seat, and exactly one row to `course.tool_calls`, the parent
 `research_destination` call's, because `ledgerRunner` wraps the whole fan-out
@@ -517,6 +538,21 @@ Owner: nobody.
 `src/cashier.ts` described lesson 4.6 in the future tense, four hundred lines
 above the code that lesson landed. Corrected in the same round that wrote this
 list, so it is here for the record rather than as work. Owner: nobody.
+
+A scout fan-out killed between its `reserve` and its last `reconcile` strands up
+to the whole batch reservation, `n` times the per-call bound, on
+`course.conversations.spend_usd_micros` and on `course.daily_usage.cost_micros`.
+Nothing sweeps a reservation: `failTurn`, `releaseForContinuation` and the
+sweeper all move turn state and not spend. It is the driver's own exposure
+multiplied by `n`, and a fan-out is the longest single wait in a step, so tier
+3's fifteen-minute kill is a realistic trigger for this path in particular. A
+`reconcile` that fails after a billed call strands one scout's share the same
+way; that one is caught rather than propagated, so the brief, its
+`course.model_calls` row and the real cost on the result all survive, and
+`src/agents/scout.ts` says what each failure leaves behind. Losing a refund
+fails closed, which is why neither is treated as an emergency. Closing either
+needs a reservation something can sweep, which means rows rather than two
+counters. Owner: lesson 5.7, which builds the monitor that would see it.
 
 `supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
 document outside this repository may be cited from code, and `git ls-tree` finds
