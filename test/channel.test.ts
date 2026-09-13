@@ -55,7 +55,8 @@ describe('what reaches her in prose from lesson 5.7', () => {
     expect(sanitizeOutbound(reply)).toEqual({ ok: true, text: reply })
     expect(redactCurrency(reply))
       .toBe('I found a beachfront stay in Faro for [amount] for the week.')
-    // And the worker now runs it before anything reaches course.messages.
+    // And the worker runs it on the reply channel, while the hand-off message
+    // quotes cashier-minted figures past it by design.
     const src = readFileSync(new URL('../src/worker.ts', import.meta.url), 'utf8')
     expect(src).toContain('redactCurrency')
   })

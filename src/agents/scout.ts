@@ -206,7 +206,7 @@ function argsFor(brief: ScoutBrief): CallArgs {
  *
  * That refund is not a rounding error at this size. `withRetry` (src/retry.ts)
  * wraps the whole agent step, so one step against a 503-ing provider reserves
- * the batch three times; `readSpendFailClosed` (src/repo/spend.ts) sums
+ * the batch three times. `readSpendFailClosed` (src/repo/spend.ts) sums
  * course.daily_usage across EVERY user for the global ceiling, so a fan-out
  * that stranded its batch would cap the product for the rest of the UTC day
  * with no lever short of a manual write.

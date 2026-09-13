@@ -31,8 +31,9 @@ export const MAX_STORED = 64_000
  * hole in it. Any other seat truncates above 8KB, because a scout fan-out is
  * three rows per tool call and the volume is the cost.
  *
- * That second branch has no production caller on this branch. The one caller is
- * src/agents/driver.ts, and it passes 'driver' or 'front_desk' every time, so
+ * That second branch has no production caller on this branch. Its callers,
+ * src/agents/driver.ts with 'driver' or 'front_desk' every time and `pgSink`
+ * itself when a prompt is present, never select it, so
  * `'truncated'` is returned by nothing a deployed turn runs, `clip` below never
  * clips and `MAX_STORED` bounds nothing yet. The cheap seats do not reach it by
  * another road either: `runScouts` (src/agents/scout.ts) calls `pgSink` with no
