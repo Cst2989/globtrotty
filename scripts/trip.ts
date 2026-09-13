@@ -174,8 +174,15 @@ try {
        where conversation_id = ${conversationId} and decision is null
        order by seq desc limit 1`
     if (pending) {
+      // Her constraints, read the same way the gates read them, so this terminal
+      // and `npm run demo` hand `cardForProposal` the same arguments and print
+      // the same card. `checkTotals` treats a null expected currency differently
+      // from a stated one, and the whole argument for that function existing is
+      // that there is one card and not two.
+      const hers = constraintsFromNotebook(
+        await loadNotebook(sql, conversationId, DEMO_USER), TODAY)
       const card = await cardForProposal(sql, {
-        proposalId: pending.id, conversationId, currency: null,
+        proposalId: pending.id, conversationId, currency: hers.currency,
       })
       if (card) {
         console.log(`\n== the offer ${'='.repeat(52)}`)

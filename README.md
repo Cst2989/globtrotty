@@ -674,8 +674,11 @@ prompt, the response body and the request id never leave that function.
 
 The monitor alarms into a log, because this repository has nowhere to page. It
 runs after the turn is closed, it can fail no turn, and its own model call is not
-metered against her ceilings, because it is ours rather than hers. Owner of both:
-module 6.
+metered against her ceilings, because it is ours rather than hers. What it can
+see is bounded by what it reads, which is `course.agent_events` and
+`course.model_calls`: the shape of a turn that finished, and not a turn that was
+killed, and not money that `reserve` debited and no `reconcile` gave back. Owner
+of all three: module 6.
 
 What is owed, and where it lives. The browser's half of SPEC section 10 is not
 here, because there is no browser, and `public/index.html` is still a
@@ -836,10 +839,15 @@ way; that one is caught rather than propagated, so the brief, its
 `src/agents/scout.ts` says what each failure leaves behind. Losing a refund
 fails closed, which is why neither is treated as an emergency. Closing either
 needs a reservation something can sweep, which means rows rather than two
-counters. Lesson 5.7 built the monitor, and the monitor is what can SEE it: a
-turn's shape carries what it spent beside what it did, so a batch that stranded
-its reservation is visible as spend with no tools finished. Seeing is not
-sweeping, and nothing sweeps a reservation yet. Owner: module 6.
+counters. Lesson 5.7 does NOT make this visible, and the earlier version of this
+paragraph said it did, which was the sort of claim the review is for. The monitor
+is the only new thing that could have: it reads `course.agent_events` and
+`course.model_calls`, and `reserve` and `reconcile` write neither, so a stranded
+reservation is not in a turn's shape. It is also invoked after `runTurn` returns,
+and the case here is a turn killed before it can return. Both halves would have
+to change, and the first one needs a row per reservation that nothing writes, so
+a stranded reservation stays invisible until something sweeps one. Owner:
+module 6.
 
 A `research_destination` row already in `course.tool_calls` is priced at three
 supplier searches whatever it really asked for, because migration 0006 stores no

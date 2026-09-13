@@ -791,8 +791,13 @@ export function escalationRunner(
       // A tool result and not a fail reason: nothing failed, and the model gets
       // one round trip to say something useful to her instead.
       return {
-        content: 'This conversation has already been escalated today. Tell her a person '
-          + 'has the request and will come back to her, and do not call this again.',
+        // The sentence says what the count counts. The query above is
+        // `where user_id =`, so the cap is hers for the day across every
+        // conversation she has, and a refusal that said "this conversation"
+        // would describe a rule this code does not implement.
+        content: `She has already raised ${ESCALATIONS_PER_DAY} escalations today, across `
+          + 'every conversation of hers. Tell her a person already has her request and will '
+          + 'come back to her, and do not call this again.',
         isError: true,
       }
     }

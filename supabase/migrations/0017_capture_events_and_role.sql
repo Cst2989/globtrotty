@@ -76,6 +76,15 @@ create index agent_events_feed on course.agent_events (conversation_id, seq);
 -- every turn index 0013 wrote, because the column is nullable: an event raised
 -- outside a turn carries no turn id.
 create index agent_events_by_turn on course.agent_events (turn_id) where turn_id is not null;
+-- The escalation cap's own index. `escalationRunner` (src/tools.ts) counts a
+-- traveller's escalations since the start of the UTC day before it records
+-- another, and neither index above serves that predicate: the feed index leads
+-- on conversation_id and this table is the fastest growing one in the schema,
+-- at two rows per tool call plus one per park, continue and failure. Leading on
+-- user_id and kind makes the count a range scan over one traveller's
+-- escalations rather than a walk of everybody's events.
+create index agent_events_escalations
+  on course.agent_events (user_id, kind, created_at);
 
 comment on table course.agent_events is
   'What the agency did during a turn, in seq order: the feed she watches and the '
@@ -96,8 +105,16 @@ do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'course_worker') then
     create role course_worker nologin;
-    execute format('grant course_worker to %I', current_user);
   end if;
+  -- OUTSIDE the branch, and that is the whole of the correction. A role is
+  -- cluster-wide and `course.schema_migrations` is database-scoped, so a fresh
+  -- database in a cluster that already holds `course_worker` skips the create,
+  -- and if the grant sat inside the branch it would skip that too: the policies
+  -- would all apply and `withUser`'s `set local role course_worker` would then
+  -- fail at run time with "permission denied to set role", with nothing at
+  -- migrate time to warn. Granting a role to a member that already has it is a
+  -- no-op, so running it every time costs nothing and closes that case.
+  execute format('grant course_worker to %I', current_user);
 end
 $$;
 

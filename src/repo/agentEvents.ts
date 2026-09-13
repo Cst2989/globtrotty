@@ -45,6 +45,32 @@ export async function recordAgentEvent(
 }
 
 /**
+ * Whether a person has been asked for on this conversation, as one boolean.
+ *
+ * A separate query rather than `readFeed(...).some(...)`, because the caller is
+ * `src/worker.ts`'s completion arm, which runs on every turn that ends with a
+ * message, and the feed grows across every turn of a conversation at two rows
+ * per tool call. Reading all of it, ordered, to answer one yes or no is a cost
+ * that rises with the length of the conversation for an answer whose size never
+ * changes. `limit 1` stops at the first row.
+ *
+ * Scoped by conversation and not by turn, deliberately: nothing in this branch
+ * hands a conversation back from the person who picked it up, so a later turn
+ * that answered her would otherwise clear the flag and leave a request with a
+ * person and a thread that says it is waiting on her.
+ */
+export async function hasEscalated(
+  sql: postgres.Sql, conversationId: string, userId: string,
+): Promise<boolean> {
+  const rows = await sql`
+    select 1 from course.agent_events
+     where conversation_id = ${conversationId} and user_id = ${userId}
+       and kind = 'escalated'
+     limit 1`
+  return rows.length > 0
+}
+
+/**
  * The feed, oldest first, by `seq` and never by `created_at`: every row a turn
  * writes lands inside one transaction in the tests, where `now()` is the same
  * instant for all of them, and an order that is not an order is worse than none.

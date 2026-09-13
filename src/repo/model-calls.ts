@@ -7,8 +7,22 @@ export type CapturePolicy = 'full' | 'truncated' | 'sampled_out'
 /** Above this, a cheap seat's prompts are truncated rather than stored whole. */
 const TRUNCATE_ABOVE_BYTES = 8_192
 
-/** The most of one prompt a truncated row keeps. */
-const MAX_STORED = 64_000
+/**
+ * The most of one PROMPT a truncated row keeps, and prompts are all it covers.
+ *
+ * `clip` below is applied to `system_prompt` and `user_prompt` and not to
+ * `response`, so a truncated row stores its response jsonb whole. Nothing writes
+ * such a row today, because the only caller that sends a response is the driver
+ * and `capturePolicyFor` holds that seat at `full`, but the limit is named for
+ * what it does rather than for what a reader would assume, and the day a cheap
+ * seat captures a response is the day this has to grow a second clip.
+ *
+ * Exported so `test/capture.test.ts` pins the clip against this number rather
+ * than against a copy of it, which is what every other limit in this branch
+ * does and what this one did not until the number was stated in a docstring and
+ * executed by nothing.
+ */
+export const MAX_STORED = 64_000
 
 /**
  * A fixed policy rather than a sampling rate, for the reason SPEC section 7

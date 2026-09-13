@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
-import { capturePolicyFor, pgSink, redactCredentials } from '../src/repo/model-calls.js'
+import { capturePolicyFor, pgSink, redactCredentials, MAX_STORED } from '../src/repo/model-calls.js'
 import { SEATS, type SeatName } from '../src/seats.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
@@ -139,6 +139,36 @@ describeDb('what the row carries', () => {
       // And the credential that was in the prompt is not in the column.
       expect(row!.system_prompt).not.toContain('sk-ant-api03-AAAA')
       expect(row!.system_prompt).toContain('[REDACTED]')
+    })
+  })
+
+  it('clips a truncated prompt at the stored limit, which nothing executed before', async () => {
+    // `MAX_STORED` fires only on `policy === 'truncated'`, and the two cases
+    // beside this one write a `full` row and a null row, so the clip was stated
+    // in a docstring and run by nothing. A cheap seat with a prompt over the 8KB
+    // threshold is the row the limit exists for: a scout fan-out is three rows
+    // per tool call and the volume is the cost.
+    await withTestDb(async (sql) => {
+      const { turnId, conversationId } = await seededTurn(sql)
+      const huge = 'a'.repeat(70_000)
+      await pgSink(sql, { conversationId, turnId, userId: USER })({
+        seat: 'scout', seatConfig: SEATS.scout, promptVersion: 'scout@1',
+        modelRequested: SEATS.scout.model, modelReturned: SEATS.scout.model,
+        usage: { input_tokens: 20_000, cache_creation_input_tokens: 0,
+                 cache_read_input_tokens: 0, output_tokens: 50 },
+        costMicros: 7n, latencyMs: 120,
+        // No `capturePolicy` passed, so `pgSink` derives it: this is also the
+        // case that proves the derivation happens rather than being trusted.
+        systemPrompt: huge, userPrompt: 'Faro',
+      })
+      const [row] = await sql<{ policy: string; system_len: number; user_len: number }[]>`
+        select capture_policy as policy,
+               length(system_prompt) as system_len, length(user_prompt) as user_len
+          from course.model_calls where turn_id = ${turnId}`
+      expect(row!.policy).toBe('truncated')
+      expect(row!.system_len).toBe(MAX_STORED)
+      // The short one is untouched: the clip is a ceiling and not a fixed width.
+      expect(row!.user_len).toBe('Faro'.length)
     })
   })
 

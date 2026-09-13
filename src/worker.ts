@@ -9,7 +9,7 @@ import { classifyError } from './errors.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
-import { readFeed, recordAgentEvent } from './repo/agentEvents.js'
+import { hasEscalated, recordAgentEvent } from './repo/agentEvents.js'
 import { emittedLinks } from './repo/linkClicks.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { AmbiguousToolCallError } from './repo/toolCalls.js'
@@ -222,10 +222,14 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // is a real FailReason (src/engine.ts); errors.ts deliberately does not
     // import the engine, so this call site is where the two are pinned together.
     const { reason } = classifyError(err)
-    // The feed she watches, from lesson 5.7. Best effort and written before the
-    // row it describes, because `failTurn` below can itself throw and a feed
-    // that only records the failures the database was healthy enough to record
-    // is a feed that goes quiet exactly when something is wrong.
+    // The feed she watches, from lesson 5.7. This is the catch-all end of the
+    // throw path, so it is the one that files the row when nothing else could:
+    // `loop`'s five failing exits write their own after `failTurn` returns, and
+    // an exception that got past them, including a `failTurn` of theirs that
+    // threw, arrives here with nothing written yet. Written before the
+    // `failTurn` below rather than after it, because that one is best effort and
+    // logged either way, so a feed that waited for it would go quiet exactly
+    // when something is wrong. One turn, one `failed` row, on either road.
     await recordAgentEvent(sql, {
       conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
       kind: 'failed', detail: reason,
@@ -406,14 +410,19 @@ async function failTurnUnlessLinkEmitted(
   // `emitted` for the same reason the catch above reads it: the fallback below
   // is the write rule 6 forbids on a turn that emitted, close or no close.
   if ((await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted) return
-  // One `failed` row on the feed per turn that really ends failed, which is
-  // what routing all five of these exits through one function buys: the event
-  // is written where the decision is taken rather than at each exit.
+  await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
+  // AFTER the write it describes, and that ordering is the whole of what keeps
+  // one turn to one `failed` row. `failTurn` can throw: a fenced one means
+  // another worker owns the turn and this one must write nothing at all, and any
+  // other throw propagates out of `loop` into `runTurn`'s catch, which files the
+  // row itself. Writing here first would have produced two rows for one ending
+  // in the second case and a row from a superseded worker in the first.
+  // Routing all five of `loop`'s failing exits through this one function is what
+  // makes that a single place rather than five.
   await recordAgentEvent(deps.sql, {
     conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
     kind: 'failed', detail: reason,
   })
-  await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
 }
 
 /**
@@ -689,14 +698,12 @@ async function loop(
       if (!outbound.ok) {
         console.error(`turn ${claim.turnId}: outbound message rewritten`, outbound.reasons)
       }
-      // Read once, here, and passed to the one writer of that column on this
-      // path. Scoped to the CONVERSATION and not to this turn, deliberately:
-      // nothing in this branch hands a conversation back from the person who
-      // picked it up, so a later turn that answered her would otherwise quietly
-      // clear the flag and leave a request with a person and a thread that says
-      // it is waiting on her.
-      const escalated = (await readFeed(sql, claim.conversationId, claim.userId))
-        .some((e) => e.kind === 'escalated')
+      // Asked once, here, and passed to the one writer of that column on this
+      // path. One row or none rather than the whole feed: this runs on every
+      // completing turn and the answer is a boolean, so `hasEscalated` stops at
+      // the first matching row (src/repo/agentEvents.ts, which also says why it
+      // is scoped to the conversation rather than to this turn).
+      const escalated = await hasEscalated(sql, claim.conversationId, claim.userId)
       await completeTurn(sql, claim, {
         // Null, not an empty string, on a blank answer: completeTurn writes a
         // row for anything that is not null, and an empty bubble in her

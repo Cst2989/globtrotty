@@ -97,6 +97,15 @@ export async function recordSpend(
  * The monitor (src/monitor.ts) wants the second, because the shape it reports is
  * built out of rows rather than out of what a step claimed.
  *
+ * WHAT IT CANNOT SEE, because a reader will otherwise assume it can: a
+ * reservation that was never reconciled. `reserve` and `reconcile` move
+ * `course.conversations.spend_usd_micros` and `course.daily_usage.cost_micros`
+ * and write no row to `course.model_calls` at all, so a turn killed between the
+ * two has money debited against her ceilings and nothing here to sum. This
+ * function answers "what did the calls this turn actually made cost", and the
+ * stranded reservation is a different question that needs a table nothing in
+ * this branch writes. README.md carries it with an owner.
+ *
  * Cast to text and parsed as a bigint, like every money read in this file: these
  * are micros, and a sum past 2^53 arriving as a float is a wrong number with no
  * error beside it.

@@ -337,6 +337,21 @@ async function main() {
     ? `   ok  course.link_clicks holds the ${clicks.length} exact URLs she was given, `
       + 'written BEFORE she was given them.'
     : '   XX  a stored URL differs from the one emitted.')
+
+  step('and the model asks for the hand-off anyway, through the runner chain...')
+  // The tool path, restored: `hand_off_to_booking` through `cashierRunner`, which
+  // is how a model reaches the cashier and is the only exercise of that wrapper
+  // this script has. It is asked AFTER the accept rather than instead of it,
+  // because that is the order the product now runs in, and the answer is rule 6
+  // in one line: a proposal whose links have been emitted is refused before a
+  // supplier is asked anything, so one trip cannot produce two sets of links.
+  const again = await run('hand_off_to_booking', { proposalId: proposal.proposalId }, 'demo-handoff')
+  const refusal = JSON.parse(again.content) as { refusal: { kind: string } }
+  console.log(again.isError && refusal.refusal.kind === 'already_emitted'
+    ? `   ok  refused: ${refusal.refusal.kind}. The links exist and are hers already; `
+      + 'nothing was re-quoted.'
+    : `   XX  the cashier answered ${again.content} to a second hand-off.`)
+
   note('that write is the point of no return: after it nothing may mark the turn')
   note('failed, which is what src/worker.ts and src/sweeper.ts now both check for.')
 

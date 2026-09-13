@@ -242,7 +242,7 @@ export const CONVERSATION_STATUSES = [
 /**
  * What a stopped turn looks like to her, from the two columns that record it.
  *
- * Seven statuses and eleven fail reasons is a lot of vocabulary and she needs
+ * Seven statuses and twelve fail reasons is a lot of vocabulary and she needs
  * none of it. What she needs is which of a few things is true: it is still
  * going, it is waiting on her, a person is picking it up, or it stopped. This
  * maps a row onto one of those and says what happens next, because a status with

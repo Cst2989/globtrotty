@@ -18,6 +18,15 @@ export type TurnShape = {
   toolsStarted: number
   toolsFinished: number
   escalated: boolean
+  /**
+   * What this turn's model calls cost, off `course.model_calls`
+   * (`turnSpendMicros`). It is NOT what the turn debited: `reserve` and
+   * `reconcile` move two counters and write no row here, so a reservation that
+   * was never reconciled is money against her ceilings that this number does
+   * not carry and this monitor cannot report. Seeing that needs a row per
+   * reservation, which nothing in this branch writes; README.md names it with an
+   * owner rather than leaving a reader to infer it from a field called spend.
+   */
   spendMicros: bigint
 }
 
