@@ -51,6 +51,12 @@ export async function withRealDb<T>(fn: (sql: postgres.Sql, userId: string) => P
     await sql`delete from course.proposals where user_id = ${userId}`
     await sql`delete from course.gate_results where user_id = ${userId}`
     await sql`delete from course.tool_results where user_id = ${userId}`
+    // course.user_memory carries a user id, so it belongs here. course.source_memory
+    // does NOT and is deliberately absent rather than forgotten: a fact about a
+    // property belongs to nobody (migration 0016), so there is no user id to
+    // delete it by, and the one test that writes it removes its own rows by
+    // source_key.
+    await sql`delete from course.user_memory where user_id = ${userId}`
     await sql`delete from course.messages where user_id = ${userId}`
     await sql`delete from course.turns where user_id = ${userId}`
     await sql`delete from course.conversations where user_id = ${userId}`

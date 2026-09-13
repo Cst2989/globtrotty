@@ -36,6 +36,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-3 | The front desk and the planning desk | npm run migrate, then npm test (test/desk-routing.test.ts, test/sentinels.test.ts, test/desks.test.ts) |
 | lesson-5-4 | Staff | npm run migrate, then npm test (test/scout.test.ts) |
 | lesson-5-5 | Fence text you did not write | npm test (test/injection-corpus.test.ts, test/outbound.test.ts) |
+| lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the canary |
 
 ## How this branch was built
 
@@ -187,6 +188,17 @@ a payment, holds a document or verifies an identity, so there is no true positiv
 to weigh against a false one. The words those requests are made of are a
 different matter, and a first version that matched them fired on six of seven
 ordinary travel sentences, which is how a blocklist gets turned off.
+
+**A default parameter is how a one hour write silently bills at the five minute
+rate.** `costMicros`'s TTL argument is required. Making it optional with a
+`'5m'` default would leave every call site that forgot it under-billing by sixty
+percent, and an under-count is the dangerous direction precisely because
+nothing surfaces it: no error, no failing test, and a number that looks like a
+number. The compiler is what found all thirteen call sites, seven of them in
+`src/` and one of those in `src/ask.ts`, a file this module touches for no other
+reason. That is the whole point of adding a required parameter rather than
+reading a field from a constant: the inventory is produced by the typechecker
+and not by somebody's memory of where the function is called.
 
 ## Hand-offs
 

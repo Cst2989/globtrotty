@@ -5,10 +5,12 @@ import { TODAY } from '../conversation.js'
 import { loadDesk, renderPrompt } from '../desks.js'
 import { textOfBlocks, whichCeiling, type ContentBlock, type Limits } from '../engine.js'
 import { isUnbilled } from '../errors.js'
+import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
 import type { Provenance } from '../notebook.js'
 import { readDeskDecision, writeDesk } from '../repo/conversations.js'
+import { readUserMemory, renderMemory } from '../repo/memory.js'
 import { pgSink } from '../repo/model-calls.js'
 import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
@@ -16,7 +18,7 @@ import { SEATS, type SeatName } from '../seats.js'
 import type { ToolRunner } from '../tools.js'
 import { toolsForDesk, type Desk } from '../tools/registry.js'
 import { assertSupplierBudget, supplierCallCost } from '../tools/supplierBudget.js'
-import { validateToolCall } from '../tools/validate.js'
+import { makeNonce, validateToolCall } from '../tools/validate.js'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 
 export type DriverDeps = {
@@ -81,13 +83,30 @@ export function makeDriver(deps: DriverDeps): Agent {
     // opposite of the truth.
     const seatName: SeatName = deskName === 'front' ? 'front_desk' : 'driver'
 
-    // Only the planning desk has a notebook to carry. The front desk holds no
-    // tools, so nothing it can do reads a requirement, and rendering one into
-    // its request would be paying input tokens to tell a desk about fields it
-    // cannot act on. The read is skipped with it.
-    const notebook = deskName === 'front'
-      ? undefined
-      : renderNotebook(await loadNotebook(sql, ctx.conversationId, ctx.userId))
+    // Only the planning desk has a notebook and a memory to carry. The front
+    // desk holds no tools, so nothing it can do reads a requirement or acts on
+    // a remembered preference, and rendering either into its request would be
+    // paying input tokens to tell a desk about things it cannot act on. Both
+    // reads are skipped with it.
+    let suffix: string | undefined
+    if (deskName !== 'front') {
+      const [notebook, facts] = await Promise.all([
+        loadNotebook(sql, ctx.conversationId, ctx.userId),
+        readUserMemory(sql, ctx.userId),
+      ])
+      // No source facts yet, and an empty map rather than a query: nothing on
+      // this branch writes course.source_memory, so a read of it could only ever
+      // come back empty and a per-turn query for it would be a round trip for
+      // nothing. The table, the reader and the render exist in this lesson, and
+      // the writer arrives with the module that learns a fact about a property.
+      // `readSourceMemory` is what will scope it to the keys that turn's corpus
+      // actually holds when it does.
+      const sourceFacts = new Map<string, string[]>()
+      // Memory first and the notebook second, so the notebook, which changes
+      // most often, is the last thing in the request.
+      suffix = [renderMemory(facts, sourceFacts, makeNonce()), renderNotebook(notebook)]
+        .filter((s) => s.length > 0).join('\n\n')
+    }
     const args: CallArgs = {
       seat,
       // Only {{today}} now, and the front desk takes no slot at all: it answers
@@ -101,11 +120,12 @@ export function makeDriver(deps: DriverDeps): Agent {
       // Empty for the front desk, so `buildRequest` omits `tools` entirely and
       // the model is offered no door to open.
       tools: toolsForDesk(deskName),
-      // The notebook is volatile: it changes the moment she states a fact. The
-      // suffix lands after the last block of the transcript, and from lesson 5.6
-      // after the last cache breakpoint, so it never invalidates the cached
-      // prefix behind it.
-      suffix: notebook,
+      // Memory and the notebook are both volatile: the notebook changes the
+      // moment she states a fact, and memory changes the moment one is learned.
+      // The suffix lands after the last block of the transcript, and from this
+      // lesson after the last cache breakpoint, so neither invalidates the
+      // cached prefix behind it.
+      suffix,
     }
 
     // ---- 1. Reserve an upper bound BEFORE dispatch (SPEC section 8) ---------
@@ -179,7 +199,14 @@ export function makeDriver(deps: DriverDeps): Agent {
     // Priced on the seat's model, not on `result.model`: the response echoes a
     // name that may be an alias with no price row, and PRICES throws rather than
     // charging zero.
-    const actual = result.kind === 'refused' ? 0n : costMicros(seat.model, result.usage)
+    // The TTL is `SYSTEM_CACHE_TTL`, the same constant `cacheableSystem`
+    // (src/model/cache.ts) actually put on the wire a few lines above, rather
+    // than a locally chosen '1h' string. A 1h write bills at twice base input
+    // and a 5m write at 1.25 times, so the row and the request have to agree,
+    // and they can only be relied on to agree if they read the same constant.
+    const actual = result.kind === 'refused'
+      ? 0n
+      : costMicros(seat.model, result.usage, SYSTEM_CACHE_TTL)
 
     // Not best effort: this is the spend, and a turn that cannot record it stops.
     await reconcile(sql, {

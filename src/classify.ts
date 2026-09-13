@@ -55,7 +55,10 @@ export async function classify(text: string, client: ModelClient, record?: Model
   } catch {
     label = 'other'
   }
-  return { label, usage, costMicros: costMicros(SEATS.cheap.model, usage) }
+  // `'5m'`: `classify` assembles its request through `withSeat` (src/seats.ts)
+  // and never through `buildRequest`, so nothing it sends carries a
+  // `cache_control` and no cache is written. Same for `classifyDesk` below.
+  return { label, usage, costMicros: costMicros(SEATS.cheap.model, usage, '5m') }
 }
 
 /**
@@ -134,7 +137,7 @@ export async function classifyDesk(
   )
   const latencyMs = Date.now() - startedMs
   const usage = usageOf(message)
-  const cost = costMicros(SEATS.front_desk.model, usage)
+  const cost = costMicros(SEATS.front_desk.model, usage, '5m')
 
   let label: Label | null = null
   try {

@@ -103,7 +103,9 @@ export async function extract(text: string, client: ModelClient, record?: ModelC
     { seat: SEATS.cheap, promptVersion: promptVersion(SYSTEM), record },
   )
   const usage = usageOf(message)
-  const cost = costMicros(SEATS.cheap.model, usage)
+  // `'5m'`, for the reason `classify` gives: this request is assembled by
+  // `withSeat` and carries no `cache_control`, so it writes no cache.
+  const cost = costMicros(SEATS.cheap.model, usage, '5m')
   let parsed: RawRequirements = EMPTY_RAW
   try {
     const result = RequirementsSchema.safeParse(JSON.parse(textOf(message)))

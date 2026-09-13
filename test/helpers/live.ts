@@ -61,3 +61,44 @@ export function requireSearchApiKey(): string {
   if (!apiKey) throw new Error('LIVE_SUPPLIERS=1 requires GOOGLE_SEARCH_API to be set')
   return apiKey
 }
+
+/**
+ * The model canary, and nothing else in the suite, calls the provider. Its own
+ * flag rather than `LIVE_SUPPLIERS`, because the two cost different money and a
+ * reader who wants to check a supplier parser should not be billed for Opus.
+ *
+ * The flag AND the key, exactly as `describeLiveSearchApi` above gates: the
+ * flag alone would run the file for a reader who set it without a key, and the
+ * key read inside the `it` would then throw, which is a red suite rather than a
+ * skip. Skipped WITH A PRINTED REASON for the same reason that one prints one,
+ * because a silent skip is the other way to mislead the same reader.
+ */
+const hasModelKey = Boolean(process.env.ANTHROPIC_API_KEY)
+if (process.env.LIVE_MODEL === '1' && !hasModelKey) {
+  console.warn(
+    'LIVE_MODEL=1 with no ANTHROPIC_API_KEY: skipping the drift canary. '
+  + 'Every other model test in this suite replays a fixture and needs no key.',
+  )
+}
+export const describeLiveModel =
+  process.env.LIVE_MODEL === '1' && hasModelKey ? describe : describe.skip
+
+/**
+ * The author's key, read INSIDE a test and never at module scope, for the same
+ * reason `requireSearchApiKey` gives: vitest runs a suite's factory during
+ * collection even when the suite is `describe.skip`, so a throw in a describe
+ * body fires on the offline default run and breaks `npm test` everywhere.
+ *
+ * With `describeLiveModel` above deciding whether the file runs at all, the
+ * throw here is unreachable rather than removed: it is what narrows
+ * `string | undefined` to `string`, and it is the guard if a third live file is
+ * ever declared with the wrong `describe`.
+ *
+ * Returned and never logged. Nothing in this file, in the canary or in any
+ * report the canary's output goes into may print it.
+ */
+export function requireModelKey(): string {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('LIVE_MODEL=1 requires ANTHROPIC_API_KEY to be set')
+  return apiKey
+}

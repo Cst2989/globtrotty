@@ -34,9 +34,15 @@ describe('a conversation', () => {
     // costMicros must cover every call this turn made: classify and extract
     // (both on the cheap seat) plus the two-step planning loop (on the
     // driver seat), not the loop alone.
-    const loopOnly = costMicros(SEATS.driver.model, LOOP_USAGE)
-    const wholeTurn =
-      loopOnly + costMicros(SEATS.cheap.model, CLASSIFY_USAGE) + costMicros(SEATS.cheap.model, EXTRACT_USAGE)
+    // `'5m'` at all three, because that is what the three calls this replays
+    // actually pass: `toolLoop`, `classify` and `extract` all assemble their
+    // requests through `withSeat` and carry no `cache_control`, so every
+    // cache_creation count in these fixtures is zero and the multiplier is
+    // never reached.
+    const loopOnly = costMicros(SEATS.driver.model, LOOP_USAGE, '5m')
+    const wholeTurn = loopOnly
+      + costMicros(SEATS.cheap.model, CLASSIFY_USAGE, '5m')
+      + costMicros(SEATS.cheap.model, EXTRACT_USAGE, '5m')
     expect(first.costMicros).toBe(wholeTurn)
     expect(first.costMicros).toBeGreaterThan(loopOnly)
     const second = await turn(first.conversation, 'Actually, let us keep it under 1,200 euros.', client, run)

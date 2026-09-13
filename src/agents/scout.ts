@@ -13,6 +13,7 @@ import { costMicros, type Usage } from '../pricing.js'
 import { loadPrompt } from '../desks.js'
 import { pgSink } from '../repo/model-calls.js'
 import { estimateBatchMicros, estimateMicros, reconcile, reserve } from '../repo/reservation.js'
+import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { SEATS } from '../seats.js'
 
 /**
@@ -389,9 +390,13 @@ export async function runScouts(
       }
       throw err
     }
+    // `SYSTEM_CACHE_TTL`: a scout's request is assembled by the same
+    // `buildRequest` the driver uses and carries the same 1h head, even though
+    // its prompt is far below Haiku's 4096 token minimum and will never actually
+    // cache. It is priced for what it SENT, not for what it got back.
     const actual = result.kind === 'refused'
       ? 0n
-      : costMicros(SEATS.scout.model, result.usage)
+      : costMicros(SEATS.scout.model, result.usage, SYSTEM_CACHE_TTL)
     // Caught, not propagated: the model has answered and been billed, and a
     // failed refund must not throw that brief away along with the row that
     // records it. What this leaves stranded, and what still stands, is in the

@@ -530,6 +530,53 @@ sits inside `ledgerRunner` there. `npm run trip` is ledgerless by design, so it
 is not: one process, no crash to resume from, and nothing to replay. The comment
 above its chain says so.
 
+From lesson 5.6 the agency remembers two kinds of thing, in two tables, for a
+reason that is about who may be shown what rather than about tidiness.
+`course.user_memory` holds facts about one traveller and carries her user id, so
+a per-user row policy can be written against it, which is lesson 5.7's subject.
+`course.source_memory` holds facts about a supplier or a property, which are
+true for everybody and belong to nobody, so it carries no user id at all. One
+table holding both would make that policy impossible: scoping it by user would
+hide every source fact from everybody, and not scoping it would show one
+traveller's facts to another.
+
+Memory is fenced on the way into the prompt, with the same wrapper and the same
+per-render nonce a tool result gets. At least one writer of that table is a
+model that had just finished reading a supplier's page, so an unmarked memory is
+a laundering channel: a fact recorded as "this property asks guests to confirm a
+card number by email" is a true thing to remember and an instruction if it
+arrives unlabelled.
+
+The four cache breakpoints are placed where the prefix that repeats actually is.
+One goes on the system prompt and the tool schemas at a one hour TTL, because a
+resumed turn is always past five minutes and that is when a warm cache is worth
+the most, and three go on the transcript, one rolling on its last block and two
+spaced inside the twenty block lookback. A thinking block cannot carry a
+breakpoint, so the walk skips to the next eligible block rather than
+special-casing it, and the rolling breakpoint is found by searching backwards
+rather than by reading the end, because a transcript that ends on an empty
+content array would otherwise index at minus one. Memory and the notebook sit
+after the last breakpoint, so a fact she states invalidates nothing.
+
+`costMicros` takes the cache TTL as a required third argument now, and it has no
+default. A one hour cache write bills at twice base input where a five minute
+write bills at 1.25 times, so a `'5m'` default would under-bill every long write
+by sixty percent, with no error, no failing test and nothing to distinguish the
+result from a legitimately small number. `estimateMicros`'s bound moved in the
+same commit, from 1.25 times list to twice list, because a bound that can
+undercount is not a bound, and the reciprocal test in `test/memory.test.ts`
+prices an all-cache-write usage against it so the multiplier is more than a
+comment.
+
+Drift is detected behaviourally and not by reading the response. `response.model`
+echoes the alias we sent and `claude-opus-5` is alias only, so a string
+comparison cannot see a weights change. The canary in `test/canary.live.test.ts`
+sends a golden prompt at the seat's exact configuration and is pinned against
+`modelConfigId`, which encodes model, effort and ceiling, so a failure names the
+configuration that produced it. It is gated on `LIVE_MODEL=1` and reports
+SKIPPED rather than passed when the gate is unset, so a keyless suite run cannot
+be mistaken for a run that checked the live path.
+
 ## Residuals
 
 Everything module 4 knows about and did not close, each with an owner. The
@@ -603,8 +650,10 @@ model call on the deployed path a fence cannot cancel: a turn another worker has
 claimed keeps that call in flight and still writes its reconcile, its row and its
 desk against a conversation somebody else is now driving. The exposure is a
 one-line Haiku prompt, which is why it is named rather than fixed under a frozen
-tag. Owner: lesson 5.6, which already threads a new argument through
-`src/classify.ts`, `src/metered.ts` and every other call site of `costMicros`.
+tag. Lesson 5.6 threaded a new required argument through `src/classify.ts`,
+`src/metered.ts` and every other call site of `costMicros` and did not add the
+signal with it, so the exposure is unchanged and only its owner has moved.
+Owner: lesson 5.7.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
 and one tool behind it. Both paths now read it once per agent step, which is the

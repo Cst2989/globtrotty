@@ -129,14 +129,15 @@ describe('the request we actually send', () => {
     expect(withTools.tools).toEqual([{ name: 'search_hotels' }])
   })
 
-  it('carries no cache_control anywhere in it', () => {
-    // Load bearing, and pinned nowhere until this case. The reservation's bound
-    // (src/repo/reservation.ts) rests on the sentence "nothing this lesson sends
-    // carries cache_control", which is what keeps `cache_creation_input_tokens`
-    // at zero on the way back. Lesson 5.6 puts a 1h cache TTL on every driver
-    // call, a 1h write bills at twice base input rather than the 1.25 the bound
-    // assumes, and this is the case that goes red in the commit that adds the
-    // breakpoint without moving the bound with it.
+  it('carries a breakpoint on the system head and one on the transcript', () => {
+    // The inversion of the case this replaces. Until lesson 5.6 this file
+    // asserted that NO cache_control appeared anywhere, and that assertion was
+    // load bearing: the reservation's bound (src/repo/reservation.ts) rested on
+    // the sentence "nothing this lesson sends carries cache_control", which is
+    // what kept `cache_creation_input_tokens` at zero on the way back. The
+    // breakpoints go on in this lesson and the bound moves to
+    // `cacheWrite1hMult` in the same commit, so what is pinned now is that they
+    // are there and that the system head carries the 1h TTL.
     const req = buildRequest({
       ...base,
       // The branchy parts of the request, so the search covers the places a
@@ -145,7 +146,28 @@ describe('the request we actually send', () => {
       tools: [{ name: 'search_hotels', input_schema: { type: 'object' } }],
       suffix: '## The notebook\n\n- destination: "Portugal"',
     })
-    expect(everyKey(req)).not.toContain('cache_control')
+    expect(everyKey(req)).toContain('cache_control')
+    expect(req.system).toEqual([{
+      type: 'text', text: 'You are the planning desk.',
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    }])
+    // And nothing was stamped onto the tool definitions, which render in front
+    // of the system block and are already covered by the breakpoint on it.
+    expect(everyKey(req.tools)).not.toContain('cache_control')
+  })
+
+  it('lands the suffix after the rolling breakpoint, never before it', () => {
+    // The assertion that pins the ordering rather than the presence. A suffix
+    // placed before the breakpoint would put the notebook inside the cached
+    // prefix, so every fact she states would throw the cache away, which is the
+    // failure this whole arrangement exists to avoid and it produces no error.
+    const req = buildRequest({ ...base, suffix: '## The notebook' })
+    const messages = req.messages as { content: { text?: string; cache_control?: unknown }[] }[]
+    const last = messages.at(-1)!.content
+    const markIndex = last.findIndex((b) => 'cache_control' in b)
+    const suffixIndex = last.findIndex((b) => b.text === '## The notebook')
+    expect(markIndex).toBeGreaterThanOrEqual(0)
+    expect(suffixIndex).toBeGreaterThan(markIndex)
   })
 
   it('never sends temperature', () => {
@@ -179,8 +201,17 @@ describe('the request we actually send', () => {
     // unit, so dividing `.length` by three undercounts CJK input by about
     // three times. The estimate feeds the reservation, and an undercount is the
     // one direction a money guardrail may not err in.
+    //
+    // Measured as each suffix's OWN contribution, against the same request with
+    // no suffix at all, rather than as one total against twice the other. The
+    // totals carry the request's fixed overhead, which grew in lesson 5.6 when
+    // the system prompt became a block carrying a cache_control, and a
+    // comparison of one total against twice another turns any fixed overhead
+    // into a term on the wrong side. The deltas are the thing the claim is
+    // about, and they do not move when the head does.
+    const bare = estimateInputTokens(base)
     const ascii = estimateInputTokens({ ...base, suffix: 'a'.repeat(300) })
     const cjk = estimateInputTokens({ ...base, suffix: '葡'.repeat(300) })
-    expect(cjk).toBeGreaterThan(ascii * 2)
+    expect(cjk - bare).toBeGreaterThan((ascii - bare) * 2)
   })
 })

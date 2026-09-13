@@ -2,6 +2,7 @@ import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resource
 import type { ModelClient } from '../client.js'
 import type { ContentBlock, LoopMessage } from '../engine.js'
 import { isRefusal } from '../errors.js'
+import { cacheableSystem, placeBreakpoints } from './cache.js'
 import { usageOf, type Usage } from '../pricing.js'
 import type { Seat } from '../seats.js'
 
@@ -110,13 +111,18 @@ export function withSuffix(messages: LoopMessage[], suffix: string | undefined):
  */
 export function buildRequest(args: CallArgs): Record<string, unknown> {
   const { seat, system, messages, tools } = args
+  const head = cacheableSystem(system, tools)
   const req: Record<string, unknown> = {
     model: seat.model,
     max_tokens: seat.maxTokens,
-    system,
-    messages: withSuffix(messages, args.suffix),
+    system: head.system,
+    // Breakpoints FIRST, suffix second: the volatile notebook and memory must
+    // land after the rolling breakpoint and never carry it, or the cache is
+    // invalidated on every request by the one part of the prompt that always
+    // changes.
+    messages: withSuffix(placeBreakpoints(messages), args.suffix),
   }
-  if (tools.length > 0) req.tools = tools
+  if (head.tools.length > 0) req.tools = head.tools
   if (seat.effort !== null) {
     req.thinking = { type: 'adaptive' }
     req.output_config = { effort: seat.effort }

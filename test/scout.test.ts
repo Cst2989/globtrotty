@@ -51,14 +51,16 @@ describe('what three cities cost the driver at lesson-5-3', () => {
     // remaining step of the turn. Three cities, five steps left.
     const perCity = 4_000
     const reReads = 5
+    // `'5m'` at both: this is arithmetic about input tokens re-read at full
+    // price, with nothing written to a cache, so the TTL is unreachable.
     const opus = costMicros(SEATS.driver.model, {
       input_tokens: perCity * 3 * reReads, cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0, output_tokens: 0,
-    })
+    }, '5m')
     const haiku = costMicros(SEATS.cheap.model, {
       input_tokens: perCity * 3, cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0, output_tokens: 600,
-    })
+    }, '5m')
     expect(opus).toBe(300_000n)
     // A scout reads each payload once and hands back six hundred tokens of
     // prose, and the driver reads the prose.

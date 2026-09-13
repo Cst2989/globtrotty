@@ -134,7 +134,13 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
   const estStepMs = options.estStepMs ?? 20_000
 
   const finish = (outcome: Outcome, text: string): LoopResult =>
-    ({ outcome, text, steps, toolTrace, usage, costMicros: costMicros(options.seat.model, usage) })
+    ({
+      outcome, text, steps, toolTrace, usage,
+      // `'5m'`: `toolLoop` assembles its own request through `withSeat` and puts
+      // no `cache_control` anywhere, so it writes no cache at all and
+      // `cache_creation_input_tokens` is zero. The multiplier is never reached.
+      costMicros: costMicros(options.seat.model, usage, '5m'),
+    })
 
   for (;;) {
     let spend: Spend

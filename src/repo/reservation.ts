@@ -15,13 +15,8 @@ import type { Seat } from '../seats.js'
  *
  * The bound assumes the worst realistic case: every input token billed at the
  * most expensive rate the request could be billed at, plus a full `max_tokens`
- * of output. Today the most expensive input rate in `PRICES` is the cache write
- * multiplier, 1.25 times list, and nothing this lesson sends carries
- * `cache_control` at all, so `cache_creation_input_tokens` comes back zero and
- * the bound holds with room to spare. Lesson 5.6 puts a 1h cache TTL on every
- * driver call, a 1h write bills at TWICE base input rather than 1.25 times, and
- * this line has to move in the same commit or the bound stops being one:
- * `test/reservation.test.ts`'s reciprocal case is what goes red when it does not.
+ * of output. That rate is now `cacheWrite1hMult`, and the multiplier below says
+ * why in full.
  *
  * `Math.max(..., 1)` is there so a future price whose cache write multiplier
  * somehow drops below list does not LOWER the bound under plain list price.
@@ -34,7 +29,18 @@ import type { Seat } from '../seats.js'
 export function estimateMicros(seat: Seat, inputTokens: number): bigint {
   const p = PRICES[seat.model]
   if (!p) throw new Error(`No price for model "${seat.model}". Refusing to reserve zero.`)
-  const worstCaseInputMult = Math.max(p.cacheWriteMult, 1)
+  // The highest multiplier any input token can be billed at. TWICE list, not
+  // 1.25 times: from this lesson every driver and scout request carries a 1h
+  // cache TTL on its system head (SYSTEM_CACHE_TTL, src/model/cache.ts), and a
+  // 1h cache WRITE is a PREMIUM rather than a discount, because the provider
+  // bills the write in addition to the tokens it stores. A cold cache, the
+  // first call of a conversation or any call resumed past the hour, reports
+  // those tokens back as cache_creation_input_tokens at that rate. Lesson 5.1's
+  // version bounded at 1.25 and said in as many words that this line had to
+  // move with the TTL; a bound that can undercount is not a bound, and it is
+  // the guardrail rather than the ledger that would have been wrong, because
+  // reconcile charges the true figure either way.
+  const worstCaseInputMult = Math.max(p.cacheWrite1hMult, 1)
   const micros =
     inputTokens * p.inMicrosPerToken * worstCaseInputMult + seat.maxTokens * p.outMicrosPerToken
   return BigInt(Math.ceil(micros))   // round UP: a bound must never undercount

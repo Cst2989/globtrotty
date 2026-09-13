@@ -177,8 +177,10 @@ describe('what an FAQ costs on the deployed path at lesson-5-2', () => {
       input_tokens: 1_000, cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0, output_tokens: 200,
     }
-    const opus = costMicros(SEATS.driver.model, usage)
-    const haiku = costMicros(SEATS.cheap.model, usage)
+    // `'5m'`: the fixture writes no cache, so the TTL is unreachable and the
+    // five minute rate is what the calls it describes actually sent.
+    const opus = costMicros(SEATS.driver.model, usage, '5m')
+    const haiku = costMicros(SEATS.cheap.model, usage, '5m')
     expect(opus).toBe(10_000n)
     expect(haiku).toBe(2_000n)
     // Five times, on every question the front desk exists to answer, since

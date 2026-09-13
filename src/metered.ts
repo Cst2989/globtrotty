@@ -31,7 +31,10 @@ export async function callAndRecord(
       modelRequested: params.model,
       modelReturned: message.model,
       usage,
-      costMicros: costMicros(meta.seat.model, usage),
+      // `'5m'`: `callAndRecord`'s callers are `classify`, `extract` and
+      // `classifyDesk`, none of which caches, and the params it is handed come
+      // from `withSeat` rather than from `buildRequest`.
+      costMicros: costMicros(meta.seat.model, usage, '5m'),
       latencyMs: Date.now() - startedMs,
     })
   }

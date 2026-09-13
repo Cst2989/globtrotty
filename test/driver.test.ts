@@ -5,7 +5,11 @@ import { makeDriver } from '../src/agents/driver.js'
 import type { ModelClient } from '../src/client.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { money } from '../src/money.js'
+import { SYSTEM_CACHE_TTL } from '../src/model/cache.js'
+import { costMicros, usageOf } from '../src/pricing.js'
+import { rememberUserFact } from '../src/repo/memory.js'
 import { applyRequirementsPatch } from '../src/repo/notebook.js'
+import { SEATS } from '../src/seats.js'
 import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -686,6 +690,98 @@ describeDb('what the driver answers by itself', () => {
       // And it really is the suffix rather than a second user turn: the
       // transcript is her one message, with the notebook appended to it.
       expect((request.messages as unknown[]).length).toBe(1)
+    })
+  })
+})
+
+/** A reply whose usage says the prefix was written, then a reply that says it was read. */
+const cold = textMessage('Let me look at Faro.', {
+  usage: { input_tokens: 40, output_tokens: 20,
+           cache_creation_input_tokens: 3_000, cache_read_input_tokens: 0 },
+} as never)
+const warm = textMessage('Three stays near the beach.', {
+  usage: { input_tokens: 40, output_tokens: 20,
+           cache_creation_input_tokens: 0, cache_read_input_tokens: 3_000 },
+} as never)
+
+describeDb('the cache, on the row and in the prompt', () => {
+  it('records the cache read on the row, not only on the invoice', async () => {
+    await withTestDb(async (sql) => {
+      // Asserted against the fixture's own usage rather than against a live call:
+      // `fakeClient` returns cache_creation on the first reply and cache_read on
+      // the second, which is what the API does when the prefix matched. What this
+      // pins is that the ROW carries the read, so a cache that silently stopped
+      // working is visible in course.model_calls rather than only in a bill
+      // somebody reads at the end of the month.
+      const { turnId } = await seededTurn(sql)
+      const client = fakeClient([
+        labelMessage('new_trip'),
+        toolUseMessage('search_hotels',
+          { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
+        warm,
+      ])
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+      const rows = await sql<{ cache_read_input_tokens: number }[]>`
+        select cache_read_input_tokens from course.model_calls
+         where turn_id = ${turnId} and seat = 'driver' order by seq`
+      expect(rows.at(-1)!.cache_read_input_tokens).toBe(3_000)
+    })
+  })
+
+  it('prices a cache write at the TTL it actually sent', async () => {
+    await withTestDb(async (sql) => {
+      // The row and the wire agree, which is the property a shared constant buys
+      // and which a locally chosen '1h' string would lose the day cacheableSystem
+      // changed its mind.
+      const { turnId } = await seededTurn(sql)
+      const client = fakeClient([labelMessage('new_trip'), cold])
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+      const [row] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.model_calls
+         where turn_id = ${turnId} and seat = 'driver' order by seq`
+      expect(BigInt(row!.cost_micros))
+        .toBe(costMicros(SEATS.driver.model, usageOf(cold), SYSTEM_CACHE_TTL))
+      // And it is NOT what the five minute rate would have charged, which is the
+      // assertion that discriminates: a driver that passed '5m' would pass every
+      // other test in this file.
+      expect(BigInt(row!.cost_micros))
+        .not.toBe(costMicros(SEATS.driver.model, usageOf(cold), '5m'))
+    })
+  })
+
+  it('carries her memory into the prompt, in front of the notebook', async () => {
+    await withTestDb(async (sql) => {
+      // Memory first and the notebook second, so the thing that changes most
+      // often is the LAST thing in the request. Both sit in the suffix, after
+      // the rolling breakpoint, so neither can invalidate the cached prefix.
+      const { conversationId, turnId } = await seededTurn(sql)
+      await rememberUserFact(sql, {
+        userId: USER, fact: 'Will not fly a red-eye while travelling with a toddler.',
+        inferred: false, sourceTurn: null,
+      })
+      await applyRequirementsPatch(sql, {
+        conversationId, userId: USER, at: '2026-08-29T10:00:00Z', source: 'user',
+        patch: { destination: 'Portugal' },
+      })
+      const client = recordingClient([
+        labelMessage('new_trip'),
+        textMessage('Three stays near the beach in Faro.'),
+      ])
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      const suffix = lastUserText(client.sent[1]!)
+      expect(suffix).toContain('Will not fly a red-eye')
+      // Fenced, because a fact is a thing somebody wrote down and one of the
+      // writers is a model that had just read a supplier's page.
+      expect(suffix).toContain('trust="untrusted"')
+      expect(suffix.indexOf('Will not fly a red-eye'))
+        .toBeLessThan(suffix.indexOf('## The notebook, as recorded'))
+      // And the memory is not in the stable prefix, which is the half that gets
+      // cached and the half a new fact would otherwise throw away.
+      expect(JSON.stringify(client.sent[1]!.system)).not.toContain('red-eye')
     })
   })
 })

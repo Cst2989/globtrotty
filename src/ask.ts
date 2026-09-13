@@ -22,5 +22,13 @@ export async function ask(text: string, client: ModelClient = liveClient(), seat
     }),
   )
   const usage = usageOf(message)
-  return { text: textOf(message), model: message.model, usage, costMicros: costMicros(seat.model, usage) }
+  // `'5m'` and not `SYSTEM_CACHE_TTL`: lesson 1.1's one-shot demo predates
+  // `callAndRecord`, calls `client.create` directly, and puts no `cache_control`
+  // anywhere, so it writes no cache at all and `cache_creation_input_tokens`
+  // comes back zero. The multiplier is never reached and `'5m'` is the honest
+  // argument for what this call actually sent.
+  return {
+    text: textOf(message), model: message.model, usage,
+    costMicros: costMicros(seat.model, usage, '5m'),
+  }
 }

@@ -102,8 +102,10 @@ describeDb('pgSink', () => {
                               order by seq`
       expect(rows).toHaveLength(4)
 
-      const cheapCost = costMicros(SEATS.cheap.model, USAGE)
-      const driverCost = costMicros(SEATS.driver.model, USAGE)
+      // `'5m'`: `USAGE` carries no cache_creation tokens, and the path these
+      // rows come from is `callAndRecord`, which prices at the five minute rate.
+      const cheapCost = costMicros(SEATS.cheap.model, USAGE, '5m')
+      const driverCost = costMicros(SEATS.driver.model, USAGE, '5m')
       const planningVersion = loadDesk('planning').promptVersion
 
       // Column by column, against the fixture's usage and the seat prices, not

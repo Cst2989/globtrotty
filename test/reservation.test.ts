@@ -17,7 +17,7 @@ describe('the bound, before any call is made', () => {
     const p = PRICES[SEATS.driver.model]!
     // 1000 input tokens at 5 micros, times the highest multiplier any input
     // token can be billed at today, plus a full max_tokens of output at 25.
-    const expected = 1_000 * 5 * Math.max(p.cacheWriteMult, 1) + 16_000 * 25
+    const expected = 1_000 * 5 * Math.max(p.cacheWrite1hMult, 1) + 16_000 * 25
     expect(estimateMicros(SEATS.driver, 1_000)).toBe(BigInt(Math.ceil(expected)))
   })
 
@@ -32,7 +32,7 @@ describe('the bound, before any call is made', () => {
     const actual = costMicros(SEATS.driver.model, {
       input_tokens: 0, cache_creation_input_tokens: inputTokens,
       cache_read_input_tokens: 0, output_tokens: SEATS.driver.maxTokens,
-    })
+    }, '1h')
     expect(actual).toBeLessThanOrEqual(reserved)
   })
 
@@ -42,24 +42,42 @@ describe('the bound, before any call is made', () => {
   })
 
   it('rounds up rather than truncating', () => {
-    // BigInt() throws a RangeError on a non-integer rather than truncating, and
-    // every multiplier in the table is already fractional, so an un-rounded
-    // value here would crash the pre-dispatch path outright rather than
-    // misprice it.
-    const p = PRICES[SEATS.cheap.model]!
-    const exact = 7 * p.inMicrosPerToken * Math.max(p.cacheWriteMult, 1)
-      + SEATS.cheap.maxTokens * p.outMicrosPerToken
-    // 8.75 micros of input on top of a whole number of output micros, so there
-    // really is something here to round; a case built on an already-integral
-    // value would pass against truncation too.
-    expect(Number.isInteger(exact)).toBe(false)
-    expect(() => estimateMicros(SEATS.cheap, 7)).not.toThrow()
-    // UP, to the next whole micro, and strictly above what truncating would
-    // have produced. `% 1n` on a bigint is 0n for every possible
-    // implementation, this one and a truncating one alike, so it pinned
-    // nothing at all.
-    expect(estimateMicros(SEATS.cheap, 7)).toBe(BigInt(Math.ceil(exact)))
-    expect(estimateMicros(SEATS.cheap, 7)).toBeGreaterThan(BigInt(Math.trunc(exact)))
+    // BigInt() throws a RangeError on a non-integer rather than truncating, so
+    // an un-rounded value here would crash the pre-dispatch path outright rather
+    // than misprice it.
+    //
+    // Priced against a model this case registers and removes again, because
+    // from lesson 5.6 no model in the real table can produce a fractional bound
+    // at all: `cacheWrite1hMult` is exactly 2, and an integer token count times
+    // an integer micro rate times 2 is always whole. This case used to lean on
+    // the 1.25 multiplier making 8.75 micros of input, and moving the bound to
+    // the 1h rate quietly took its fraction away, which would have left
+    // `Math.ceil` in `estimateMicros` guarded by nothing at all while still
+    // being the line that keeps a future fractional price from throwing.
+    const model = 'claude-fractional-for-this-case'
+    PRICES[model] = {
+      inMicrosPerToken: 1.25, outMicrosPerToken: 5,
+      cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
+    }
+    try {
+      const seat = { ...SEATS.cheap, model }
+      const p = PRICES[model]!
+      const exact = 7 * p.inMicrosPerToken * Math.max(p.cacheWrite1hMult, 1)
+        + seat.maxTokens * p.outMicrosPerToken
+      // 17.5 micros of input on top of a whole number of output micros, so there
+      // really is something here to round; a case built on an already-integral
+      // value would pass against truncation too.
+      expect(Number.isInteger(exact)).toBe(false)
+      expect(() => estimateMicros(seat, 7)).not.toThrow()
+      // UP, to the next whole micro, and strictly above what truncating would
+      // have produced. `% 1n` on a bigint is 0n for every possible
+      // implementation, this one and a truncating one alike, so it pinned
+      // nothing at all.
+      expect(estimateMicros(seat, 7)).toBe(BigInt(Math.ceil(exact)))
+      expect(estimateMicros(seat, 7)).toBeGreaterThan(BigInt(Math.trunc(exact)))
+    } finally {
+      delete PRICES[model]
+    }
   })
 
   it('bounds a batch at n times the per-call bound', () => {
