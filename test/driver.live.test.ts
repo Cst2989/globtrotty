@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import { buildRequest, callModel } from '../src/model/client.js'
 import { SEATS } from '../src/model/seats.js'
+import { FRONT_SCHEMA } from '../src/agents/frontDesk.js'
+import { WEB_SEARCH_TOOL } from '../src/agents/scout.js'
 // Not called in the two assertions below — no single live call here is large
 // enough, or repeated enough, to reliably exercise a cache read. Imported
 // anyway, per the task brief's exact test file, as the reference to why this
@@ -83,5 +85,47 @@ live('driver against the real API', () => {
     const parsed = JSON.parse((text as { text: string }).text)
     expect(typeof parsed.approved).toBe('boolean')
     expect(Array.isArray(parsed.issues)).toBe(true)
+  }, 60_000)
+})
+
+// Task 9's canary pins: one live call per Haiku seat, proving against the real
+// API exactly the two things the driver's live tests above prove for Opus —
+// "no thinking block on Haiku" (src/model/client.ts's `buildRequest` doc
+// comment) and the server tool's real response shape — rather than trusting a
+// stubbed transport for either.
+live('Haiku seats against the real API', () => {
+  it('front_desk: no thinking block, structured output for FRONT_SCHEMA', async () => {
+    const r = await callModel(
+      transport(),
+      {
+        seat: SEATS.front_desk, tools: [],
+        system: 'Classify her message and, for a trip, give it a short title.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'a week in Portugal in September for two' }] }],
+        outputSchema: FRONT_SCHEMA,
+      },
+      () => Date.now(),
+    )
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') throw new Error(`refused: ${r.explanation}`)
+    const text = r.content.find((b) => b.type === 'text')
+    expect(text).toBeDefined()
+    const parsed = JSON.parse((text as { type: 'text'; text: string }).text)
+    expect(['new_trip', 'faq', 'unclear']).toContain(parsed.label)
+  }, 60_000)
+
+  it('scout: accepts the server-side web_search tool and reports a search count', async () => {
+    const r = await callModel(
+      transport(),
+      {
+        seat: SEATS.scout, tools: [WEB_SEARCH_TOOL],
+        system: 'Give a brief on the named city as a destination, in words only, never a price.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'City: Faro' }] }],
+      },
+      () => Date.now(),
+    )
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') throw new Error(`refused: ${r.explanation}`)
+    expect(typeof r.usage.server_tool_use?.web_search_requests).toBe('number')
+    expect(r.usage.server_tool_use!.web_search_requests).toBeGreaterThanOrEqual(0)
   }, 60_000)
 })
