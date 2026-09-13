@@ -44,6 +44,25 @@ describe('buildRequest', () => {
     expect(req.model).toBe('claude-opus-5')
     expect(req.max_tokens).toBe(SEATS.driver.maxTokens)
   })
+
+  it('puts a JSON schema under output_config.format with type json_schema, and nowhere else', () => {
+    const schema = { type: 'object', properties: { approved: { type: 'boolean' } },
+                     required: ['approved'], additionalProperties: false }
+    const req = buildRequest({ ...base, outputSchema: schema })
+    expect(req.output_config).toEqual({ effort: 'high', format: { type: 'json_schema', schema } })
+    expect(req.output_format).toBeUndefined()          // the deprecated top-level name
+  })
+
+  it('emits no format when no schema is given, so the driver request is byte-identical to before', () => {
+    const req = buildRequest(base)
+    expect((req.output_config as Record<string, unknown>).format).toBeUndefined()
+  })
+
+  it('counts tokens for a structured request with the same format field', () => {
+    const schema = { type: 'object', properties: {}, additionalProperties: false }
+    const count = buildCountTokensRequest({ ...base, outputSchema: schema })
+    expect((count.output_config as Record<string, unknown>).format).toEqual({ type: 'json_schema', schema })
+  })
 })
 
 describe('buildCountTokensRequest', () => {
