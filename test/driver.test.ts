@@ -2,15 +2,18 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { makeDriver } from '../src/agents/driver.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { mockRunner } from '../src/tools.js'
-import { runTurn } from '../src/worker.js'
+import { ledgerRunner, mockRunner } from '../src/tools.js'
+import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { apiError } from './helpers/errors.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
-import { workerDeps } from './helpers/worker.js'
+import { claimOf, workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
 
-async function seededTurn(sql: postgres.Sql, text = 'Portugal in September for 1500 euros') {
+const HER_MESSAGE = 'Portugal in September for 1500 euros'
+
+async function seededTurn(sql: postgres.Sql, text = HER_MESSAGE) {
   const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
   const [t] = await sql`
     insert into course.turns (conversation_id, user_id, idempotency_key)
@@ -75,6 +78,39 @@ describeDb('one invocation of the driver is one model call', () => {
     })
   })
 
+  it('strands nothing when every attempt of a step fails, because a 5xx was never billed', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seededTurn(sql)
+      // A 503, which classifies `provider_down` and is retryable, so `withRetry`
+      // (src/retry.ts) gives the step three attempts and each one reserves
+      // before it dispatches. `fakeClient` repeats its last entry, so all three
+      // attempts get the same outage.
+      const client = fakeClient([() => { throw apiError(503) }])
+      const agent = makeDriver({
+        sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+      })
+      await expect(runTurn(workerDeps(sql, { agent }), turnId)).rejects.toThrow()
+      expect(client.calls).toBe(3)
+
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from course.conversations where id = ${conversationId}`
+      const [day] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.daily_usage where user_id = ${USER}`
+      // Zero on BOTH ceilings, not "roughly nothing". Three reservations of
+      // roughly 400,000 micros each is over a million stranded in a column
+      // `readSpendFailClosed` sums across all users for the global ceiling
+      // (src/limits.ts), so an outage that failed a few hundred steps would cap
+      // the whole product for the rest of the UTC day at zero real spend, with
+      // no lever short of a manual write.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(0n)
+      expect(BigInt(day?.cost_micros ?? '0')).toBe(0n)
+
+      const [turn] = await sql<{ fail_reason: string }[]>`
+        select fail_reason from course.turns where id = ${turnId}`
+      expect(turn!.fail_reason).toBe('provider_down')
+    })
+  })
+
   it('appends the assistant turn carrying the tool_use before the tool_result', async () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
@@ -98,6 +134,58 @@ describeDb('one invocation of the driver is one model call', () => {
       const use = messages[1]!.content.find((b) => b.type === 'tool_use')!
       const result = messages[2]!.content.find((b) => b.type === 'tool_result')!
       expect(result.tool_use_id).toBe(use.id)
+    })
+  })
+
+  it('writes one pending row per call and runs the tool once, through the chain tier 3 composes', async () => {
+    await withTestDb(async (sql) => {
+      const { turnId } = await seededTurn(sql)
+      const client = fakeClient([
+        toolUseMessage('search_hotels',
+          { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
+        textMessage('Three stays near the beach in Faro.'),
+      ])
+      let executions = 0
+      const inner = mockRunner()
+      // The chain as netlify/functions/run-turn-background.mts composes it:
+      // `ledgerRunner` OUTERMOST, built per step from the `AgentContext` the
+      // harness hands the agent, exactly the way tier 3 builds `runnerFor`.
+      // `mockRunner` stands in for the cashier, the gates, the corpus and the
+      // supplier, which this case is not about; the counter between the two is
+      // how "executed" is told apart from "replayed".
+      //
+      // Every other case in this file hands the driver a bare `mockRunner()`,
+      // which has no ledger in it, so none of them can see what the deployed
+      // composition does. This one is the case that can.
+      const agent: Agent = async (ctx) => makeDriver({
+        sql,
+        client,
+        run: ledgerRunner(
+          sql,
+          claimOf(ctx),
+          async (name, input, callId, signal) => {
+            executions += 1
+            return await inner(name, input, callId, signal)
+          },
+        ),
+        limits: DEFAULT_LIMITS,
+        now: Date.now,
+      })(ctx)
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      const [turn] = await sql<{ status: string; fail_reason: string | null }[]>`
+        select status, fail_reason from course.turns where id = ${turnId}`
+      // The turn ANSWERS. A second writer of the pending row makes the first
+      // tool call of every deployed turn end `ambiguous_tool_call` with the
+      // supplier never called, and leaves an operator ticket behind it.
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBe(null)
+      expect(executions).toBe(1)
+
+      const rows = await sql<{ call_id: string; status: string }[]>`
+        select call_id, status from course.tool_calls where turn_id = ${turnId}`
+      expect(rows).toHaveLength(1)
+      expect(rows[0]!.status).toBe('done')
     })
   })
 
@@ -138,17 +226,35 @@ describeDb('one invocation of the driver is one model call', () => {
     })
   })
 
-  it('keeps the provider tool_use id across the resume, so the ledger recognises the call', async () => {
+  it('keys the call on its position, so a re-ask after a lost state write replays it', async () => {
     await withTestDb(async (sql) => {
-      const { turnId } = await seededTurn(sql)
+      const { turnId } = await seededTurn(sql, HER_MESSAGE)
+      const search = {
+        city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1,
+      }
       const client = fakeClient([
-        toolUseMessage('search_hotels',
-          { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
+        toolUseMessage('search_hotels', search, 'toolu_01FIRST'),
+        // The identical request, with the fresh id a real provider mints on
+        // every response. This is the reply the re-ask below receives, and it
+        // is what makes an id read off the reply useless as a ledger key.
+        toolUseMessage('search_hotels', search, 'toolu_02SECOND'),
         textMessage('Three stays near the beach in Faro.'),
       ])
-      const agent = makeDriver({
-        sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
-      })
+      let executions = 0
+      const inner = mockRunner()
+      const agent: Agent = async (ctx) => makeDriver({
+        sql,
+        client,
+        run: ledgerRunner(sql, claimOf(ctx), async (name, input, callId, signal) => {
+          executions += 1
+          return await inner(name, input, callId, signal)
+        }),
+        limits: DEFAULT_LIMITS,
+        now: Date.now,
+      })(ctx)
+
+      // One step, then the invocation is out of wall clock and hands the turn
+      // back, so the tool has run and been recorded.
       let stepBudget = 1
       await runTurn(
         workerDeps(sql, {
@@ -156,17 +262,37 @@ describeDb('one invocation of the driver is one model call', () => {
         }),
         turnId,
       )
+      expect(executions).toBe(1)
+
+      // The crash this case is about, and the only window the ledger exists
+      // for: `finishToolCall` landed and the state write that carries its
+      // answer did not (a background kill, a fence, a pool error between the
+      // two). Rewinding the column to the transcript the turn was claimed with
+      // is exactly what a worker killed between them leaves behind.
+      const rewound = await sql`
+        update course.turns
+           set state = ${sql.json({
+             step: 0,
+             messages: [{ role: 'user', content: [{ type: 'text', text: HER_MESSAGE }] }],
+           } as never)}
+         where id = ${turnId}
+        returning id`
+      expect(rewound).toHaveLength(1)
+
       await runTurn(workerDeps(sql, { agent }), turnId)
+
       const rows = await sql<{ call_id: string; status: string }[]>`
         select call_id, status from course.tool_calls where turn_id = ${turnId}`
-      // One row, the provider's own id, done. toolLoop had to key its calls
-      // positionally because a resumed turn asked the model again and got fresh
-      // toolu_ ids back; a persisted transcript replays the SAME id, so the
-      // provider's id is now the stable key and the positional scheme is not
-      // needed on this path.
+      // ONE row, keyed on step and block index rather than on either toolu_ id,
+      // and the supplier was called once. Keyed on the reply's own id there
+      // would be two rows, two searches, and, in the window before
+      // `finishToolCall`, a `pending` row under an id nothing will ever present
+      // again: the ambiguous detection bypassed entirely by a call that arrives
+      // under a different key.
       expect(rows).toHaveLength(1)
-      expect(rows[0]!.call_id).toMatch(/^toolu_/)
+      expect(rows[0]!.call_id).toBe('s0-b0')
       expect(rows[0]!.status).toBe('done')
+      expect(executions).toBe(1)
     })
   })
 })

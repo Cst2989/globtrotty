@@ -10,7 +10,7 @@ import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
 import { emittedLinks } from './repo/linkClicks.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
-import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
+import { AmbiguousToolCallError } from './repo/toolCalls.js'
 import { isToolOutcome } from './tools.js'
 import {
   claimTurn, completeTurn, failTurn, heartbeat, loadTurnInput, releaseForContinuation, saveTurnState,
@@ -80,6 +80,19 @@ type StepCost = { costMicros: bigint; alreadyRecorded?: boolean }
 export type AgentStep =
   | ({ kind: 'message'; text: string } & StepCost)
   | ({
+      /**
+       * `callId` is the id the `tool_result` block this harness appends
+       * references, which must be the id the `tool_use` block beside it carries
+       * or the next request is a 400: for the driver that is the PROVIDER's own
+       * id, straight off the reply. It is not a ledger key and nothing here
+       * writes `course.tool_calls` with it. The ledger's key is the runner
+       * chain's business, positional and stable across a re-ask
+       * (src/agents/driver.ts, src/loop.ts), and the agent has already bound it
+       * into `run` by the time a step reaches this file.
+       *
+       * `name` is what an operator reads when a call comes back ambiguous; the
+       * transcript does not carry it.
+       */
       kind: 'tool'; callId: string; name: string
       run: (signal: AbortSignal) => Promise<unknown>
       /**
@@ -526,16 +539,23 @@ async function loop(
     }
 
     // Retried here, around the whole step, and safe to retry for the TOOL
-    // effects a step makes: lesson 3.4's ledger replays a tool call it already
-    // ran instead of running it again. It is NOT safe for model spend in the
-    // same way. `classify` and `extract` (src/classify.ts, src/extract.ts)
-    // call `callAndRecord` with no retry of their own, so a retryable
-    // `APIError` from either escapes `turn()` and this whole step is retried
-    // from scratch: a retried attempt pays for `classify` again even though
-    // `ledgerSink` already billed the first attempt's call. `withRetry`
-    // wrapping the whole step is the wrap this lesson has, over a single
-    // agent-defined unit of work; wrapping only the model call the 429 or 5xx
-    // actually came from is the narrower fix, and is not this lesson's.
+    // effects a step makes: the ledger inside the runner chain replays a call it
+    // already ran instead of running it again, keyed on a call id that is stable
+    // across the re-ask a retry produces (src/agents/driver.ts, src/loop.ts).
+    // Nothing in a retried step reaches a supplier twice.
+    //
+    // The model call is the part a retry repeats, and from lesson 5.1 a step IS
+    // one model call. The driver reserves before it dispatches and reconciles
+    // after (src/repo/reservation.ts), so a failed attempt's money is settled by
+    // the driver itself: refunded in full when a response body came back, kept
+    // when nothing did, before the throw ever reaches this line. What a retried
+    // step therefore costs is a second reservation, made and settled on its own
+    // terms, not a second charge for the first attempt's call.
+    //
+    // `withRetry` wrapping the whole step is the wrap this harness has, over a
+    // single agent-defined unit of work. It is the right shape while a step is
+    // one call; the day a step makes two, wrapping only the call the 429 or 5xx
+    // came from is the narrower fix, and is not this lesson's.
     let step: AgentStep
     try {
       step = await withHeartbeat(deps, claim, (signal) =>
@@ -595,28 +615,54 @@ async function loop(
     }
 
     await heartbeat(sql, claim)
-    const outcome = await beginToolCall(sql, claim, step.callId, step.name)
+    /**
+     * ONE writer of `course.tool_calls`, and it is not this file.
+     *
+     * `step.run` is the runner chain the agent was composed with, and the
+     * ledger is the outermost link of that chain (`ledgerRunner`, src/tools.ts;
+     * netlify/functions/run-turn-background.mts composes it). It writes the
+     * pending row, decides whether the inner runner is called at all, replays a
+     * stored result instead of running the tool a second time, and records the
+     * outcome. A `beginToolCall` here as well would be a SECOND writer of the
+     * same `(turn_id, call_id)`: the first insert wins, the second reads the row
+     * this same worker wrote milliseconds earlier, sees `pending`, and reports
+     * `ambiguous`, so every tool call on the composed path would fail its turn
+     * with the supplier never called and a stuck row left for a person.
+     *
+     * The harness keeps the ENDING rather than the row: an ambiguous call is
+     * still a turn-level decision, and `ledgerRunner` says so by throwing.
+     * Caught here rather than left to `runTurn`'s catch, which would classify it
+     * `unclassified` (src/errors.ts knows nothing about tool ledgers) and lose
+     * the one reason in this module that genuinely needs a person
+     * (src/repo/toolCalls.ts, src/sweeper.ts's runbook). Its own reason, not
+     * 'fenced': fenced means another worker holds the claim and is alive to
+     * finish the turn, which needs nobody's attention.
+     *
+     * Wrapped in `withHeartbeat` exactly like the agent call above: a real
+     * supplier request can run past the staleness window, so heartbeat_at has to
+     * keep moving while it is in flight and not only either side of it.
+     */
     let result: unknown
-    if (outcome.status === 'replayed') {
-      result = outcome.result
-    } else if (outcome.status === 'ambiguous') {
-      // Started and never finished: the effect on the outside world is
-      // unknown, and guessing either way is worse than stopping. Its own
-      // reason, not 'fenced': fenced means another worker holds the claim and
-      // is alive to finish the turn, which needs nobody's attention.
-      // 'ambiguous_tool_call' is the one outcome in this module that genuinely
-      // needs a person (src/repo/toolCalls.ts, src/sweeper.ts's runbook).
+    try {
+      result = await withHeartbeat(deps, claim, (signal) => step.run(signal))
+    } catch (err) {
+      if (!(err instanceof AmbiguousToolCallError)) throw err
+      // One line, because `fail_reason` records the reason and nothing records
+      // WHICH call: the person this ending is for has to find a `pending` row
+      // by hand (src/repo/toolCalls.ts), and the tool's name is half of what
+      // tells them whether the effect they are looking for is a wasted search
+      // or a booking.
+      console.error(`turn ${claim.turnId}: tool ${step.name} came back ambiguous`, err)
       await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'ambiguous_tool_call')
       return
-    } else {
-      // Wrapped exactly like the agent call above: a real supplier request can
-      // run past the staleness window, so heartbeat_at has to keep moving while
-      // it is in flight and not only either side of it.
-      result = await withHeartbeat(deps, claim, (signal) => step.run(signal))
-      await heartbeat(sql, claim)
-      await finishToolCall(sql, claim, step.callId, result)
-      await spend(deps, claim, turnSpend, step)
     }
+    await heartbeat(sql, claim)
+    // Counted whether the tool ran or was replayed, which is a change from the
+    // version that owned the ledger here and only billed the fresh branch. A
+    // driver step is one MODEL call plus at most one tool execution, and the
+    // model call happened either way; skipping it on a replay dropped a call
+    // this turn really paid for out of `turns.spend_usd_micros`.
+    await spend(deps, claim, turnSpend, step)
 
     state = {
       ...state,

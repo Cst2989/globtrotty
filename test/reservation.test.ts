@@ -46,8 +46,20 @@ describe('the bound, before any call is made', () => {
     // every multiplier in the table is already fractional, so an un-rounded
     // value here would crash the pre-dispatch path outright rather than
     // misprice it.
+    const p = PRICES[SEATS.cheap.model]!
+    const exact = 7 * p.inMicrosPerToken * Math.max(p.cacheWriteMult, 1)
+      + SEATS.cheap.maxTokens * p.outMicrosPerToken
+    // 8.75 micros of input on top of a whole number of output micros, so there
+    // really is something here to round; a case built on an already-integral
+    // value would pass against truncation too.
+    expect(Number.isInteger(exact)).toBe(false)
     expect(() => estimateMicros(SEATS.cheap, 7)).not.toThrow()
-    expect(estimateMicros(SEATS.cheap, 7) % 1n).toBe(0n)
+    // UP, to the next whole micro, and strictly above what truncating would
+    // have produced. `% 1n` on a bigint is 0n for every possible
+    // implementation, this one and a truncating one alike, so it pinned
+    // nothing at all.
+    expect(estimateMicros(SEATS.cheap, 7)).toBe(BigInt(Math.ceil(exact)))
+    expect(estimateMicros(SEATS.cheap, 7)).toBeGreaterThan(BigInt(Math.trunc(exact)))
   })
 })
 

@@ -45,11 +45,6 @@ export const HEARTBEAT_INTERVAL = 25
 export const HEARTBEAT_STALE = 90
 
 /**
- * What one worker holds while it owns a turn. `attempts` is the fencing token:
- * it is not a diagnostic counter, it is the value every subsequent write carries
- * to prove it comes from the run that currently owns this row.
- */
-/**
  * A `TurnState` as the parameter `sql.json` takes, which needs one cast and is
  * worth the sentence explaining it. From lesson 5.1 the transcript carries a
  * `tool_use` block whose `input` is `unknown`, because a tool's arguments are
@@ -63,6 +58,11 @@ export const HEARTBEAT_STALE = 90
 type JsonParam = Parameters<postgres.Sql['json']>[0]
 const asJson = (state: TurnState): JsonParam => state as unknown as JsonParam
 
+/**
+ * What one worker holds while it owns a turn. `attempts` is the fencing token:
+ * it is not a diagnostic counter, it is the value every subsequent write carries
+ * to prove it comes from the run that currently owns this row.
+ */
 export type Claim = {
   turnId: string
   conversationId: string

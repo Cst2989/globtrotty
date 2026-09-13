@@ -41,8 +41,14 @@ describe('seatNameOf', () => {
 describe('the settings the seat carries', () => {
   it('puts the output ceiling on the seat rather than at the call site', () => {
     expect(SEATS.driver.maxTokens).toBe(16_000)
-    // Eight times smaller than the 8000 `toolLoop` hardcoded for every seat,
-    // which is the whole of the over-reservation this field removes.
+    // Not a shrunk version of the 8000 `toolLoop` hardcodes (src/loop.ts): that
+    // number is for whatever seat it is handed, and the cheap seat is never
+    // handed to it, because only the planning desk has tools. The cheap seat's
+    // ceiling lived at its own two call sites, 64 for `classify` and 400 for
+    // `extract`, and 1,024 is above both, so this field removes no
+    // over-reservation here. What it does is make the number a reservation
+    // bounds output at a property of the seat being billed rather than of
+    // whoever happened to write the call.
     expect(SEATS.cheap.maxTokens).toBe(1_024)
   })
 

@@ -34,7 +34,7 @@ import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import { sweep } from '../src/sweeper.js'
-import { corpusRunner, supplierRunner } from '../src/tools.js'
+import { corpusRunner, ledgerRunner, supplierRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 
 config({ path: '.env.local', override: false })
@@ -60,23 +60,45 @@ const note = (s: string) => console.log(`       ${s}`)
 let sideEffects = 0
 
 /**
+ * What the search "returns", as a `ToolOutcome`: the shape every runner in the
+ * chain hands back, and the shape a replayed row has to come back as for
+ * `ledgerRunner` to give it to the model (`isToolOutcome`, src/tools.ts).
+ */
+const SEARCH_RESULT = { id: 'MOCK-1', minor: '18400', currency: 'EUR' }
+
+/**
  * Two steps: one tool call, then a message. The call id comes from `state.step`
  * rather than being generated fresh, which is what lets a resumed turn recognise
  * the call it already made. A random id would defeat the ledger entirely.
+ *
+ * The ledger is the layer that recognises it, and it is a layer of the runner
+ * chain rather than anything the harness does: this agent wraps its own runner
+ * in `ledgerRunner` exactly the way tier 3 does
+ * (netlify/functions/run-turn-background.mts). The harness writes no
+ * `course.tool_calls` row of its own, so a tool that is not run through the
+ * ledger is a tool that runs again after a crash.
  */
-const demoAgent: Agent = async ({ state }) => {
+const demoAgent: Agent = async (ctx) => {
+  const { state } = ctx
   if (state.step === 0) {
+    const callId = `search-${state.step}`
+    const run = ledgerRunner(
+      sql,
+      { turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
+        attempts: ctx.attempts, state: ctx.state },
+      async () => {
+        sideEffects += 1
+        step(`tool search_flights EXECUTED (execution number ${sideEffects})`)
+        return { content: JSON.stringify({ offers: [SEARCH_RESULT] }), isError: false }
+      },
+    )
     return {
-      kind: 'tool', callId: `search-${state.step}`, name: 'search_flights', costMicros: 2_000n,
+      kind: 'tool', callId, name: 'search_flights', costMicros: 2_000n,
       // A demo agent says nothing before it calls: there is no assistant turn to
       // echo, and an empty array is the honest answer rather than a fabricated
       // one (src/worker.ts's AgentStep).
       assistantContent: [],
-      run: async () => {
-        sideEffects += 1
-        step(`tool search_flights EXECUTED (execution number ${sideEffects})`)
-        return { offers: [{ id: 'MOCK-1', minor: '18400', currency: 'EUR' }] }
-      },
+      run: (signal) => run('search_flights', {}, callId, signal),
     }
   }
   // From lesson 5.1 a tool result is a `tool_result` BLOCK inside a user
@@ -137,7 +159,8 @@ async function main() {
   if (outcome.status === 'fresh') {
     sideEffects += 1
     step(`tool search_flights EXECUTED (execution number ${sideEffects})`)
-    await finishToolCall(sql, claim, 'search-0', { offers: [{ id: 'MOCK-1' }] })
+    await finishToolCall(sql, claim, 'search-0',
+      { content: JSON.stringify({ offers: [SEARCH_RESULT] }), isError: false })
   }
   // The state is saved WITHOUT the search result, because that is the window
   // the ledger exists for: the call has landed at the supplier and in

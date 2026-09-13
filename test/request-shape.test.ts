@@ -12,6 +12,26 @@ const base: CallArgs = {
   tools: [],
 }
 
+/**
+ * Every key at every depth of an assembled request, arrays included. A top-level
+ * `not.toHaveProperty` cannot answer this question: `cache_control` is a
+ * per-BLOCK field, so it would appear on a system block, a tool definition or
+ * the last content block of a message, never beside `model`.
+ */
+function everyKey(value: unknown, found: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) everyKey(item, found)
+    return found
+  }
+  if (typeof value === 'object' && value !== null) {
+    for (const [key, inner] of Object.entries(value)) {
+      found.push(key)
+      everyKey(inner, found)
+    }
+  }
+  return found
+}
+
 describe('the request we actually send', () => {
   it('never carries budget_tokens', () => {
     // The one assertion in this file that looks redundant and is not. Opus 5
@@ -77,6 +97,25 @@ describe('the request we actually send', () => {
     expect(buildRequest(base)).not.toHaveProperty('tools')
     const withTools = buildRequest({ ...base, tools: [{ name: 'search_hotels' }] })
     expect(withTools.tools).toEqual([{ name: 'search_hotels' }])
+  })
+
+  it('carries no cache_control anywhere in it', () => {
+    // Load bearing, and pinned nowhere until this case. The reservation's bound
+    // (src/repo/reservation.ts) rests on the sentence "nothing this lesson sends
+    // carries cache_control", which is what keeps `cache_creation_input_tokens`
+    // at zero on the way back. Lesson 5.6 puts a 1h cache TTL on every driver
+    // call, a 1h write bills at twice base input rather than the 1.25 the bound
+    // assumes, and this is the case that goes red in the commit that adds the
+    // breakpoint without moving the bound with it.
+    const req = buildRequest({
+      ...base,
+      // The branchy parts of the request, so the search covers the places a
+      // breakpoint is actually written: the tool definitions and a multi-block
+      // trailing user turn.
+      tools: [{ name: 'search_hotels', input_schema: { type: 'object' } }],
+      suffix: '## The notebook\n\n- destination: "Portugal"',
+    })
+    expect(everyKey(req)).not.toContain('cache_control')
   })
 
   it('never sends temperature', () => {

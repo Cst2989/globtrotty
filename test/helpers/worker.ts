@@ -1,7 +1,8 @@
 import type postgres from 'postgres'
 import { vi } from 'vitest'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
-import { echoAgent, type WorkerDeps } from '../../src/worker.js'
+import type { Claim } from '../../src/repo/turns.js'
+import { echoAgent, type AgentContext, type WorkerDeps } from '../../src/worker.js'
 
 /**
  * One `WorkerDeps` for every test that drives `runTurn`, rather than a copy per
@@ -29,4 +30,20 @@ export const workerDeps = (sql: postgres.Sql, over: Partial<WorkerDeps> = {}): W
   sleep: async () => {},
   random: () => 0,
   ...over,
+})
+
+/**
+ * The `Claim` an agent rebuilds from the context the harness hands it, which is
+ * how `netlify/functions/run-turn-background.mts` composes its runner chain:
+ * `ledgerRunner` and `corpusRunner` fence their writes on a full claim, and
+ * `attempts` is only known once `claimTurn` has taken the row. Every test that
+ * runs a tool THROUGH the ledger composes it the same way the deployed path
+ * does, rather than reaching around the chain.
+ */
+export const claimOf = (ctx: AgentContext): Claim => ({
+  turnId: ctx.turnId,
+  conversationId: ctx.conversationId,
+  userId: ctx.userId,
+  attempts: ctx.attempts,
+  state: ctx.state,
 })

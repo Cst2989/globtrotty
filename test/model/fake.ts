@@ -21,9 +21,14 @@ export function textMessage(text: string, overrides: Partial<Message> = {}): Mes
   } as Message
 }
 
-export function toolUseMessage(name: string, input: unknown): Message {
+/**
+ * `id` is a parameter because a real provider mints a FRESH `toolu_` id on every
+ * response, including the response to a re-ask of the identical transcript. A
+ * test about what survives a resume has to be able to say so.
+ */
+export function toolUseMessage(name: string, input: unknown, id = `toolu_${name}`): Message {
   return textMessage('', {
-    content: [{ type: 'tool_use', id: `toolu_${name}`, name, input, caller: { type: 'direct' } }],
+    content: [{ type: 'tool_use', id, name, input, caller: { type: 'direct' } }],
     stop_reason: 'tool_use',
   } as Partial<Message>)
 }

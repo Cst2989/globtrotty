@@ -118,17 +118,24 @@ export function makeDriver(deps: DriverDeps): Agent {
     // ---- 2. Call, and classify before touching content ----------------------
     // A throw here leaves the reservation debited unless we can say the call was
     // never billed. An error BODY reaching us, at any status from 400 to 503,
-    // carries no usage, so nothing was billed and the whole reservation is
-    // refunded. A connection failure, a timeout or our own abort keeps the
+    // carries no usage: the provider answered with a refusal to serve rather
+    // than with a generation, so nothing was billed and the whole reservation is
+    // refunded. That is both halves of the taxonomy that carry a status,
+    // `provider_rejected` (the remaining 4xx) and `provider_down` (408, 409,
+    // 429 and every 5xx), and `isUnbilled` below names both. A connection
+    // failure, a timeout with no response at all or our own abort keeps the
     // debit, because the provider may have generated and billed a response we
     // never saw.
     //
-    // Getting this wrong in the other direction is not a rounding error. An
-    // outage produces 429s and 5xx, roughly 400,000 stranded micros per attempt
-    // land in course.daily_usage, and readSpendFailClosed sums that column
-    // across ALL USERS for the global ceiling, so a few hundred failed calls
-    // would cap the whole product for the rest of the UTC day at zero real
-    // spend, with no lever short of a manual write.
+    // Refunding only one half is not a rounding error. `withRetry`
+    // (src/retry.ts) wraps the whole agent step at src/worker.ts, so one step
+    // against a 503-ing provider reserves three times, and roughly 400,000
+    // stranded micros per attempt land in course.daily_usage.
+    // `readSpendFailClosed` sums that column across ALL USERS for the global
+    // ceiling (src/limits.ts), so on the order of forty failed steps would cap
+    // the whole product for the rest of the UTC day at zero real spend, with no
+    // lever short of a manual write. `test/driver.test.ts` drives three failed
+    // attempts and holds both counters at zero.
     let result: ModelResult
     try {
       result = await callModel(deps.client, { ...args, signal: ctx.signal }, deps.now)
@@ -180,7 +187,8 @@ export function makeDriver(deps: DriverDeps): Agent {
     }
 
     // ---- 3. No tool: her answer --------------------------------------------
-    const toolUse = result.content.find((b) => b.type === 'tool_use')
+    const blockIndex = result.content.findIndex((b) => b.type === 'tool_use')
+    const toolUse = blockIndex === -1 ? undefined : result.content[blockIndex]
     if (toolUse === undefined || toolUse.type !== 'tool_use') {
       const text = textOfBlocks(result.content).trim()
       return {
@@ -214,21 +222,51 @@ export function makeDriver(deps: DriverDeps): Agent {
     const assistantContent: ContentBlock[] =
       result.content.filter((b) => b.type !== 'tool_use' || b.id === toolUse.id)
 
+    /**
+     * The LEDGER's key: position, not `toolUse.id`, which is `toolLoop`'s own
+     * scheme (`s${steps}-b${index}`, src/loop.ts) and stable for the same
+     * reason here.
+     *
+     * A persisted transcript makes the REQUEST identical across a resume. It
+     * does not make the RESPONSE identical: a provider mints a fresh `toolu_`
+     * id every time it answers, and this driver never reads a call id back out
+     * of `course.turns.state`, which is input only. So an id taken off the reply
+     * cannot recognise a call we already made.
+     *
+     * The window it has to survive is real: `finishToolCall` lands and the
+     * process dies before `saveTurnState` (a Netlify background kill, a fence, a
+     * pool error). The resumed turn sends the unchanged transcript, the model
+     * asks for the same search again, and under a reply id `beginToolCall` would
+     * see a call it has never heard of and run the search a second time. Under
+     * `search_hotels` that is a wasted fetch; through `cashierRunner` it is a
+     * second re-quote and a second booking link for one intent. Worse in the
+     * narrower window between begin and finish: the `pending` row under the old
+     * id is orphaned and the ambiguous detection, which exists to catch exactly
+     * "started and never finished", is bypassed by a call arriving under a
+     * different key.
+     *
+     * `state.step` is the counter the harness persists with the transcript and
+     * increments once per tool step (src/worker.ts), so a re-ask asks at the
+     * same position and gets the same id. `beginToolCall`'s own name check
+     * catches a resume that asks for a DIFFERENT tool at this position rather
+     * than replaying the other call's result.
+     */
+    const callId = `s${ctx.state.step}-b${blockIndex}`
+
     return {
       kind: 'tool',
       /**
-       * The PROVIDER's id, which is correct from this lesson and was not before
-       * it. `toolLoop` keys its calls positionally (`s${steps}-b${index}`)
-       * because its transcript died with the call: a resumed turn asked the
-       * model the same questions and got fresh `toolu_` ids back, so an id from
-       * the reply could not recognise a call we had already made. A transcript
-       * held in `course.turns.state` replays the SAME assistant blocks with the
-       * SAME id, so the provider's id is stable across a resume and is the right
-       * key for `course.tool_calls (turn_id, call_id)`.
+       * The PROVIDER's id here, and the positional one above, because the two
+       * ids answer two different questions and `toolLoop` already separates
+       * them exactly this way (src/loop.ts: the ledger takes the position, the
+       * `tool_result` block takes `block.id`). The harness pairs the
+       * `tool_result` it appends with this, and it has to be the id the
+       * assistant block beside it carries or the next request is a 400. The
+       * ledger never sees it.
        */
       callId: toolUse.id,
       name: toolUse.name,
-      run: (signal) => deps.run(toolUse.name, toolUse.input, toolUse.id, signal),
+      run: (signal) => deps.run(toolUse.name, toolUse.input, callId, signal),
       assistantContent,
       costMicros: actual,
       alreadyRecorded: true,
@@ -243,9 +281,21 @@ export function makeDriver(deps: DriverDeps): Agent {
  * name, keeps the debit.
  *
  * Derived from the branch's own classifier rather than from a second list of
- * statuses: `provider_rejected` is the bucket for a provider that looked at this
- * request and said no, which is exactly the case where a body came back.
+ * statuses: `provider_rejected` and `provider_down` are exactly the two reasons
+ * `classifyError` (src/errors.ts) produces from an HTTP STATUS, which is to say
+ * from a response the provider sent. It rejected the request (400, 401, 403,
+ * 404) or it could not serve it (408, 409, 429, 5xx); either way it did not
+ * generate tokens, and a 429 in an outage is no more billed than a 400 is.
+ *
+ * The two that are left out are the two with no response behind them.
+ * `fetch_failed` is `APIConnectionError`: the request never reached the
+ * provider, or a timeout expired with nothing coming back, and a timeout is the
+ * case where a generation may well have been produced and billed after we
+ * stopped listening. `unclassified` covers our own abort and anything we cannot
+ * name, where we know nothing at all. Both keep the debit, which is the
+ * conservative direction on a guardrail.
  */
 function isUnbilled(err: unknown): boolean {
-  return classifyError(err).reason === 'provider_rejected'
+  const { reason } = classifyError(err)
+  return reason === 'provider_rejected' || reason === 'provider_down'
 }

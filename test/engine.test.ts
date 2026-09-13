@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto'
+import type postgres from 'postgres'
 import { decideNext, exceedsAnyCeiling, type DecideInput, type LoopMessage, type ThinkingBlock,
-  type ToolResultBlock, type ToolUseBlock } from '../src/engine.js'
+  type ToolResultBlock, type ToolUseBlock, type TurnState } from '../src/engine.js'
+import { claimTurn, saveTurnState } from '../src/repo/turns.js'
+import { describeDb, withTestDb } from './helpers/db.js'
 
 const LIMITS = {
   conversationCeilingMicros: 8_000_000n,   // $8
@@ -213,5 +217,71 @@ describe('the transcript survives the column it is stored in', () => {
     const after = JSON.parse(JSON.stringify(result)) as LoopMessage
     expect(after.role).toBe('user')
     expect((after.content[0] as ToolResultBlock).tool_use_id).toBe('toolu_01ABC')
+  })
+})
+
+/**
+ * The signature the API compares byte for byte, in the alphabet a real one uses:
+ * base64, so `+`, `/` and the `=` padding are all in it. Those are the
+ * characters an encoding round trip through a column mangles if anything is
+ * going to.
+ */
+const SIGNATURE = 'ErUBCkYIBBgCKkB+9Zq/lA3pXcWvQ0tRm8dYhK2sT7uNvE1gJc4bPzF6/wRxHy0aLmQ=='
+
+describeDb('the transcript survives the column it REALLY is stored in', () => {
+  it('pins a tool_use id and a thinking signature through the course.turns round trip', async () => {
+    await withTestDb(async (sql: postgres.Sql) => {
+      const userId = randomUUID()
+      const [c] = await sql`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      const [t] = await sql`
+        insert into course.turns (conversation_id, user_id, idempotency_key)
+        values (${c!.id}, ${userId}, ${randomUUID()}) returning id`
+      const claim = (await claimTurn(sql, t!.id as string))!
+
+      const before: TurnState = {
+        step: 1,
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'Portugal in September, one toddler' }] },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'she said one toddler', signature: SIGNATURE },
+              { type: 'text', text: 'Let me look at Faro.' },
+              { type: 'tool_use', id: 'toolu_01ABC', name: 'search_hotels',
+                input: { city: 'Faro', checkIn: '2026-09-19', adults: 2, children: 1 } },
+            ],
+          },
+          {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'toolu_01ABC', content: '[]', is_error: false }],
+          },
+        ],
+      }
+      // Through the writer the harness uses, not a hand-written update: the
+      // `jsonb` parameter goes through the one cast in src/repo/turns.ts, which
+      // is the line whose claim ("the round trip is safe") this case is the
+      // evidence for.
+      await saveTurnState(sql, claim, before)
+
+      const [row] = await sql<{ state: TurnState }[]>`
+        select state from course.turns where id = ${claim.turnId}`
+      const after = row!.state
+      expect(after).toEqual(before)
+
+      // The two fields the API is unforgiving about, named rather than left to
+      // the deep equal above: a transcript that lost the id sends an unpaired
+      // tool_result and a transcript that altered one byte of the signature is
+      // rejected outright, and both would still pass a check that the row came
+      // back as SOME object.
+      const use = after.messages[1]!.content[2] as ToolUseBlock
+      expect(use.id).toBe('toolu_01ABC')
+      expect((use.input as { children: number }).children).toBe(1)
+      const think = after.messages[1]!.content[0] as ThinkingBlock
+      expect(think.signature).toBe(SIGNATURE)
+      expect(Buffer.byteLength(think.signature, 'utf8')).toBe(Buffer.byteLength(SIGNATURE, 'utf8'))
+      const result = after.messages[2]!.content[0] as ToolResultBlock
+      expect(result.tool_use_id).toBe(use.id)
+    })
   })
 })

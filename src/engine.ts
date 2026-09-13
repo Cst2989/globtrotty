@@ -15,9 +15,13 @@
  *    thinking block is rejected.
  *
  * `course.turns.state` has been `jsonb` since lesson 2.1, so widening this
- * needed no migration. What it does need is that every block survives a JSON
- * round trip unchanged, which test/engine.test.ts pins block by block, because
- * the column is where a resumed turn reads its transcript back from.
+ * needed no migration. What it does need is that every block survives a round
+ * trip unchanged, which test/engine.test.ts pins twice: block by block through
+ * `JSON.parse(JSON.stringify(...))`, which is the encoding, and then through
+ * `course.turns.state` itself, writing with `saveTurnState` and reading the
+ * column back, because the column is where a resumed turn reads its transcript
+ * from and an encoding that survives in memory proves nothing about the
+ * parameter cast and the driver on the way there.
  */
 export type TextBlock = { type: 'text'; text: string }
 export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }

@@ -10,11 +10,12 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { claimTurn, FencedError, MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { sweep } from '../src/sweeper.js'
+import { ledgerRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { apiError } from './helpers/errors.js'
 import { handlerDeps, silentFor } from './helpers/turns.js'
-import { workerDeps } from './helpers/worker.js'
+import { claimOf, workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
 
@@ -57,7 +58,7 @@ describeDb('runTurn', () => {
       const r = await submit(sql, 'hi', 'w1b')
       const agent: Agent = async () =>
         ({ kind: 'message', text: 'two options near Faro', costMicros: 4_000n, alreadyRecorded: true })
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
 
       const [t] = await sql`select status, spend_usd_micros from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('done')
@@ -76,7 +77,7 @@ describeDb('runTurn', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'w1c')
       const agent: Agent = async () => ({ kind: 'continue_later', costMicros: 500n })
-      const deps = workerDeps(sql, { agent: agent })
+      const deps = workerDeps(sql, { agent })
 
       await runTurn(deps, r.turnId!)                  // first attempt: 500 spent, handed back
       await runTurn(deps, r.turnId!)                  // the re-invocation claims it again
@@ -110,7 +111,7 @@ describeDb('runTurn', () => {
         seen.push(state.messages.length)
         return { kind: 'message', text: `saw ${state.messages.length} lines`, costMicros: 1_000n }
       }
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
       // Her message was loaded out of the database, not invented.
       expect(seen).toEqual([1])
     })
@@ -139,7 +140,7 @@ describeDb('runTurn', () => {
           costMicros: 10n,
         }
       }
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
       const msgs = await sql`select content from course.messages
                               where conversation_id = ${r.conversationId} order by seq`
       expect(msgs[msgs.length - 1]!.content).toBe('answering: a week in Portugal')
@@ -148,13 +149,22 @@ describeDb('runTurn', () => {
 
   it('does not repeat a completed tool call on resume', async () => {
     await withTestDb(async (sql) => {
-      const sideEffect = vi.fn().mockResolvedValue({ ok: true })
+      const sideEffect = vi.fn().mockResolvedValue({ content: '{"ok":true}', isError: false })
       let handedOut = false
-      const agent: Agent = async () => {
+      // Through the ledger, the way tier 3 composes it
+      // (netlify/functions/run-turn-background.mts): the harness itself writes
+      // no `course.tool_calls` row, so an agent that wants a call it made once
+      // to stay made once wraps its runner in `ledgerRunner`, exactly as the
+      // deployed chain does. A `ToolOutcome` rather than a bare object, because
+      // that is what a replayed row has to come back as (`isToolOutcome`,
+      // src/tools.ts) for the ledger to hand it to the model.
+      const agent: Agent = async (ctx) => {
         if (!handedOut) {
           handedOut = true
+          const run = ledgerRunner(sql, claimOf(ctx), async () => await sideEffect())
           return {
-            kind: 'tool', callId: 'toolu_1', name: 'search_hotels', run: sideEffect,
+            kind: 'tool', callId: 'toolu_1', name: 'search_hotels',
+            run: (signal) => run('search_hotels', {}, 'toolu_1', signal),
             // Nothing was said to ask for this call: a counting agent has no
             // assistant turn to echo, and an empty array is the honest answer.
             assistantContent: [], costMicros: 10n,
@@ -164,13 +174,13 @@ describeDb('runTurn', () => {
       }
 
       const r = await submit(sql, 'hi', 'w4')
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
       expect(sideEffect).toHaveBeenCalledTimes(1)
 
       // A crash and a resume: reopen the turn and run it again.
       await sql`update course.turns set status = 'queued' where id = ${r.turnId}`
       handedOut = false
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
       expect(sideEffect).toHaveBeenCalledTimes(1)      // NOT twice
     })
   })
@@ -178,14 +188,20 @@ describeDb('runTurn', () => {
   it('escalates rather than guess when a tool call was started and never finished', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'w5')
-      const sideEffect = vi.fn().mockResolvedValue({ ok: true })
-      const agent: Agent = async () =>
-        ({ kind: 'tool', callId: 'toolu_1', name: 'escalate', run: sideEffect, assistantContent: [], costMicros: 10n })
+      const sideEffect = vi.fn().mockResolvedValue({ content: '{"ok":true}', isError: false })
+      const agent: Agent = async (ctx) => {
+        const run = ledgerRunner(sql, claimOf(ctx), async () => await sideEffect())
+        return {
+          kind: 'tool', callId: 'toolu_1', name: 'escalate',
+          run: (signal) => run('escalate', {}, 'toolu_1', signal),
+          assistantContent: [], costMicros: 10n,
+        }
+      }
 
       // Leave the intent behind with no result, the way a kill mid call does.
       await sql`insert into course.tool_calls (turn_id, call_id, name, status)
                 values (${r.turnId}, 'toolu_1', 'escalate', 'pending')`
-      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
+      await runTurn(workerDeps(sql, { agent }), r.turnId!)
 
       expect(sideEffect).not.toHaveBeenCalled()
       const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
@@ -241,7 +257,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 60))
         return { kind: 'message', text: 'ok', costMicros: 10n }
       }
-      const deps = workerDeps(sql, { agent: agent })
+      const deps = workerDeps(sql, { agent })
       deps.heartbeatIntervalMs = 15
       deps.onHeartbeat = () => { beats.count += 1 }
       await runTurn(deps, r.turnId!)
@@ -264,7 +280,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 60))
         throw boom
       }
-      const deps = workerDeps(sql, { agent: agent })
+      const deps = workerDeps(sql, { agent })
       deps.heartbeatIntervalMs = 15
       deps.onHeartbeat = () => { beats.count += 1 }
       await expect(runTurn(deps, r.turnId!)).rejects.toThrow('agent exploded')
@@ -292,7 +308,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 150))
         return { kind: 'message', text: 'too late', costMicros: 10n }
       }
-      const deps = workerDeps(sql, { agent: agent })
+      const deps = workerDeps(sql, { agent })
       deps.heartbeatIntervalMs = 20
       const run = runTurn(deps, r.turnId!)
       // Let the claim's own first heartbeat tick or two pass uneventfully.
@@ -343,7 +359,7 @@ describeDb('runTurn', () => {
       const headers = new Headers({ 'retry-after': '900' })      // fifteen minutes
       let calls = 0
       const agent: Agent = async () => { calls += 1; throw apiError(429, headers) }
-      const deps = workerDeps(sql, { agent: agent })
+      const deps = workerDeps(sql, { agent })
       deps.deadlineMs = () => Date.now() + 120_000              // two minutes left
       await runTurn(deps, r.turnId!)
 

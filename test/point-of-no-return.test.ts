@@ -8,10 +8,11 @@ import { recordProposal } from '../src/repo/proposals.js'
 import { MAX_ATTEMPTS } from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { sweep } from '../src/sweeper.js'
+import { ledgerRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { handlerDeps } from './helpers/turns.js'
-import { workerDeps } from './helpers/worker.js'
+import { claimOf, workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
 
@@ -167,11 +168,21 @@ describeDb('after a link is emitted, no exit from the loop fails the turn', () =
       // there when this attempt begins.
       await sql`insert into course.tool_calls (turn_id, call_id, name, status)
                 values (${submitted.turnId}, 'call-1', 'search_flights', 'pending')`
-      const tooling: Agent = async () => ({
-        kind: 'tool', callId: 'call-1', name: 'search_flights',
-        run: async () => { throw new Error('the tool must not be run') },
-        assistantContent: [], costMicros: 0n,
-      })
+      // The ledger is what reads that row and refuses, since lesson 5.1's fix
+      // round left it the only writer of course.tool_calls: the agent composes
+      // it the way tier 3 does, and the harness turns the throw into the
+      // turn's ending.
+      const tooling: Agent = async (ctx) => {
+        const run = ledgerRunner(
+          sql, claimOf(ctx),
+          async () => { throw new Error('the tool must not be run') },
+        )
+        return {
+          kind: 'tool', callId: 'call-1', name: 'search_flights',
+          run: (signal) => run('search_flights', {}, 'call-1', signal),
+          assistantContent: [], costMicros: 0n,
+        }
+      }
       await runTurn(workerDeps(sql, { agent: tooling }), submitted.turnId)
       await expectHandedOff(sql, submitted.turnId)
       // The operator step lesson 3.4 wrote down is unchanged: the pending row

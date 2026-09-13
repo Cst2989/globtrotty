@@ -426,6 +426,16 @@ export function corpusRunner(sql: postgres.Sql, claim: Claim, inner: SupplierRun
  * responsibility per file: `mockRunner` knows about the supplier, this knows
  * about crashes, and lesson 4's live adapters get the same protection by being
  * wrapped in exactly the same way.
+ *
+ * THE ONLY writer of `course.tool_calls`, and from lesson 5.1 two different
+ * loops depend on that: `toolLoop` below, and `src/worker.ts`'s own loop
+ * running the driver. Neither of them writes the ledger itself. A second writer
+ * of the same `(turn_id, call_id)` does not double-record, it deadlocks the
+ * feature: the first insert wins, the second reads back a row its own process
+ * wrote moments ago, sees `pending`, and reports the call ambiguous, so every
+ * tool call fails its turn with the supplier never called. Both callers instead
+ * catch the `AmbiguousToolCallError` this throws and end the turn
+ * `ambiguous_tool_call`.
  */
 export function ledgerRunner(sql: postgres.Sql, claim: Claim, inner: ToolRunner): ToolRunner {
   return async (name, input, callId, signal) => {
