@@ -149,7 +149,7 @@ describeDb('proposals repo', () => {
       ref: { sourceId: 'X', quantity: 1, slot: 'outbound' },
       item: { sourceId: 'X', supplier: 'mock', kind: 'flight' as const, name: 'n',
         price: money(123n, 'EUR'), priceBasis: 'total' as const, fetchedAt: NOW, ttlSeconds: 900,
-        bookingUrl: null, detail: { kind: 'flight' as const, outbound: { from: 'A', to: 'B', departureLocal: 'x', arrivalLocal: 'y', stops: 0, route: [], cabinClass: 'E', carriers: [], flightNumbers: ['ZZ1'] }, inbound: null, baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 }, totalDurationSeconds: 1, selfTransfer: false },
+        bookingUrl: 'https://mock.example/book/X', detail: { kind: 'flight' as const, outbound: { from: 'A', to: 'B', departureLocal: 'x', arrivalLocal: 'y', stops: 0, route: [], cabinClass: 'E', carriers: [], flightNumbers: ['ZZ1'] }, inbound: null, baggage: { personalItem: 1, cabinBag: 0, checkedBag: 0 }, totalDurationSeconds: 1, selfTransfer: false },
         searchParams: null },
       lineTotal: money(123n, 'EUR'),
     }
@@ -157,5 +157,9 @@ describeDb('proposals repo', () => {
     expect(JSON.parse(JSON.stringify(out))).toEqual(out)
     expect(out.items[0]!.priceMinor).toBe('123')
     expect(out.items[0]!.fetchedAt).toBe(NOW.toISOString())
+    // F2: bookingUrl must round-trip — the cashier's disclosure path (a
+    // supplier that may not requote) needs the ORIGINAL link, not a
+    // regenerated one, to build a booking URL from a stored item.
+    expect(out.items[0]!.bookingUrl).toBe('https://mock.example/book/X')
   })
 })

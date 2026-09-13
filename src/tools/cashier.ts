@@ -22,9 +22,9 @@ export function withinTolerance(oldMinor: bigint, newMinor: bigint): boolean {
 /**
  * Spec section 5, point 3: "per item and on item identity, not just on the
  * sum. A total that fell because a refundable fare became basic economy is a
- * downgrade she never accepted." Flight identity: supplier, id, and the
- * flight-number lists in order, both directions. Hotel identity: supplier, id,
- * name, check-in and check-out.
+ * downgrade she never accepted." Flight identity: supplier, id, the
+ * flight-number lists in order, both directions, AND both directions'
+ * departure dates. Hotel identity: supplier, id, name, check-in and check-out.
  */
 export function sameIdentity(stored: StoredItineraryItem, fresh: SupplierItem): boolean {
   if (stored.supplier !== fresh.supplier || stored.sourceId !== fresh.sourceId || stored.kind !== fresh.kind) return false
@@ -134,7 +134,7 @@ async function requote(deps: CashierDeps, p: ProposalRow, now: Date): Promise<Ve
 
 function storedAsItem(i: StoredItineraryItem): SupplierItem {
   return { sourceId: i.sourceId, supplier: i.supplier, kind: i.kind, name: i.name, price: money(BigInt(i.priceMinor), i.currency),
-    priceBasis: i.priceBasis, fetchedAt: new Date(i.fetchedAt), ttlSeconds: 0, bookingUrl: null, detail: i.detail }
+    priceBasis: i.priceBasis, fetchedAt: new Date(i.fetchedAt), ttlSeconds: 0, bookingUrl: i.bookingUrl, detail: i.detail }
 }
 
 /**
@@ -151,12 +151,18 @@ function storedAsItem(i: StoredItineraryItem): SupplierItem {
  */
 function render(p: ProposalRow, links: LinkClickRow[], now: Date, verified: boolean): string {
   const byItemId = new Map(links.map((l) => [l.itemId, l]))
-  const lines = p.itinerary.items.flatMap((i) => {
-    const l = byItemId.get(i.sourceId)
-    if (!l) return []
+  // M3: a partial link set — fewer links than items, a duplicate item id, or
+  // an item with no matching link — must never render silently short. Dropping
+  // the missing lines would hand her a booking message for less than the
+  // whole itinerary with no sign anything was left out.
+  if (byItemId.size !== p.itinerary.items.length || p.itinerary.items.some((i) => !byItemId.has(i.sourceId))) {
+    return 'Stored links do not match the proposal\'s items; escalate to a human.'
+  }
+  const lines = p.itinerary.items.map((i) => {
+    const l = byItemId.get(i.sourceId)!
     const ageMin = Math.max(0, Math.round((now.getTime() - new Date(i.fetchedAt).getTime()) / 60_000))
     const price = formatMoney(money(l.quotedMinor, l.currency))
-    return [`- ${i.slot}: ${maskUntrustedText(i.name)} — ${price}${verified ? '' : ` (found ${ageMin} min ago)`} — ${l.url}`]
+    return `- ${i.slot}: ${maskUntrustedText(i.name)} — ${price}${verified ? '' : ` (found ${ageMin} min ago)`} — ${l.url}`
   })
   const head = verified
     ? 'Verified just now against the suppliers; every item is still offered at the price she accepted (within 0.5%).'

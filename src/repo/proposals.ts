@@ -12,6 +12,7 @@ export type StoredItineraryItem = {
   priceMinor: string; currency: string; priceBasis: 'total' | 'pre_tax'
   fetchedAt: string
   lineTotalMinor: string
+  bookingUrl: string | null
   detail: FlightDetail | HotelDetail
   searchParams: SearchParams | null
 }
@@ -42,6 +43,7 @@ export function toStoredItinerary(items: RehydratedItem[]): StoredItinerary {
       priceMinor: item.price.minor.toString(), currency: item.price.currency,
       priceBasis: item.priceBasis, fetchedAt: item.fetchedAt.toISOString(),
       lineTotalMinor: lineTotal.minor.toString(),
+      bookingUrl: item.bookingUrl,
       detail: item.detail, searchParams: item.searchParams,
     })),
   }

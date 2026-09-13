@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { handOff, withinTolerance, sameIdentity, ACCEPT_WINDOW_MS } from '../src/tools/cashier.js'
+import { withTracking } from '../src/supplier/urls.js'
 import { runProposalPath } from '../src/agents/proposalPath.js'
 import { decideProposal } from '../src/repo/proposals.js'
 import { recordResults } from '../src/repo/toolResults.js'
@@ -126,7 +127,7 @@ describeDb('cashier', () => {
   })
   it('blocks a CHEAPER fare whose identity changed', () => {
     const stored = { slot: 'outbound', quantity: 1, sourceId: 'X', supplier: 'mock', kind: 'flight' as const, name: 'n', priceMinor: '1000', currency: 'EUR', priceBasis: 'total' as const,
-      fetchedAt: NOW.toISOString(), lineTotalMinor: '1000', searchParams: null,
+      fetchedAt: NOW.toISOString(), lineTotalMinor: '1000', bookingUrl: null, searchParams: null,
       detail: { kind: 'flight' as const, outbound: { from: 'A', to: 'B', departureLocal: '2026-09-12T08:00:00', arrivalLocal: 'y', stops: 0, route: [], cabinClass: 'E', carriers: [], flightNumbers: ['ZZ100'] }, inbound: null, baggage: { personalItem: 0, cabinBag: 0, checkedBag: 0 }, totalDurationSeconds: 0, selfTransfer: false } }
     const fresh = { sourceId: 'X', supplier: 'mock', kind: 'flight' as const, name: 'n', price: money(900n, 'EUR'), priceBasis: 'total' as const, fetchedAt: NOW, ttlSeconds: 900, bookingUrl: null,
       detail: { ...stored.detail, outbound: { ...stored.detail.outbound, flightNumbers: ['ZZ101'] } } }
@@ -157,6 +158,33 @@ describeDb('cashier', () => {
       expect(await sql`select 1 from link_clicks where proposal_id = ${s.proposalId}`).toHaveLength(2)
     })
   })
+  // F2: on the disclosure path (mayRequote: false) the real adapters build the
+  // booking URL from the STORED item's `bookingUrl` field, not from a fresh
+  // search — so `StoredItineraryItem.bookingUrl` must actually be populated,
+  // and `storedAsItem` must carry it through rather than always handing the
+  // adapter a `null`.
+  it('mints links from the stored bookingUrl on the disclosure path (mayRequote: false)', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '18', { mayRequote: false })
+      await accept(sql, s)
+      const fromStored = (item: { bookingUrl: string | null }, ref: string) =>
+        withTracking(item.bookingUrl ?? '', ref, (h) => h === 'mock.example')
+      vi.spyOn(s.flights, 'bookingUrl').mockImplementation(fromStored)
+      vi.spyOn(s.hotels, 'bookingUrl').mockImplementation(fromStored)
+      const out = await handOff(s.deps, s, s.proposalId)
+      const [p] = await sql`select itinerary from proposals where id = ${s.proposalId}`
+      const items = (p!.itinerary as { items: { sourceId: string; bookingUrl: string | null }[] }).items
+      const links = await sql`select item_id, url from link_clicks where proposal_id = ${s.proposalId}`
+      expect(links).toHaveLength(2)
+      for (const l of links) {
+        const item = items.find((i) => i.sourceId === l.item_id)
+        expect(item?.bookingUrl).toBeTruthy()
+        expect((l.url as string).startsWith(item!.bookingUrl as string)).toBe(true)
+        expect(out).toContain(l.url as string)
+      }
+    })
+  })
+
   it('blocks an item with no stored search to re-run', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '10')
@@ -215,7 +243,7 @@ describeDb('cashier', () => {
   })
   it('blocks a hotel whose stay dates moved, and passes an identical stay', () => {
     const stored = { slot: 'stay', quantity: 1, sourceId: 'H', supplier: 'mock', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '2000', currency: 'EUR', priceBasis: 'total' as const,
-      fetchedAt: NOW.toISOString(), lineTotalMinor: '2000', searchParams: null,
+      fetchedAt: NOW.toISOString(), lineTotalMinor: '2000', bookingUrl: null, searchParams: null,
       detail: { kind: 'hotel' as const, checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7, rating: null, coordinates: null, offerSource: null } }
     const fresh = { sourceId: 'H', supplier: 'mock', kind: 'hotel' as const, name: 'Casa Bela', price: money(2000n, 'EUR'), priceBasis: 'total' as const, fetchedAt: NOW, ttlSeconds: 900, bookingUrl: null,
       detail: { ...stored.detail, checkOut: '2026-09-20' } }
