@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
+import { ESCALATION_REASONS } from '../src/notify.js'
 
 const USER = '00000000-0000-4000-8000-00000000a001'
 
@@ -42,6 +43,25 @@ describeDb('0014 plan 3b schema', () => {
       await expect(sql`
         insert into escalations (conversation_id, user_id, reason)
         values (${conversationId}, ${USER}, 'the hotel smelled')`)
+        .rejects.toThrow(/check constraint/i)
+    })
+  })
+
+  // M5: pins the TS enum and migration 0014's check constraint to each other —
+  // a reason added to one without the other would otherwise surface only as a
+  // runtime insert failure in production, on whichever side lagged.
+  it('accepts every ESCALATION_REASONS value and rejects one outside it', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId } = await seedProposal(sql)
+      for (const reason of ESCALATION_REASONS) {
+        const [e] = await sql`
+          insert into escalations (conversation_id, user_id, reason)
+          values (${conversationId}, ${USER}, ${reason}) returning id`
+        expect(e!.id).toBeTruthy()
+      }
+      await expect(sql`
+        insert into escalations (conversation_id, user_id, reason)
+        values (${conversationId}, ${USER}, 'not_a_real_reason')`)
         .rejects.toThrow(/check constraint/i)
     })
   })

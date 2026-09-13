@@ -579,9 +579,15 @@ describeDb('driver', () => {
       const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
       expect(proposals).toHaveLength(1)
       expect(step.spent!.micros).toBe(6_000n)
+      // M1: `created_at` is transaction-start time inside withTestDb (every
+      // insert in this test transaction gets the SAME timestamp), so ordering
+      // by it and asserting an exact sequence is asserting on Postgres's tie-
+      // breaking, not on anything the driver guarantees. A multiset assertion
+      // pins what actually matters: both seats fired, exactly once each.
       const calls = await sql`
-        select seat from model_calls where conversation_id = ${s.conversationId} order by created_at`
-      expect(calls.map((r) => r.seat)).toEqual(['driver', 'reviewer'])
+        select seat from model_calls where conversation_id = ${s.conversationId}`
+      expect(new Set(calls.map((r) => r.seat))).toEqual(new Set(['driver', 'reviewer']))
+      expect(calls).toHaveLength(2)
     })
   })
 

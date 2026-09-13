@@ -25,11 +25,16 @@ export async function escalate(
   }
   const e = await recordEscalation(deps.sql, { conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId,
     proposalId: input.proposalId ?? null, reason: input.reason })
+  // M2: `markNotified` must run OUTSIDE the try — a failed markNotified after
+  // a successful notify used to log "notifier failed", which is a lie: the
+  // notifier succeeded, and it's the (best-effort) stamp that didn't land.
+  let notified = false
   try {
     await deps.notifier.notify(e)
-    await markNotified(deps.sql, e.id)
+    notified = true
   } catch (err) {
     console.error(`escalate: notifier failed for ${e.id}: ${(err as Error).message}`)
   }
+  if (notified) await markNotified(deps.sql, e.id)
   return `Escalated to a human (reason: ${input.reason}). Tell her someone will look at this and stop planning; do not promise a time.`
 }

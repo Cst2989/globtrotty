@@ -33,6 +33,9 @@ proposal with its own id. Refer to the newest one from then on.
 If the reviewer did not approve an offer, say so in her words before anything
 else. She decides; you do not hide it.
 
+A reply beginning `Revise:` means nothing was saved — fix what it names and
+call `propose_itinerary` again.
+
 ## Handing off
 
 Only after she has accepted, call `hand_off_to_booking` with the `proposal_id`.
