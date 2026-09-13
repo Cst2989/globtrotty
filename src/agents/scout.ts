@@ -36,8 +36,46 @@ const { prompt: SYSTEM, promptVersion: VERSION } =
   loadPrompt(new URL('./prompts/scout.md', import.meta.url), '<!-- scout -->')
 export { SYSTEM as SCOUT_PROMPT }
 
-/** One city and one question, with the search results the driver already has. */
-export type ScoutBrief = { city: string; question: string; results: string }
+/** One city and one question: what a scout is sent to find out, before it has read anything. */
+export type ScoutAssignment = { city: string; question: string }
+
+/** An assignment with the city's supplier payload attached, which is what is sent. */
+export type ScoutBrief = ScoutAssignment & { results: string }
+
+/**
+ * One city's supplier payload, fetched after the batch is reserved.
+ *
+ * A required argument of `runScouts` rather than something it builds, because a
+ * scout reads a supplier and `src/agents/` knows nothing about suppliers;
+ * `scoutRunner` (src/tools.ts) is where the two meet. Required rather than
+ * defaulted, because the default would be the empty string, and an empty
+ * payload is the exact defect the previous round closed: the scout prompt tells
+ * the model it is reading a supplier's own text.
+ */
+export type ScoutSearch = (assignment: ScoutAssignment) => Promise<string>
+
+/**
+ * What the reservation ALLOWS for a payload nobody has fetched yet.
+ *
+ * The reservation is taken before the searches (see `runScouts`), so the payload
+ * cannot be measured into it and has to be allowed for instead. The mock's three
+ * listings rendered through `itemForModel` measure 1,202 bytes, which is 401
+ * tokens under `estimateInputTokens`'s three-bytes-a-token rule; the figure here
+ * is three times that, so a live adapter has room for about nine listings before
+ * it overruns.
+ *
+ * An allowance that a fat city overruns does not stop the reservation being a
+ * bound on the batch, and the arithmetic says why rather than the hope. The
+ * scout seat's bound is dominated by output it almost never uses:
+ * `estimateMicros` charges a full `maxTokens` of 2,048 at 5 micros a token,
+ * 10,240 micros, and a real brief is around 112 output tokens, so every
+ * reserved call carries roughly 9,700 micros of slack. Input is charged at 1
+ * micro a token times the 1.25 cache-write multiplier, so it would take about
+ * 7,700 tokens of listings ON TOP of this allowance to eat that slack. What an
+ * overrun does cost is precision in the ceiling check, which is why the number
+ * is stated here rather than left at zero.
+ */
+export const SCOUT_PAYLOAD_TOKENS = 1_200
 
 export type ScoutResult = {
   city: string
@@ -83,10 +121,16 @@ export class BatchNotReservedError extends Error {
 /**
  * Roughly what one brief's prompt costs, before any of them is assembled.
  *
- * Assembled from the LONGEST brief in the batch rather than from an average,
- * because the reservation is a bound and an average is not one. Three cities
- * whose result sets differ by a factor of two would otherwise reserve for the
- * middle one and dispatch the large one.
+ * Assembled from the LONGEST assignment in the batch rather than from an
+ * average, because the reservation is a bound and an average is not one. Three
+ * cities whose framing differs would otherwise reserve for the middle one and
+ * dispatch the large one.
+ *
+ * The payload is the part that is NOT measured, because the reservation is
+ * taken before any city is searched and there is nothing to measure yet. It
+ * enters as `SCOUT_PAYLOAD_TOKENS`, one allowance for the whole batch's
+ * per-call bound, and that constant's docstring carries the arithmetic for what
+ * a city that overruns it costs.
  *
  * Exported, because `test/scout.test.ts` has to spend a conversation down to
  * exactly the room for two of three and then assert the debit at the moment of
@@ -94,8 +138,10 @@ export class BatchNotReservedError extends Error {
  * would be asserting its own arithmetic, and would stay green against a batch
  * that reserved for the average.
  */
-export function batchInputTokens(briefs: ScoutBrief[]): number {
-  return Math.max(...briefs.map((b) => estimateInputTokens(argsFor(b))))
+export function batchInputTokens(assignments: ScoutAssignment[]): number {
+  const framing = Math.max(
+    ...assignments.map((a) => estimateInputTokens(argsFor({ ...a, results: '' }))))
+  return framing + SCOUT_PAYLOAD_TOKENS
 }
 
 function argsFor(brief: ScoutBrief): CallArgs {
@@ -124,6 +170,11 @@ function argsFor(brief: ScoutBrief): CallArgs {
  * Reconciled per reply rather than per batch, because that is when the real
  * figure is known and a reply that comes back small should return its refund at
  * once rather than waiting for the slowest sibling.
+ *
+ * The cities are SEARCHED after that reservation rather than before it, which
+ * is why this function takes a `ScoutSearch` instead of finished briefs. Each
+ * search is a metered supplier call, and a batch refused by a ceiling must not
+ * have paid for any. The comment above the call itself has the rest of it.
  *
  * ## Why they run in parallel
  *
@@ -187,7 +238,9 @@ function argsFor(brief: ScoutBrief): CallArgs {
  * ## What a kill mid-batch leaves behind
  *
  * Everything between `reserve` and the last `reconcile`, which is up to the
- * whole `n x perCall`. Nothing sweeps a reservation: `failTurn`,
+ * whole `n x perCall`. A kill during the SEARCHES is the one window this does
+ * not apply to, because an abort there is caught and the whole batch refunded
+ * before it is re-thrown. Nothing sweeps a reservation: `failTurn`,
  * `releaseForContinuation` and the sweeper all move turn state and not spend.
  * That is the driver's existing exposure multiplied by `n`, and the fan-out is
  * the longest single wait in a step, so tier 3's fifteen-minute kill is a
@@ -196,7 +249,9 @@ function argsFor(brief: ScoutBrief): CallArgs {
  * needs a reservation somebody can sweep and this branch stores reservations in
  * two counters rather than in rows.
  */
-export async function runScouts(deps: ScoutDeps, briefs: ScoutBrief[]): Promise<ScoutResult[]> {
+export async function runScouts(
+  deps: ScoutDeps, assignments: ScoutAssignment[], search: ScoutSearch,
+): Promise<ScoutResult[]> {
   const { sql } = deps
   // BEFORE any arithmetic, because none of it survives an empty list:
   // `batchInputTokens` is `Math.max(...[])`, which is -Infinity, and
@@ -208,9 +263,10 @@ export async function runScouts(deps: ScoutDeps, briefs: ScoutBrief[]): Promise<
   // `cities: z.array(...).min(1)` in the registry makes this unreachable
   // through the door, so what it protects is a direct caller of this exported
   // function.
-  if (briefs.length === 0) throw new Error('runScouts: a batch needs at least 1 brief, got 0')
-  const perCall = estimateMicros(SEATS.scout, batchInputTokens(briefs))
-  const reserved = estimateBatchMicros(SEATS.scout, batchInputTokens(briefs), briefs.length)
+  if (assignments.length === 0) throw new Error('runScouts: a batch needs at least 1 brief, got 0')
+  const perCall = estimateMicros(SEATS.scout, batchInputTokens(assignments))
+  const reserved =
+    estimateBatchMicros(SEATS.scout, batchInputTokens(assignments), assignments.length)
   // One debit, for the whole batch, before the first call leaves.
   const { conversationMicros, dailyMicros, day } = await reserve(sql, {
     userId: deps.userId, conversationId: deps.conversationId, micros: reserved,
@@ -227,6 +283,46 @@ export async function runScouts(deps: ScoutDeps, briefs: ScoutBrief[]): Promise<
       userId: deps.userId, conversationId: deps.conversationId, reserved, actual: 0n, day,
     })
     throw new BatchNotReservedError(reached)
+  }
+
+  /**
+   * The searches, AFTER the reservation and never before it.
+   *
+   * Each is one metered hotel search, so a batch this conversation cannot
+   * afford must be refused without making any of them: the round that gave the
+   * scouts a real payload fetched all three first, and a fan-out refused with
+   * `limit_reached` had already paid three suppliers for text nobody would
+   * read. They are counted against `maxSupplierCallsPerTurn` too, one per city,
+   * before the driver ever calls this function (`supplierCallCost`,
+   * src/tools/supplierBudget.ts).
+   *
+   * The cost of that ordering is that the payload cannot be measured into the
+   * reservation, which is what `SCOUT_PAYLOAD_TOKENS` is for.
+   *
+   * A throw here is the whole batch refunded and re-thrown. `cityPayload`
+   * (src/tools.ts) only throws on an abort, which means the turn is being
+   * killed, and a killed fan-out that has dispatched nothing has no reason to
+   * leave the batch debited. The refund is guarded for the same reason every
+   * other one in this function is: a refund that fails must not replace the
+   * error that says what really went wrong.
+   */
+  let briefs: ScoutBrief[]
+  try {
+    briefs = await Promise.all(assignments.map(async (a) => ({ ...a, results: await search(a) })))
+  } catch (err) {
+    try {
+      await reconcile(sql, {
+        userId: deps.userId, conversationId: deps.conversationId, reserved, actual: 0n, day,
+      })
+    } catch (refundErr) {
+      console.error(
+        `runScouts: the batch for ${deps.callId} could not be searched and could not be `
+        + `refunded either; ${reserved} micros stay reserved against this conversation and `
+        + 'this day',
+        refundErr,
+      )
+    }
+    throw err
   }
 
   const settled = await Promise.allSettled(briefs.map(async (brief, i) => {
@@ -271,10 +367,25 @@ export async function runScouts(deps: ScoutDeps, briefs: ScoutBrief[]): Promise<
       // docstring above describes and `test/scout.test.ts`'s 503 case reads off
       // both counters.
       if (isUnbilled(err)) {
-        await reconcile(sql, {
-          userId: deps.userId, conversationId: deps.conversationId,
-          reserved: perCall, actual: 0n, day,
-        })
+        // Guarded, like the reconcile on the success path below, and for a
+        // sharper reason: this one runs while something has ALREADY failed. An
+        // unguarded refund that failed here replaced the provider's error with
+        // the database's on the way out, so the batch's own log line and
+        // `Promise.allSettled`'s reason both said "pool exhausted" for a call
+        // the provider had 503'd, and the one record of why a scout produced no
+        // brief pointed at the wrong system.
+        try {
+          await reconcile(sql, {
+            userId: deps.userId, conversationId: deps.conversationId,
+            reserved: perCall, actual: 0n, day,
+          })
+        } catch (refundErr) {
+          console.error(
+            `runScouts: the refund for ${callId} (${brief.city}) failed after the call did; `
+            + `${perCall} micros stay reserved against this conversation and this day`,
+            refundErr,
+          )
+        }
       }
       throw err
     }

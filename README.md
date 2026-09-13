@@ -176,9 +176,10 @@ payloads on every remaining step of the turn, which is where most of the saving
 is.
 
 The payload is real, and fetching it is what the tool is for. `scoutRunner`
-runs one hotel search per city before any scout is dispatched, against the same
-supplier pair the driver's own searches and the cashier's re-quote are handed,
-rendered by `itemForModel` exactly as `search_hotels` renders it. The stay comes
+runs one hotel search per city, after the batch is reserved and before any scout
+is dispatched, against the same supplier pair the driver's own searches and the
+cashier's re-quote are handed, rendered by `itemForModel` exactly as
+`search_hotels` renders it. The stay comes
 off her notebook, because the tool carries a city and a question and no dates
 and a hotel search needs some; a month she has not named is scouted a month out
 for a week, and a party size she has not stated is one adult. A scout handed an
@@ -188,7 +189,23 @@ all. Nothing those searches return is recorded: a scouting payload is read once,
 by one Haiku call, and no gate ever has to rehydrate it, so `course.tool_results`
 stays the record of searches the driver actually made.
 
-One reservation covers the batch, taken before the first call leaves. A per-call
+Those searches count against the turn's supplier budget, one per city. A
+fan-out reaches the same rate-limited and sometimes billed hotel supplier
+`search_hotels` reaches, so three cities is three searches out of the six a turn
+may make, and the driver refuses a fan-out with more cities than the turn has
+left before the runner is reached at all. The refusal is a sentence the model
+can act on, naming what the call wanted and what is left, and it writes no
+`course.tool_calls` row, so a refusal never consumes the quota it was refused
+for. A fan-out that already ran is priced from its one row at three, the most
+cities the schema admits, because the row records no input and cannot say how
+many it asked for; that overcounts a one-city fan-out, which refuses a search
+that would have fitted rather than admitting one that would not.
+
+One reservation covers the batch, taken before the first call leaves, and before
+any city is searched. The order matters both ways: a fan-out the conversation
+cannot afford comes back `limit_reached` having asked no supplier anything, and
+the payload nobody has fetched yet enters the reservation as a stated allowance
+rather than as a measurement. A per-call
 check is not a bound on a fan-out: three calls dispatched together each read a
 counter the other two have not moved, so a conversation with room for two used
 to admit all three and cross its ceiling by a whole call. Each reply is
@@ -542,6 +559,8 @@ list, so it is here for the record rather than as work. Owner: nobody.
 A scout fan-out killed between its `reserve` and its last `reconcile` strands up
 to the whole batch reservation, `n` times the per-call bound, on
 `course.conversations.spend_usd_micros` and on `course.daily_usage.cost_micros`.
+A kill during the searches is the one window this does not cover, because an
+abort there refunds the whole batch before it re-throws.
 Nothing sweeps a reservation: `failTurn`, `releaseForContinuation` and the
 sweeper all move turn state and not spend. It is the driver's own exposure
 multiplied by `n`, and a fan-out is the longest single wait in a step, so tier
@@ -553,6 +572,13 @@ way; that one is caught rather than propagated, so the brief, its
 fails closed, which is why neither is treated as an emergency. Closing either
 needs a reservation something can sweep, which means rows rather than two
 counters. Owner: lesson 5.7, which builds the monitor that would see it.
+
+A `research_destination` row already in `course.tool_calls` is priced at three
+supplier searches whatever it really asked for, because migration 0006 stores no
+input and nothing else in the row can say. A turn that fans out to one city is
+therefore charged for three, which can refuse a later search that would have
+fitted. It fails in the safe direction and the alternative is a migration, so it
+is accepted rather than closed. Owner: lesson 5.7.
 
 `supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
 document outside this repository may be cited from code, and `git ls-tree` finds

@@ -591,6 +591,64 @@ describeDb('what the driver answers by itself', () => {
     })
   })
 
+  it('refuses a fan-out the turn cannot afford, counting one search per city', async () => {
+    await withTestDb(async (sql) => {
+      const { turnId } = await seededTurn(sql)
+      // Four searches already made, six allowed. `research_destination` reaches
+      // the metered hotel supplier once per city, outside `supplierRunner` and
+      // outside the ledger, so until this round it was a door through which a
+      // turn could take three more searches while the budget reported four used
+      // and the table showed four rows. Three cities do not fit in two.
+      for (const i of [0, 1, 2, 3]) {
+        await sql`
+          insert into course.tool_calls (turn_id, call_id, name, status)
+          values (${turnId}, ${`s0-b${i}`}, 'search_hotels', 'done')`
+      }
+      const client = fakeClient([
+        labelMessage('new_trip'),
+        toolUseMessage('research_destination',
+          { cities: ['Faro', 'Lisbon', 'Porto'], question: 'Is the old town walkable?' }),
+        textMessage('Here is what I already have.'),
+      ])
+      const chain = countingRunner()
+      const agent = makeDriver({
+        sql,
+        client,
+        run: chain.run,
+        limits: { ...DEFAULT_LIMITS, maxSupplierCallsPerTurn: 6 },
+        now: Date.now,
+      })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      // No scout was sent, and no supplier was asked anything, because the
+      // refusal never reaches the chain at all.
+      expect(chain.calls()).toBe(0)
+      const [turn] = await sql<{ status: string; fail_reason: string | null }[]>`
+        select status, fail_reason from course.turns where id = ${turnId}`
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBe(null)
+
+      const [row] = await sql<{ state: { messages: { content: { type: string; content?: string; is_error?: boolean }[] }[] } }[]>`
+        select state from course.turns where id = ${turnId}`
+      const results = row!.state.messages
+        .flatMap((m) => m.content)
+        .filter((b) => b.type === 'tool_result')
+      expect(results).toHaveLength(1)
+      // The sentence says how many this call wanted and how many are left, so a
+      // model asked for three with two left can ask for two.
+      expect(results[0]!.content).toContain('needs 3 supplier searches')
+      expect(results[0]!.content).toContain('2 of its 6 left')
+      expect(results[0]!.content).toContain('No more searches will run')
+      expect(results[0]!.is_error).toBe(true)
+
+      // Still the four seeded rows: a refusal that wrote one would be counted by
+      // `countSupplierCalls` on the next step, and a fan-out row counts three.
+      const rows = await sql<{ call_id: string }[]>`
+        select call_id from course.tool_calls where turn_id = ${turnId} order by call_id`
+      expect(rows.map((r) => r.call_id)).toEqual(['s0-b0', 's0-b1', 's0-b2', 's0-b3'])
+    })
+  })
+
   it('sends the stored notebook as the request suffix, after the transcript and not in the prompt', async () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId } = await seededTurn(sql)

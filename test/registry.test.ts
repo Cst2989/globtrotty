@@ -1,5 +1,5 @@
 import { DESK_TOOLS, TOOLS, toolsForDesk } from '../src/tools/registry.js'
-import { SUPPLIER_DOORS } from '../src/tools/supplierBudget.js'
+import { SCOUT_MAX_CITIES, SUPPLIER_CALL_COST } from '../src/tools/supplierBudget.js'
 import { fenceResult, trimForContext, validateToolCall } from '../src/tools/validate.js'
 
 describe('the registry', () => {
@@ -67,12 +67,20 @@ describe('the registry', () => {
   })
 
   it('counts every api door against the per-turn supplier budget', () => {
-    // `SUPPLIER_DOORS` (src/tools/supplierBudget.ts) is a hand-kept list rather
-    // than a filter over `door === 'api'`, so that widening the budget is a
-    // deliberate edit. This is the line that stops the two drifting: an api-door
-    // tool missing from the list would be a metered third party nothing counted.
+    // `SUPPLIER_CALL_COST` (src/tools/supplierBudget.ts) is a hand-kept map
+    // rather than a filter over `door === 'api'`, so that widening the budget is
+    // a deliberate edit. This is the line that stops the two drifting: an
+    // api-door tool missing from the map would be a metered third party nothing
+    // counted.
     const api = Object.values(TOOLS).filter((d) => d.door === 'api').map((d) => d.name)
-    expect([...SUPPLIER_DOORS].sort()).toEqual(api.sort())
+    for (const name of api) expect(SUPPLIER_CALL_COST[name]).toBe(1)
+    // And the other direction, which is the half this round needed. A tool that
+    // reaches a supplier without standing behind an api door has to be in the
+    // map too, or the budget is blind to it; `research_destination` is that
+    // tool and is the only one, so any NEW name appearing here is a deliberate
+    // edit somebody made rather than a door quietly widening.
+    const priced = Object.keys(SUPPLIER_CALL_COST).filter((n) => !api.includes(n))
+    expect(priced).toEqual(['research_destination'])
   })
 
   it('puts a scout behind a worker door, not a code one', () => {
@@ -93,6 +101,15 @@ describe('the registry', () => {
       cities: ['a', 'b', 'c', 'd'], question: 'q',
     })
     expect(wide.success).toBe(false)
+    // And the same three the supplier budget prices a fan-out row at, because
+    // `course.tool_calls` stores no input and the row cannot say how many cities
+    // it asked for. That number is a BOUND only while this schema refuses a
+    // fourth city, and the two live in different files, so this is the line that
+    // keeps them agreeing.
+    const exact = TOOLS.research_destination!.schema.safeParse({
+      cities: Array.from({ length: SCOUT_MAX_CITIES }, (_, i) => `City ${i}`), question: 'q',
+    })
+    expect(exact.success).toBe(true)
   })
 
   it('does not advertise revise_component yet', () => {

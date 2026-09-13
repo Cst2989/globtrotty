@@ -14,8 +14,8 @@ import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { SEATS, type SeatName } from '../seats.js'
 import type { ToolRunner } from '../tools.js'
-import { TOOLS, toolsForDesk, type Desk } from '../tools/registry.js'
-import { assertSupplierBudget } from '../tools/supplierBudget.js'
+import { toolsForDesk, type Desk } from '../tools/registry.js'
+import { assertSupplierBudget, supplierCallCost } from '../tools/supplierBudget.js'
 import { validateToolCall } from '../tools/validate.js'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 
@@ -346,9 +346,26 @@ export function makeDriver(deps: DriverDeps): Agent {
       return { ...step, run: async () => ({ content: check.content, isError: true }) }
     }
 
-    const def = TOOLS[toolUse.name]
-    if (def?.door === 'api') {
-      const budget = await assertSupplierBudget(sql, ctx.turnId, limits.maxSupplierCallsPerTurn)
+    /**
+     * What this call will cost the supplier budget, from its own input, and
+     * zero for the tools that reach no supplier at all.
+     *
+     * Priced rather than switched on `def.door === 'api'`, which is what this
+     * check read until this round. `research_destination` stands behind a
+     * `worker` door and searches the hotel supplier once per city on its way to
+     * the scouts (`cityPayload`, src/tools.ts), so a door check let three
+     * metered searches through a cap that reported none used. The price comes
+     * from `SUPPLIER_CALL_COST` (src/tools/supplierBudget.ts), which is the one
+     * place a tool is declared to reach a supplier.
+     *
+     * Read here rather than inside the runner for the same reason the door check
+     * was here: the refusal below has to happen BEFORE `ledgerRunner` writes a
+     * row, or the refusal counts itself against the next step's budget.
+     */
+    const cost = supplierCallCost(toolUse.name, toolUse.input)
+    if (cost > 0) {
+      const budget = await assertSupplierBudget(
+        sql, ctx.turnId, limits.maxSupplierCallsPerTurn, cost)
       if (!budget.ok) {
         /**
          * A refusal the model can act on, and one that leaves NO trace in
@@ -373,12 +390,14 @@ export function makeDriver(deps: DriverDeps): Agent {
          * budget is not a fail reason, and the model has steps left in which to
          * propose from what it already has.
          */
+        const wanted = budget.cost === 1 ? '1 supplier search' : `${budget.cost} supplier searches`
         return {
           ...step,
           run: async () => ({
-            content: `You have used all ${budget.max} supplier searches for this turn `
-              + `(${budget.used} so far). No more searches will run. Propose from what you `
-              + 'already have, or ask her a question.',
+            content: `This call needs ${wanted} and this turn has `
+              + `${Math.max(0, budget.max - budget.used)} of its ${budget.max} left. `
+              + 'No more searches will run. Propose from what you already have, or ask her a '
+              + 'question.',
             isError: true,
           }),
         }

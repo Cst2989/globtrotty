@@ -12,7 +12,9 @@ import { mockSuppliers } from '../src/supplier/mock.js'
 import {
   corpusRunner, doorRunner, ledgerRunner, mockRunner, notebookRunner, supplierRunner,
 } from '../src/tools.js'
-import { assertSupplierBudget, countSupplierCalls } from '../src/tools/supplierBudget.js'
+import {
+  assertSupplierBudget, countSupplierCalls, SCOUT_MAX_CITIES, supplierCallCost,
+} from '../src/tools/supplierBudget.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
 const USER = randomUUID()
@@ -251,8 +253,52 @@ describeDb('the per-turn supplier budget', () => {
         values (${claim.turnId}, 'toolu_dead', 'search_hotels', 'pending')`
       expect(await countSupplierCalls(sql, claim.turnId)).toBe(1)
       expect(await assertSupplierBudget(sql, claim.turnId, 1))
-        .toEqual({ ok: false, used: 1, max: 1 })
+        .toEqual({ ok: false, used: 1, max: 1, cost: 1 })
     })
+  })
+
+  it('counts a fan-out at the cities its door may ask for', async () => {
+    await withTestDb(async (sql) => {
+      const claim = await claimedTurn(sql)
+      // `research_destination` searches once per city, directly, without a
+      // `course.tool_calls` row of its own for each one: the table keeps exactly
+      // one writer and the fan-out is one call. So the one row it does leave has
+      // to answer for all of them, and it answers at the registry's ceiling,
+      // `cities: z.array(...).max(3)`. The row carries no input (migration 0006
+      // stores turn, call, name, status and result), so three is the only honest
+      // reading of it, and an overcount refuses a search that would have fitted
+      // rather than admitting one that would not.
+      await sql`
+        insert into course.tool_calls (turn_id, call_id, name, status)
+        values (${claim.turnId}, 's1-b0', 'research_destination', 'pending')`
+      expect(await countSupplierCalls(sql, claim.turnId)).toBe(SCOUT_MAX_CITIES)
+      // Six searches a turn, three already answered for: a second fan-out of
+      // three fits exactly, and one of three plus a search does not.
+      expect(await assertSupplierBudget(sql, claim.turnId, 6, 3)).toEqual({ ok: true })
+      expect(await assertSupplierBudget(sql, claim.turnId, 6, 4))
+        .toEqual({ ok: false, used: 3, max: 6, cost: 4 })
+    })
+  })
+})
+
+describe('what one call costs the supplier budget', () => {
+  it('prices a fan-out by its cities and everything else by the door', () => {
+    // The call about to be made can be MEASURED, because the driver holds its
+    // input; a row already in the table can only be bounded. That asymmetry is
+    // deliberate and it is the only reason the two numbers differ.
+    expect(supplierCallCost('search_hotels', { query: 'Faro' })).toBe(1)
+    expect(supplierCallCost('search_flights', {})).toBe(1)
+    expect(supplierCallCost('propose_itinerary', {})).toBe(0)
+    expect(supplierCallCost('research_destination', { cities: ['Faro'] })).toBe(1)
+    expect(supplierCallCost('research_destination', { cities: ['Faro', 'Lisbon'] })).toBe(2)
+    // Unvalidated model output reaches this: the driver checks the budget before
+    // the chain validates anything. Anything it cannot read is priced at the
+    // ceiling rather than at zero, which is the same direction every other
+    // guardrail on this branch rounds.
+    expect(supplierCallCost('research_destination', {})).toBe(SCOUT_MAX_CITIES)
+    expect(supplierCallCost('research_destination', { cities: 'Faro' })).toBe(SCOUT_MAX_CITIES)
+    expect(supplierCallCost('research_destination', { cities: ['a', 'b', 'c', 'd'] }))
+      .toBe(SCOUT_MAX_CITIES)
   })
 })
 

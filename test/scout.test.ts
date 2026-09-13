@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { APIConnectionError } from '@anthropic-ai/sdk'
 import type postgres from 'postgres'
-import { batchInputTokens, runScouts, SCOUT_PROMPT, type ScoutBrief } from '../src/agents/scout.js'
+import {
+  batchInputTokens, runScouts, SCOUT_PROMPT, type ScoutAssignment,
+} from '../src/agents/scout.js'
 import { costMicros } from '../src/pricing.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { estimateBatchMicros, estimateMicros } from '../src/repo/reservation.js'
@@ -10,6 +13,7 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { exceedsAnyCeiling } from '../src/engine.js'
 import { SEATS } from '../src/seats.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
+import type { SearchParams, SupplierPair } from '../src/supplier/types.js'
 import { emptyNotebook } from '../src/notebook.js'
 import {
   doorRunner, itemForModel, ledgerRunner, mockRunner, scoutRunner, scoutStayFrom,
@@ -146,7 +150,7 @@ describe('a batch with nothing in it', () => {
     // through the door, so the exposure is a direct caller of the exported
     // `runScouts`. `sql` is never touched, which is why this case needs no
     // database.
-    await expect(runScouts(EMPTY_DEPS, [])).rejects.toThrow(/at least 1/)
+    await expect(runScouts(EMPTY_DEPS, [], NO_PAYLOAD)).rejects.toThrow(/at least 1/)
   })
 })
 
@@ -177,8 +181,8 @@ describeDb('a real brief, replayed', () => {
       const [result] = await runScouts(
         { sql, client, conversationId: c!.id as string, userId: USER, turnId: null as never,
           callId: 's3-b0', limits: DEFAULT_LIMITS, now: () => 0 },
-        [{ city: 'Faro', question: 'Is the old town walkable from the beach with a toddler?',
-           results: await faroResults() }],
+        [{ city: 'Faro', question: 'Is the old town walkable from the beach with a toddler?' }],
+        faroResults,
       )
       client.done()
       // A real reply was read, and not `runScouts`'s own failure sentence.
@@ -212,9 +216,48 @@ describeDb('a real brief, replayed', () => {
 const AT = new Date('2026-08-20T09:00:00.000Z')
 const STAY = { checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, currency: 'EUR' }
 
-const THREE: ScoutBrief[] = ['Faro', 'Lisbon', 'Porto'].map((city) => ({
-  city, question: 'Is the old town walkable from the beach with a toddler?', results: '[]',
+const THREE: ScoutAssignment[] = ['Faro', 'Lisbon', 'Porto'].map((city) => ({
+  city, question: 'Is the old town walkable from the beach with a toddler?',
 }))
+
+/**
+ * The search `runScouts` makes once the batch is reserved, stubbed out to a
+ * supplier that answered with nothing.
+ *
+ * A required argument rather than a default, because a default would be the
+ * defect the previous round closed: `scoutRunner` used to hand every scout
+ * `results: ''`, so the scout prompt's claim that it was reading a supplier's
+ * own text was false, and nothing in the signature said so. The cases that care
+ * what a scout READ use `scoutRunner`, which passes the real one.
+ */
+const NO_PAYLOAD = async (): Promise<string> => '[]'
+
+/**
+ * The same mock pair, with every hotel search it is asked for recorded.
+ *
+ * A Proxy rather than a spread, for `sqlWithOneFailingReconcile`'s reason: a
+ * `Supplier` carries `quote`, `kind` and `capabilities` too, and spreading a
+ * class instance drops the prototype method.
+ */
+function countingSuppliers(): { suppliers: SupplierPair; searched: () => string[] } {
+  const base = mockSuppliers({ hotel: { now: () => AT } })
+  const queries: string[] = []
+  const hotel = new Proxy(base.hotel, {
+    get(target, prop, receiver) {
+      if (prop === 'search') {
+        return async (params: SearchParams, signal?: AbortSignal) => {
+          queries.push(params.kind === 'hotel' ? params.query : params.from)
+          return target.search(params, signal)
+        }
+      }
+      const value = Reflect.get(target, prop, receiver) as unknown
+      return typeof value === 'function'
+        ? (value as (...a: never[]) => unknown).bind(target)
+        : value
+    },
+  })
+  return { suppliers: { flight: base.flight, hotel }, searched: () => queries }
+}
 
 /**
  * A client that answers after a delay, so wall clock is a thing the test
@@ -304,11 +347,43 @@ describeDb('three scouts, one reservation', () => {
       const client = slowClient([0, 0, 0])
       const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
                      callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
-      await expect(runScouts(deps, THREE)).rejects.toThrow(/limit_reached/)
+      await expect(runScouts(deps, THREE, NO_PAYLOAD)).rejects.toThrow(/limit_reached/)
       // The batch is refused before a single call leaves, which is the whole
       // difference from lesson-5-3, where all three were dispatched and the
       // third one's bill arrived after the ceiling had already been crossed.
       expect(client.calls).toBe(0)
+    })
+  })
+
+  it('takes the reservation before it searches, so a refused fan-out pays no supplier', async () => {
+    await withTestDb(async (sql) => {
+      // Ordering, and it is money rather than tidiness. Every city's payload is
+      // a real hotel search, billed on tier 3 and rate limited everywhere, and
+      // the round that gave the scouts a real payload fetched all three BEFORE
+      // the reservation. A conversation with no room for the batch therefore
+      // paid three suppliers for text nobody ever read. `limit_reached` now
+      // costs exactly what it cost at lesson-5-3: nothing.
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const conversationId = c!.id as string
+      const perCall = estimateMicros(SEATS.scout, batchInputTokens(THREE))
+      await sql`update course.conversations
+                   set spend_usd_micros = ${(DEFAULT_LIMITS.conversationCeilingMicros - perCall * 2n).toString()}
+                 where id = ${conversationId}`
+      const client = slowClient([0, 0, 0])
+      const { suppliers, searched } = countingSuppliers()
+      const run = scoutRunner(sql, {
+        client, suppliers, stay: STAY, conversationId, userId: USER,
+        turnId: null as never, limits: DEFAULT_LIMITS, now: Date.now,
+      }, mockRunner())
+      const out = await run('research_destination',
+        { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 's3-b0', undefined)
+
+      // The refusal the model can act on, unchanged, and no scout dispatched.
+      expect(out.isError).toBe(true)
+      expect(out.content).toContain('No scouts were sent')
+      expect(client.calls).toBe(0)
+      // And not one supplier was asked anything.
+      expect(searched()).toEqual([])
     })
   })
 
@@ -327,7 +402,7 @@ describeDb('three scouts, one reservation', () => {
       })
       const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
                      callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
-      await runScouts(deps, THREE)
+      await runScouts(deps, THREE, NO_PAYLOAD)
       expect(spendAtFirstCall).toBe(
         before + estimateBatchMicros(SEATS.scout, batchInputTokens(THREE), 3))
     })
@@ -363,7 +438,7 @@ describeDb('three scouts, one reservation', () => {
       const deps = { sql, client, conversationId: c!.id as string, userId: USER,
                      turnId: null as never, callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
       const started = Date.now()
-      const results = await runScouts(deps, THREE)
+      const results = await runScouts(deps, THREE, NO_PAYLOAD)
       const elapsed = Date.now() - started
       expect(results).toHaveLength(3)
       const spread = Math.max(...starts) - Math.min(...starts)
@@ -464,7 +539,7 @@ describeDb('three scouts, one reservation', () => {
       const results = await runScouts(
         { sql, client, conversationId: c!.id as string, userId: USER, turnId: null as never,
           callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS },
-        THREE,
+        THREE, NO_PAYLOAD,
       )
       expect(results.map((r) => r.callId))
         .toEqual(['s3-b0-scout0', 's3-b0-scout1', 's3-b0-scout2'])
@@ -488,7 +563,7 @@ describeDb('three scouts, one reservation', () => {
       }
       const deps = { sql, client, conversationId: c!.id as string, userId: USER,
                      turnId: null as never, callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
-      const results = await runScouts(deps, THREE)
+      const results = await runScouts(deps, THREE, NO_PAYLOAD)
       // Promise.allSettled and not Promise.all: one bad call must not lose two
       // good briefs, and the driver can plan from two cities.
       expect(results.map((r) => r.city)).toEqual(['Faro', 'Lisbon', 'Porto'])
@@ -526,13 +601,58 @@ describeDb('three scouts, one reservation', () => {
       }
       const deps = { sql, client, conversationId, userId: USER, turnId: null as never,
                      callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
-      const results = await runScouts(deps, THREE)
+      const results = await runScouts(deps, THREE, NO_PAYLOAD)
       // `Promise.allSettled`, so the batch still answers: three manufactured
       // sentences and no throw. That is what made the leak invisible.
       expect(client.calls).toBe(3)
       expect(results.map((r) => r.brief.includes('the scout call failed'))).toEqual([true, true, true])
       expect(await conversationSpend(sql, conversationId)).toBe(beforeConversation)
       expect(await dailySpend(sql, USER)).toBe(beforeDaily)
+    })
+  })
+
+  it('reports the call that failed, not the refund that failed after it', async () => {
+    await withTestDb(async (sql) => {
+      // A double failure: the provider 503s and the refund for it cannot be
+      // written either. The refund is lost, which is a stranded share and a log
+      // line, and that part is already accepted. What must NOT happen is the
+      // pool error replacing the provider error on its way out: the batch's own
+      // log line and `Promise.allSettled`'s reason are the only record of WHY a
+      // scout produced no brief, and a reader chasing a 503 would find a
+      // sentence about a database instead.
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const client = {
+        calls: 0,
+        async create() {
+          client.calls += 1
+          throw apiError(503)
+        },
+      }
+      const logged: unknown[][] = []
+      const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        logged.push(args)
+      })
+      try {
+        const deps = { sql: sqlWithOneFailingReconcile(sql), client,
+                       conversationId: c!.id as string, userId: USER, turnId: null as never,
+                       callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
+        const results = await runScouts(deps, THREE, NO_PAYLOAD)
+        // The batch still answers, which is `Promise.allSettled` doing its job.
+        expect(results.map((r) => r.brief.includes('the scout call failed')))
+          .toEqual([true, true, true])
+      } finally {
+        spy.mockRestore()
+      }
+      // The lost refund is logged, which is the half that was already accepted.
+      expect(logged.filter((args) => String(args[0]).includes('the refund for')))
+        .toHaveLength(1)
+      // And the batch's own three lines each carry the SDK's own 503 rather than
+      // 'reconcile: pool exhausted'.
+      const reasons = logged
+        .filter((args) => String(args[0]).endsWith(') failed'))
+        .map((args) => args[1] as { status?: number })
+      expect(reasons).toHaveLength(3)
+      expect(reasons.map((r) => r.status)).toEqual([503, 503, 503])
     })
   })
 
@@ -550,7 +670,7 @@ describeDb('three scouts, one reservation', () => {
       const deps = { sql: sqlWithOneFailingReconcile(sql), client,
                      conversationId: claim.conversationId, userId: USER, turnId: claim.turnId,
                      callId: 's3-b0', now: Date.now, limits: DEFAULT_LIMITS }
-      const results = await runScouts(deps, THREE)
+      const results = await runScouts(deps, THREE, NO_PAYLOAD)
 
       // Three real briefs, each carrying its own cost.
       expect(results.map((r) => r.city)).toEqual(['Faro', 'Lisbon', 'Porto'])
@@ -568,8 +688,17 @@ describeDb('three scouts, one reservation', () => {
 
       // And exactly one share is stranded: the refund the failed write would
       // have made, which is the per-call bound minus what that call cost.
+      //
+      // `results[0]` stands in for whichever scout lost its refund, and that is
+      // an ASSUMPTION this case is allowed to make rather than a claim about
+      // ordering: `slowClient` answers all three with the same sentence, so the
+      // three replies carry identical usage and `perCall - costMicros` is one
+      // number whichever of them the failing `begin` landed on. A client that
+      // answered the three differently would need the stranded share read off
+      // the scout that actually failed.
       const perCall = estimateMicros(SEATS.scout, batchInputTokens(THREE))
       const billed = results.reduce((sum, r) => sum + r.costMicros, 0n)
+      expect(new Set(results.map((r) => r.costMicros)).size).toBe(1)
       const stranded = perCall - results[0]!.costMicros
       expect(await conversationSpend(sql, claim.conversationId)).toBe(before + billed + stranded)
       console.log(`one reconcile lost: ${stranded} micros stranded, `

@@ -503,10 +503,17 @@ function addDays(day: string, n: number): string {
 /**
  * The scouting stay, from the notebook this conversation has actually stored.
  *
- * Derived from `constraintsFromNotebook` rather than from the notebook's raw
- * fields, so the currency a scouting search asks for is the same currency the
- * gates expect and the same one `supplierRunner` is handed: two derivations of a
- * trip currency is how one of them ends up defaulting.
+ * Two of the four fields come from `constraintsFromNotebook` and two are read
+ * off the notebook itself, and the split is not arbitrary.
+ *
+ * `currency` and the window behind `checkIn` are the derived ones, because both
+ * already have one derivation the rest of the system agrees on: the currency is
+ * the budget's, which is what the gates compare against and what
+ * `supplierRunner` is handed, and two derivations of a trip currency is how one
+ * of them ends up defaulting. `nights` and `partySize` are read straight off
+ * `nb`, because `NotebookConstraints` carries neither
+ * (src/gates/notebookConstraints.ts returns a budget, a currency and a window)
+ * and a search needs both.
  *
  * The defaults are deliberately dull and are named above rather than spelled
  * inline. A traveller who has named no month is scouted a month out for a week,
@@ -610,17 +617,31 @@ async function cityPayload(
  * nothing at all, because the payload the scout exists to absorb would still be
  * unread.
  *
- * The searches run BEFORE `runScouts` rather than inside it, and in parallel
- * with each other. The reservation then follows for free: `batchInputTokens`
- * measures the assembled prompts, so a city whose listings are twice the size
- * of its neighbours' raises the bound the batch is debited for, which is the
- * property a reservation computed before the payload was known could not have.
+ * The searches are handed to `runScouts` as a function rather than run here,
+ * and it makes all of them in parallel AFTER its reservation. The ordering is
+ * money: each is a metered hotel search, and a fan-out the conversation cannot
+ * afford comes back `limit_reached` having asked no supplier anything. The
+ * price of that ordering is that the payload is no longer measured into the
+ * reservation, and `SCOUT_PAYLOAD_TOKENS` (src/agents/scout.ts) is the
+ * allowance that replaced the measurement.
+ *
+ * ## They cost supplier quota, and the quota knows it
+ *
+ * Three cities is three searches against the same rate-limited, sometimes
+ * billed supplier the driver searches through `search_hotels`, so they are
+ * counted: `SUPPLIER_CALL_COST` (src/tools/supplierBudget.ts) prices
+ * `research_destination` and the driver refuses a fan-out with more cities than
+ * the turn has searches left, before this runner is reached at all. Until that
+ * landed, this was a `worker` door writing no per-city row, which is to say a
+ * path to a metered supplier that `maxSupplierCallsPerTurn` could not see.
  *
  * Nothing is recorded. These searches do not go through `corpusRunner`, so they
  * write no `course.tool_results` rows and nothing here can be proposed: a
  * scouting payload is read once, by one Haiku call, and then it is gone. The
  * corpus is for items a gate has to rehydrate, and the driver never sees one of
- * these.
+ * these. They write no `course.tool_calls` row of their own either, because
+ * that table keeps one writer and the fan-out is one call, which is exactly why
+ * the budget has to price the parent's row at the registry's ceiling of three.
  *
  * Returns the briefs joined with a plain heading per city and NOT fenced here.
  * `doorRunner`, the outermost wrapper, puts one fence around the whole result
@@ -635,15 +656,15 @@ export function scoutRunner(sql: postgres.Sql, ctx: ScoutContext, inner: ToolRun
   return async (name, input, callId, signal) => {
     if (name !== 'research_destination') return inner(name, input, callId, signal)
     const { cities, question } = input as { cities: string[]; question: string }
-    const briefs = await Promise.all(cities.map(async (city) => ({
-      city, question, results: await cityPayload(ctx.suppliers, ctx.stay, city, signal),
-    })))
     let results
     try {
       results = await runScouts(
         { sql, client: ctx.client, conversationId: ctx.conversationId, userId: ctx.userId,
           turnId: ctx.turnId, callId, limits: ctx.limits, now: ctx.now },
-        briefs,
+        cities.map((city) => ({ city, question })),
+        // Handed in rather than run here, so `runScouts` decides WHEN: after its
+        // reservation, so a batch a ceiling refuses pays no supplier at all.
+        ({ city }) => cityPayload(ctx.suppliers, ctx.stay, city, signal),
       )
     } catch (err) {
       // A batch that could not be reserved is `limit_reached` and nothing new:
