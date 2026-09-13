@@ -22,8 +22,9 @@ import { researchDestination } from './scout.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
 import { handOff } from '../tools/cashier.js'
 import { escalate } from '../tools/escalate.js'
-import { recordResults } from '../repo/toolResults.js'
+import { listExpiredSourceIds, recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
 import type { EscalationReason, Notifier } from '../notify.js'
@@ -70,6 +71,12 @@ export function makeDriver(deps: DriverDeps): Agent {
     const { sql, limits } = deps
     const seat = SEATS.driver
     const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+    // The gate's own freshness rule, surfaced as a warning the MODEL reads
+    // before it proposes rather than after a rejection: an id whose newest
+    // fetch is already past its supplier's ttl is not quotable, and
+    // `propose_itinerary` would refuse it anyway (spec section 4's price half
+    // of `trimForContext`, done here instead — see validate.ts).
+    const expired = await listExpiredSourceIds(sql, ctx.conversationId, new Date(deps.now()))
 
     const args: CallArgs = {
       seat,
@@ -78,8 +85,13 @@ export function makeDriver(deps: DriverDeps): Agent {
       tools: toolsForDesk(DESK),
       // The notebook is volatile: it changes the moment she states a fact.
       // `suffix` lands after the last cache breakpoint, so it never invalidates
-      // the cached prefix behind it (spec section 7).
-      suffix: renderNotebook(notebook),
+      // the cached prefix behind it (spec section 7). The expired notice joins
+      // it here for the same reason — both are per-turn, not stable across
+      // turns — and is dropped entirely (rather than appended empty) when
+      // nothing is stale, so a driver call with a fresh corpus sends exactly
+      // the notebook it always sent.
+      suffix: [renderNotebook(notebook), renderExpiredNotice(expired)]
+        .filter((s) => s.length > 0).join('\n\n'),
     }
 
     // ---- 1. Reserve an upper bound BEFORE dispatch (spec section 8) ---------
@@ -488,6 +500,26 @@ async function execute(
       // handler is a readable message rather than an undefined.
       return `No handler for "${name}" at this desk.`
   }
+}
+
+/**
+ * The price half of `trimForContext` (spec section 4), as a warning rather
+ * than a trim: an expired id is not stripped from anything, because nothing
+ * here holds the corpus text to strip it from — it is named, so the model
+ * re-searches before proposing instead of after `propose_itinerary` rejects
+ * it. Empty when nothing is stale, so it drops out of the suffix entirely
+ * (see `makeDriver` above) rather than appending a hollow heading every turn.
+ *
+ * `sanitizeSourceId`, not a raw join: an id in this list came from a
+ * supplier's own response (`SupplierItem.sourceId`), so it is untrusted the
+ * same way any other supplier-written string is by the time it is echoed
+ * back into the model's context.
+ */
+export function renderExpiredNotice(ids: string[]): string {
+  if (ids.length === 0) return ''
+  return '## Expired results\n'
+    + `These ids are no longer quotable: ${ids.map(sanitizeSourceId).join(', ')}. `
+    + 'Re-search before proposing them.'
 }
 
 /**

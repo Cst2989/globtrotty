@@ -6,7 +6,8 @@ import { runTurn } from '../src/worker.js'
 import { submitMessage } from '../src/handler.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { recordResults } from '../src/repo/toolResults.js'
-import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
+import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../src/repo/notebook.js'
+import { sanitizeSourceId } from '../src/sanitize.js'
 import { estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
 import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -547,6 +548,71 @@ describeDb('driver', () => {
       const names = (sent!.tools as Array<{ name: string }>).map((t) => t.name)
       expect(names).toContain('update_requirements')
       expect(names).toContain('propose_itinerary')
+    })
+  })
+
+  // The price half of `trimForContext` (spec section 4), implemented as a
+  // warning in the suffix rather than in the tool result itself: the model
+  // reads it BEFORE it proposes, not after a rejection. `deps.now` is the real
+  // `Date.now()` (see `deps` above), so the corpus row must be stale against
+  // WALL-CLOCK time — seeding its `fetchedAt` 30 minutes in the past, well
+  // past the mock supplier's 900-second (15-minute) ttl, achieves that
+  // without a fake clock.
+  it('appends an expired-results notice to the suffix when the corpus holds a stale batch', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '30')
+      const staleParams: FlightSearch = {
+        kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
+        returnDate: null, flexDays: 0, adults: 2, children: 0, infants: 0,
+        cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+      }
+      const items = await new MockSupplier({
+        kind: 'flight', now: () => new Date(Date.now() - 30 * 60_000),
+      }).search(staleParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: null, params: staleParams, items,
+      })
+      let sent: Record<string, unknown> | null = null
+      const create = vi.fn().mockImplementation(async (req: unknown) => {
+        sent = req as Record<string, unknown>
+        return textResponse('ok')
+      })
+      await makeDriver(deps(sql, create))(ctx(s))
+      const messages = sent!.messages as Array<{ content: Array<Record<string, unknown>> }>
+      const lastBlock = messages.at(-1)!.content.at(-1)!
+      const text = String(lastBlock.text)
+      // `lastBlock` IS the last content block of the last message — the
+      // notice, being part of `suffix`, always lands there (src/model/client.ts's
+      // `withSuffix`).
+      expect(text).toContain('## Expired results')
+      for (const i of items) expect(text).toContain(sanitizeSourceId(i.sourceId))
+    })
+  })
+
+  it('omits the expired-results notice entirely when nothing in the corpus is stale', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '31')
+      // A non-empty notebook, so the suffix is non-empty either way — an
+      // empty notebook would make the "notice dropped out entirely" case
+      // indistinguishable from "the suffix was never appended at all"
+      // (`withSuffix` skips appending anything when `suffix.length === 0`).
+      await applyRequirementsPatch(sql, {
+        conversationId: s.conversationId, userId: s.userId, source: 'user',
+        patch: { destination: 'Faro' },
+      })
+      let sent: Record<string, unknown> | null = null
+      const create = vi.fn().mockImplementation(async (req: unknown) => {
+        sent = req as Record<string, unknown>
+        return textResponse('ok')
+      })
+      await makeDriver(deps(sql, create))(ctx(s))
+      const messages = sent!.messages as Array<{ content: Array<Record<string, unknown>> }>
+      const lastBlock = messages.at(-1)!.content.at(-1)!
+      const text = String(lastBlock.text)
+      expect(text).not.toContain('## Expired results')
+      // With nothing expired, the suffix block is the rendered notebook alone.
+      const notebook = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(text).toBe(renderNotebook(notebook))
     })
   })
 

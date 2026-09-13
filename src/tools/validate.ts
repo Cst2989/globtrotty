@@ -117,10 +117,13 @@ const MAX_RESULT_CHARS = 16_000
  * about a result set it believes it saw in full — worse than a short answer,
  * because it cannot know to search again.
  *
- * NOT implemented here, and recorded as a deliberate gap: the price half of spec
- * section 4's `trimForContext`, which strips prices past their supplier's
- * `pricePersistence` window and tells the model to re-search. That needs the
- * re-quote path, which arrives with the cashier in plan 3b.
+ * NOT implemented here: the price half of spec section 4's `trimForContext`,
+ * which warns the model off prices past their ttl and tells it to re-search.
+ * That is implemented — not here, and not as a trim — as the driver's
+ * expired-results notice in the suffix (`renderExpiredNotice`,
+ * `src/agents/driver.ts`, plan 3c §3): a per-turn warning read BEFORE a
+ * proposal is made, rather than a rewrite of a tool result already sitting in
+ * `TurnState.messages`.
  */
 export function trimForContext(raw: string): string {
   if (raw.length <= MAX_RESULT_CHARS) return raw
