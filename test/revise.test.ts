@@ -9,7 +9,7 @@ import { MockSupplier } from '../src/supplier/mock.js'
 import { money } from '../src/money.js'
 import { emptyNotebook, type Notebook } from '../src/notebook.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
+import type { FlightDetail, FlightSearch, HotelSearch } from '../src/supplier/types.js'
 
 const NOW = new Date('2026-09-13T12:00:00Z')
 const flight: FlightSearch = { kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12', returnDate: '2026-09-19',
@@ -86,6 +86,32 @@ describeDb('revise_component', () => {
     })
   })
 
+  it('shift matches the return leg too — a newer batch with only a different inbound flight is not silently substituted', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '10')
+      const fp = { ...flight, flexDays: 5, departureDate: '2026-09-14', returnDate: '2026-09-21' }
+      const hp = { ...hotel, query: hotel.query + '10', checkIn: '2026-09-14', checkOut: '2026-09-21' }
+      const f2 = await new MockSupplier({ kind: 'flight', now: () => NOW }).search(fp)
+      const h2 = await new MockSupplier({ kind: 'hotel', now: () => NOW }).search(hp)
+      await recordResults(sql, { conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: fp, items: f2 })
+      await recordResults(sql, { conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: hp, items: h2 })
+      // A second, NEWER batch: same outbound, a DIFFERENT return flight, under
+      // different sourceIds. An outbound-only match would pick this row (it is
+      // ordered first by fetched_at/id) and silently hand her a return flight
+      // she never chose.
+      const f2alt = f2.map((item) => {
+        const detail = item.detail as FlightDetail
+        return { ...item, sourceId: item.sourceId + '-alt',
+          detail: { ...detail, inbound: { ...detail.inbound!, flightNumbers: ['ZZ999'] } } }
+      })
+      await recordResults(sql, { conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: fp, items: f2alt })
+      const r = await buildRevisedRefs(sql, s.conversationId, { proposalId: s.proposalId, change: { kind: 'shift', days: 2 } })
+      expect(r.ok).toBe(true)
+      if (!r.ok) throw new Error('unreachable')
+      expect(r.refs.find((x) => x.slot === 'outbound')!.sourceId).toBe(f2[0]!.sourceId)
+    })
+  })
+
   it('shift names every slot it could not resolve and calls no supplier', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '06')
@@ -111,6 +137,16 @@ describeDb('revise_component', () => {
       expect(rows.map((x) => x.round)).toEqual([0, 1])
       const [child] = await sql`select parent_proposal_id from proposals where conversation_id = ${s.conversationId} and parent_proposal_id is not null`
       expect(child!.parent_proposal_id).toBe(s.proposalId)
+    })
+  })
+
+  it('counts prior revise_component calls too, not just propose_itinerary', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '09')
+      await sql`insert into tool_calls (turn_id, call_id, name, status) values (${s.turnId}, 'toolu_p', 'propose_itinerary', 'done')`
+      await sql`insert into tool_calls (turn_id, call_id, name, status) values (${s.turnId}, 'toolu_r1', 'revise_component', 'done')`
+      await sql`insert into tool_calls (turn_id, call_id, name, status) values (${s.turnId}, 'toolu_r2', 'revise_component', 'pending')`
+      expect(await countPriorGateRuns(sql, s.turnId, 'toolu_r2')).toBe(2)
     })
   })
 

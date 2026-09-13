@@ -347,7 +347,7 @@ describeDb('0008 turn_id indexes and the daily_usage RLS warning', () => {
 
 /**
  * 0013. `round` is derived per TURN, not per conversation:
- * `countPriorProposals` (src/repo/toolCalls.ts) filters `where turn_id = ...`,
+ * `countPriorGateRuns` (src/repo/toolCalls.ts) filters `where turn_id = ...`,
  * so it resets to 0 on every turn. Without a uniqueness rule, two `runGates`
  * calls that land on the same (turn, round) write two full seven-row sets and
  * every `group by gate` fire-rate double-counts. Plan 3b's `revise_component`
