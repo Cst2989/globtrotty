@@ -73,7 +73,33 @@ export function makeNonce(): string {
   return randomBytes(8).toString('hex')
 }
 
-const NONCE_SHAPED = /[0-9a-f]{16}/gi
+/**
+ * The shape of a nonce, and nothing else that happens to be made of the same
+ * characters.
+ *
+ * Sixteen hex characters, standing alone, with at least one LETTER among them.
+ * The letter is the whole point of this pattern and it was added in lesson 5.5's
+ * fix round: `[0-9a-f]{16}` on its own matches sixteen DECIMAL digits, so a
+ * sixteen-digit ticket number or booking reference in a supplier body reached
+ * the model as `[redacted]` and the model had no way to quote it back to her.
+ * A run of sixteen digits is common in travel data. A run of sixteen hex
+ * characters with a letter in it is not, and removing that costs a supplier
+ * nothing.
+ *
+ * The word boundaries are the other half. Without them the pattern matched
+ * inside a longer run and left the extra characters behind, so
+ * `0123456789abcdef0` came out as `[redacted]0`, which reads as corruption
+ * rather than as a redaction. With them a seventeen-character run is left
+ * alone, and that gives nothing up: a guessed nonce only does anything in the
+ * exact form `-<16 hex>>`, where the neighbours are not hex.
+ *
+ * The residual, stated rather than left to be discovered: `makeNonce` can mint
+ * an all-digit nonce, once in about forty-three thousand calls, and a payload
+ * that guessed that value would not be redacted. It would still have to have
+ * guessed all sixteen characters to close anything, which is the 2^-64 this
+ * function never claimed to improve on.
+ */
+const NONCE_SHAPED = /\b(?=[0-9a-f]{16}\b)[0-9a-f]*[a-f][0-9a-f]*\b/gi
 
 /**
  * Neutralises anything in a payload that could be read as this fence's own
@@ -96,6 +122,24 @@ const NONCE_SHAPED = /[0-9a-f]{16}/gi
  * nothing nonce-shaped left to redact and would report a clean payload where
  * there had been an attempt.
  *
+ * That widening was also a NARROWING for one round, and this comment records
+ * both directions because the second one was an accident. Lesson 5.2's pattern
+ * was `<\/tool_result\s*>`, and `\s` includes a newline. Lesson 5.5 first wrote
+ * the middle as `[^>\n]*`, which does not, so `</tool_result\n>` was escaped at
+ * 5.2, was not escaped at 5.5, and is escaped again now that the middle is
+ * `[^>]*`. That form is what a supplier's pretty-printed HTML produces and it
+ * is the same family as the corpus's "closing tag, whitespace inside" case. The
+ * newline costs nothing to allow: a match still stops at the first `>`, and the
+ * only thing a payload buys by putting a line break inside the tag is that one
+ * escape spans two lines, with every character between them kept.
+ *
+ * It is not a fixpoint, and the corpus says so out loud rather than leaving it
+ * to be found: `</tool_result</tool_result>` comes back as
+ * `&lt;/tool_result</tool_result&gt;`, because the middle swallowed the inner
+ * tag and the second replace below only matches an OPENING `<tool_result`. The
+ * raw substring that survives carries no nonce, so it closes nothing, which is
+ * exactly the property the nonce was added to make true.
+ *
  * Exported from lesson 5.5 for a second caller with the same problem, the same
  * treatment `isToolOutcome` got at lesson 5.1: `renderNotebook`
  * (src/repo/notebook.ts) puts the notebook into the SAME request as a fenced
@@ -104,13 +148,31 @@ const NONCE_SHAPED = /[0-9a-f]{16}/gi
  */
 export function escapeFence(raw: string): string {
   return raw
-    .replace(/<\/tool_result([^>\n]*)>/gi, '&lt;/tool_result$1&gt;')
+    .replace(/<\/tool_result([^>]*)>/gi, '&lt;/tool_result$1&gt;')
     .replace(/<tool_result\b/gi, '&lt;tool_result')
 }
 
-/** `&`, `<` and `"` cannot survive inside an attribute value. */
+/**
+ * `&`, `<`, `>`, `"` and a line break cannot survive inside an attribute value.
+ *
+ * The `>` and the line break were added in lesson 5.5's fix round, because
+ * without them the docstring's claim below was only half true. A tool name
+ * carrying a `>` ends the opening delimiter early as anything reading the
+ * transcript sees it, so `<tool_result-NONCE name="search>` reads as a complete
+ * tag and the rest of our own header reads as content, and a name carrying a
+ * newline splits that one line into several. Neither can arrive from a supplier
+ * (the name comes from `check.def.name`, the registry's own string), and that is
+ * the same reason the quote was escaped here in the first place: this removes a
+ * class of mistake we could make later, and it costs two replacements.
+ */
 function escapeAttr(v: string): string {
-  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+  return v
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '&#10;')
+    .replace(/\r/g, '&#13;')
 }
 
 /**
@@ -141,8 +203,11 @@ function escapeAttr(v: string): string {
  *
  * Anything nonce-SHAPED is stripped from the payload. That is the one way a
  * nonce can be beaten without knowing it: write sixteen hex characters and hope
- * they match. They will not, and removing them costs a supplier nothing, because
- * a run of sixteen hex characters in a hotel description is not information.
+ * they match. They will not, and removing them costs a supplier almost nothing,
+ * because a standalone run of sixteen hex characters with a letter in it is not
+ * information a hotel description carries. Almost, and not nothing: see
+ * `NONCE_SHAPED` above for what the pattern deliberately leaves alone, which is
+ * a sixteen-digit booking code and a longer hex run.
  *
  * ## Two residuals, accepted deliberately
  *

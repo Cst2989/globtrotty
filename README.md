@@ -417,10 +417,15 @@ call, after the result comes back, so the string that closes the wrapper did not
 exist when the supplier wrote its payload. The escaping stays, because the two
 together mean an attacker has to beat both, and anything nonce-shaped is
 stripped out of the payload, which is the only way a nonce could be beaten
-without knowing it. The corpus in `test/injection-corpus.test.ts` runs the
-closing tag exactly, in mixed case, with whitespace inside the tag, nested,
+without knowing it, with one exception it names: a run of sixteen decimal digits
+is a ticket number rather than a nonce and survives. The corpus in
+`test/injection-corpus.test.ts` runs the closing tag exactly, in mixed case, with
+whitespace inside the tag, with a newline inside the tag, nested, doubled,
 through the interpolated tool name, through a supplier's source id and through
-the notebook, and every case is a payload a real supplier could return.
+the notebook, and every case is a payload a real supplier could return. The
+source id is covered twice: as pure calls in that file, which need no database,
+and against a real `rehydrateRefs` violation in `test/gate-rehydrate.test.ts`,
+which does.
 
 Two residuals are accepted here on purpose and are written down as decisions
 rather than left as oversights. A payload containing Unicode homoglyphs of the
@@ -432,15 +437,34 @@ own output is indistinguishable from an attacker who escaped theirs, and
 unescaping to make the text read better would create the hole.
 
 The agency has two exits and this lesson closed both. `sanitizeOutbound` runs on
-every agent message before `completeTurn` writes it, in `src/worker.ts` rather
-than inside the driver, so an agent a later module writes gets it without asking.
-It strips a URL to any host the cashier does not build links against, an image
-above all, because a markdown image is a request her browser makes with no tool
-call anywhere in it and every allowlist this course has built watches tool calls.
-And it refuses a message that asks her for a card, a document or a code, which
-is a blocklist and is the right shape only because the agency has no legitimate
-use for any of them: it never takes a payment, never holds a document and never
-verifies an identity.
+every agent message `src/worker.ts` writes that anything outside this repository
+could have shaped, and there are two: the model's own reply, in the `message`
+branch before `completeTurn`, and the hand-off sentence `completeIfLinkEmitted`
+rebuilds from `course.link_clicks` after a link went out. The only other writer
+of a message is `failTurn`, and every sentence that reaches it is built here out
+of our own strings rather than composed by a model. The check sits in the worker
+rather than inside the driver, so an agent a later module writes gets it without
+asking.
+
+It strips any URL that is not one the cashier itself built, an image above all,
+because a markdown image is a request her browser makes with no tool call
+anywhere in it and every allowlist this course has built watches tool calls. The
+comparison is against the cashier's link PREFIXES and not against its hosts,
+which is a distinction one host makes expensive: `www.google.com` is a booking
+host, because a searchapi hotel is booked on a Google entity page, and a host
+comparison also said yes to an image endpoint and an open redirect on the same
+domain, which are an exfiltration path and a way to land her on the attacker.
+
+And it removes a request that asks HER for a card, a document, a code or a
+payment, which is a blocklist and is the right shape only because the agency has
+no legitimate use for making one: it never takes a payment, never holds a
+document and never verifies an identity. It matches the request and not the
+noun, because "the hotel asks for a 100 EUR deposit to hold the room" is a
+cancellation policy the planning desk is told to relay, and the seven ordinary
+travel sentences that a noun-matching version fired on are negative cases in
+`test/outbound.test.ts` now. A hit takes out the span that fired and leaves the
+rest of the message standing, so an itinerary whose last line asks for a card
+still reaches her as an itinerary.
 
 The browser's half is owed and is not here. A Content Security Policy with
 `img-src 'self'` would stop a remote image at the renderer even if the check

@@ -33,6 +33,13 @@ const AFFILIATE_ID = 'globetrotty-course'
  * built here, from `(supplier, sourceId, tracking ref)`, against a fixed
  * per-supplier template, and the host is re-parsed off the finished string and
  * compared with this map before it is returned.
+ *
+ * A BUILD-time check, and only that. It answers "did this template put the link
+ * where its supplier's links go", which is a question about our own templates.
+ * It is not the question the outbound check asks, which is "is this URL one we
+ * built", and from lesson 5.5's fix round that one reads
+ * `BOOKING_LINK_PREFIXES` below instead: one of these hosts also serves a
+ * favicon endpoint and an open redirect, so host equality is not an answer.
  */
 export const BOOKING_HOSTS: Record<string, string> = {
   kiwi: 'www.kiwi.com',
@@ -50,6 +57,36 @@ const TEMPLATES: Record<string, (itemId: string, trackingRef: string) => string>
   mock: (id, ref) =>
     `https://example.invalid/book/${encodeURIComponent(id)}?subid=${encodeURIComponent(ref)}`,
 }
+
+/**
+ * The prefix of every link this file can build, one per template, derived by
+ * running each template against a probe and cutting at the probe.
+ *
+ * `sanitizeOutbound` (src/sanitize.ts) is the only reader, and it reads this
+ * rather than `BOOKING_HOSTS` because a HOST is not what the cashier promises.
+ * `www.google.com` is on `BOOKING_HOSTS` for the searchapi adapter, whose
+ * template points at one hotel entity page, and a check that compared the host
+ * alone let through `https://www.google.com/s2/favicons?d=<her notebook>`, which
+ * is an image an untrusted listing can talk the model into writing, and
+ * `https://www.google.com/url?q=<attacker>`, which is an open redirect on the
+ * same host. Both are the exfiltration this lesson exists to close, and both
+ * were `ok: true` until this fix round. Comparing the prefix admits exactly the
+ * links the cashier itself emits and nothing else on those hosts.
+ *
+ * DERIVED and never written out again, for the reason the host map gives: a
+ * second copy of a money-adjacent rule diverges silently, and here it would
+ * diverge the moment a template's path changed. A template whose id does not
+ * come first would produce a prefix that is not a prefix of the finished URL, so
+ * that case throws at module load rather than shipping a rule nobody checked.
+ */
+const LINK_PROBE = 'LINKPREFIXPROBE'
+export const BOOKING_LINK_PREFIXES: readonly string[] =
+  Object.keys(TEMPLATES).map((supplier) => {
+    const url = TEMPLATES[supplier]!(LINK_PROBE, LINK_PROBE)
+    const cut = url.indexOf(LINK_PROBE)
+    if (cut <= 0) throw new Error(`No stable link prefix for supplier '${supplier}'`)
+    return url.slice(0, cut)
+  })
 
 export class UnknownSupplierError extends Error {
   constructor(readonly supplier: string) {

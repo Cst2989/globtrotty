@@ -179,10 +179,14 @@ repair, which is the only version of the claim worth putting in a lesson.
 
 **A blocklist and an allowlist, chosen per surface rather than by preference.**
 The URL check is an allowlist because the agency emits exactly one kind of link
-and everything else is wrong by construction. The solicitation check is a
-blocklist because the phrases it catches have no legitimate instance here: the
-agency never takes a payment, holds a document or verifies an identity, so
-there is no true positive to weigh against a false one.
+and everything else is wrong by construction, which is also why it compares whole
+links and not hosts: one of the hosts it builds links on serves an image
+endpoint and an open redirect too. The solicitation check is a blocklist because
+the REQUESTS it catches have no legitimate instance here: the agency never takes
+a payment, holds a document or verifies an identity, so there is no true positive
+to weigh against a false one. The words those requests are made of are a
+different matter, and a first version that matched them fired on six of seven
+ordinary travel sentences, which is how a blocklist gets turned off.
 
 ## Hand-offs
 

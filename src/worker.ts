@@ -339,9 +339,25 @@ export async function completeIfLinkEmitted(
   if (emitted.links.length === 0) return { emitted: false, closed: false }
   const now = new Date(deps.now())
   try {
+    // The second writer of an agent message, through the same check as the
+    // first (src/sanitize.ts, lesson 5.5). This sentence is built server side
+    // from `course.link_clicks` rows and the model never touched it, so the
+    // check has nothing to find. It runs anyway, because "every agent message
+    // goes through it" is a claim about the WRITERS and a claim with an
+    // exception is a claim the next writer inherits. It also proves the URL
+    // rule admits the links the cashier actually built, which is the one thing
+    // that rule must never get wrong: a stripped booking link here is a turn
+    // that took her money's worth of work and handed her `[link removed]`.
+    // Still inside the try, for the reason the docstring gives about
+    // `handOffMessage` throwing.
+    const handOff = sanitizeOutbound(
+      handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now))
+    if (!handOff.ok) {
+      console.error(`turn ${claim.turnId}: hand-off message rewritten`, handOff.reasons)
+    }
     await close(sql, claim, {
       state,
-      agentMessage: handOffMessage(emitted.links, emitted.verified, emitted.quotedAt ?? now, now),
+      agentMessage: handOff.text,
       parked: true,
       spendMicros,
     })
@@ -614,6 +630,15 @@ async function loop(
       // applies to itself is a check the next agent forgets. `ask_user`'s
       // questions arrive here too, because the driver returns them as a
       // `message` step rather than as a kind of their own.
+      //
+      // What she is shown and what we record are the same string, and this
+      // branch is why: a `message` step returns from here, so the text never
+      // reaches the transcript append at the bottom of this loop, and the
+      // `state` written below carries no assistant message at all. Nothing
+      // stores the version before the check, so no later reader can quote her a
+      // sentence she was never sent. That property is worth a sentence because
+      // the obvious alternative, checking on the way out while recording what
+      // the model wrote, would leave the two disagreeing for ever.
       const outbound = step.text ? sanitizeOutbound(step.text) : { ok: true as const, text: '' }
       if (!outbound.ok) {
         console.error(`turn ${claim.turnId}: outbound message rewritten`, outbound.reasons)
