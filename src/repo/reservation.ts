@@ -37,9 +37,14 @@ export function estimateMicros(seat: Seat, inputTokens: number): bigint {
   // first call of a conversation or any call resumed past the hour, reports
   // those tokens back as cache_creation_input_tokens at that rate. Lesson 5.1's
   // version bounded at 1.25 and said in as many words that this line had to
-  // move with the TTL; a bound that can undercount is not a bound, and it is
-  // the guardrail rather than the ledger that would have been wrong, because
-  // reconcile charges the true figure either way.
+  // move with the TTL, and a bound that can undercount is not a bound.
+  //
+  // The bound stays at the 1h rate even though most of a driver request's
+  // breakpoints write at 5m, because a bound is the worst case and the worst
+  // case is the whole prefix landing in the 1h bucket. What reconcile then
+  // charges is at most this and usually less: it prices each bucket from
+  // `usage.cache_creation` where the provider reports the split (src/pricing.ts)
+  // and falls back to the same 1h rate where it does not.
   const worstCaseInputMult = Math.max(p.cacheWrite1hMult, 1)
   const micros =
     inputTokens * p.inMicrosPerToken * worstCaseInputMult + seat.maxTokens * p.outMicrosPerToken

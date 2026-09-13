@@ -194,11 +194,14 @@ rate.** `costMicros`'s TTL argument is required. Making it optional with a
 `'5m'` default would leave every call site that forgot it under-billing by sixty
 percent, and an under-count is the dangerous direction precisely because
 nothing surfaces it: no error, no failing test, and a number that looks like a
-number. The compiler is what found all thirteen call sites, seven of them in
-`src/` and one of those in `src/ask.ts`, a file this module touches for no other
-reason. That is the whole point of adding a required parameter rather than
-reading a field from a constant: the inventory is produced by the typechecker
-and not by somebody's memory of where the function is called.
+number. The compiler is what found them: eight call sites in `src/`, across
+seven files, one of them in `src/ask.ts`, a file this module touches for no
+other reason, and every test that prices a call of its own on top of those.
+Counting files rather than call sites is how a list like that comes out one
+short, since `src/classify.ts` prices twice. That is the whole point of adding a
+required parameter rather than reading a field from a constant: the inventory is
+produced by the typechecker and not by somebody's memory of where the function is
+called.
 
 ## Hand-offs
 
@@ -262,8 +265,10 @@ a fenced turn keeps it in flight and still writes its reconcile, its
 `course.model_calls` row and its desk afterwards, against a conversation another
 worker is now driving. It is one Haiku call against a one-line prompt with a
 1,024 token ceiling, which is the whole reason it is named instead of fixed
-here. The fix is one parameter. Owner: lesson 5.6, which threads a new argument
-through `src/classify.ts` and `src/metered.ts` already.
+here. The fix is one parameter. Lesson 5.6 threaded a new required argument
+through `src/classify.ts`, `src/metered.ts` and every other call site of
+`costMicros` and did not add the signal with it, so the exposure is unchanged and
+only its owner has moved. Owner: lesson 5.7.
 
 Open at lesson 4.6: the affiliate id inside every emitted link is one
 placeholder shared by all three templates, not a per-supplier account. The shape

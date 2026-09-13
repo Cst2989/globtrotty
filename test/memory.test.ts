@@ -37,11 +37,18 @@ describeDb('what the agency remembers between trips', () => {
     })
   })
 
-  it('marks an inferred fact as inferred, all the way to the prompt', async () => {
+  it('marks an inferred fact as inferred, and an outright one not at all', async () => {
     await withTestDb(async (sql) => {
+      // Both halves in one case, because the point of the column is the
+      // DISTINCTION. A `renderMemory` that appended "(inferred)" to every line
+      // satisfies the positive assertion on its own, and it would tell the desk
+      // that a thing she said in as many words was something we guessed.
       await rememberUserFact(sql, { userId: USER, fact: 'Travels with a partner.', inferred: true, sourceTurn: null })
+      await rememberUserFact(sql, { userId: USER, fact: 'Flies from Berlin.', inferred: false, sourceTurn: null })
       const rendered = renderMemory(await readUserMemory(sql, USER), new Map(), 'a1b2c3d4e5f6a7b8')
-      expect(rendered).toContain('(inferred)')
+      const lines = rendered.split('\n')
+      expect(lines.find((l) => l.includes('Travels with a partner.'))).toContain('(inferred)')
+      expect(lines.find((l) => l.includes('Flies from Berlin.'))).not.toContain('(inferred)')
     })
   })
 
@@ -77,6 +84,27 @@ describeDb('what the agency remembers between trips', () => {
     })
   })
 
+  it('refuses a fact that points at another traveller\'s turn', async () => {
+    await withTestDb(async (sql) => {
+      // The composite key to course.turns (id, user_id), migration 0016. Every
+      // sibling table gets this tie from its conversation and this one has no
+      // conversation to get it from, so without the composite key a fact
+      // belonging to her could cite somebody else's turn as its source. Lesson
+      // 5.7 writes a per-user row policy against this table, and a row that
+      // passes the policy on user_id while pointing into another user's history
+      // is the row that makes the policy a decoration.
+      const other = randomUUID()
+      const [c] = await sql`insert into course.conversations (user_id) values (${other}) returning id`
+      const [t] = await sql`
+        insert into course.turns (conversation_id, user_id, idempotency_key)
+        values (${c!.id}, ${other}, ${randomUUID()}) returning id`
+      await expect(rememberUserFact(sql, {
+        userId: USER, fact: 'Learned from a turn that was never hers.',
+        inferred: true, sourceTurn: t!.id as string,
+      })).rejects.toThrow(/foreign key|violates/i)
+    })
+  })
+
   it('keeps a fact after the turn that learned it is deleted', async () => {
     await withTestDb(async (sql) => {
       // `on delete set null` rather than cascade. A fact outlives the turn that
@@ -96,6 +124,32 @@ describeDb('what the agency remembers between trips', () => {
       expect(facts).toHaveLength(1)
       expect(facts[0]!.sourceTurn).toBeNull()
     })
+  })
+})
+
+describe('what a render will print', () => {
+  it('bounds the facts it prints about any one source', () => {
+    // Pure, because `renderMemory` is. The key list is bounded by what a turn's
+    // corpus holds and the facts under one key are bounded by nothing, so this
+    // is the line between "memory" and "a prefix that grows for ever on a
+    // property somebody kept writing notes about".
+    const facts = Array.from({ length: 25 }, (_, i) => `Fact number ${i}.`)
+    const rendered = renderMemory([], new Map([['mock:hotel-0-4471', facts]]), 'a1b2c3d4e5f6a7b8')
+    const printed = rendered.split('\n').filter((l) => l.startsWith('- Fact number '))
+    expect(printed).toHaveLength(10)
+    // The newest, which is what `readSourceMemory` hands over first, and not
+    // whichever ten the iteration happened to reach.
+    expect(printed[0]).toContain('Fact number 0.')
+    expect(printed.at(-1)).toContain('Fact number 9.')
+    expect(rendered).not.toContain('Fact number 10.')
+  })
+
+  it('renders nothing at all rather than an empty fence', () => {
+    // The driver filters empty strings out of its suffix, so an empty render
+    // has to actually be empty: a fence with no facts in it is a nonce, a
+    // preamble and two delimiters of pure cost on every request of a traveller
+    // the agency has never learned anything about.
+    expect(renderMemory([], new Map(), 'a1b2c3d4e5f6a7b8')).toBe('')
   })
 })
 

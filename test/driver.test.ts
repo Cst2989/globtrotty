@@ -686,7 +686,13 @@ describeDb('what the driver answers by itself', () => {
       expect(suffix).toContain('Portugal')
       expect(suffix).toContain('EUR')
       expect(suffix).toContain('(user)')
-      expect(String(request.system)).not.toContain('The notebook, as recorded')
+      // `JSON.stringify` and not `String`, which was what this line used until
+      // lesson 5.6 made `system` an array of blocks: `String([{...}])` is
+      // "[object Object]", so the assertion passed against every implementation
+      // there is, including one that rendered the whole notebook into the system
+      // prompt. It is the assertion that pins the load bearing half of the
+      // arrangement, and it spent one commit pinning nothing.
+      expect(JSON.stringify(request.system)).not.toContain('The notebook, as recorded')
       // And it really is the suffix rather than a second user turn: the
       // transcript is her one message, with the notebook appended to it.
       expect((request.messages as unknown[]).length).toBe(1)

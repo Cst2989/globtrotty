@@ -13,6 +13,19 @@ import { describeLiveModel, requireModelKey } from './helpers/live.js'
 const GOLDEN = 'We are two adults and a toddler, Berlin to Faro, a week in September, '
   + 'about 1500 euros all in. Find us somewhere near the beach.'
 
+/**
+ * Her own budget figure, as she wrote it and in the forms a reply might echo it
+ * in, removed from the prose before the no-price assertion runs.
+ *
+ * She said "about 1500 euros all in", so a reply that opens "got it, two adults
+ * and a toddler, about 1500 euros all in" has stated no price: it has repeated
+ * hers. Failing the canary on that is the same mistake as pinning one tool name,
+ * a red light on a correct answer, and a canary that cries wolf is one somebody
+ * turns off. What must still go red is a figure the model produced, which is any
+ * amount that is not this one.
+ */
+const HER_BUDGET = /(?:€\s*)?\b1[.,]?500\b(?:\s*(?:eur|euros|€))?/gi
+
 const goldenArgs = (): CallArgs => ({
   seat: SEATS.driver,
   system: 'You are the planning desk of a travel agency. Use the tools you have. '
@@ -50,10 +63,12 @@ describeLiveModel('the drift canary', () => {
     // No price in the prose, which is the one property lesson 5.7's whole
     // channel split rests on the model NOT being trusted for. Asserted here so
     // that a drift in that direction is visible as a drift rather than only as
-    // a redaction doing more work than it used to.
+    // a redaction doing more work than it used to. Her own budget is struck out
+    // first, for the reason `HER_BUDGET` above gives: echoing her number is not
+    // quoting a price.
     const prose = result.content
       .filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join(' ')
-    expect(prose).not.toMatch(/\d[\d.,]*\s*(?:eur|euros|€)|€\s*\d/i)
+    expect(prose.replace(HER_BUDGET, '')).not.toMatch(/\d[\d.,]*\s*(?:eur|euros|€)|€\s*\d/i)
     // Pinned against the config id and not against the model string, because
     // the model string is the alias and cannot change. This assertion is what
     // makes the run attributable: a failure names the configuration that

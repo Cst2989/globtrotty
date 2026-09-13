@@ -7,11 +7,19 @@ export const MAX_BREAKPOINTS = 4
 /** Stay inside the 20-block lookback window. */
 export const INTERMEDIATE_EVERY = 15
 /**
- * The TTL on the system+tools write. Exported because `src/agents/driver.ts`
- * must price this exact write with `costMicros(model, usage, SYSTEM_CACHE_TTL)`:
- * a 1h write bills at twice base input and a 5m write at 1.25 times, so the
- * constant on the wire and the constant in the ledger have to be the same
- * constant.
+ * The TTL on the system+tools write, and on that write ONLY.
+ *
+ * Exported because `src/agents/driver.ts` prices with
+ * `costMicros(model, usage, SYSTEM_CACHE_TTL)`, and it is worth being exact
+ * about what that argument does, because one lesson was written believing it did
+ * more. A request does not have "a" TTL: this constant rides on the system head
+ * and `placeBreakpoints` leaves the transcript marks at the provider's five
+ * minute default, so a driver request writes at BOTH rates and
+ * `cache_creation_input_tokens` is the sum across them. What prices that
+ * correctly is the provider's own `usage.cache_creation` split, which
+ * `costMicros` reads whenever it is there. This constant is what the ledger
+ * falls back to when it is not, and it is the dearer of the two rates, so the
+ * fallback over-states a mixed write rather than under-stating one.
  */
 export const SYSTEM_CACHE_TTL: CacheTtl = '1h'
 
@@ -122,6 +130,14 @@ export function placeBreakpoints(messages: LoopMessage[]): LoopMessage[] {
 
   for (const [m, b] of chosen) {
     const block = out[m]!.content[b] as unknown as Record<string, unknown>
+    // No `ttl`, which is the provider's five minute default, and deliberately so
+    // rather than by omission: the transcript is the part of the prompt that
+    // changes on every step, so a mark placed here is read minutes later by the
+    // next step of the same turn or it is not read at all. Paying the 1h premium
+    // to store it for an hour buys nothing. The system head, which does survive
+    // an hour, is the one that asks for `SYSTEM_CACHE_TTL`, and `costMicros`
+    // prices the two apart from `usage.cache_creation` rather than charging the
+    // whole write at either rate.
     block.cache_control = { type: 'ephemeral' }
   }
   return out

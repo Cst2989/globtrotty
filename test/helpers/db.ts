@@ -53,9 +53,12 @@ export async function withRealDb<T>(fn: (sql: postgres.Sql, userId: string) => P
     await sql`delete from course.tool_results where user_id = ${userId}`
     // course.user_memory carries a user id, so it belongs here. course.source_memory
     // does NOT and is deliberately absent rather than forgotten: a fact about a
-    // property belongs to nobody (migration 0016), so there is no user id to
-    // delete it by, and the one test that writes it removes its own rows by
-    // source_key.
+    // property belongs to nobody (migration 0016), so there is no user id this
+    // function could delete it by. Nothing else deletes it either, and nothing
+    // needs to yet: its only writer today is a case in test/memory.test.ts that
+    // runs inside `withTestDb`, whose transaction is always rolled back, so its
+    // rows never commit. The first writer that commits one is what has to give
+    // this list a line, and it will need a key of its own to delete by.
     await sql`delete from course.user_memory where user_id = ${userId}`
     await sql`delete from course.messages where user_id = ${userId}`
     await sql`delete from course.turns where user_id = ${userId}`

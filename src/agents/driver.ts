@@ -94,10 +94,11 @@ export function makeDriver(deps: DriverDeps): Agent {
         loadNotebook(sql, ctx.conversationId, ctx.userId),
         readUserMemory(sql, ctx.userId),
       ])
-      // No source facts yet, and an empty map rather than a query: nothing on
-      // this branch writes course.source_memory, so a read of it could only ever
-      // come back empty and a per-turn query for it would be a round trip for
-      // nothing. The table, the reader and the render exist in this lesson, and
+      // No source facts yet, and an empty map rather than a query: no PRODUCTION
+      // path writes course.source_memory, so a read of it could only ever come
+      // back empty and a per-turn query for it would be a round trip for
+      // nothing. `rememberSourceFact` exists and test/memory.test.ts calls it,
+      // which is what pins the reader and the render against a real table. The table, the reader and the render exist in this lesson, and
       // the writer arrives with the module that learns a fact about a property.
       // `readSourceMemory` is what will scope it to the keys that turn's corpus
       // actually holds when it does.
@@ -200,10 +201,14 @@ export function makeDriver(deps: DriverDeps): Agent {
     // name that may be an alias with no price row, and PRICES throws rather than
     // charging zero.
     // The TTL is `SYSTEM_CACHE_TTL`, the same constant `cacheableSystem`
-    // (src/model/cache.ts) actually put on the wire a few lines above, rather
-    // than a locally chosen '1h' string. A 1h write bills at twice base input
-    // and a 5m write at 1.25 times, so the row and the request have to agree,
-    // and they can only be relied on to agree if they read the same constant.
+    // (src/model/cache.ts) actually put on the system head a few lines above,
+    // rather than a locally chosen '1h' string, so the two cannot drift apart.
+    // It does not describe the whole request: the transcript breakpoints go on
+    // at the five minute default, so this call writes at two rates at once.
+    // `costMicros` prices them apart from `result.usage.cache_creation` where
+    // the provider reports it, and charges the whole write at this constant
+    // where it does not, which is the dearer rate and therefore the direction a
+    // spend figure is allowed to be wrong in.
     const actual = result.kind === 'refused'
       ? 0n
       : costMicros(seat.model, result.usage, SYSTEM_CACHE_TTL)

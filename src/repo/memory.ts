@@ -120,6 +120,23 @@ export async function readSourceMemory(
 }
 
 /**
+ * How many facts about ONE source a render prints.
+ *
+ * The user half of the render is bounded by `DEFAULT_MEMORY_LIMIT` at the read.
+ * The source half is bounded here instead, because `readSourceMemory` is scoped
+ * by key rather than by count: the KEY list is bounded by what a turn's corpus
+ * holds, and the facts under any one key are bounded by nothing at all. One
+ * property that accumulated two hundred facts would otherwise grow every request
+ * of every turn that so much as mentions it, and the suffix is the part of the
+ * prompt that is never cached, so every one of those tokens is paid for at full
+ * price on every step.
+ *
+ * The newest ones, because `readSourceMemory` orders `seq desc` and the newest
+ * fact about a property is the one most likely to still be true of it.
+ */
+const MAX_SOURCE_FACTS_PER_KEY = 10
+
+/**
  * Memory as text for the model, FENCED, and rendered into the same
  * `CallArgs.suffix` the notebook uses.
  *
@@ -152,7 +169,7 @@ export function renderMemory(
     if (facts.length === 0) continue
     if (lines.length > 0) lines.push('')
     lines.push(`What we know about ${key}:`)
-    for (const fact of facts) lines.push(`- ${fact}`)
+    for (const fact of facts.slice(0, MAX_SOURCE_FACTS_PER_KEY)) lines.push(`- ${fact}`)
   }
   if (lines.length === 0) return ''
   // `worker` and not `code`: a `code`-door result is ours and comes back

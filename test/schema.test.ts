@@ -57,15 +57,24 @@ describeDb('the constraints and the types', () => {
   })
 
   // The handler's read-back after `on conflict do nothing` (src/handler.ts)
-  // assumes zero rows means exactly one of these two refused, and tells
-  // duplicate from busy by checking only the first by name. A third unique
-  // index added to this table later would make some other refusal look like
-  // one of these two, silently, so this pins the whole set rather than just
+  // assumes zero rows means one of the REFUSABLE constraints refused, and tells
+  // duplicate from busy by checking only the first by name. A unique index
+  // added to this table later could make some other refusal look like one of
+  // those two, silently, which is why this pins the whole set rather than just
   // that each one individually still throws. `turns_user_idempotency` is
   // scoped to (user_id, idempotency_key), not (conversation_id,
   // idempotency_key), so a first press with no conversation yet can still be
   // recognised (src/handler.ts's `firstPress`).
-  it('carries exactly the two unique indexes the on-conflict read-back tells apart', async () => {
+  //
+  // The third entry, `turns_id_user_id_key`, is lesson 5.6's and is not a
+  // refusal this read-back can ever meet. It exists so course.user_memory can
+  // carry a COMPOSITE foreign key to (id, user_id) and a fact cannot cite
+  // another traveller's turn (migration 0016), and the only insert that could
+  // conflict on it is one whose `id` collides with an existing row's, which is
+  // a gen_random_uuid() collision and not a press arriving twice. It is listed
+  // here because an unlisted unique index is exactly what this case exists to
+  // catch, including a deliberate one.
+  it('carries exactly the unique indexes the on-conflict read-back tells apart', async () => {
     await withTestDb(async (sql) => {
       const idx = await sql`
         select indexname from pg_indexes
@@ -73,7 +82,7 @@ describeDb('the constraints and the types', () => {
            and indexdef ilike '%unique%' and indexname <> 'turns_pkey'
          order by indexname`
       expect(idx.map((r) => r.indexname)).toEqual([
-        'turns_one_active_per_conversation', 'turns_user_idempotency',
+        'turns_id_user_id_key', 'turns_one_active_per_conversation', 'turns_user_idempotency',
       ])
     })
   })

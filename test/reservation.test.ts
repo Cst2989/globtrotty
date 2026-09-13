@@ -54,6 +54,15 @@ describe('the bound, before any call is made', () => {
     // the 1h rate quietly took its fraction away, which would have left
     // `Math.ceil` in `estimateMicros` guarded by nothing at all while still
     // being the line that keeps a future fractional price from throwing.
+    //
+    // Registered in the exported `PRICES` and removed again in the `finally`,
+    // which is what keeps this case from being visible to any other. It has to
+    // be removed rather than left: `test/pricing.test.ts` asserts
+    // `Object.keys(PRICES)` equals exactly the two models we staff, so a leaked
+    // third key is a failure in another file that names neither this case nor
+    // this model. Vitest gives each test FILE its own module registry, so the
+    // two cannot collide today, and the `finally` is what makes that a property
+    // of this case rather than of the runner's isolation settings.
     const model = 'claude-fractional-for-this-case'
     PRICES[model] = {
       inMicrosPerToken: 1.25, outMicrosPerToken: 5,
