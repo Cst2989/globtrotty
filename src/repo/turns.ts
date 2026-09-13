@@ -170,9 +170,17 @@ export async function completeTurn(
                        'agent', ${opts.agentMessage})`
     }
 
+    // `case when status = 'escalated' then 'escalated' else ...`: an escalation
+    // (src/repo/escalations.ts) is always followed, in the same turn, by the
+    // driver's closing message — which reaches this exact write with `parked:
+    // true`. Without the guard that message's completeTurn would stamp
+    // 'awaiting_user' right back over the terminal status the escalation just
+    // set, and a human paged to look at the conversation would find it marked
+    // as if nothing had happened.
     await tx`
       update conversations
-         set status = ${opts.parked ? 'awaiting_user' : 'active'},
+         set status = case when status = 'escalated' then 'escalated'
+                           else ${opts.parked ? 'awaiting_user' : 'active'} end,
              updated_at = now()
        where id = ${claim.conversationId} and user_id = ${claim.userId}`
   })
@@ -221,7 +229,12 @@ export async function failTurn(
                values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
                        'agent', ${agentMessage})`
     }
-    await tx`update conversations set status = ${conversationStatus}, updated_at = now()
+    // Same sticky guard as completeTurn's, and for the same reason: a `fail`
+    // step can follow an escalation in the same turn, and must not overwrite
+    // the terminal 'escalated' status with 'failed' or 'limit_reached'.
+    await tx`update conversations
+                set status = case when status = 'escalated' then 'escalated' else ${conversationStatus} end,
+                    updated_at = now()
               where id = ${claim.conversationId} and user_id = ${claim.userId}`
   })
 }

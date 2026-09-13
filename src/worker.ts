@@ -97,9 +97,11 @@ export type AgentStep =
       assistantContent?: ContentBlock[]
       /**
        * Micros the tool debited ITSELF during run() — a reviewer call inside
-       * propose_itinerary. Read after run() resolves and added to the turn
-       * total; never passed to recordSpend. Same rule as recordedMicros, one
-       * step later in time because the amount is not known before run().
+       * propose_itinerary. Folded into the turn total in a `finally` wrapped
+       * around `run()`, so a throw after a self-debited call still reaches
+       * the turn total — exactly the property the `alreadyDebited` comment in
+       * `loop()` argues for, applied to a debit that isn't known until run()
+       * resolves (or throws). Never passed to recordSpend.
        */
       spent?: { micros: bigint }
     }
@@ -377,15 +379,25 @@ async function loop(
       // Wrapped exactly like deps.agent(...) above: a real supplier call (plan 3)
       // can run past HEARTBEAT_STALE, so heartbeat_at must keep advancing while
       // it's in flight, not just before and after.
-      result = await withHeartbeat(
-        sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
-        () => step.run(),
-      )
+      //
+      // The `finally` is F4: step.spent.micros is debited by run() ITSELF,
+      // partway through — if run() throws after that debit (the reviewer call
+      // inside propose_itinerary succeeded, then something later in the same
+      // run() failed), the money is already spent and must still land on
+      // turns.spend_usd_micros. Folding it only after a successful
+      // finishToolCall, as this used to, drops it silently on exactly that path.
+      try {
+        result = await withHeartbeat(
+          sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+          () => step.run(),
+        )
+      } finally {
+        if (step.spent !== undefined) turnSpend.total += step.spent.micros
+      }
       // ...and ahead of finishToolCall — a superseded worker must not be the one
       // recording this tool call's result as authoritative.
       await heartbeat(sql, claim)
       await finishToolCall(sql, claim.turnId, step.callId, result)
-      if (step.spent !== undefined) turnSpend.total += step.spent.micros
       await heartbeat(sql, claim)
       await recordSpend(sql, {
         userId: claim.userId, conversationId: claim.conversationId,
