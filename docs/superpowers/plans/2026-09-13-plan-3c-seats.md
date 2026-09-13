@@ -1062,7 +1062,7 @@ import { buildCountTokensRequest, buildRequest, callModel, estimateInputTokens, 
 import { costMicros, WEB_SEARCH_MICROS } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
-import { cutAtWords, maskUntrustedText, redactPrices } from '../sanitize.js'
+import { cutAtWords, maskControlChars, maskUntrustedText, redactPrices } from '../sanitize.js'
 
 const SYSTEM = readFileSync(new URL('./prompts/scout.md', import.meta.url), 'utf8')
 export const SCOUT_MAX_WORDS = 300
@@ -1111,12 +1111,12 @@ export async function researchDestination(
   if (result.kind === 'refused') return 'No brief: the scout declined this city. Plan from what you know, or ask her.'
   const text = result.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n').trim()
   if (text.length === 0) return 'No brief: the scout returned nothing. Plan from what you know, or ask her.'
-  const { text: cut, cut: wasCut } = cutAtWords(maskUntrustedText(redactPrices(text)), SCOUT_MAX_WORDS)
+  const { text: cut, cut: wasCut } = cutAtWords(maskControlChars(redactPrices(text)), SCOUT_MAX_WORDS)
   return wasCut ? `${cut}\n[brief cut at ${SCOUT_MAX_WORDS} words]` : cut
 }
 ```
 
-`maskUntrustedText` caps length at 128 today (`MAX_UNTRUSTED_TEXT_LEN`) — that is for ids and names. For the brief, mask control characters WITHOUT the cap: add an optional second parameter `maskUntrustedText(s, { cap?: number })` defaulting to the existing cap, and call it with `{ cap: Infinity }` here (and keep `sanitizeSourceId` unchanged). Add one test in `test/sanitize.test.ts` for the uncapped form.
+`maskUntrustedText` caps length at 128 and masks non-ASCII — that is for ids and supplier names. The brief is our own model's prose: use `maskControlChars` (added in Task 3's fix round: strips C0/C1 controls and U+2028/9 only, keeps Unicode letters, no cap) instead of `maskUntrustedText` in the line `cutAtWords(maskUntrustedText(redactPrices(text)), …)`. The scout test's `\n## Injected` assertion holds either way.
 
 `ContentBlock` in `src/engine.ts` must tolerate the two server-tool block types at runtime; `callModel` casts `raw.content` without validating block types, and the scout reads only `text` blocks, so no type change is needed. Add a comment in `scout.ts` saying so.
 
