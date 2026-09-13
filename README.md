@@ -406,13 +406,57 @@ SPEC section 5's `pricePersistence` half would strip a price past its window and
 tell the model to search again, and this branch judges a stale price at the
 freshness gate instead, so adding it would be a second definition of stale over
 a different input. The cost is that the model can quote her a price the gate
-will refuse a step later. And the fence's delimiter is a fixed string, which is
-a string an attacker can write; lesson 5.5 is where that is attacked properly.
-The planning desk now publishes `ask_user`, which the driver answers by ending
+will refuse a step later. The planning desk now publishes `ask_user`, which the driver answers by ending
 the turn on her question. Until lesson 5.3 `npm run trip` ran `turn()` and
 `toolLoop`, which have no such step, so on that one path `ask_user` came back to
 the model as an error result; that script runs the driver now and both paths
 park the turn on her question.
+
+From lesson 5.5 the fence carries a nonce. `<tool_result-<16 hex>` is minted per
+call, after the result comes back, so the string that closes the wrapper did not
+exist when the supplier wrote its payload. The escaping stays, because the two
+together mean an attacker has to beat both, and anything nonce-shaped is
+stripped out of the payload, which is the only way a nonce could be beaten
+without knowing it. The corpus in `test/injection-corpus.test.ts` runs the
+closing tag exactly, in mixed case, with whitespace inside the tag, nested,
+through the interpolated tool name, through a supplier's source id and through
+the notebook, and every case is a payload a real supplier could return.
+
+Two residuals are accepted here on purpose and are written down as decisions
+rather than left as oversights. A payload containing Unicode homoglyphs of the
+delimiter passes through, because it is not the delimiter and closes nothing; it
+reads like a closing tag to a person looking at a transcript, which is a fact
+about people rather than about the model. And an already-escaped payload arrives
+with `&lt;/tool_result&gt;` visible in it, because a supplier that escapes its
+own output is indistinguishable from an attacker who escaped theirs, and
+unescaping to make the text read better would create the hole.
+
+The agency has two exits and this lesson closed both. `sanitizeOutbound` runs on
+every agent message before `completeTurn` writes it, in `src/worker.ts` rather
+than inside the driver, so an agent a later module writes gets it without asking.
+It strips a URL to any host the cashier does not build links against, an image
+above all, because a markdown image is a request her browser makes with no tool
+call anywhere in it and every allowlist this course has built watches tool calls.
+And it refuses a message that asks her for a card, a document or a code, which
+is a blocklist and is the right shape only because the agency has no legitimate
+use for any of them: it never takes a payment, never holds a document and never
+verifies an identity.
+
+The browser's half is owed and is not here. A Content Security Policy with
+`img-src 'self'` would stop a remote image at the renderer even if the check
+above missed one, and a persistent line under the composer saying the agency
+never asks for payment is what makes the rule legible to her rather than only to
+us. `public/index.html` is a placeholder and there is no renderer in this
+repository, so both are named rather than built, and lesson 5.7's proposal card
+is built as a pure function for the same reason.
+
+Taint and fencing are separate properties and this lesson is where that becomes
+load bearing. `propose_itinerary` stands behind a `code` door and is not fenced,
+and its rejection sentence contains a supplier-derived total, which is precisely
+the sentence that would motivate raising a budget to fit. Provenance is derived
+from whether the transcript holds a `tool_result` at all, with no regard to the
+door, so the notebook write after that rejection is stamped `inferred` and the
+money gate holds.
 
 From lesson 4.6 there is a cashier. It refuses unless a stored proposal row for
 this conversation carries `decision = 'accept'` decided within thirty minutes;
@@ -469,6 +513,23 @@ first four are the module's own; the rest are what the whole-branch review found
 across all six lessons and decided was worth naming rather than fixing under a
 frozen tag. An owner is a lesson, a module, or a person, and "a person" means
 there is nothing to design: somebody has to type it.
+
+The browser's half of the outbound check does not exist. `sanitizeOutbound`
+(src/sanitize.ts, lesson 5.5) strips a remote image and a remote link from every
+agent message before it is written, and a Content Security Policy with
+`img-src 'self'` would stop one at the renderer even if the check missed it,
+which is the defence that does not depend on a regular expression. The
+persistent line under the composer saying the agency never asks for a payment is
+the other half, and it is what makes the solicitation rule legible to her rather
+than only to us. `public/index.html` is a placeholder and this repository has no
+renderer, so neither can be built here. Owner: whoever builds the renderer.
+
+Unicode homoglyphs of the fence delimiter, and an already-escaped payload, both
+pass through `escapeFence` unchanged. Neither is a breakout: a homoglyph is not
+the delimiter and closes nothing, and an already-escaped payload cannot close
+anything either, while unescaping it to make a transcript read better is exactly
+how the hole would be created. Both are accepted deliberately and are recorded
+in `fenceResult`'s own docstring as decisions. Owner: nobody.
 
 Nothing in production sets `decision`. `decideProposal` is written and tested,
 and its production caller is the accept button on a proposal card, which is

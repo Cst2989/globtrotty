@@ -18,7 +18,7 @@ import { emptyNotebook } from '../src/notebook.js'
 import {
   doorRunner, itemForModel, ledgerRunner, mockRunner, scoutRunner, scoutStayFrom,
 } from '../src/tools.js'
-import { fenceResult } from '../src/tools/validate.js'
+import { fenceResult, makeNonce } from '../src/tools/validate.js'
 import { SENTINELS } from '../scripts/sentinels.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { apiError } from './helpers/errors.js'
@@ -200,7 +200,7 @@ describeDb('a real brief, replayed', () => {
       // of its own record. This is an assertion about a REAL reply and not about
       // a reply we wrote, which is the whole reason this one fixture is recorded.
       expect(result!.brief).not.toMatch(/\d+[.,]?\d*\s*(EUR|USD|euros?|dollars?|€|\$)/i)
-      const fenced = fenceResult('research_destination', 'worker', result!.brief)
+      const fenced = fenceResult('research_destination', 'worker', result!.brief, makeNonce())
       expect(fenced).toContain('trust="untrusted"')
       expect(fenced).toContain('not instructions')
     })

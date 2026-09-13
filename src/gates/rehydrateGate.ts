@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type postgres from 'postgres'
 import { rehydrate } from '../repo/toolResults.js'
+import { sanitizeSourceId } from '../sanitize.js'
 import { itemTotal } from '../supplier/types.js'
 import { SLOT_KINDS } from './types.js'
 import type { ItemRef, RehydratedItem, Violation } from './types.js'
@@ -110,7 +111,17 @@ export async function rehydrateRefs(
   // Not deduplicated, and it does not need to be: the schema's `.refine` above
   // rejects a proposal that repeats a sourceId, and it is re-applied on every
   // call, so `safeRefs` cannot hold one twice.
-  const missing = safeRefs.filter((r) => !found.has(r.sourceId)).map((r) => r.sourceId)
+  //
+  // Sanitised on the way out (src/sanitize.ts, lesson 5.5). This is the ONE
+  // place on this branch where an id the model invented is quoted back into a
+  // sentence we wrote, and our sentences are not fenced, because they are ours.
+  // Every other id interpolated into prose the model reads (`checkCurrency`,
+  // `checkSlots` and `checkTotals` in src/gates/checks.ts, and the cashier's
+  // four refusals) was rehydrated out of `course.tool_results` first, so it is
+  // an id a supplier actually returned rather than one the model wrote here.
+  const missing = safeRefs
+    .filter((r) => !found.has(r.sourceId))
+    .map((r) => sanitizeSourceId(r.sourceId))
   if (missing.length > 0) {
     return {
       ok: false,

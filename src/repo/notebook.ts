@@ -1,6 +1,7 @@
 import type postgres from 'postgres'
 import { formatMoney, money } from '../money.js'
 import { applyRequirements, emptyNotebook, type Notebook, type Provenance } from '../notebook.js'
+import { escapeFence } from '../tools/validate.js'
 
 /**
  * `course.conversations.requirements` arrived in migration 0015 for this module,
@@ -142,7 +143,13 @@ export function renderNotebook(nb: Notebook): string {
       ? `${formatMoney(f.value as Parameters<typeof formatMoney>[0])} `
         + `${(f.value as { currency: string }).currency}`
       : JSON.stringify(f.value)
-    lines.push(`- ${key}: ${shown} (${f.source})`)
+    // The same `escapeFence` the fence uses (src/tools/validate.ts), and for the
+    // same reason. The notebook is OURS and is therefore not fenced, but it
+    // rides in the SAME request as a fenced tool result, and a value that closes
+    // a fence closes the fence printed above it. The value is a string the model
+    // wrote through `update_requirements` after reading a listing, so "ours" is
+    // a fact about the column and not about who chose the characters.
+    lines.push(`- ${key}: ${escapeFence(shown)} (${f.source})`)
   }
   return lines.length === 0 ? '' : `## The notebook, as recorded\n\n${lines.join('\n')}`
 }

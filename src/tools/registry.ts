@@ -13,7 +13,7 @@ export type Desk = 'front' | 'planning'
  *
  * The article this course is built from calls this field `behind`, as in "what
  * stands behind this door". It is `door` here for one reason: `fenceResult(name,
- * door, raw)` reads correctly and `behind: 'code'` reads as a preposition with
+ * door, raw, nonce)` reads correctly and `behind: 'code'` reads as a preposition with
  * nothing after it.
  */
 export type ToolDoor = 'code' | 'worker' | 'api'

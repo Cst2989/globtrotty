@@ -16,7 +16,7 @@ import {
   type FlightSearch, type HotelSearch, type SearchParams, type SupplierItem, type SupplierPair,
 } from './supplier/types.js'
 import { FlightInput, HotelInput, type Desk } from './tools/registry.js'
-import { fenceResult, trimForContext, validateToolCall } from './tools/validate.js'
+import { fenceResult, makeNonce, trimForContext, validateToolCall } from './tools/validate.js'
 
 /** The parsed shapes `flightSearchFrom` and `hotelSearchFrom` take, from the one schema that defines them. */
 export type FlightToolInput = z.infer<typeof FlightInput>
@@ -345,8 +345,9 @@ export function corpusRunner(sql: postgres.Sql, claim: Claim, inner: SupplierRun
  *
  * The fence is applied HERE rather than inside the ledger, so what
  * `finishToolCall` stores is the raw result and every replay is fenced afresh.
- * That matters from lesson 5.5, when the delimiter carries a per-call nonce: a
- * stored fence would replay yesterday's nonce.
+ * From lesson 5.5 that is load bearing rather than tidy: the delimiter carries a
+ * per-call nonce, and a fence stored in `course.tool_calls` would replay a nonce
+ * from a previous invocation, which is a nonce the model has already read.
  *
  * A rejection is returned as an error result, not thrown, so the model gets one
  * round trip to correct itself. This is the same door a gate rejection uses
@@ -361,8 +362,12 @@ export function doorRunner(desk: Desk, inner: ToolRunner): ToolRunner {
     // object would be reading a shape nothing checked, which is how a schema
     // becomes decoration.
     const outcome = await inner(name, check.input, callId, signal)
+    // The nonce is minted HERE, after the result came back, so the delimiter did
+    // not exist when the supplier wrote its payload.
     return {
-      content: fenceResult(check.def.name, check.def.door, trimForContext(outcome.content)),
+      content: fenceResult(
+        check.def.name, check.def.door, trimForContext(outcome.content), makeNonce(),
+      ),
       isError: outcome.isError,
     }
   }

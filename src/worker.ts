@@ -17,6 +17,7 @@ import {
   FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim, type TurnCloser,
 } from './repo/turns.js'
 import { withRetry, RetryBudgetExceededError } from './retry.js'
+import { sanitizeOutbound } from './sanitize.js'
 
 export type AgentContext = {
   state: TurnState
@@ -607,11 +608,23 @@ async function loop(
       // throws here, before any money is spent.
       await heartbeat(sql, claim)
       await spend(deps, claim, turnSpend, step)
+      // The last thing between the model and her screen (src/sanitize.ts, lesson
+      // 5.5). Applied here rather than inside the driver so that EVERY agent,
+      // including one a later module writes, goes through it: a check the agent
+      // applies to itself is a check the next agent forgets. `ask_user`'s
+      // questions arrive here too, because the driver returns them as a
+      // `message` step rather than as a kind of their own.
+      const outbound = step.text ? sanitizeOutbound(step.text) : { ok: true as const, text: '' }
+      if (!outbound.ok) {
+        console.error(`turn ${claim.turnId}: outbound message rewritten`, outbound.reasons)
+      }
       await completeTurn(sql, claim, {
         // Null, not an empty string, on a blank answer: completeTurn writes a
         // row for anything that is not null, and an empty bubble in her
-        // thread reads worse than nothing.
-        state, agentMessage: step.text || null, parked: true, spendMicros: turnSpend.total,
+        // thread reads worse than nothing. A message the check emptied takes
+        // the same road, so a reply that was nothing but a stripped link is no
+        // bubble rather than an empty one.
+        state, agentMessage: outbound.text || null, parked: true, spendMicros: turnSpend.total,
       })
       return
     }

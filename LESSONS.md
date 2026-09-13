@@ -35,6 +35,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-2 | Tools are doors | npm run migrate, then npm test (test/registry.test.ts, test/doors.test.ts, test/notebook-repo.test.ts) |
 | lesson-5-3 | The front desk and the planning desk | npm run migrate, then npm test (test/desk-routing.test.ts, test/sentinels.test.ts, test/desks.test.ts) |
 | lesson-5-4 | Staff | npm run migrate, then npm test (test/scout.test.ts) |
+| lesson-5-5 | Fence text you did not write | npm test (test/injection-corpus.test.ts, test/outbound.test.ts) |
 
 ## How this branch was built
 
@@ -168,6 +169,20 @@ call charges through exactly one of those paths, never both, and
 claimed `recordSpend` was the only writer, and it was true when it was written,
 which is what makes this class of defect so hard to see: nobody wrote a false
 comment, somebody wrote a comment that a later lesson made false.
+
+**An attack corpus is written before the defence, and the report says which
+cases already passed.** Six of the nine cases in `test/injection-corpus.test.ts`
+were green against the fixed delimiter lesson 5.2 shipped, because the escaping
+was already right. Writing that down is the difference between "we added a nonce
+and the tests pass" and knowing that the nonce is defence in depth rather than a
+repair, which is the only version of the claim worth putting in a lesson.
+
+**A blocklist and an allowlist, chosen per surface rather than by preference.**
+The URL check is an allowlist because the agency emits exactly one kind of link
+and everything else is wrong by construction. The solicitation check is a
+blocklist because the phrases it catches have no legitimate instance here: the
+agency never takes a payment, holds a document or verifies an identity, so
+there is no true positive to weigh against a false one.
 
 ## Hand-offs
 

@@ -15,6 +15,7 @@ import {
 import {
   assertSupplierBudget, countSupplierCalls, SCOUT_MAX_CITIES, supplierCallCost,
 } from '../src/tools/supplierBudget.js'
+import { fenceResult, makeNonce } from '../src/tools/validate.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
 const USER = randomUUID()
@@ -306,5 +307,29 @@ describe('the per-turn supplier budget, with nothing to read it from', () => {
   it('throws rather than reporting zero when it cannot read', async () => {
     // A budget reader that fails open is not a budget.
     await expect(countSupplierCalls(brokenSql(), 'any')).rejects.toThrow()
+  })
+})
+
+describe('a trusted door that carries untrusted money', () => {
+  it('does not fence a code-door rejection, and still taints what follows it', () => {
+    // Two independent properties, and conflating them opens a hole exactly where
+    // they differ. Fencing is about delimiter injection: whether the model can
+    // tell where our words end. Taint is about provenance: whether what the model
+    // is about to write down came from her or from something we read. A rule that
+    // narrowed the taint to untrusted DOORS would stamp the write after this
+    // rejection `'user'` and let the model raise her budget to fit the total it
+    // just read.
+    const rejection = 'The proposal was rejected. Fix exactly these and propose again:\n'
+      + '- budget (hotel-0-4471): this trip totals EUR 1,742, over your EUR 1,500 budget'
+    expect(fenceResult('propose_itinerary', 'code', rejection, makeNonce())).toBe(rejection)
+
+    const after = provenanceFor({ state: { step: 2, messages: [
+      { role: 'user', content: [{ type: 'text', text: 'Portugal, 1500 euros' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'propose_itinerary', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: rejection }] },
+    ] } } as never)
+    // Inferred, on the strength of the tool_result block alone, with no regard
+    // to which door produced it. That is what makes the money gate hold here.
+    expect(after).toBe('inferred')
   })
 })
