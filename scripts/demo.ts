@@ -33,6 +33,13 @@ import { makeDriver } from '../src/agents/driver.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import type { Transport } from '../src/model/client.js'
 import { LogNotifier } from '../src/notify.js'
+import { runProposalPath } from '../src/agents/proposalPath.js'
+import { decideProposal, loadProposal } from '../src/repo/proposals.js'
+import { handOff } from '../src/tools/cashier.js'
+import { recordResults } from '../src/repo/toolResults.js'
+import { emptyNotebook, type Notebook } from '../src/notebook.js'
+import { formatMoney, money } from '../src/money.js'
+import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
 
 const DEMO_USER = '00000000-0000-4000-8000-00000000dec0'
 
@@ -108,6 +115,112 @@ async function convRow(id: string) {
 async function cleanup() {
   await sql`delete from conversations where user_id = ${DEMO_USER}`
   await sql`delete from daily_usage where user_id = ${DEMO_USER}`
+  // model_calls carries no FK to conversations (retention outlives a deleted
+  // conversation on purpose) — the cashier scenario is the first one in this
+  // file to write a row there (via the reviewer), so it needs its own delete.
+  await sql`delete from model_calls where user_id = ${DEMO_USER}`
+}
+
+/**
+ * The cashier: a proposal accepted, handed off once, replayed idempotently,
+ * and a second proposal whose flight re-quoted past tolerance and was
+ * refused. Runs without `LIVE_MODEL` — the reviewer's approving verdict comes
+ * from a transport stub, exactly as `test/cashier.test.ts`'s `seed` helper
+ * builds one, never from the real API.
+ */
+async function cashierScenario() {
+  const approve = () => ({
+    content: [{ type: 'text', text: JSON.stringify({ approved: true, issues: [] }) }],
+    stop_reason: 'end_turn', model: 'claude-opus-5', _request_id: 'demo-cashier',
+    usage: { input_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 20 },
+  })
+  const withBudget = (nb: Notebook): Notebook => ({
+    ...nb, budget: { value: money(10_000_00n, 'EUR'), source: 'user', at: new Date().toISOString() },
+  })
+
+  /** Seeds one conversation/turn, searches both suppliers, and proposes. */
+  async function propose(n: string, flights: MockSupplier, hotels: MockSupplier) {
+    const [conv] = await sql`insert into conversations (user_id) values (${DEMO_USER}) returning id`
+    const conversationId = conv!.id as string
+    const [t] = await sql`
+      insert into turns (conversation_id, user_id, idempotency_key, status)
+      values (${conversationId}, ${DEMO_USER}, ${'cashier-' + n}, 'running') returning id`
+    const turnId = t!.id as string
+    const ctx = { conversationId, userId: DEMO_USER, turnId }
+
+    const fp: FlightSearch = { kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-10-12',
+      returnDate: '2026-10-19', flexDays: 0, adults: 2, children: 0, infants: 0, cabinClass: 'Economy',
+      currency: 'EUR', maxStops: null, allowSelfTransfer: false }
+    const hp: HotelSearch = { kind: 'hotel', query: `Faro beach demo ${n}`, checkIn: '2026-10-12',
+      checkOut: '2026-10-19', adults: 2, currency: 'EUR' }
+    const fi = await flights.search(fp)
+    const hi = await hotels.search(hp)
+    await recordResults(sql, { conversationId, userId: DEMO_USER, turnId, params: fp, items: fi })
+    await recordResults(sql, { conversationId, userId: DEMO_USER, turnId, params: hp, items: hi })
+
+    const path = { sql, transport: { create: async () => approve() }, limits: DEFAULT_LIMITS, now: () => Date.now() }
+    const refs = [
+      { sourceId: fi[0]!.sourceId, quantity: 1, slot: 'outbound' },
+      { sourceId: hi[0]!.sourceId, quantity: 1, slot: 'stay' },
+    ]
+    const outcome = await runProposalPath(path, ctx, { micros: 0n },
+      { notebook: withBudget(emptyNotebook()), round: 0, parentProposalId: null, refs })
+    const [p] = await sql`
+      select id from proposals where conversation_id = ${conversationId} order by created_at desc limit 1`
+    if (!p) throw new Error(`no proposal was saved — office said: ${outcome}`)
+    return { ...ctx, proposalId: p.id as string, deps: { sql, flights, hotels, now: () => Date.now() } }
+  }
+
+  head('The cashier hands off',
+       'accept, tracked links minted once, a replay that re-quotes nothing, and a price that '
+       + 'moved past tolerance gets refused')
+
+  step('proposal A: searching both suppliers, proposing, the stub reviewer approves...')
+  const flightsA = new MockSupplier({ kind: 'flight' })
+  const hotelsA = new MockSupplier({ kind: 'hotel' })
+  const a = await propose('a', flightsA, hotelsA)
+  const proposalA = await loadProposal(sql, a.conversationId, a.proposalId)
+  ok(`proposal row: id=${a.proposalId.slice(0, 8)}  gate_outcome=${proposalA!.gateOutcome}  `
+     + `total=${formatMoney(money(proposalA!.totalMinor, proposalA!.currency))}  decision=${proposalA!.decision ?? 'none'}`)
+
+  await decideProposal(sql, { proposalId: a.proposalId, conversationId: a.conversationId, decision: 'accept' })
+  step('she accepted — calling the cashier...')
+
+  // Wraps the mock's own quote() so a replay's call count is visible without
+  // vitest's vi.spyOn, which is not available outside a test file.
+  let quoteCalls = 0
+  const origFlightQuote = flightsA.quote.bind(flightsA)
+  flightsA.quote = async (id, p) => { quoteCalls++; return origFlightQuote(id, p) }
+  const origHotelQuote = hotelsA.quote.bind(hotelsA)
+  hotelsA.quote = async (id, p) => { quoteCalls++; return origHotelQuote(id, p) }
+
+  const firstOut = await handOff(a.deps, a, a.proposalId)
+  const links = await sql`
+    select item_id, supplier, url, tracking_ref, quoted_minor, currency
+      from link_clicks where proposal_id = ${a.proposalId} order by item_id`
+  ok(`link_clicks minted: ${links.length} row(s), quote() called ${quoteCalls} time(s)`)
+  for (const l of links) {
+    ok(`  ${l.item_id as string} (${l.supplier as string}): ${l.url as string}`)
+  }
+
+  step('calling the cashier again on the same proposal (replay)...')
+  const secondOut = await handOff(a.deps, a, a.proposalId)
+  if (secondOut === firstOut && quoteCalls === links.length) {
+    console.log(`   ${c.green('✓')} ${c.bold(c.green(
+      `replay returned the identical text and called quote() zero more times (still ${quoteCalls})`))}`)
+  } else {
+    console.log(`   ${c.red('✗')} ${c.red('replay re-quoted or changed the text — bug')}`)
+  }
+
+  step('proposal B: a flight whose re-quote drifted past the 0.5% tolerance...')
+  const flightsB = new MockSupplier({ kind: 'flight', quoteDriftMinor: 9_000n })
+  const hotelsB = new MockSupplier({ kind: 'hotel' })
+  const b = await propose('b', flightsB, hotelsB)
+  await decideProposal(sql, { proposalId: b.proposalId, conversationId: b.conversationId, decision: 'accept' })
+  const refusal = await handOff(b.deps, b, b.proposalId)
+  ok(`refusal: ${refusal}`)
+  const blockedLinks = await sql`select 1 from link_clicks where proposal_id = ${b.proposalId}`
+  ok(`link_clicks for the moved-price proposal: ${blockedLinks.length} (none minted)`)
 }
 
 /**
@@ -340,6 +453,9 @@ async function main() {
   // spent" from "no answer" — see readSpendFailClosed's doc comment.
   note('the conversation read fails closed: if the database cannot confirm that')
   note('number the request is denied, and the daily and global reads ride on it.')
+
+  // ─────────────────────────────────────────────────────────────────────────
+  await cashierScenario()
 
   // ─────────────────────────────────────────────────────────────────────────
   head('The live proof',
