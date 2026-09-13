@@ -198,8 +198,11 @@ export function gradeTrajectory(trace: Trace, expected: TrajectoryExpectation): 
  * reason: with no figure stated, nothing was exceeded and nothing was cleared.
  *
  * Nothing in this repository calls it at lesson 6.1, and test/grade.test.ts is
- * its only exercise. Lesson 6.2 turns `within_budget` from a null into a
- * verdict and is where the caller arrives.
+ * its only exercise. Nothing in this repository calls it. Lesson 6.2 turned `within_budget`
+ * into a verdict through `replayGates` (src/evals/replay.ts), which reads
+ * `checkBudget`'s own violations rather than re-deciding the comparison
+ * here. This stays as the honest three-valued comparison a later caller
+ * can reach for, and test/grade.test.ts is its only exercise.
  */
 export function overBudget(total: Money, budget: Money | null): boolean | null {
   if (!budget || total.currency !== budget.currency) return null
