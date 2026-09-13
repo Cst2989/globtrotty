@@ -74,17 +74,31 @@ export function maskControlChars(s: string): string {
 export const PRICE_REDACTED = '[price removed]'
 
 // A number with optional thousands separators and decimals, in either the
-// 1,200.50 or the 1.200,50 convention.
-const NUM = String.raw`\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+// 1,200.50 or the 1.200,50 convention, and an optional bare "k" (thousands)
+// suffix directly against the digits ("1.2k", never "1.2 k").
+const NUM_CORE = String.raw`\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+const NUM = String.raw`(?:${NUM_CORE})[kK]?`
+// A range between two NUMs, hyphen/en-dash or "to" between them, spaces
+// optional on either side: "200-400", "80\u2013120", "80 to 120".
+const RANGE = String.raw`(?:${NUM})(?:\s?[-\u2013]\s?|\s?to\s?)(?:${NUM})`
+// A priceable value is either a single number or a range of them \u2014 every
+// symbol/ISO/postfix/spelled-currency pattern below accepts either shape.
+const VAL = String.raw`(?:${RANGE}|${NUM})`
 const SYM = String.raw`[\u20ac$\u00a3\u00a5]`
 const ISO = String.raw`(?:EUR|USD|GBP|CHF|JPY|CAD|AUD|SEK|NOK|DKK|PLN|CZK|HUF|RON)`
 const UNIT = String.raw`(?:per\s+(?:night|person|adult|day|week|room)|pp|p\.p\.|a\s+night|each)`
+// Spelled-out currency words a scout might plausibly write instead of a
+// symbol or an ISO code. Case-insensitive (see the 'gi' flag below) \u2014 unlike
+// the ISO codes, which are only ever written uppercase.
+const CURRENCY_WORD = String.raw`(?:euros?|dollars?|pounds?|francs?|yen|kronor?|zloty)`
 
 const PRICE_PATTERNS: RegExp[] = [
-  new RegExp(String.raw`${SYM}\s?(?:${NUM})`, 'g'), // \u20ac89, $1,200
-  new RegExp(String.raw`\b${ISO}\s?(?:${NUM})\b`, 'g'), // EUR 45, USD1200
-  new RegExp(String.raw`\b(?:${NUM})\s?${ISO}\b`, 'g'), // 45 EUR
-  new RegExp(String.raw`\b(?:${NUM})(?=\s?${UNIT}\b)`, 'g'), // 120 per night, 30 pp
+  new RegExp(String.raw`${SYM}\s?(?:${VAL})`, 'g'), // \u20ac89, $1,200, $200-400, \u20ac80\u2013120, \u20ac1.2k
+  new RegExp(String.raw`\b${ISO}\s?(?:${VAL})\b`, 'g'), // EUR 45, USD1200, USD 1.2k
+  new RegExp(String.raw`\b(?:${VAL})\s?${ISO}\b`, 'g'), // 45 EUR
+  new RegExp(String.raw`\b(?:${VAL})(?=\s?${UNIT}\b)`, 'g'), // 120 per night, 30 pp
+  new RegExp(String.raw`\b(?:${VAL})\s?${SYM}`, 'g'), // 89\u20ac, 89 \u20ac
+  new RegExp(String.raw`\b(?:${VAL})\s?${CURRENCY_WORD}\b`, 'gi'), // 89 euros, 50 dollars, 12 pounds
 ]
 
 /**

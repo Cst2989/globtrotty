@@ -23,6 +23,15 @@ describe('redactPrices', () => {
     ['costs 30 pp', `costs ${PRICE_REDACTED} pp`],
     ['1.200,00 EUR', `${PRICE_REDACTED}`],
     ['USD1200', `${PRICE_REDACTED}`],
+    ['rooms from 89€ a night', `rooms from ${PRICE_REDACTED} a night`],
+    ['89 €', `${PRICE_REDACTED}`],
+    ['flights $200-400 return', `flights ${PRICE_REDACTED} return`],
+    ['€80–120 per night', `${PRICE_REDACTED} per night`],
+    ['about 89 euros', `about ${PRICE_REDACTED}`],
+    ['50 dollars each', `${PRICE_REDACTED} each`],
+    ['12 pounds pp', `${PRICE_REDACTED} pp`],
+    ['from USD 1.2k', `from ${PRICE_REDACTED}`],
+    ['€1.2k', `${PRICE_REDACTED}`],
   ])('redacts %j', (input, expected) => expect(redactPrices(input)).toBe(expected))
   it.each([
     'Terminal 2 is 12 minutes by metro',
@@ -30,6 +39,10 @@ describe('redactPrices', () => {
     'a 3-night minimum in August',
     'bus 27 runs every 20 minutes',
     'population 500,000',
+    'a 2-hour drive',
+    'gate 12-14',
+    'the 1990s',
+    'bus 27',
   ])('leaves %j alone', (s) => expect(redactPrices(s)).toBe(s))
   it('never touches the fence delimiters or the untrusted marker', () => {
     const s = '<tool_result name="x" trust="untrusted">€5</tool_result>'
