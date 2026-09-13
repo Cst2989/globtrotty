@@ -70,3 +70,42 @@ export function sanitizeSourceId(id: string): string {
 export function maskControlChars(s: string): string {
   return s.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, '?')
 }
+
+export const PRICE_REDACTED = '[price removed]'
+
+// A number with optional thousands separators and decimals, in either the
+// 1,200.50 or the 1.200,50 convention.
+const NUM = String.raw`\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?`
+const SYM = String.raw`[\u20ac$\u00a3\u00a5]`
+const ISO = String.raw`(?:EUR|USD|GBP|CHF|JPY|CAD|AUD|SEK|NOK|DKK|PLN|CZK|HUF|RON)`
+const UNIT = String.raw`(?:per\s+(?:night|person|adult|day|week|room)|pp|p\.p\.|a\s+night|each)`
+
+const PRICE_PATTERNS: RegExp[] = [
+  new RegExp(String.raw`${SYM}\s?(?:${NUM})`, 'g'), // \u20ac89, $1,200
+  new RegExp(String.raw`\b${ISO}\s?(?:${NUM})\b`, 'g'), // EUR 45, USD1200
+  new RegExp(String.raw`\b(?:${NUM})\s?${ISO}\b`, 'g'), // 45 EUR
+  new RegExp(String.raw`\b(?:${NUM})(?=\s?${UNIT}\b)`, 'g'), // 120 per night, 30 pp
+]
+
+/**
+ * Parent spec section 9: "a deterministic post-filter redacts currency-shaped
+ * tokens". Used on scout briefs now (section 4: "words never prices") and on
+ * the streamed prose channel in plan 4. Deliberately over-eager: a redacted
+ * "population 500,000 EUR" is a harmless oddity; a surviving "from \u20ac89" is the
+ * one failure this product must not have. Bare numbers without a currency or a
+ * per-unit word are left alone \u2014 durations, bus numbers, centuries.
+ */
+export function redactPrices(text: string): string {
+  let out = text
+  for (const re of PRICE_PATTERNS) out = out.replace(re, PRICE_REDACTED)
+  return out
+}
+
+/** Cuts to at most `maxWords`, preferring the last sentence boundary under the cap. */
+export function cutAtWords(text: string, maxWords: number): { text: string; cut: boolean } {
+  const words = text.split(/\s+/).filter((w) => w.length > 0)
+  if (words.length <= maxWords) return { text, cut: false }
+  const head = words.slice(0, maxWords).join(' ')
+  const lastStop = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.endsWith('.') ? head.length - 1 : -1)
+  return { text: lastStop > 0 ? head.slice(0, lastStop + 1) : head, cut: true }
+}
