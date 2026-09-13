@@ -92,6 +92,14 @@ export function sanitizeSourceId(id: string): string {
  * check with no false-positive case is a check whose false positives are found
  * in production, by a traveller who lost an itinerary.
  *
+ * What the shape lets past, because a blocklist should say so itself: a request
+ * that names no possessive goes through, "Please reply with the card number" and
+ * "send it to the address below" among them. That is the price of the negatives
+ * above, and it is the right way round for a check whose job is to be invisible
+ * on every message that is fine. The structural defence behind it is that the
+ * agency has no payment surface at all, so an answer she sent would reach
+ * nothing.
+ *
  * Declared GLOBAL, and this module only ever calls `replace` with them. A
  * `RegExp` carrying `g` keeps `lastIndex` between calls, so `pattern.test(...)`
  * on one of these would answer for the second call what it found on the first.
@@ -142,33 +150,6 @@ export const SOLICITATION_PATTERNS: readonly { name: string; pattern: RegExp }[]
  */
 const REMOVED = '[removed: Globetrotty never asks for a card, a document, a code or a payment in a message]'
 
-/**
- * The links the cashier builds. Nothing else may appear as a URL.
- *
- * DERIVED from `BOOKING_LINK_PREFIXES` (src/cashier.ts) and never written out
- * again here. The agency emits exactly one kind of link, built server side by
- * the cashier from a fixed template, and that file is where a template is
- * decided. A second list beside it would be a second definition of a
- * money-adjacent rule, which is the duplication `trimForContext` refuses one
- * file over. It also diverges in exactly the way this project cannot see: a
- * hand-written list would have carried `www.booking.com`, which this branch
- * never builds a link for, and would have missed `example.invalid`, which is the
- * host every mock hand-off emits, so `npm run demo` and every mock-supplier test
- * would have had their booking links stripped by the check that exists to
- * protect them.
- *
- * A PREFIX and not a host, which is the correction this fix round made. The host
- * map has `www.google.com` on it, because the searchapi adapter's hotels are
- * booked on one Google entity page, and a host comparison therefore said `ok` to
- * `https://www.google.com/s2/favicons?d=budget-1500-Portugal-toddler`, which is
- * an image with her notebook in the query string, and to
- * `https://www.google.com/url?q=https%3A%2F%2Fattacker.example%2F%3Fd%3D...`,
- * which is an open redirect that lands her on the attacker with the payload
- * attached. Both are the exfiltration this file opens by describing, and both
- * passed. The cashier's own justification was always about the whole link, "a
- * fixed template against a known host", and the check now compares what the
- * justification claims.
- */
 export type OutboundVerdict = { ok: true; text: string } | { ok: false; text: string; reasons: string[] }
 
 /**
@@ -235,6 +216,12 @@ export function sanitizeOutbound(text: string): OutboundVerdict {
 
 /**
  * Is this a URL the cashier built.
+ *
+ * IMPORTED from `src/cashier.ts` and never written out again here, which is the
+ * same refusal `trimForContext` makes one file over: a second list beside the
+ * templates would be a second definition of a money-adjacent rule. The list is
+ * of PREFIXES rather than hosts, and the reason is in the docstring on
+ * `BOOKING_LINK_PREFIXES` where the derivation lives.
  *
  * Compared on the PARSED href rather than on the raw string, so the prefix
  * cannot be faked by the shapes a bare `startsWith` falls for:

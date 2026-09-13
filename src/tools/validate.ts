@@ -94,10 +94,10 @@ export function makeNonce(): string {
  * exact form `-<16 hex>>`, where the neighbours are not hex.
  *
  * The residual, stated rather than left to be discovered: `makeNonce` can mint
- * an all-digit nonce, once in about forty-three thousand calls, and a payload
- * that guessed that value would not be redacted. It would still have to have
- * guessed all sixteen characters to close anything, which is the 2^-64 this
- * function never claimed to improve on.
+ * an all-digit nonce, which is `(10/16)^16` and so happens about once in every
+ * 1,845 calls, and a payload that guessed that value would not be redacted. It
+ * would still have to have guessed all sixteen characters to close anything,
+ * which is the 2^-64 this function never claimed to improve on.
  */
 const NONCE_SHAPED = /\b(?=[0-9a-f]{16}\b)[0-9a-f]*[a-f][0-9a-f]*\b/gi
 

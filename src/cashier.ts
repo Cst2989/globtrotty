@@ -75,9 +75,21 @@ const TEMPLATES: Record<string, (itemId: string, trackingRef: string) => string>
  *
  * DERIVED and never written out again, for the reason the host map gives: a
  * second copy of a money-adjacent rule diverges silently, and here it would
- * diverge the moment a template's path changed. A template whose id does not
- * come first would produce a prefix that is not a prefix of the finished URL, so
- * that case throws at module load rather than shipping a rule nobody checked.
+ * diverge the moment a template's path changed. It would also diverge in the way
+ * this project cannot see: a list written from memory would have carried
+ * `www.booking.com`, which this branch never builds a link for, and would have
+ * missed `example.invalid`, which is the host every mock hand-off emits, so
+ * `npm run demo` and every mock-supplier test would have had their booking links
+ * stripped by the check that exists to protect them.
+ *
+ * What the cut does and does not guarantee, measured rather than assumed. The
+ * probe goes in as BOTH arguments, so `indexOf` finds whichever of the two is
+ * interpolated first and the slice is always a genuine prefix of the finished
+ * URL. A template that put the tracking ref before the item id would therefore
+ * derive a SHORTER prefix and ship it silently rather than throwing: still host
+ * and path bound, still nothing an attacker can move, but looser than the
+ * template it came from. The throw below fires on one case only, a template that
+ * interpolates neither value, where there is no prefix to find at all.
  */
 const LINK_PROBE = 'LINKPREFIXPROBE'
 export const BOOKING_LINK_PREFIXES: readonly string[] =

@@ -548,6 +548,20 @@ the other half, and it is what makes the solicitation rule legible to her rather
 than only to us. `public/index.html` is a placeholder and this repository has no
 renderer, so neither can be built here. Owner: whoever builds the renderer.
 
+The outbound URL check admits a link the cashier COULD have built and not only
+one it did. It compares the prefix of each of the cashier's templates, so a model
+an untrusted listing has talked into it can still write
+`https://www.google.com/travel/hotels/entity/x?ap=<her notebook>`, or the same
+tail on the kiwi and mock prefixes. That is a privacy leak to a counterparty this
+agency already transacts with rather than an attacker channel: there is no
+attacker-controlled host and no redirect under any of the prefixes, so the data
+lands in a supplier's own request log rather than on a server somebody hostile
+reads, which is categorically different from the "an image pointing anywhere,
+with no tool call in it" path lesson 5.5 closes. The complete answer is equality
+against the links actually emitted for the turn, which changes
+`sanitizeOutbound`'s signature and has nothing to compare against on the
+`ask_user` path, since that path emits no links. Owner: the whole-branch review.
+
 Unicode homoglyphs of the fence delimiter, and an already-escaped payload, both
 pass through `escapeFence` unchanged. Neither is a breakout: a homoglyph is not
 the delimiter and closes nothing, and an already-escaped payload cannot close
