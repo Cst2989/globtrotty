@@ -19,6 +19,7 @@ import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { runProposalPath } from './proposalPath.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
+import { handOff } from '../tools/cashier.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
@@ -466,6 +467,10 @@ async function execute(
       if (!built.ok) return `Revision refused: ${built.reason}`
       const round = await countPriorGateRuns(sql, ctx.turnId, callId)
       return runProposalPath(deps, ctx, spent, { refs: built.refs, notebook, round, parentProposalId: built.parentProposalId })
+    }
+    case 'hand_off_to_booking': {
+      const { proposalId } = input as { proposalId: string }
+      return handOff({ sql, flights: deps.flights, hotels: deps.hotels, now: deps.now }, ctx, proposalId)
     }
     default:
       // Unreachable: validateToolCall already refused anything not in

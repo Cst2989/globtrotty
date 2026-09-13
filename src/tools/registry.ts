@@ -58,6 +58,9 @@ export const ReviseComponent = z.strictObject({
   ]),
 })
 
+/** Takes the proposal id only — everything else (price, url, tracking ref) is server-built. */
+export const HandOff = z.strictObject({ proposalId: z.uuid() })
+
 export const TOOLS: Record<string, ToolDef> = {
   update_requirements: { name: 'update_requirements', door: 'code', schema: UpdateRequirements,
     description: 'Record what she has told you into the notebook. Never invent a value she did not state.' },
@@ -71,6 +74,8 @@ export const TOOLS: Record<string, ToolDef> = {
     description: 'Propose an itinerary as REFERENCES to search results: {sourceId, quantity, slot}. Never send prices — they are rehydrated server-side and yours are discarded.' },
   revise_component: { name: 'revise_component', door: 'code', schema: ReviseComponent,
     description: 'Change ONE component of a saved proposal by proposal_id: swap the item in a slot for another search-result id, or shift every date by N days (only works if you have already searched the shifted dates). Runs the full gates and reviewer again and saves a new proposal.' },
+  hand_off_to_booking: { name: 'hand_off_to_booking', door: 'code', schema: HandOff,
+    description: 'After she has ACCEPTED a proposal in chat, hand her tracked booking links. Takes the proposal_id only. Refuses if she has not accepted, or accepted more than 30 minutes ago.' },
 }
 
 /**
@@ -81,7 +86,7 @@ export const TOOLS: Record<string, ToolDef> = {
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
   planning: ['update_requirements', 'ask_user', 'explore_flights', 'explore_hotels',
-             'propose_itinerary', 'revise_component'],
+             'propose_itinerary', 'revise_component', 'hand_off_to_booking'],
 }
 
 /**
