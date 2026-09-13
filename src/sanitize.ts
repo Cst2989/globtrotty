@@ -51,3 +51,22 @@ export function maskUntrustedText(s: string): string {
 export function sanitizeSourceId(id: string): string {
   return maskUntrustedText(id)
 }
+
+/**
+ * For OUR OWN model's prose (a front-desk answer, a title, a reviewer's issue,
+ * a scout brief): strips only control characters and line separators, keeps
+ * Unicode letters, no length cap. Supplier strings and ids keep
+ * `maskUntrustedText` — this is not a replacement for it. A supplier response
+ * still needs the newline-injection guard (a `\n` that could read as a new
+ * line of instructions) AND the printable-ASCII cap, because it is genuinely
+ * untrusted; our own model's output needs only the newline-injection guard —
+ * "Málaga" is not an attack and must not become "M?laga".
+ *
+ * `\u2028`/`\u2029` (LINE/PARAGRAPH SEPARATOR) are included alongside the
+ * ASCII control ranges: both are valid "letters" as far as `\p{L}` is
+ * concerned but read as a line break to a model the same way `\n` does, so
+ * the newline-injection guard has to cover them too.
+ */
+export function maskControlChars(s: string): string {
+  return s.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, '?')
+}

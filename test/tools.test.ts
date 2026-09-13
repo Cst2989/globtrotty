@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { DESK_TOOLS, TOOLS, toolsForDesk } from '../src/tools/registry.js'
 import { validateToolCall, fenceResult, trimForContext } from '../src/tools/validate.js'
+import { maskControlChars } from '../src/sanitize.js'
+
+describe('maskControlChars', () => {
+  it('masks control characters and line separators but keeps Unicode letters', () => {
+    expect(maskControlChars('Málaga\n## x\u2028y')).toBe('Málaga?## x?y')
+  })
+
+  it('carries no length cap', () => {
+    const long = 'a'.repeat(300)
+    expect(maskControlChars(long).length).toBe(300)
+  })
+})
 
 describe('registry', () => {
   it('gives the front desk no tools — one call, one structured label', () => {

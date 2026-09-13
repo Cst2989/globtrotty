@@ -11,7 +11,7 @@ import { costMicros } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
 import { recordFrontLabel, routeToPlanning } from '../repo/conversations.js'
-import { maskUntrustedText } from '../sanitize.js'
+import { maskControlChars } from '../sanitize.js'
 
 const SYSTEM = readFileSync(new URL('./prompts/front_desk.md', import.meta.url), 'utf8')
 
@@ -23,13 +23,18 @@ const Verdict = z.strictObject({
   title: z.string().nullable(),
 })
 
-/** Hand-written: the API rejects zod's length keywords. */
+/**
+ * Hand-written: the API rejects zod's length keywords. Nullable fields are
+ * `anyOf: [{type: 'string'}, {type: 'null'}]`, not `type: ['string', 'null']`
+ * — the array-of-types shorthand is outside the documented structured-output
+ * subset.
+ */
 export const FRONT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
     label: { type: 'string', enum: ['new_trip', 'faq', 'unclear'] },
-    answer: { type: ['string', 'null'] },
-    title: { type: ['string', 'null'] },
+    answer: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    title: { anyOf: [{ type: 'string' }, { type: 'null' }] },
   },
   required: ['label', 'answer', 'title'],
   additionalProperties: false,
@@ -55,11 +60,11 @@ export function parseFrontVerdict(result: ModelResult): { label: FrontLabel; ans
   const v = parsed.data
   if (v.label === 'faq') {
     if (v.answer === null || v.answer.trim().length === 0) return fallback
-    return { label: 'faq', answer: maskUntrustedText(v.answer), title: null }
+    return { label: 'faq', answer: maskControlChars(v.answer), title: null }
   }
   if (v.label === 'new_trip') {
     if (v.title === null || v.title.trim().length === 0) return fallback
-    return { label: 'new_trip', answer: null, title: maskUntrustedText(v.title) }
+    return { label: 'new_trip', answer: null, title: maskControlChars(v.title).slice(0, 120) }
   }
   return { label: 'unclear', answer: null, title: null }
 }
