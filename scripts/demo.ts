@@ -23,13 +23,13 @@ if (!process.env.DATABASE_URL) {
 }
 
 import { submitMessage } from '../src/handler.js'
-import { runTurn, type Agent } from '../src/worker.js'
+import { runTurn, type Agent, type AgentContext } from '../src/worker.js'
 import { sweep } from '../src/sweeper.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import type { TurnState } from '../src/engine.js'
-import { makeDriver } from '../src/agents/driver.js'
+import { routeAgent } from '../src/agents/route.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import type { Transport } from '../src/model/client.js'
 import { LogNotifier } from '../src/notify.js'
@@ -249,7 +249,6 @@ async function liveDriverScenario(apiKey: string) {
   )
   const convId = first.conversationId
   const turnId = first.turnId!
-  const before = await convRow(convId)
 
   // Sampled from inside `transport.create`, AFTER `reserve()` has already
   // debited but before the real response comes back — the same technique
@@ -266,7 +265,12 @@ async function liveDriverScenario(apiKey: string) {
       anthropic.messages.countTokens(req as never) as Promise<{ input_tokens: number }>,
   }
 
-  const driver = makeDriver({
+  // `submitMessage` creates every conversation at `desk = 'front'` (Task 1),
+  // so this is now TWO live calls, not one: `routeAgent` sends the message to
+  // the front desk first (a real Haiku call), which reads as a trip request
+  // and flips the conversation to `desk = 'planning'`; only THEN does the
+  // same `route(...)` call, invoked again, reach the real driver.
+  const route = routeAgent({
     sql, transport,
     flights: new MockSupplier({ kind: 'flight' }),
     hotels: new MockSupplier({ kind: 'hotel' }),
@@ -274,13 +278,20 @@ async function liveDriverScenario(apiKey: string) {
     now: () => Date.now(),
     notifier: new LogNotifier(),
   })
-
-  step('calling the real driver (one live API call)...')
-  const result = await driver({
+  const ctx: AgentContext = {
     state: { step: 0,
               messages: [{ role: 'user', content: [{ type: 'text', text: message }] }] },
     conversationId: convId, userId: DEMO_USER, turnId,
-  })
+  }
+
+  step('the front desk sees this message first (one live Haiku call) and routes it to planning...')
+  const frontStep = await route(ctx)
+  ok(`front desk step: kind=${frontStep.kind}`)
+
+  const before = await convRow(convId)
+
+  step('calling the real driver (one live API call)...')
+  const result = await route(ctx)
   const after = await convRow(convId)
 
   const reservedDelta = spendDuringCall! - BigInt(before.spend_usd_micros)

@@ -748,6 +748,11 @@ describeDb('driver', () => {
         { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId, conversationId: null, message: 'a week in Faro', idempotencyKey: 'rt1' },
       )
+      // This test calls `makeDriver` directly (not `routeAgent`), so the
+      // conversation `submitMessage` created at `desk = 'front'` (Task 1) is
+      // seeded straight to 'planning' — the desk flag plays no part in what
+      // this test is checking (per-model-call spend, exactly once).
+      await sql`update conversations set desk = 'planning' where id = ${r.conversationId}`
       const create = vi.fn().mockResolvedValue(textResponse('Faro it is.'))
       await runTurn({
         sql, limits: DEFAULT_LIMITS,
