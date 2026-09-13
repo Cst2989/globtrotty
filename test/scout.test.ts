@@ -33,7 +33,7 @@ describeDb('scout', () => {
       const create = vi.fn().mockResolvedValue(brief('Faro is the gateway to the Algarve.'))
       await researchDestination(deps(sql, create), s, { micros: 0n }, 'Faro', emptyNotebook())
       const sent = create.mock.calls[0]![0] as Record<string, unknown>
-      expect(sent.tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }])
+      expect(sent.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }])
       expect(sent.thinking).toBeUndefined()
       expect(sent.model).toBe('claude-haiku-4-5-20251001')
     })

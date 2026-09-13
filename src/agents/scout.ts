@@ -15,8 +15,17 @@ import { cutAtWords, maskControlChars, redactPrices } from '../sanitize.js'
 const SYSTEM = readFileSync(new URL('./prompts/scout.md', import.meta.url), 'utf8')
 export const SCOUT_MAX_WORDS = 300
 export const SCOUT_MAX_SEARCHES = 3
-/** The only tool a scout holds: read-only, server-side, no outbound channel of ours. */
-export const WEB_SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: SCOUT_MAX_SEARCHES } as const
+/**
+ * The only tool a scout holds: read-only, server-side, no outbound channel of
+ * ours. `web_search_20250305` — the BASIC variant — not `web_search_20260209`:
+ * that newer variant adds dynamic result filtering, which runs code execution
+ * under the hood, and Haiku 4.5 (the scout's model, src/model/seats.ts)
+ * rejects it outright — confirmed live, a 400 ("does not support programmatic
+ * tool calling ... set `allowed_callers=["direct"]`"). Only Opus 4.6+ and
+ * Sonnet 4.6+ support the dynamic-filtering variant; every other model,
+ * Haiku 4.5 included, takes the basic one.
+ */
+export const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: SCOUT_MAX_SEARCHES } as const
 /**
  * A per-search bound on the search-RESULT tokens the provider folds into
  * `input_tokens` — the pages a search fetches and hands back to the model,
