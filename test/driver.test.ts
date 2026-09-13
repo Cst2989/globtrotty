@@ -779,6 +779,40 @@ describeDb('driver', () => {
       expect(BigInt(daily!.cost_micros as string)).toBe(6_250n)
     })
   })
+
+  // research_destination's door is 'worker' (src/tools/registry.ts), so its
+  // result must arrive fenced like an api-door result — it is a model's prose,
+  // paid for, but still untrusted content by the time it reaches the driver's
+  // own transcript. The scout's own Haiku call is a SECOND model call within
+  // the same tool step, priced and recorded separately from the driver's.
+  it('research_destination: fences the brief as untrusted and folds the scout cost into step.spent', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '25')
+      const scoutUsage = {
+        input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
+        output_tokens: 200, server_tool_use: { web_search_requests: 1 },
+      }
+      const create = vi.fn()
+        .mockResolvedValueOnce(toolResponse('research_destination', { city: 'Faro' }))
+        .mockResolvedValueOnce({
+          content: [{ type: 'text', text: 'Faro is the gateway to the Algarve.' }],
+          stop_reason: 'end_turn', model: 'claude-haiku-4-5-20251001', _request_id: 'req_scout',
+          usage: scoutUsage,
+        })
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      expect(step.name).toBe('research_destination')
+      const out = String(await step.run())
+      expect(out).toContain('trust="untrusted"')
+      expect(out).toContain('Faro is the gateway to the Algarve.')
+      // 1000*1 (input) + 200*5 (output) + 1*10_000 (one search) = 12_000
+      expect(step.spent!.micros).toBe(12_000n)
+      const [mc] = await sql`
+        select seat, cost_micros from model_calls where turn_id = ${s.turnId} and seat = 'scout'`
+      expect(mc!.seat).toBe('scout')
+      expect(BigInt(mc!.cost_micros as string)).toBe(12_000n)
+    })
+  })
 })
 
 /**

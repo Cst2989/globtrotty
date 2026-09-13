@@ -18,6 +18,7 @@ import { fenceResult, trimForContext, validateToolCall } from '../tools/validate
 import { assertSupplierBudget, SUPPLIER_DOORS } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { runProposalPath } from './proposalPath.js'
+import { researchDestination } from './scout.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
 import { handOff } from '../tools/cashier.js'
 import { escalate } from '../tools/escalate.js'
@@ -477,6 +478,10 @@ async function execute(
     }
     case 'escalate_to_human':
       return escalate({ sql, notifier: deps.notifier, now: deps.now }, ctx, input as { reason: EscalationReason; proposalId?: string })
+    case 'research_destination': {
+      const { city } = input as { city: string }
+      return researchDestination({ sql, transport: deps.transport, limits: deps.limits, now: deps.now }, ctx, spent, city)
+    }
     default:
       // Unreachable: validateToolCall already refused anything not in
       // DESK_TOOLS.planning. Kept so adding a tool to the registry without a
