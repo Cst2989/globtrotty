@@ -1,6 +1,6 @@
 import { findSentinels, SENTINELS } from './sentinels.js'
 
-const ROOTS = ['src', 'netlify', 'public']
+const ROOTS = ['src', 'netlify', 'public', 'evals']
 const findings = findSentinels(ROOTS)
 if (findings.length === 0) {
   console.log(`sentinels: ${SENTINELS.length} patterns, ${ROOTS.join(', ')}, nothing found.`)

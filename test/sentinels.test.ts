@@ -4,10 +4,13 @@ import path from 'node:path'
 import { findSentinels, SENTINELS } from '../scripts/sentinels.js'
 
 describe('the sentinel grep', () => {
-  it('finds nothing in what this repository deploys', () => {
+  it('finds nothing in the four directories this repository deploys or publishes', () => {
     // The check itself, run inside the suite, so `npm test` fails on a leak
-    // rather than a deploy step somebody can skip.
-    expect(findSentinels(['src', 'netlify', 'public'])).toEqual([])
+    // rather than a deploy step somebody can skip. The four are the roots
+    // `scripts/check-sentinels.ts` walks, and `evals` is the fourth from lesson
+    // 6.1: a case file a reader opens is somewhere a prompt gets pasted, and a
+    // root nobody walks is a root nobody checks.
+    expect(findSentinels(['src', 'netlify', 'public', 'evals'])).toEqual([])
   })
 
   it('finds a planted key, so the empty result above means something', () => {

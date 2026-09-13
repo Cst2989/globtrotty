@@ -919,6 +919,14 @@ no `docs` at any tag here, so a reader has nothing to open. The migration is
 frozen and stays as it is; the reference belongs in the lesson prose. Owner:
 module 6.
 
+Open at lesson 6.1: `gradeOutput` files two checks and `gradeTrajectory` files
+two as `passed: null`, so four of the eight properties the scorecard names are
+not looked at yet. Each null carries the lesson that reaches it, 6.2 for the
+budget and the travel window and 6.5 for the path, and `npm run evals` prints
+those lines under the card rather than only in the code. This is deliberate
+rather than owed: a scorecard that reported four unbuilt checks as passes would
+be the exact failure lesson 6.1 exists to retire.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

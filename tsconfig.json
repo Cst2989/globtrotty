@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "test", "scripts", "netlify"]
+  "include": ["src", "test", "scripts", "netlify", "evals"]
 }

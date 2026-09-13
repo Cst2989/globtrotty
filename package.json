@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "trip": "tsx scripts/trip.ts",
     "demo": "tsx scripts/demo.ts",
+    "evals": "tsx evals/run.ts",
     "migrate": "tsx scripts/migrate.ts",
     "sentinels": "tsx scripts/check-sentinels.ts",
     "messages": "tsx scripts/messages.ts"

@@ -38,6 +38,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-5 | Fence text you did not write | npm test (test/injection-corpus.test.ts, test/outbound.test.ts) |
 | lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the canary |
 | lesson-5-7 | What she sees | npm run migrate, then npm test (test/channel.test.ts, test/isolation.test.ts, test/capture.test.ts, test/monitor.test.ts), then npm run trip for the offer card |
+| lesson-6-1 | Why snapshot tests lie | npm test (test/eval-snapshot.test.ts, test/grade.test.ts, test/scorecard.test.ts), then npm run evals for the first scorecard |
 
 ## How this branch was built
 
