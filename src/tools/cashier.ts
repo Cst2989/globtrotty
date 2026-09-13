@@ -2,7 +2,7 @@ import type postgres from 'postgres'
 import { loadProposal, type ProposalRow, type StoredItineraryItem } from '../repo/proposals.js'
 import { linksForProposal, mintLinks, type LinkClickRow } from '../repo/linkClicks.js'
 import { formatMoney, money } from '../money.js'
-import { sanitizeSourceId } from '../sanitize.js'
+import { maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
 import { BookingUrlError } from '../supplier/urls.js'
 import type { Supplier, SupplierItem } from '../supplier/types.js'
 
@@ -63,6 +63,10 @@ export async function handOff(
   const now = new Date(deps.now())
   const p = await loadProposal(sql, ctx.conversationId, proposalId)
   if (p === null) return `No proposal ${sanitizeSourceId(proposalId)} in this conversation.`
+  // Before the replay early-return: a replayed row saved in a shape the
+  // cashier cannot read must never reach `render`, which assumes `items` is
+  // the version-1 array shape.
+  if (p.itinerary.schemaVersion !== 1) return 'This proposal was saved in a shape the cashier cannot read.'
 
   const existing = await linksForProposal(sql, p.id)
   if (existing.length > 0) return render(p, existing, now, verifiedLabel(deps, p))
@@ -74,7 +78,6 @@ export async function handOff(
   if (now.getTime() - p.decidedAt.getTime() > ACCEPT_WINDOW_MS) {
     return 'She accepted this more than 30 minutes ago; prices may have moved. Ask her to accept again on a fresh proposal.'
   }
-  if (p.itinerary.schemaVersion !== 1) return 'This proposal was saved in a shape the cashier cannot read.'
 
   const verify = await requote(deps, p, now)
   if (!verify.ok) return verify.text
@@ -90,7 +93,7 @@ export async function handOff(
         buildUrl: (ref: string) => sup.bookingUrl(item, ref) }
     }),
   }).catch((err: unknown) => { if (err instanceof BookingUrlError) return err; throw err })
-  if (links instanceof BookingUrlError) return `Could not build a booking link: ${links.message}. Escalate to a human.`
+  if (links instanceof BookingUrlError) return `Could not build a booking link: ${maskUntrustedText(links.message)}. Escalate to a human.`
   return render(p, links, now, verifiedLabel(deps, p))
 }
 
@@ -108,13 +111,13 @@ async function requote(deps: CashierDeps, p: ProposalRow, now: Date): Promise<Ve
     ({ ok: false, text: `Could not verify ${sanitizeSourceId(i.sourceId)} (${i.slot}): ${why}. Nothing was handed off. Re-search that slot and propose again, or escalate.` })
   for (const i of p.itinerary.items) {
     const sup = supplierFor(deps, i)
-    if (sup.name !== i.supplier) return block(i, `this desk has no supplier named ${i.supplier}`)
+    if (sup.name !== i.supplier) return block(i, `this desk has no supplier named ${maskUntrustedText(i.supplier)}`)
     if (!sup.capabilities.mayRequote) continue                    // disclosure path; nothing to verify
     if (i.searchParams === null) return block(i, 'no stored search to re-run')
     let q
     try { q = await sup.quote(i.sourceId, i.searchParams) } catch (err) { return block(i, `the supplier failed (${(err as Error).message})`) }
     if (q.status === 'gone') return block(i, 'it is no longer offered')
-    if (q.status === 'unavailable') return block(i, q.reason)
+    if (q.status === 'unavailable') return block(i, maskUntrustedText(q.reason))
     const item = q.item
     if (item.price.currency !== i.currency) return block(i, `it is now quoted in ${item.price.currency}, a different currency than the ${i.currency} she accepted`)
     if (!sameIdentity(i, item)) return block(i, 'the offer changed (different flights or dates) even though the id matched')
@@ -138,19 +141,27 @@ function storedAsItem(i: StoredItineraryItem): SupplierItem {
  * What the model passes on. Spec section 5, point 4: when nothing was
  * re-quoted the copy is DISCLOSURE, never verification, and every price
  * renders with its age.
+ *
+ * Iterates `p.itinerary.items`, not `links`: `mintLinks` returns rows in
+ * itinerary order but `linksForProposal` (the replay path) orders by
+ * `rendered_at, item_id` — a different order in general. Rendering from the
+ * itinerary and looking each link up by `itemId` keeps both paths byte-
+ * identical regardless of how the rows came back, which is what makes the
+ * replay a true replay rather than a reshuffled one.
  */
 function render(p: ProposalRow, links: LinkClickRow[], now: Date, verified: boolean): string {
-  const byId = new Map(p.itinerary.items.map((i) => [i.sourceId, i]))
-  const lines = links.map((l) => {
-    const i = byId.get(l.itemId)
-    const ageMin = i ? Math.max(0, Math.round((now.getTime() - new Date(i.fetchedAt).getTime()) / 60_000)) : 0
+  const byItemId = new Map(links.map((l) => [l.itemId, l]))
+  const lines = p.itinerary.items.flatMap((i) => {
+    const l = byItemId.get(i.sourceId)
+    if (!l) return []
+    const ageMin = Math.max(0, Math.round((now.getTime() - new Date(i.fetchedAt).getTime()) / 60_000))
     const price = formatMoney(money(l.quotedMinor, l.currency))
-    return `- ${i?.slot ?? l.itemId}: ${i?.name ?? ''} — ${price}${verified ? '' : ` (found ${ageMin} min ago)`} — ${l.url}`
+    return [`- ${i.slot}: ${maskUntrustedText(i.name)} — ${price}${verified ? '' : ` (found ${ageMin} min ago)`} — ${l.url}`]
   })
   const head = verified
     ? 'Verified just now against the suppliers; every item is still offered at the price she accepted (within 0.5%).'
     : `These were the prices when we found them. Prices move; tell her to check the total before she pays.`
   const warn = p.gateOutcome === 'shipped_unapproved' && p.reviewIssues.length > 0
-    ? `\n\nThe reviewer did not approve this offer: ${p.reviewIssues.join('; ')}. Say so plainly before the links.` : ''
+    ? `\n\nThe reviewer did not approve this offer: ${p.reviewIssues.map(maskUntrustedText).join('; ')}. Say so plainly before the links.` : ''
   return `${head}${warn}\n\nGive her these links, one per line, exactly as written:\n${lines.join('\n')}\n\nThis is the point of no return: do not re-quote, revise, or re-propose this set.`
 }

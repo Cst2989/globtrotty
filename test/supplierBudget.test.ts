@@ -70,8 +70,16 @@ describeDb('supplier budget', () => {
 
 // Outside describeDb on purpose: none of these need a database, and the
 // first draft's version was skipped offline for no reason.
-describe('SUPPLIER_DOORS tracks the registry\'s api-door tools', () => {
-  it('lists exactly the tools registered with door: "api" — no more, no fewer', () => {
+describe('SUPPLIER_DOORS tracks the registry\'s api-door tools, plus known non-api exceptions', () => {
+  // `hand_off_to_booking` is a `code`-door tool that still calls
+  // `Supplier.quote` once per item, so it is on SUPPLIER_DOORS on purpose —
+  // named here, rather than folded silently into the set comparison below,
+  // so an api-door tool added without a corresponding SUPPLIER_DOORS entry
+  // still fails this test instead of being mistaken for another deliberate
+  // exception.
+  const NON_API_SUPPLIER_TOOLS = ['hand_off_to_booking']
+
+  it('lists exactly the tools registered with door: "api", plus the named exceptions — no more, no fewer', () => {
     // SUPPLIER_DOORS is maintained BY HAND, deliberately separate from TOOLS'
     // `door` field (src/tools/supplierBudget.ts): `door` answers a
     // fencing/provenance question, this list answers a cost/rate-limit
@@ -85,12 +93,13 @@ describe('SUPPLIER_DOORS tracks the registry\'s api-door tools', () => {
     // TOOLS' door field — that coupling was deliberately rejected. Instead,
     // decide whether the new/changed api-door tool actually reaches a
     // metered, rate-limited third party, and if so add it BY HAND to
-    // SUPPLIER_DOORS in src/tools/supplierBudget.ts.
+    // SUPPLIER_DOORS in src/tools/supplierBudget.ts (and, if it is not an
+    // api-door tool, to NON_API_SUPPLIER_TOOLS above).
     const apiDoorTools = Object.values(TOOLS)
       .filter((t) => t.door === 'api')
       .map((t) => t.name)
 
-    expect(new Set(SUPPLIER_DOORS)).toEqual(new Set(apiDoorTools))
+    expect(new Set(SUPPLIER_DOORS)).toEqual(new Set([...apiDoorTools, ...NON_API_SUPPLIER_TOOLS]))
     // Also pin there are no duplicates in the hand-maintained list itself.
     expect(SUPPLIER_DOORS.length).toBe(new Set(SUPPLIER_DOORS).size)
   })

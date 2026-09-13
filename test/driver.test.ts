@@ -356,6 +356,31 @@ describeDb('driver', () => {
     })
   })
 
+  it('counts hand_off_to_booking against the same per-turn supplier budget, though it is a code-door tool', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '28')
+      for (let i = 0; i < DEFAULT_LIMITS.maxSupplierCallsPerTurn; i++) {
+        await sql`insert into tool_calls (turn_id, call_id, name, status)
+                  values (${s.turnId}, ${'pre' + i}, 'explore_flights', 'done')`
+      }
+      const create = vi.fn().mockResolvedValue(toolResponse('hand_off_to_booking',
+        { proposalId: '00000000-0000-4000-8000-000000000001' }))
+      const d = deps(sql, create)
+      const qf = vi.spyOn(d.flights, 'quote')
+      const step = await makeDriver(d)(ctx(s))
+      expect(step.kind).toBe('tool')
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const result = String(await step.run())
+      // The budget refusal, same as any other supplier-reaching tool — never
+      // the cashier's own "no proposal"/"not been accepted" text, which would
+      // mean the gate was skipped and handOff ran instead.
+      expect(result).toMatch(/budget|limit|searches/i)
+      expect(result).toContain(String(DEFAULT_LIMITS.maxSupplierCallsPerTurn))
+      // ...and no supplier was ever asked to re-quote.
+      expect(qf).not.toHaveBeenCalled()
+    })
+  })
+
   it('records update_requirements into the notebook, as HER words', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '09')

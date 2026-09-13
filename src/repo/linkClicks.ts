@@ -20,6 +20,7 @@ export async function mintLinks(
     links: { itemId: string; supplier: string; buildUrl: (trackingRef: string) => string; quotedMinor: bigint; currency: string }[]
   },
 ): Promise<LinkClickRow[]> {
+  if (args.links.length === 0) throw new Error('mintLinks: refusing to mint an empty set')
   const rows = args.links.map((l) => {
     const id = randomUUID()
     const trackingRef = `gt_${id.replace(/-/g, '')}`

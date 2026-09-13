@@ -15,7 +15,7 @@ import { recordModelCall } from '../repo/modelCalls.js'
 import { countPriorGateRuns } from '../repo/toolCalls.js'
 import { toolsForDesk } from '../tools/registry.js'
 import { fenceResult, trimForContext, validateToolCall } from '../tools/validate.js'
-import { assertSupplierBudget } from '../tools/supplierBudget.js'
+import { assertSupplierBudget, SUPPLIER_DOORS } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { runProposalPath } from './proposalPath.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
@@ -278,7 +278,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       }
     }
 
-    if (check.def.door === 'api') {
+    if (SUPPLIER_DOORS.includes(check.def.name)) {
       const budget = await assertSupplierBudget(sql, ctx.turnId, limits.maxSupplierCallsPerTurn)
       if (!budget.ok) {
         return asToolStep(async () =>
