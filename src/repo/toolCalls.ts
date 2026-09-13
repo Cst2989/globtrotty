@@ -60,15 +60,23 @@ export async function beginToolCall(
  * with no explanation in the system.
  */
 /**
- * How many `propose_itinerary` calls this turn has already made, EXCLUDING
- * the one in progress right now — same one-query pattern as
+ * Every tool whose handler re-runs the gates and writes a `gate_results` row
+ * set for the turn. `countPriorGateRuns` (below) counts calls to exactly
+ * these names — a third gate-running tool that is not added here is not
+ * counted, and its `round` would collide with one already used (see that
+ * function's doc comment).
+ */
+export const GATE_RUN_TOOLS = ['propose_itinerary', 'revise_component'] as const
+
+/**
+ * How many gate-running calls (`GATE_RUN_TOOLS`, above) this turn has already
+ * made, EXCLUDING the one in progress right now — same one-query pattern as
  * `countSupplierCalls` (src/tools/supplierBudget.ts).
  *
  * "In progress right now" needs the exclusion because `loop()` calls
- * `beginToolCall` (above) BEFORE the tool runs, so by the time
- * `propose_itinerary`'s handler executes, its own 'pending' row already
- * exists in `tool_calls` — count it and every proposal would be off by one,
- * counting itself as a prior round.
+ * `beginToolCall` (above) BEFORE the tool runs, so by the time the handler
+ * executes, its own 'pending' row already exists in `tool_calls` — count it
+ * and every call would be off by one, counting itself as a prior round.
  *
  * Used to derive `gate_results.round`: `driver.md` instructs the model to
  * "fix exactly what it names and propose again" on rejection, and `maxSteps`
@@ -80,31 +88,30 @@ export async function beginToolCall(
  * `(turn_id, round, gate)` where `turn_id is not null` — which makes this
  * function's return value load-bearing, not merely a labelling nicety.
  *
- * PRECONDITION this function does not itself enforce: it counts
- * `propose_itinerary` calls ONLY. Any future tool (e.g. a `revise_component`
- * that re-runs the gates on an edited proposal without a fresh
- * `propose_itinerary` call) must either be counted here too or derive `round`
- * some other way — if it re-runs `runGates` while this count has not
- * advanced, the insert collides with the unique index above and
- * `recordGateResults` has no `on conflict` clause, so the whole turn fails
- * (per `runGates`' own comment: a write failure here must not be swallowed).
- * That is the correct trade for data integrity, not a bug to route around —
- * but it means any new proposal-shaped tool must be wired into how `round`
- * is derived before it ships, not after.
+ * PRECONDITION this function now meets, by construction rather than by
+ * comment: it counts every name in `GATE_RUN_TOOLS`, not `propose_itinerary`
+ * alone, so `revise_component` — which re-runs the gates on an edited
+ * proposal without a fresh `propose_itinerary` call — is counted too. Any
+ * THIRD gate-running tool must be added to `GATE_RUN_TOOLS` before it ships —
+ * if it re-runs `runGates` while this count has not advanced, the insert
+ * collides with the unique index above and `recordGateResults` has no
+ * `on conflict` clause, so the whole turn fails (per `runGates`' own comment:
+ * a write failure here must not be swallowed). That is the correct trade for
+ * data integrity, not a bug to route around.
  *
  * Throws rather than returning 0 when the read fails, for the same reason
  * `countSupplierCalls` does: a `?? 0` here would relabel every re-proposal
  * back to round 0 exactly when the database is unhealthy, which is silent
  * data corruption in the eval corpus, not a missing count.
  */
-export async function countPriorProposals(
+export async function countPriorGateRuns(
   sql: postgres.Sql, turnId: string, callId: string,
 ): Promise<number> {
   const rows = await sql<{ n: number }[]>`
     select count(*)::int as n from tool_calls
-     where turn_id = ${turnId} and name = 'propose_itinerary' and call_id != ${callId}`
+     where turn_id = ${turnId} and name = any(${[...GATE_RUN_TOOLS]}) and call_id != ${callId}`
   const row = rows[0]
-  if (!row) throw new Error('countPriorProposals: count returned no row; refusing to assume zero')
+  if (!row) throw new Error('countPriorGateRuns: count returned no row; refusing to assume zero')
   return row.n
 }
 

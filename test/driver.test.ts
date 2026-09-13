@@ -563,7 +563,7 @@ describeDb('driver', () => {
   // turn is not an edge case. round used to be hardcoded to 0 on every call,
   // so two proposals in a turn wrote two identical seven-row gate_results sets
   // under round 0, double-counting any `group by gate` fire-rate query.
-  it('derives round from the count of PRIOR propose_itinerary calls this turn, not a hardcoded 0', async () => {
+  it('derives round from the count of PRIOR gate-running tool calls this turn, not a hardcoded 0', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '23')
       // Stands in for a first propose_itinerary call this turn: `loop()`
@@ -588,8 +588,8 @@ describeDb('driver', () => {
   // The one call_id this handler must NOT count against itself: `loop()`
   // (src/worker.ts) writes THIS call's own tool_calls row via beginToolCall
   // before execute() runs, so without the `call_id != callId` exclusion every
-  // proposal — even the first — would count itself and start at round 1.
-  it('does not count its OWN in-progress tool_calls row as a prior proposal', async () => {
+  // call — even the first — would count itself and start at round 1.
+  it('does not count its OWN in-progress tool_calls row as a prior gate run', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '24')
       await sql`

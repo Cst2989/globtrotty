@@ -12,7 +12,7 @@ import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { costMicros } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
-import { countPriorProposals } from '../repo/toolCalls.js'
+import { countPriorGateRuns } from '../repo/toolCalls.js'
 import { toolsForDesk } from '../tools/registry.js'
 import { fenceResult, trimForContext, validateToolCall } from '../tools/validate.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
@@ -455,9 +455,9 @@ async function execute(
       // runs the gates twice for the same turn without this count having
       // advanced collides on insert, and `recordGateResults` has no
       // `on conflict` clause, so the turn fails outright rather than silently
-      // double-counting (see `countPriorProposals`'s doc comment in
-      // src/repo/toolCalls.ts for the precondition this now enforces).
-      const round = await countPriorProposals(sql, ctx.turnId, callId)
+      // double-counting (see `countPriorGateRuns`'s doc comment in
+      // src/repo/toolCalls.ts for the precondition it now enforces).
+      const round = await countPriorGateRuns(sql, ctx.turnId, callId)
       return runProposalPath(deps, ctx, spent, { refs, notebook, round, parentProposalId: null })
     }
     default:
