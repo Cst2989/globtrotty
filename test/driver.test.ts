@@ -397,18 +397,26 @@ describeDb('what the driver answers by itself', () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId } = await seededTurn(sql)
       const questions = ['Which airport do you fly from?', 'How many nights?']
-      const client = fakeClient([toolUseMessage('ask_user', { questions })])
+      // The routing reply first, then hers: `selectDesk` classifies her message
+      // on step 0 before the driver's own call (lesson 5.3), so the first reply
+      // queued here is the one it reads.
+      const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
+        toolUseMessage('ask_user', { questions }),
+      ])
       const chain = countingRunner()
       const agent = makeDriver({
         sql, client, run: chain.run, limits: DEFAULT_LIMITS, now: Date.now,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
-      // Terminal: ONE model call, and the chain was never reached. `ask_user` is
-      // answered by her, so a driver that let it fall through to `deps.run`
-      // would send it into the runner chain, which has no wrapper for it, and
-      // the model would be told its question was an unknown tool.
-      expect(client.calls).toBe(1)
+      // Terminal: TWO model calls and no third. The routing call, then the one
+      // driver call that came back with her question, and nothing after it. The
+      // chain was never reached either. `ask_user` is answered by her, so a
+      // driver that let it fall through to `deps.run` would send it into the
+      // runner chain, which has no wrapper for it, the model would be told its
+      // question was an unknown tool, and the turn would take another step.
+      expect(client.calls).toBe(2)
       expect(chain.calls()).toBe(0)
 
       const [msg] = await sql<{ content: string }[]>`
@@ -433,6 +441,11 @@ describeDb('what the driver answers by itself', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
+        // The routing call's reply, ahead of the driver's own: `selectDesk`
+        // classifies her message on step 0 (lesson 5.3) and takes the first
+        // reply queued here. Step 1 reads the desk off the column and asks
+        // nothing, so the two below are the driver's two steps.
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         // What the registry's `AskUser` schema refuses: objects rather than
         // strings. `questions.join('\n\n')` on this array is the string
         // "[object Object]", and until this fix that string was the turn's reply
@@ -482,6 +495,10 @@ describeDb('what the driver answers by itself', () => {
         insert into course.tool_calls (turn_id, call_id, name, status)
         values (${turnId}, 's0-b0', 'search_hotels', 'done')`
       const client = fakeClient([
+        // The routing reply `selectDesk` consumes on step 0 (lesson 5.3), then
+        // the driver's own two steps. 'new_trip' keeps the turn on the planning
+        // desk, which is the only desk that publishes `search_hotels` at all.
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Here is what I already have for Faro.'),
@@ -532,14 +549,23 @@ describeDb('what the driver answers by itself', () => {
         conversationId, userId: USER, source: 'user', at: '2026-08-29T10:00:00Z',
         patch: { budget: money(150_000n, 'EUR'), destination: 'Portugal' },
       })
-      const client = recordingClient([textMessage('Three stays near the beach in Faro.')])
+      // Two replies: the routing call's label, then the driver's answer.
+      // 'new_trip' routes to the planning desk, which is the desk that carries a
+      // notebook at all; the front desk is handed none on purpose.
+      const client = recordingClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
+        textMessage('Three stays near the beach in Faro.'),
+      ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
-      expect(client.sent).toHaveLength(1)
-      const request = client.sent[0]!
+      // Two requests went out, the routing call's and the driver's, and it is
+      // the driver's that carries the notebook. `selectDesk` sends her raw text
+      // against a one-line label prompt and nothing else.
+      expect(client.sent).toHaveLength(2)
+      const request = client.sent[1]!
       // In the TRANSCRIPT, on the last user turn, which is where `withSuffix`
       // puts it (src/model/client.ts) and therefore after any cache breakpoint
       // lesson 5.6 places. In the system prompt it would invalidate the cached
