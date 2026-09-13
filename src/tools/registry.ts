@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ProposalRefsSchema, SLOT_NAMES } from '../gates/rehydrateGate.js'
+import { ESCALATION_REASONS, type EscalationReason } from '../notify.js'
 
 export type Desk = 'front' | 'planning'
 /** Where a tool's result comes from, which decides whether it must be fenced. */
@@ -61,6 +62,12 @@ export const ReviseComponent = z.strictObject({
 /** Takes the proposal id only — everything else (price, url, tracking ref) is server-built. */
 export const HandOff = z.strictObject({ proposalId: z.uuid() })
 
+/** Fixed-format only: a reason code from the enum, and optionally a proposal id. No free text reaches the row. */
+export const EscalateToHuman = z.strictObject({
+  reason: z.enum(ESCALATION_REASONS as [EscalationReason, ...EscalationReason[]]),
+  proposalId: z.uuid().optional(),
+})
+
 export const TOOLS: Record<string, ToolDef> = {
   update_requirements: { name: 'update_requirements', door: 'code', schema: UpdateRequirements,
     description: 'Record what she has told you into the notebook. Never invent a value she did not state.' },
@@ -76,6 +83,8 @@ export const TOOLS: Record<string, ToolDef> = {
     description: 'Change ONE component of a saved proposal by proposal_id: swap the item in a slot for another search-result id, or shift every date by N days (only works if you have already searched the shifted dates). Runs the full gates and reviewer again and saves a new proposal.' },
   hand_off_to_booking: { name: 'hand_off_to_booking', door: 'code', schema: HandOff,
     description: 'After she has ACCEPTED a proposal in chat, hand her tracked booking links. Takes the proposal_id only. Refuses if she has not accepted, or accepted more than 30 minutes ago.' },
+  escalate_to_human: { name: 'escalate_to_human', door: 'code', schema: EscalateToHuman,
+    description: 'Hand this conversation to a human. reason is one of the fixed codes; add proposalId when it concerns a saved proposal. Use when a supplier is down, a price moved past what she accepted, she asks for a person, or you cannot satisfy a constraint.' },
 }
 
 /**
@@ -86,7 +95,7 @@ export const TOOLS: Record<string, ToolDef> = {
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
   planning: ['update_requirements', 'ask_user', 'explore_flights', 'explore_hotels',
-             'propose_itinerary', 'revise_component', 'hand_off_to_booking'],
+             'propose_itinerary', 'revise_component', 'hand_off_to_booking', 'escalate_to_human'],
 }
 
 /**

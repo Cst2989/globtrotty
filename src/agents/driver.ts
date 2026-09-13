@@ -20,10 +20,12 @@ import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/no
 import { runProposalPath } from './proposalPath.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
 import { handOff } from '../tools/cashier.js'
+import { escalate } from '../tools/escalate.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
+import type { EscalationReason, Notifier } from '../notify.js'
 
 /**
  * `import.meta.url`, never `__dirname` — this package is `"type": "module"` with
@@ -43,6 +45,7 @@ export type DriverDeps = {
   hotels: Supplier
   limits: Limits
   now: () => number
+  notifier: Notifier
 }
 
 /**
@@ -472,6 +475,8 @@ async function execute(
       const { proposalId } = input as { proposalId: string }
       return handOff({ sql, flights: deps.flights, hotels: deps.hotels, now: deps.now }, ctx, proposalId)
     }
+    case 'escalate_to_human':
+      return escalate({ sql, notifier: deps.notifier, now: deps.now }, ctx, input as { reason: EscalationReason; proposalId?: string })
     default:
       // Unreachable: validateToolCall already refused anything not in
       // DESK_TOOLS.planning. Kept so adding a tool to the registry without a

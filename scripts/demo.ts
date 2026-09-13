@@ -32,6 +32,7 @@ import type { TurnState } from '../src/engine.js'
 import { makeDriver } from '../src/agents/driver.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import type { Transport } from '../src/model/client.js'
+import { LogNotifier } from '../src/notify.js'
 
 const DEMO_USER = '00000000-0000-4000-8000-00000000dec0'
 
@@ -158,6 +159,7 @@ async function liveDriverScenario(apiKey: string) {
     hotels: new MockSupplier({ kind: 'hotel' }),
     limits: DEFAULT_LIMITS,
     now: () => Date.now(),
+    notifier: new LogNotifier(),
   })
 
   step('calling the real driver (one live API call)...')

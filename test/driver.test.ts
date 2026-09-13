@@ -12,6 +12,7 @@ import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { APIConnectionError, BadRequestError } from '@anthropic-ai/sdk'
 import type { FlightSearch } from '../src/supplier/types.js'
+import { LogNotifier } from '../src/notify.js'
 
 const usage = {
   input_tokens: 1000, cache_creation_input_tokens: 0,
@@ -69,6 +70,7 @@ describeDb('driver', () => {
     hotels: new MockSupplier({ kind: 'hotel' }),
     limits: DEFAULT_LIMITS,
     now: () => Date.now(),
+    notifier: new LogNotifier(() => {}),
   })
 
   it('returns a message step, writes a model_calls row, and charges NOTHING twice', async () => {
