@@ -7,7 +7,7 @@ import type { ItemRef } from '../src/gates/types.js'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { compareMoney, CurrencyMismatchError, money, sumMoney, type Money } from '../src/money.js'
-import { emptyNotebook, toStored } from '../src/notebook.js'
+import { emptyNotebook } from '../src/notebook.js'
 import { decideProposal, recordProposal } from '../src/repo/proposals.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
@@ -154,7 +154,7 @@ describeDb('handOffToBooking', () => {
     // The row is here for the cashier's precondition, so its snapshot is not
     // what these cases are about, and `recordProposal` refuses a missing one.
     const proposalId = await recordProposal(sql, {
-      conversationId, userId: USER, turnId, refs, requirementsSnapshot: toStored(emptyNotebook()),
+      conversationId, userId: USER, turnId, refs, requirementsSnapshot: emptyNotebook(),
     })
     if (over.decision !== null) {
       await decideProposal(sql, {
@@ -410,7 +410,7 @@ describeDb('handOffToBooking', () => {
       // Here for the cashier's precondition, so the snapshot is not what this
       // case is about, and `recordProposal` refuses a missing one.
       const proposalId = await recordProposal(sql, {
-        conversationId, userId: USER, turnId, refs, requirementsSnapshot: toStored(emptyNotebook()),
+        conversationId, userId: USER, turnId, refs, requirementsSnapshot: emptyNotebook(),
       })
       await decideProposal(sql, { proposalId, conversationId, decision: 'accept', at: DECIDED_AT })
 
@@ -621,7 +621,7 @@ describeDb('handOffToBooking', () => {
         conversationId: claim.conversationId, userId: USER, turnId: claim.turnId, refs: [],
         // Here for the cashier's precondition, so the snapshot is not what
         // this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await decideProposal(sql, {
         proposalId, conversationId: claim.conversationId, decision: 'accept', at: DECIDED_AT,

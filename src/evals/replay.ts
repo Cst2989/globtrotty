@@ -1,11 +1,59 @@
 import type postgres from 'postgres'
 import { constraintsFromNotebook } from '../gates/notebookConstraints.js'
 import { runGates } from '../gates/pipeline.js'
-import type { GateOutcome } from '../gates/types.js'
+import { GATE_NAMES, type GateName, type GateOutcome } from '../gates/types.js'
 import { loadNotebook } from '../repo/notebook.js'
 import { loadProposal } from '../repo/proposals.js'
 
-export type ReplayResult = { outcome: GateOutcome; against: 'snapshot' | 'live' }
+/**
+ * One gate's recorded verdict, in the three values `course.gate_results` holds:
+ * true is the gate ran and was satisfied, false is it ran and rejected, and
+ * null is it could not reach a verdict and `detail` says why.
+ *
+ * `detail` is null only on a pass, because a gate that had nothing to say says
+ * nothing. On a false it is every violation that gate filed, and on a null it
+ * is one of `NOT_EVALUATED`'s reasons (src/gates/pipeline.ts).
+ */
+export type GateVerdict = { passed: boolean | null; detail: string | null }
+
+/**
+ * Every gate this replay recorded, by name. `Partial`, because a run that fails
+ * provenance short-circuits and writes rows for the gates that spoke and no
+ * others, so an absent gate is "no row", which is a third thing again and must
+ * not be read as a pass.
+ */
+export type GateVerdicts = Partial<Record<GateName, GateVerdict>>
+
+export type ReplayResult = {
+  outcome: GateOutcome
+  /**
+   * The per-gate verdicts, read back out of `course.gate_results` after the
+   * write, rather than derived from `outcome`.
+   *
+   * `GateOutcome` carries `ok` and a violation list and nothing else, so "no
+   * budget violation" there covers two different facts: the budget gate ran and
+   * was satisfied, and the budget gate had no budget to check against and
+   * recorded `passed: null`. A grader reading the outcome alone reports both as
+   * a pass, which is the fail-open collapse `Check.passed` (src/evals/grade.ts)
+   * exists to refuse. The table already distinguishes them, so this reads the
+   * table.
+   */
+  verdicts: GateVerdicts
+  against: 'snapshot' | 'live'
+}
+
+/**
+ * Which round each replay mode writes under.
+ *
+ * Round 0 is production's verdict and nothing here ever writes it. The two
+ * replay modes are separated because they disagree ON PURPOSE: run against one
+ * proposal, the snapshot replay records what production decided and the live
+ * replay records what her notebook would decide today. Two rows for one gate at
+ * one round would be two answers to one question with nothing in the table
+ * saying which is which, which is the exact indistinguishability this file's
+ * round argument was introduced to prevent.
+ */
+export const REPLAY_ROUNDS = { snapshot: 1, live: 2 } as const
 
 /**
  * Runs the gates again over a proposal that already exists, against the
@@ -14,7 +62,10 @@ export type ReplayResult = { outcome: GateOutcome; against: 'snapshot' | 'live' 
  * `against: 'live'` exists so a lesson and a test can produce the wrong answer
  * on purpose and show what it looks like. It is never the default and no
  * production path passes it: reading the live notebook is what makes a replay
- * agree with whatever she believes today rather than with what we did.
+ * agree with whatever she believes today rather than with what we did. Its rows
+ * are written under a round of their own and `gateMetrics`
+ * (src/evals/gateMetrics.ts) counts neither replay, so a deliberately wrong
+ * answer cannot reach a card.
  *
  * `proposalId` and `round` are passed through to `runGates`, which has accepted
  * both since lesson 4.5 and has never been given either, because
@@ -25,9 +76,11 @@ export type ReplayResult = { outcome: GateOutcome; against: 'snapshot' | 'live' 
  * correct: at the moment the production gates run, the row they would name does
  * not exist.
  *
- * `round` defaults to 1 rather than to 0 for the same reason: round 0 is the
- * verdict production reached, and a replay that overwrote that number would
- * make the two runs indistinguishable in the table they both write to.
+ * `userId` is taken rather than read off the proposal, because every caller in
+ * this module already has it and a signature that reads it from the row would
+ * hide which user a replay is being run as. It is checked against the row
+ * instead, so a disagreement is a sentence here rather than a foreign key
+ * violation from two layers down.
  */
 export async function replayGates(
   sql: postgres.Sql,
@@ -39,6 +92,12 @@ export async function replayGates(
   const proposal = await loadProposal(sql, args.proposalId, args.conversationId)
   if (!proposal) {
     throw new Error(`replayGates: no proposal ${args.proposalId} in conversation ${args.conversationId}`)
+  }
+  if (proposal.userId !== args.userId) {
+    throw new Error(
+      `replayGates: proposal ${args.proposalId} was judged for a different user than the one this `
+      + 'replay names. Pass the id the proposal belongs to, or read it off the proposal row.',
+    )
   }
   const against = args.against ?? 'snapshot'
   const nb = against === 'live'
@@ -54,6 +113,7 @@ export async function replayGates(
       + 'no requirements snapshot. It cannot be replayed, and the live notebook is not a substitute.',
     )
   }
+  const round = args.round ?? REPLAY_ROUNDS[against]
   const outcome = await runGates(sql, {
     conversationId: args.conversationId,
     userId: args.userId,
@@ -62,7 +122,32 @@ export async function replayGates(
     notebook: constraintsFromNotebook(nb, args.today),
     now: args.now,
     proposalId: args.proposalId,
-    round: args.round ?? 1,
+    round,
   })
-  return { outcome, against }
+  return { outcome, verdicts: await verdictsFor(sql, args.proposalId, round), against }
+}
+
+/**
+ * The rows this replay just wrote, by gate.
+ *
+ * Ordered by `seq` and written into the map in that order, so replaying one
+ * proposal twice in one mode leaves the LATEST verdict standing rather than an
+ * arbitrary one. `recordGateResults` only accepts a `GateName`, so the filter
+ * below can never drop a row today. It is here because the column is text, and
+ * `gateMetrics` carries the same guard for the same reason.
+ */
+async function verdictsFor(
+  sql: postgres.Sql, proposalId: string, round: number,
+): Promise<GateVerdicts> {
+  const rows = await sql<{ gate: string; passed: boolean | null; detail: string | null }[]>`
+    select gate, passed, detail from course.gate_results
+     where proposal_id = ${proposalId} and round = ${round}
+     order by seq`
+  const known = new Set<string>(GATE_NAMES)
+  const verdicts: GateVerdicts = {}
+  for (const row of rows) {
+    if (!known.has(row.gate)) continue
+    verdicts[row.gate as GateName] = { passed: row.passed, detail: row.detail }
+  }
+  return verdicts
 }

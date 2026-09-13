@@ -1,6 +1,7 @@
 import { compareMoney, formatMoney, type Money } from '../money.js'
 import type { DateWindow } from '../gates/checks.js'
-import type { GateOutcome, RehydratedItem } from '../gates/types.js'
+import type { GateName, RehydratedItem } from '../gates/types.js'
+import type { GateVerdicts } from './replay.js'
 
 /**
  * One graded property, with the evidence that decided it.
@@ -72,18 +73,49 @@ export const NOT_YET = {
  * `replayed` is optional because a case that never reached a proposal has no
  * gate verdict to report, and there is nothing for `replayGates`
  * (src/evals/replay.ts) to run against. When it is absent the two gate-owned
- * checks stay null with their reason, which is the same three-verdict
- * discipline course.gate_results uses. When it is there, the verdict is the
- * gates' own: these are not eval copies of `checkBudget` and `checkDates`, they
- * are the outcome of the run those two functions decided.
+ * checks stay null with their reason.
+ *
+ * What is read from it is `verdicts` and never the outcome, and the difference
+ * is the whole point. `GateOutcome` carries `ok` and a violation list, so
+ * "there is no budget violation" covers a gate that ran and was satisfied AND a
+ * gate that had no budget to check and recorded `passed: null`. Both production
+ * drivers hand `proposalRunner` exactly that notebook today
+ * (test/doors.test.ts), so inferring a pass from an absent violation would
+ * score a green `within_budget` on every conversation that never named a
+ * figure. `verdicts` is the three-valued row `course.gate_results` recorded, so
+ * the check reports the gate's own verdict and its own sentence, which is the
+ * identity this lesson is built on rather than a second reading of it.
  */
 export function gradeOutput(
   reply: string, items: RehydratedItem[], expected: OutputExpectation,
-  replayed?: GateOutcome,
+  replayed?: { verdicts: GateVerdicts },
 ): Grade {
   const lower = reply.toLowerCase()
   const missing = expected.mustInclude.filter((w) => !lower.includes(w.toLowerCase()))
   const currencies = [...new Set(items.map((i) => i.item.price.currency))]
+
+  /**
+   * One gate-owned check, from the row that gate wrote.
+   *
+   * Three ways to reach null and each says something different: no replay was
+   * handed in, the replay recorded no row for this gate (provenance
+   * short-circuits and the gates after it never run), or the gate ran and could
+   * not reach a verdict, in which case the reason is the gate's own.
+   */
+  const fromGate = (name: string, gate: GateName, unreached: string): Check => {
+    if (replayed === undefined) return { name, passed: null, detail: unreached }
+    const verdict = replayed.verdicts[gate]
+    if (verdict === undefined) {
+      return {
+        name,
+        passed: null,
+        detail: `not evaluated: the replay recorded no ${gate} verdict for this proposal.`,
+      }
+    }
+    // A passing row carries no detail, because a gate that had nothing to say
+    // says nothing (rowsFor, src/gates/pipeline.ts).
+    return { name, passed: verdict.passed, detail: verdict.detail ?? 'The gates approved it.' }
+  }
 
   return {
     checks: [
@@ -121,34 +153,12 @@ export function gradeOutput(
           ? 'not evaluated: no items to price.'
           : `Items priced in ${currencies.join(', ')}, but she asked in ${expected.currency}.`,
       },
-      {
-        name: 'within_budget',
-        passed: replayed === undefined
-          ? null
-          : replayed.ok || !replayed.violations.some((v) => v.gate === 'budget'),
-        detail: replayed === undefined
-          ? expected.budget
-            ? `${NOT_YET.gates} (budget ${formatMoney(expected.budget)})`
-            : `${NOT_YET.gates} (no budget stated)`
-          : replayed.ok
-            ? 'The gates approved it.'
-            : replayed.violations.filter((v) => v.gate === 'budget').map((v) => v.detail).join(' ')
-              || 'No budget violation among the faults recorded.',
-      },
-      {
-        name: 'inside_her_window',
-        passed: replayed === undefined
-          ? null
-          : replayed.ok || !replayed.violations.some((v) => v.gate === 'dates'),
-        detail: replayed === undefined
-          ? expected.window
-            ? `${NOT_YET.gates} (${expected.window.earliest} to ${expected.window.latest})`
-            : `${NOT_YET.gates} (no travel window stated)`
-          : replayed.ok
-            ? 'The gates approved it.'
-            : replayed.violations.filter((v) => v.gate === 'dates').map((v) => v.detail).join(' ')
-              || 'No dates violation among the faults recorded.',
-      },
+      fromGate('within_budget', 'budget', expected.budget
+        ? `${NOT_YET.gates} (budget ${formatMoney(expected.budget)})`
+        : `${NOT_YET.gates} (no budget stated)`),
+      fromGate('inside_her_window', 'dates', expected.window
+        ? `${NOT_YET.gates} (${expected.window.earliest} to ${expected.window.latest})`
+        : `${NOT_YET.gates} (no travel window stated)`),
     ],
   }
 }
@@ -197,12 +207,12 @@ export function gradeTrajectory(trace: Trace, expected: TrajectoryExpectation): 
  * pricing it (src/gates/checks.ts). A missing budget is null for the same
  * reason: with no figure stated, nothing was exceeded and nothing was cleared.
  *
- * Nothing in this repository calls it at lesson 6.1, and test/grade.test.ts is
- * its only exercise. Nothing in this repository calls it. Lesson 6.2 turned `within_budget`
- * into a verdict through `replayGates` (src/evals/replay.ts), which reads
- * `checkBudget`'s own violations rather than re-deciding the comparison
- * here. This stays as the honest three-valued comparison a later caller
- * can reach for, and test/grade.test.ts is its only exercise.
+ * Nothing in this repository calls it, and test/grade.test.ts is its only
+ * exercise. Lesson 6.2 did not become the caller: `within_budget` reads the
+ * verdict the budget gate recorded, through `replayGates`
+ * (src/evals/replay.ts), rather than re-deciding the comparison here, because
+ * two budget rules is how the eval and the gate come to disagree. This stays as
+ * the honest three-valued comparison a later caller can reach for.
  */
 export function overBudget(total: Money, budget: Money | null): boolean | null {
   if (!budget || total.currency !== budget.currency) return null

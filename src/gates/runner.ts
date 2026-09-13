@@ -1,6 +1,6 @@
 import type postgres from 'postgres'
-import { formatMoney } from '../money.js'
-import { toStored, type Notebook } from '../notebook.js'
+import { formatMoney, type Money } from '../money.js'
+import type { Notebook } from '../notebook.js'
 import { recordProposal } from '../repo/proposals.js'
 import { runGates } from './pipeline.js'
 import type { NotebookConstraints } from './notebookConstraints.js'
@@ -28,9 +28,15 @@ export type ProposalContext = {
    *
    * Both are carried rather than deriving one from the other here, because the
    * derivation takes `today` (constraintsFromNotebook, src/gates/notebookConstraints.ts)
-   * and this link has no business knowing what day it is. The caller already
-   * computed the constraints from a notebook it had in its hand, so it passes
-   * both and nothing is recomputed or guessed.
+   * and this link has no business knowing what day it is. The caller computes
+   * the constraints from a notebook it has in its hand and passes both.
+   *
+   * That they AGREE is an invariant the type cannot carry, two fields of one
+   * shape being exactly what a caller can get wrong, and a proposal row whose
+   * snapshot describes a different traveller from the one the gates judged is
+   * the single thing this column exists to prevent. So `assertDerivedFrom`
+   * below re-derives the part of the reduction that needs no date and refuses a
+   * mismatch before any gate runs.
    */
   snapshot: Notebook
   now: () => Date
@@ -78,6 +84,7 @@ export type ProposalContext = {
 export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: ToolRunner): ToolRunner {
   return async (name, input, callId, signal) => {
     if (name !== 'propose_itinerary') return inner(name, input, callId, signal)
+    assertDerivedFrom(ctx)
 
     // `refs` is read off the raw input with no validation at all, on purpose.
     // `runGates` applies `ProposalRefsSchema` itself and reports a structural
@@ -111,8 +118,9 @@ export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: T
       refs: outcome.items.map((i) => i.ref),
       // Written at SAVE TIME and from the notebook this run judged against, not
       // read back later from the conversation. The moment it is read back it is
-      // the live notebook again, which is the whole defect.
-      requirementsSnapshot: toStored(ctx.snapshot),
+      // the live notebook again, which is the whole defect. `recordProposal`
+      // serialises it, so there is one door into that column.
+      requirementsSnapshot: ctx.snapshot,
     })
     return {
       content: JSON.stringify({
@@ -138,4 +146,42 @@ export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: T
       isError: false,
     }
   }
+}
+
+/**
+ * Refuses a `notebook` that is not `snapshot` reduced.
+ *
+ * Only the two fields whose derivation needs no date are checked. `budget` and
+ * `currency` come straight off `nb.budget` (constraintsFromNotebook,
+ * src/gates/notebookConstraints.ts) and `window` needs `today`, which this link
+ * does not have and must not acquire, so the window is left to the caller that
+ * computed it. Two of three is not a proof, and it catches the mismatch that
+ * matters: the budget is the constraint a replay is re-judged against, and a
+ * snapshot recording a budget the gates never saw is a green replay of a
+ * proposal production refused.
+ *
+ * Throws rather than filing a violation, because this is a wiring mistake in
+ * our own code and not something a model put in a proposal. `FAIL_REASONS`
+ * (src/engine.ts) does not grow an entry: a turn that dies here died of a bug,
+ * which is the case `crash_loop` already covers.
+ */
+function assertDerivedFrom(ctx: ProposalContext): void {
+  const fromSnapshot = ctx.snapshot.budget?.value ?? null
+  const agrees = fromSnapshot === null
+    ? ctx.notebook.budget === null
+    : ctx.notebook.budget !== null
+      && ctx.notebook.budget.minor === fromSnapshot.minor
+      && ctx.notebook.budget.currency === fromSnapshot.currency
+  if (!agrees || ctx.notebook.currency !== (fromSnapshot?.currency ?? null)) {
+    throw new Error(
+      'proposalRunner: ctx.notebook was not derived from ctx.snapshot. The constraints carry '
+      + `budget ${describe(ctx.notebook.budget)} in ${ctx.notebook.currency ?? 'no currency'} and `
+      + `the snapshot carries ${describe(fromSnapshot)}. Pass the notebook the constraints came from.`,
+    )
+  }
+}
+
+/** A budget for an error message, without reaching for a formatter that needs a locale. */
+function describe(m: Money | null): string {
+  return m === null ? 'no budget' : `${m.minor.toString()} ${m.currency}`
 }

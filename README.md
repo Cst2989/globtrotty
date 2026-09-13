@@ -913,20 +913,28 @@ have reached no supplier at all. It fails closed and costs her turn work rather
 than money, and the fix is for the driver to ask whether a `done` row already
 exists for this call id before it prices the budget. Owner: module 6.
 
-Closed at lesson 6.2: migration 0012's header cites "spec section 4.3, lesson
-6.2", a document outside this repository, and the migration is frozen. What it
-meant is this lesson: a table that recorded only failures could not answer how
-often freshness fired, and `gateMetrics` (src/evals/gateMetrics.ts) is the
-reader that asks. The citation stays in the file, byte for byte, and the answer
-is here rather than in a new migration.
+Closed at lesson 6.2: migration 0012's header cites a spec section and this
+lesson by number, a document outside this repository, and the migration is
+frozen. What it meant is this lesson: a table that recorded only failures could
+not answer how often freshness fired, and `gateMetrics`
+(src/evals/gateMetrics.ts) is the reader that asks. The citation stays in the
+file, byte for byte, and the answer is here rather than in a new migration.
 
-Open at lesson 6.2: `gradeTrajectory` still files two checks as `passed: null`,
-`every_number_has_a_search` and `questions_before_guesses`, because both read a
-transcript this runner does not assemble yet. Lesson 6.5 reads it. The two gate
-checks lesson 6.1 left null are verdicts now, through `replayGates`
-(src/evals/replay.ts). The runner exits 1 when a check is false and 0 when the
-only unfinished business is a null, so the proof command can go red on a real
-verdict without the unbuilt checks reddening it every time somebody runs it.
+Open at lesson 6.2: all four of `gradeOutput`'s and `gradeTrajectory`'s deferred
+checks still print as `passed: null` when you run `npm run evals`, and for two
+different reasons. `every_number_has_a_search` and `questions_before_guesses`
+read a transcript this runner does not assemble yet, and lesson 6.5 assembles
+it. `within_budget` and `inside_her_window` are a different case: the machinery
+is here, `replayGates` (src/evals/replay.ts) re-runs the gates over a stored
+proposal and `gradeOutput` takes its recorded per-gate verdicts as a fourth
+argument, so both checks CAN reach a verdict. Nothing hands one in yet. Nothing
+outside `test/eval-replay.test.ts` calls `replayGates`, because the runner
+grades two mock worlds rather than driving a conversation, and a world that
+never proposed anything has no proposal to replay. Lesson 6.3 drives the
+conversation that reaches one, and until then the two checks print not evaluated
+with the reason. The runner exits 1 when a check is false and 0 when the only
+unfinished business is a null, so the proof command can go red on a real verdict
+without the unbuilt checks reddening it every time somebody runs it.
 
 ## What is next
 

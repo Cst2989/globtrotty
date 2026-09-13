@@ -64,7 +64,7 @@ describe('the patch, validated before anything is written', () => {
       emptyNotebook(), { budget: { minor: '150000', currency: 'eur' } }, 'user', AT)
     expect(rejected).toEqual([])
     // A real Money, with a bigint and an uppercased code, and not the object the
-    // model happened to type: `toStored` (src/repo/notebook.ts) calls
+    // model happened to type: `toStored` (src/notebook.ts) calls
     // `.minor.toString()` on this value and `fromStored` rebuilds it through
     // `money()`, so anything else is a row that cannot be read back.
     expect(next.budget!.value).toEqual(money(150000n, 'EUR'))

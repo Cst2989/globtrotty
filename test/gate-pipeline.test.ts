@@ -744,10 +744,19 @@ describeDb('proposalRunner', () => {
       // either `npm run trip` or tier 3 can produce, and a reader who ran only
       // those would never see this gate fire. This is the case the lesson
       // points at when it says so.
-      const tight: NotebookConstraints = { ...notebook, budget: money(1n, 'EUR') }
+      // The tight constraints are DERIVED from a tight notebook rather than
+      // spread off the loose one, so the pair `proposalRunner` is handed is the
+      // pair its docstring describes. A €0.01 budget beside a €10,000 snapshot
+      // would be exactly the lying row lesson 6.2's column exists to prevent.
+      const tightNotebook: Notebook = {
+        ...rawNotebook,
+        budget: { ...rawNotebook.budget!, value: money(1n, 'EUR') },
+      }
+      const tight: NotebookConstraints = constraintsFromNotebook(tightNotebook, '2026-08-16')
+      expect(tight.budget).toEqual(money(1n, 'EUR'))
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook: tight, snapshot: rawNotebook, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook: tight, snapshot: tightNotebook, now: () => NOW },
         async () => ({ content: 'not reached', isError: true }),
       )
       const outcome = await run('propose_itinerary', {
@@ -761,6 +770,31 @@ describeDb('proposalRunner', () => {
       // A real verdict on the row, not the NOT_EVALUATED.noBudget tier 3 writes.
       expect(rows.get('budget')!.passed).toBe(false)
       expect(rows.get('budget')!.detail).not.toBe(NOT_EVALUATED.noBudget)
+    })
+  })
+
+  it('refuses a constraints object that was not derived from the snapshot beside it', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, items } = await seed(sql, 26)
+      // The pair is two fields of one shape, which is the thing a caller gets
+      // wrong, and the row it would write is a proposal whose snapshot names a
+      // budget the gates never saw. Refused before any gate runs, so no row is
+      // written at all.
+      const run = proposalRunner(
+        sql,
+        {
+          conversationId, userId: USER, turnId: null,
+          notebook: { ...notebook, budget: money(1n, 'EUR'), currency: 'EUR' },
+          snapshot: rawNotebook,
+          now: () => NOW,
+        },
+        async () => ({ content: 'not reached', isError: true }),
+      )
+      await expect(run('propose_itinerary', {
+        refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }],
+      }, 's1-b0')).rejects.toThrow(/was not derived from/)
+      expect(await sql`select 1 from course.gate_results where conversation_id = ${conversationId}`)
+        .toHaveLength(0)
     })
   })
 

@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { replayGates } from '../src/evals/replay.js'
+import { REPLAY_ROUNDS, replayGates } from '../src/evals/replay.js'
 import { checkBudget, checkTotals } from '../src/gates/checks.js'
 import { constraintsFromNotebook } from '../src/gates/notebookConstraints.js'
 import { proposalRunner } from '../src/gates/runner.js'
+import { GATE_NAMES } from '../src/gates/types.js'
+import { emptyNotebook } from '../src/notebook.js'
+import { recordProposal } from '../src/repo/proposals.js'
 import { money } from '../src/money.js'
 import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
 import { recordResults } from '../src/repo/toolResults.js'
@@ -76,13 +79,47 @@ describeDb('replaying a gate against the notebook it was judged with', () => {
       })
       expect(live.outcome.ok).toBe(false)
 
+      // The verdicts are the rows the two runs wrote, and they disagree about
+      // the same gate, which is the whole demonstration. Read back rather than
+      // derived from the outcome, because an outcome carrying no budget
+      // violation says nothing about whether the gate ran.
+      expect(snapshot.verdicts.budget).toEqual({ passed: true, detail: null })
+      expect(live.verdicts.budget!.passed).toBe(false)
+      expect(live.verdicts.budget!.detail).toContain('over the')
+
       // And the replay's rows name the proposal they judged, which no row this
-      // branch has ever written did.
-      const rows = await sql<{ proposal_id: string | null; round: number }[]>`
-        select proposal_id, round from course.gate_results
+      // branch has ever written did. Each mode writes under its own round, so
+      // the deliberately wrong answer is not filed beside the right one.
+      const rows = await sql<{ proposal_id: string | null; round: number; gate: string }[]>`
+        select proposal_id, round, gate from course.gate_results
          where conversation_id = ${conversationId} order by seq`
       expect(rows.some((r) => r.proposal_id === null && r.round === 0)).toBe(true)
-      expect(rows.filter((r) => r.proposal_id === proposalId).every((r) => r.round === 1)).toBe(true)
+      const replayed = rows.filter((r) => r.proposal_id === proposalId)
+      expect(replayed.every((r) => r.round === REPLAY_ROUNDS.snapshot || r.round === REPLAY_ROUNDS.live))
+        .toBe(true)
+      const budgetRounds = replayed.filter((r) => r.gate === 'budget').map((r) => r.round).sort()
+      expect(budgetRounds).toEqual([REPLAY_ROUNDS.snapshot, REPLAY_ROUNDS.live])
+      // Nothing production wrote was touched: the count of round 0 rows is
+      // still one per gate, whatever the replays did.
+      expect(rows.filter((r) => r.round === 0)).toHaveLength(GATE_NAMES.length)
+    })
+  })
+
+  it('refuses to replay a proposal under a user id it does not belong to', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const conversationId = c!.id as string
+      const proposalId = await recordProposal(sql, {
+        conversationId, userId: USER, turnId: null,
+        refs: [{ sourceId: 'hotel-0-nothing', quantity: 1, slot: 'stay' }],
+        requirementsSnapshot: emptyNotebook(),
+      })
+      // A sentence from here, rather than a foreign key violation from two
+      // layers down when the gate rows are written under an owner the
+      // conversation does not have.
+      await expect(replayGates(sql, {
+        proposalId, conversationId, userId: randomUUID(), now: NOW, today: TODAY_ISO,
+      })).rejects.toThrow(/judged for a different user/)
     })
   })
 

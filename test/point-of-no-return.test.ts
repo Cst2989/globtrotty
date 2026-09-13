@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { money } from '../src/money.js'
-import { emptyNotebook, toStored } from '../src/notebook.js'
+import { emptyNotebook } from '../src/notebook.js'
 import { submitMessage } from '../src/handler.js'
 import { recordLinkClicks } from '../src/repo/linkClicks.js'
 import { recordProposal } from '../src/repo/proposals.js'
@@ -31,7 +31,7 @@ async function turnWithALink(
     refs: [{ sourceId: 'hotel-0-1', quantity: 1, slot: 'stay' }],
     // The row is here so a link has a proposal to hang off, so its snapshot is
     // not what these cases are about, and `recordProposal` refuses a missing one.
-    requirementsSnapshot: toStored(emptyNotebook()),
+    requirementsSnapshot: emptyNotebook(),
   })
   const id = randomUUID()
   await recordLinkClicks(sql, {
@@ -231,7 +231,7 @@ describeDb('a turn that handed off twice', () => {
         refs: [{ sourceId: 'hotel-0-2', quantity: 1, slot: 'stay' }],
         // Here so a second link has a proposal to hang off, so its snapshot is
         // not what this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await recordLinkClicks(sql, {
         proposalId, turnId: submitted.turnId, userId: USER,
@@ -271,7 +271,7 @@ describeDb('a turn that handed off twice', () => {
         refs: [{ sourceId: 'hotel-0-3', quantity: 1, slot: 'stay' }],
         // Here so a second link has a proposal to hang off, so its snapshot is
         // not what this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await recordLinkClicks(sql, {
         proposalId, turnId: submitted.turnId, userId: USER, verified: true, quotedAt: new Date(),
@@ -445,7 +445,7 @@ describeDb('after a link is emitted, the sweeper', () => {
         refs: [{ sourceId: 'hotel-0-3', quantity: 1, slot: 'stay' }],
         // Here so a second link has a proposal to hang off, so its snapshot is
         // not what this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await recordLinkClicks(sql, {
         proposalId, turnId: submitted.turnId, userId: USER, verified: true, quotedAt: new Date(),

@@ -11,7 +11,7 @@ import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
 import { LIMIT_REACHED_MESSAGE } from '../src/limit-message.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { money } from '../src/money.js'
-import { emptyNotebook, toStored } from '../src/notebook.js'
+import { emptyNotebook } from '../src/notebook.js'
 import type { EmittedLink } from '../src/repo/linkClicks.js'
 import { recordProposal } from '../src/repo/proposals.js'
 import { submitMessage } from '../src/handler.js'
@@ -306,7 +306,7 @@ async function proposedStay(sql: postgres.Sql) {
     refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'stay' }],
     // The row is here so there is a card to render, so its snapshot is not
     // what these cases are about, and `recordProposal` refuses a missing one.
-    requirementsSnapshot: toStored(emptyNotebook()),
+    requirementsSnapshot: emptyNotebook(),
   })
   return { conversationId, proposalId, turnId: claim.turnId }
 }
@@ -519,7 +519,7 @@ describeDb('the card the terminals print', () => {
         refs: [{ sourceId: 'hotel-0-nothing-searched', quantity: 1, slot: 'stay' }],
         // Here so there is a row to render from, so its snapshot is not what
         // this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await expect(cardForProposal(sql, { proposalId, conversationId, currency: 'EUR' }))
         .rejects.toThrow(/rejected proposal/)
@@ -551,7 +551,7 @@ describeDb('the card the terminals print', () => {
         ],
         // Here so there is a row to render from, so its snapshot is not what
         // this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       await expect(cardForProposal(sql, { proposalId, conversationId, currency: null }))
         .rejects.toThrow(/rejected proposal/)
@@ -573,7 +573,7 @@ describeDb('one component, changed', () => {
         ],
         // Here so `revise_component` has a proposal to read, so its snapshot is
         // not what this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       // The inner runner throws, which is how we know this link answered on its
       // own rather than falling through and searching.
@@ -599,7 +599,7 @@ describeDb('one component, changed', () => {
         refs: [{ sourceId: 'hotel-0-4471', quantity: 1, slot: 'stay' }],
         // Here so the other conversation has a row to leak, so its snapshot is
         // not what this case is about, and `recordProposal` refuses a missing one.
-        requirementsSnapshot: toStored(emptyNotebook()),
+        requirementsSnapshot: emptyNotebook(),
       })
       const run = cardRunner(sql, { conversationId: mine!.id as string, userId: USER, turnId: null },
         () => { throw new Error('inner runner must not be reached') })

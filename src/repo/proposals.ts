@@ -1,6 +1,6 @@
 import type postgres from 'postgres'
 import type { ItemRef } from '../gates/types.js'
-import { fromStored, type Notebook } from '../notebook.js'
+import { fromStored, toStored, type Notebook } from '../notebook.js'
 
 export type Proposal = {
   id: string
@@ -38,21 +38,38 @@ type Row = {
  * one call site silently keeps writing rows a replay cannot use, and this is
  * the one write where a missing value is invisible until months later, when an
  * eval reports a green suite over proposals nobody can re-judge.
+ *
+ * It is a `Notebook` and not the stored jsonb, so there is ONE door into this
+ * column and `toStored` is behind it. A parameter typed loosely enough to take
+ * the jsonb would also take the raw notebook, and a raw notebook reaching
+ * `sql.json` throws on `Money.minor`'s bigint at runtime, in the one write this
+ * docstring just said must not fail quietly. Taking the notebook and
+ * serialising here makes the wrong call impossible to write rather than
+ * expensive to debug.
  */
 export async function recordProposal(
   sql: postgres.Sql,
   args: {
     conversationId: string; userId: string; turnId: string | null
-    refs: ItemRef[]; requirementsSnapshot: unknown
+    refs: ItemRef[]; requirementsSnapshot: Notebook
   },
 ): Promise<string> {
-  const [row] = await sql<{ id: string }[]>`
+  const [row] = await sql<{ id: string; requirements_snapshot: unknown }[]>`
     insert into course.proposals
       (conversation_id, user_id, turn_id, refs, requirements_snapshot)
     values (${args.conversationId}, ${args.userId}, ${args.turnId},
-            ${sql.json(args.refs as never)}, ${sql.json(args.requirementsSnapshot as never)})
+            ${sql.json(args.refs as never)},
+            ${sql.json(toStored(args.requirementsSnapshot) as never)})
     returning id, requirements_snapshot`
   if (!row) throw new Error('recordProposal: insert returned no row')
+  // The returning clause is read, not decorative. The column is nullable
+  // because every pre-0018 row has a null in it, so a null written by THIS
+  // function would be a proposal no replay can use, produced by the one writer
+  // whose whole job is to make that impossible. Verified through `returning`
+  // like every writer in this directory.
+  if (row.requirements_snapshot === null) {
+    throw new Error(`recordProposal: wrote proposal ${row.id} with no requirements snapshot`)
+  }
   return row.id
 }
 

@@ -1,6 +1,8 @@
 import { gradeOutput, gradeTrajectory, NOT_YET, overBudget, type Trace } from '../src/evals/grade.js'
+import type { GateVerdicts } from '../src/evals/replay.js'
 import { checkBudget, checkDates, checkTotals } from '../src/gates/checks.js'
-import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
+import { NOT_EVALUATED } from '../src/gates/pipeline.js'
+import type { RehydratedItem } from '../src/gates/types.js'
 import { money, type Money } from '../src/money.js'
 import { mockSuppliers, type MockConfig } from '../src/supplier/mock.js'
 import type { HotelSearch } from '../src/supplier/types.js'
@@ -30,19 +32,31 @@ const EXPECTED = {
 const BUDGET = money(75_000n, 'EUR')
 
 /**
- * What `replayGates` (src/evals/replay.ts) hands `gradeOutput`, built here out
- * of the SAME two checks the pipeline calls rather than out of a literal. A
- * hand-written outcome would let this file agree with a `detail` string
- * src/gates/checks.ts no longer produces.
+ * The `verdicts` half of a `ReplayResult` (src/evals/replay.ts), built here out
+ * of the SAME checks the pipeline calls and bucketed by the same rule
+ * `rowsFor` uses: a violation makes the row false and carries its sentences, no
+ * constraint makes it null and carries the reason, and neither makes it true
+ * and carries nothing. Written from the checks rather than from literals so
+ * this file cannot agree with a `detail` string src/gates/checks.ts stopped
+ * producing. That the DATABASE records exactly these rows is pinned against a
+ * real database in test/eval-replay.test.ts.
  */
-const outcomeFor = (items: RehydratedItem[], budget: Money): GateOutcome => {
+const verdictsFor = (
+  items: RehydratedItem[], budget: Money | null, window = EXPECTED.window as typeof EXPECTED.window | null,
+): GateVerdicts => {
   const totals = checkTotals(items, 'EUR')
-  const violations = [
-    ...totals.violations,
-    ...checkBudget(items, totals, budget),
-    ...checkDates(items, EXPECTED.window),
-  ]
-  return violations.length > 0 ? { ok: false, violations } : { ok: true, items, total: totals.total! }
+  const budgetFaults = checkBudget(items, totals, budget)
+  const dateFaults = checkDates(items, window)
+  const verdict = (faults: { detail: string }[], unreached: string | null) =>
+    faults.length > 0
+      ? { passed: false, detail: faults.map((f) => f.detail).join(' ') }
+      : unreached !== null
+        ? { passed: null, detail: unreached }
+        : { passed: true, detail: null }
+  return {
+    budget: verdict(budgetFaults, budget === null ? NOT_EVALUATED.noBudget : null),
+    dates: verdict(dateFaults, window === null ? NOT_EVALUATED.noWindow : null),
+  }
 }
 
 describe('grading the output', () => {
@@ -104,7 +118,8 @@ describe('grading the output', () => {
   it('turns both gate-owned checks into verdicts once a replay is handed in', async () => {
     const items = await rehydrated()
     const cheapest = items.reduce((a, b) => (a.item.price.minor < b.item.price.minor ? a : b))
-    const grade = gradeOutput('A crib is included.', items, EXPECTED, outcomeFor([cheapest], BUDGET))
+    const grade = gradeOutput('A crib is included.', items, EXPECTED,
+      { verdicts: verdictsFor([cheapest], BUDGET) })
     for (const name of ['within_budget', 'inside_her_window']) {
       const check = grade.checks.find((c) => c.name === name)!
       expect(check.passed).toBe(true)
@@ -119,13 +134,45 @@ describe('grading the output', () => {
     // calls, rather than out of a second budget rule written for the evals.
     const items = await rehydrated()
     const dearest = items.reduce((a, b) => (a.item.price.minor > b.item.price.minor ? a : b))
-    const grade = gradeOutput('A crib is included.', items, EXPECTED, outcomeFor([dearest], BUDGET))
+    const grade = gradeOutput('A crib is included.', items, EXPECTED,
+      { verdicts: verdictsFor([dearest], BUDGET) })
     const budget = grade.checks.find((c) => c.name === 'within_budget')!
     expect(budget.passed).toBe(false)
     expect(budget.detail).toBe('This trip totals €840.00, over the €750.00 budget.')
     // The dates gate had nothing against the same stay, so one failed check
     // does not drag the other down with it.
     expect(grade.checks.find((c) => c.name === 'inside_her_window')!.passed).toBe(true)
+  })
+
+  it('keeps a gate that could not say as a null, and never reads it as a pass', async () => {
+    // The regression this check exists for. A conversation that never named a
+    // budget makes the budget gate record `passed: null`, and the gate files no
+    // violation because there was nothing to compare, so a grader reading only
+    // "is there a budget violation" reports a green `within_budget` over a
+    // comparison nobody made. Both production drivers produce exactly this
+    // state on every proposal (test/doors.test.ts), so it is the common case
+    // and not a corner.
+    const items = await rehydrated()
+    const grade = gradeOutput('A crib is included.', items, EXPECTED,
+      { verdicts: verdictsFor(items, null, null) })
+    const budget = grade.checks.find((c) => c.name === 'within_budget')!
+    expect(budget.passed).toBeNull()
+    expect(budget.detail).toBe(NOT_EVALUATED.noBudget)
+    const window = grade.checks.find((c) => c.name === 'inside_her_window')!
+    expect(window.passed).toBeNull()
+    expect(window.detail).toBe(NOT_EVALUATED.noWindow)
+  })
+
+  it('keeps a gate the replay recorded no row for as a null too', async () => {
+    // A proposal that fails provenance short-circuits, so the gates after it
+    // write no row at all. An absent gate is a third thing again, and reading
+    // it as a pass would be the same fault as reading a null as one.
+    const grade = gradeOutput('A crib is included.', await rehydrated(), EXPECTED, { verdicts: {} })
+    for (const name of ['within_budget', 'inside_her_window']) {
+      const check = grade.checks.find((c) => c.name === name)!
+      expect(check.passed).toBeNull()
+      expect(check.detail).toContain('recorded no')
+    }
   })
 })
 
