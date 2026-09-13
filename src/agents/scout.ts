@@ -70,9 +70,10 @@ export type ScoutSearch = (assignment: ScoutAssignment) => Promise<string>
  * scout seat's bound is dominated by output it almost never uses:
  * `estimateMicros` charges a full `maxTokens` of 2,048 at 5 micros a token,
  * 10,240 micros, and a real brief is around 112 output tokens, so every
- * reserved call carries roughly 9,700 micros of slack. Input is charged at 1
- * micro a token times the 1.25 cache-write multiplier, so it would take about
- * 7,700 tokens of listings ON TOP of this allowance to eat that slack. What an
+ * reserved call carries roughly 9,700 micros of slack. Input is bounded at 1
+ * micro a token times `cacheWrite1hMult`, which is 2 since lesson 5.6 moved the
+ * bound to the 1h rate (src/repo/reservation.ts), so it would take about 4,850
+ * tokens of listings ON TOP of this allowance to eat that slack. What an
  * overrun does cost is precision in the ceiling check, which is why the number
  * is stated here rather than left at zero.
  */
@@ -205,7 +206,7 @@ function argsFor(brief: ScoutBrief): CallArgs {
  *
  * That refund is not a rounding error at this size. `withRetry` (src/retry.ts)
  * wraps the whole agent step, so one step against a 503-ing provider reserves
- * the batch three times; `readSpendFailClosed` (src/limits.ts) sums
+ * the batch three times; `readSpendFailClosed` (src/repo/spend.ts) sums
  * course.daily_usage across EVERY user for the global ceiling, so a fan-out
  * that stranded its batch would cap the product for the rest of the UTC day
  * with no lever short of a manual write.
@@ -280,9 +281,25 @@ export async function runScouts(
   if (reached !== null) {
     // Refunded in full, because nothing was dispatched, and then thrown rather
     // than returned: no brief exists to hand back.
-    await reconcile(sql, {
-      userId: deps.userId, conversationId: deps.conversationId, reserved, actual: 0n, day,
-    })
+    //
+    // Guarded like every other refund in this function, and here the cost of
+    // leaving it bare is worse than a misleading log. `scoutRunner`
+    // (src/tools.ts) catches `BatchNotReservedError` by name and turns it into a
+    // `limit_reached` tool result the model can act on, and re-throws anything
+    // else. So a refund that failed on this path would replace a clean,
+    // recoverable "no room for three scouts" with a database error that fails
+    // the whole turn, which is the one outcome this branch exists to avoid.
+    try {
+      await reconcile(sql, {
+        userId: deps.userId, conversationId: deps.conversationId, reserved, actual: 0n, day,
+      })
+    } catch (refundErr) {
+      console.error(
+        `runScouts: the batch for ${deps.callId} hit the ${reached} ceiling and could not be `
+        + `refunded. ${reserved} micros stay reserved against this conversation and this day`,
+        refundErr,
+      )
+    }
     throw new BatchNotReservedError(reached)
   }
 

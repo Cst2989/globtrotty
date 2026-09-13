@@ -295,16 +295,21 @@ export async function loadTurnInput(sql: postgres.Sql, turnId: string): Promise<
  * conversation that is simply waiting on her, every heartbeat window, quietly
  * re-billing a state that is supposed to cost nothing.
  *
- * `spendMicros` is the spend to add for this attempt, not a running total:
- * both statements below write it as `spend_usd_micros + ...`. The `+` is load
- * bearing rather than defensive. A closer is terminal, so at most one of them
- * ever lands for one turn, but `releaseForContinuation` above adds every
- * continued attempt's spend through the same column, so what a closer finds
- * there is already the sum of the attempts that came before it and an
- * overwrite would throw them away. It lands on `turns.spend_usd_micros` only.
- * Conversation and daily spend accrue through `recordSpend` (lesson 2.6) and
- * adding them here as well would double-count the conversation and bypass the
- * daily counter a ceiling reads.
+ * `spendMicros` is the spend to add for this attempt, not a running total. Four
+ * statements in this file write the column and every one of them writes
+ * `spend_usd_micros + ...`: `releaseForContinuation` above, and `completeTurn`,
+ * `completeReapedTurn` and `failTurn` below. The `+` is load bearing rather than
+ * defensive. A closer is terminal, so at most one of the three ever lands for
+ * one turn, but `releaseForContinuation` adds every continued attempt's spend
+ * through the same column, so what a closer finds there is already the sum of
+ * the attempts that came before it and an overwrite would throw them away.
+ *
+ * It lands on `turns.spend_usd_micros` only. Conversation and daily spend accrue
+ * through `recordSpend` (lesson 2.6) and, since lesson 5.1, through `reserve`
+ * and `reconcile` (src/repo/reservation.ts), which debit the pre-dispatch bound
+ * and settle the difference. Adding them here as well would double-count the
+ * conversation and bypass the daily counter a ceiling reads, whichever of those
+ * three doors the call went through.
  */
 export async function completeTurn(
   sql: postgres.Sql,

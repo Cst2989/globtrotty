@@ -37,7 +37,7 @@ describe('the fixed delimiter, attacked', () => {
     it(`survives: ${attack.name}`, () => {
       const out = fenceResult('search_hotels', 'api', attack.payload, NONCE)
       // Exactly one open and one close, whatever the payload contained. Matched
-      // on the tag NAME and not on the delimiter, because these five cases have
+      // on the tag NAME and not on the delimiter, because these six cases have
       // to say the same thing before step 3 and after it: the fence lesson 5.2
       // shipped opens `<tool_result ` and the one step 3 ships opens
       // `<tool_result-<nonce> `, and neither of those is what is under test

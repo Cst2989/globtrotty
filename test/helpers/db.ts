@@ -4,7 +4,30 @@ import { describe } from 'vitest'
 import { connect } from '../../src/db.js'
 
 export const DB_URL = process.env.DATABASE_URL
-/** Every test that needs Postgres is declared with this, so npm test works without one. */
+
+/**
+ * Every test that needs Postgres is declared with this, so `npm test` works
+ * without one.
+ *
+ * Skipped WITH A PRINTED REASON, on the argument `test/helpers/live.ts` makes
+ * for the live gates: a silent skip is the other way to mislead a reader,
+ * because a run that says nothing looks like a run that checked something. This
+ * is the larger case by far. The live gates cover two files, and this one covers
+ * every DB-backed file in the suite, which is most of what a reader of this
+ * course would call the interesting half, and the keyless run is the run every
+ * reader actually performs.
+ *
+ * Written at module scope, once, and only in the case it describes. Vitest's
+ * default reporter buffers console output on a green run, so the line shows
+ * under `--reporter=verbose`, in CI, and beside any failure. The claim is that
+ * the reason is written, not that every reporter shows it.
+ */
+if (!DB_URL) {
+  console.warn(
+    'No DATABASE_URL: skipping every database-backed test file. The pure tests still run. '
+  + 'Set DATABASE_URL in .env.local to run the whole suite.',
+  )
+}
 export const describeDb = DB_URL ? describe : describe.skip
 
 /** Runs fn inside a transaction that is always rolled back, so tests leave nothing behind. */

@@ -84,9 +84,11 @@ describeDb('what the gates can judge at lesson-5-1', () => {
         select gate, passed, detail from course.gate_results
          where conversation_id = ${conversationId} order by gate`
       const byGate = Object.fromEntries(rows.map((r) => [r.gate, r]))
-      // Two of the six reach no verdict, on every proposal, on both paths a
-      // reader can run. The gate that exists to stop a trip she cannot afford
-      // has never once judged a budget in production.
+      // Two of the seven reach no verdict, on every proposal, on both paths a
+      // reader can run. `GATE_NAMES` (src/gates/types.ts) is provenance,
+      // freshness, slots, currency, totals, budget and dates, and the gate that
+      // exists to stop a trip she cannot afford has never once judged a budget
+      // in production.
       expect(byGate.budget!.passed).toBeNull()
       expect(byGate.dates!.passed).toBeNull()
       console.log(rows.map((r) => `${r.gate}=${r.passed ?? 'null'} ${r.detail ?? ''}`).join('\n'))

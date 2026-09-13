@@ -606,18 +606,26 @@ async function loop(
     // across the re-ask a retry produces (src/agents/driver.ts, src/loop.ts).
     // Nothing in a retried step reaches a supplier twice.
     //
-    // The model call is the part a retry repeats, and from lesson 5.1 a step IS
-    // one model call. The driver reserves before it dispatches and reconciles
-    // after (src/repo/reservation.ts), so a failed attempt's money is settled by
-    // the driver itself: refunded in full when a response body came back, kept
-    // when nothing did, before the throw ever reaches this line. What a retried
-    // step therefore costs is a second reservation, made and settled on its own
-    // terms, not a second charge for the first attempt's call.
+    // The model calls are the part a retry repeats, and a step no longer makes
+    // just one. Lesson 5.3 put a routing call in front of step 0
+    // (`selectDesk`, src/agents/driver.ts) and lesson 5.4 put up to three scout
+    // calls inside a single `research_destination` execution
+    // (src/agents/scout.ts). The driver reserves before each call and reconciles
+    // after (src/repo/reservation.ts), so a failed attempt's money is settled
+    // call by call by the driver itself: refunded in full when a response body
+    // came back, kept when nothing did, before the throw ever reaches this line.
+    // What a retried step therefore costs is a fresh reservation per call it
+    // makes again, each settled on its own terms, and never a second charge for
+    // an attempt that already settled.
     //
     // `withRetry` wrapping the whole step is the wrap this harness has, over a
-    // single agent-defined unit of work. It is the right shape while a step is
-    // one call; the day a step makes two, wrapping only the call the 429 or 5xx
-    // came from is the narrower fix, and is not this lesson's.
+    // single agent-defined unit of work, and the two multi-call paths are each
+    // built so that repeating the step does not repeat their spend: `selectDesk`
+    // reads the decision it persisted rather than routing again
+    // (src/repo/conversations.ts) and `runScouts` refunds a batch that never
+    // reached the provider. A path that acquires a cost a retry cannot recover
+    // is the one that would need the narrower wrap, around the call the 429 or
+    // 5xx came from, and this branch has none.
     let step: AgentStep
     try {
       step = await withHeartbeat(deps, claim, (signal) =>
@@ -689,9 +697,12 @@ async function loop(
       // after that would be scanning text this repository wrote rather than text
       // the model wrote, which is the wrong input for it. Nothing about the
       // redaction can create a URL or a solicitation, so the reverse dependency
-      // does not exist. Every price she is shown reaches her on the card instead
-      // (`renderProposalCard`), which the server builds from what the gates
-      // rehydrated out of course.tool_results.
+      // does not exist. A price she is shown therefore comes from the server
+      // rather than from this text: from the card (`renderProposalCard`), which
+      // the server builds from what the gates rehydrated out of
+      // course.tool_results, or from the booking hand-off sentence
+      // `completeIfLinkEmitted` writes above, which is built from
+      // course.link_clicks and goes out through `sanitizeOutbound` alone.
       const outbound = step.text
         ? sanitizeOutbound(redactCurrency(step.text))
         : { ok: true as const, text: '' }
@@ -769,6 +780,15 @@ async function loop(
       // tells them whether the effect they are looking for is a wasted search
       // or a booking.
       console.error(`turn ${claim.turnId}: tool ${step.name} came back ambiguous`, err)
+      // Before the ending is written, not after, because the closer reads
+      // `turnSpend.total` and this exit returns past the `spend` call below. The
+      // step's model call was reserved and reconciled by the driver already, so
+      // the ceilings are right either way. What would be lost is the addition to
+      // `turns.spend_usd_micros`, and a turn that ended ambiguous would read as
+      // having paid for one model call fewer than it made. Safe to call here
+      // because every driver step carries `alreadyRecorded: true`, so this only
+      // accumulates the total and moves no money a second time.
+      await spend(deps, claim, turnSpend, step)
       await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'ambiguous_tool_call')
       return
     }

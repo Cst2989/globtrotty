@@ -85,8 +85,8 @@ const HandOffInput = z.strictObject({
  * this file publishes is the JSON schema the model reads, and a per-field schema
  * in the model's copy is advice rather than a check; the check is `PatchSchema`
  * in src/notebook.ts, which every writer of the notebook goes through. So the
- * `strictObject` claim above is exactly true of the two keys this object
- * declares, and the keys INSIDE `patch` are made true one layer down.
+ * `strictObject` claim above is exactly true of the one key this object
+ * declares, `patch`, and the keys INSIDE `patch` are made true one layer down.
  */
 const UpdateRequirements = z.strictObject({
   patch: z.record(z.string(), z.unknown())

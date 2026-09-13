@@ -82,23 +82,48 @@ const TEMPLATES: Record<string, (itemId: string, trackingRef: string) => string>
  * `npm run demo` and every mock-supplier test would have had their booking links
  * stripped by the check that exists to protect them.
  *
- * What the cut does and does not guarantee, measured rather than assumed. The
- * probe goes in as BOTH arguments, so `indexOf` finds whichever of the two is
- * interpolated first and the slice is always a genuine prefix of the finished
- * URL. A template that put the tracking ref before the item id would therefore
- * derive a SHORTER prefix and ship it silently rather than throwing: still host
- * and path bound, still nothing an attacker can move, but looser than the
- * template it came from. The throw below fires on one case only, a template that
- * interpolates neither value, where there is no prefix to find at all.
+ * What the cut guarantees, structurally rather than by comment. The two probes
+ * are DISTINCT, so the derivation can tell the item id apart from the tracking
+ * ref instead of cutting at whichever one interpolated first. The cut is taken
+ * at the item id, which is the last fixed thing every template writes before it
+ * starts writing variable text, and a template that put the tracking ref ahead
+ * of the item id would derive a prefix SHORTER than the template it came from
+ * and widen the outbound allowlist by exactly that much. That case used to ship
+ * silently. `deriveLinkPrefix` now throws on it, which turns a quiet loosening
+ * of a security-load-bearing constant into a build-time failure the first test
+ * to import this module reports. It still throws on the older case too, a
+ * template that interpolates no item id at all, where there is no prefix to find.
  */
-const LINK_PROBE = 'LINKPREFIXPROBE'
+const ID_PROBE = 'LINKPREFIXPROBEID'
+const REF_PROBE = 'LINKPREFIXPROBEREF'
+
+/**
+ * One template in, one prefix out, or a throw.
+ *
+ * Exported and taking its template as an argument only so a test can hand it the
+ * two shapes `TEMPLATES` must never grow, a ref-first template and one that
+ * interpolates neither probe, and watch it refuse both. Production has exactly
+ * one caller, the `map` below.
+ */
+export function deriveLinkPrefix(
+  supplier: string,
+  template: (itemId: string, trackingRef: string) => string,
+): string {
+  const url = template(ID_PROBE, REF_PROBE)
+  const cut = url.indexOf(ID_PROBE)
+  if (cut <= 0) throw new Error(`No stable link prefix for supplier '${supplier}'`)
+  const refAt = url.indexOf(REF_PROBE)
+  if (refAt >= 0 && refAt < cut) {
+    throw new Error(
+      `Booking template for '${supplier}' writes the tracking ref before the item id, `
+      + 'so the derived prefix would be looser than the template. Refusing to ship it.',
+    )
+  }
+  return url.slice(0, cut)
+}
+
 export const BOOKING_LINK_PREFIXES: readonly string[] =
-  Object.keys(TEMPLATES).map((supplier) => {
-    const url = TEMPLATES[supplier]!(LINK_PROBE, LINK_PROBE)
-    const cut = url.indexOf(LINK_PROBE)
-    if (cut <= 0) throw new Error(`No stable link prefix for supplier '${supplier}'`)
-    return url.slice(0, cut)
-  })
+  Object.keys(TEMPLATES).map((supplier) => deriveLinkPrefix(supplier, TEMPLATES[supplier]!))
 
 export class UnknownSupplierError extends Error {
   constructor(readonly supplier: string) {
@@ -553,14 +578,20 @@ export type CashierContext = {
  * The `hand_off_to_booking` link of the runner chain, composed outside
  * `proposalRunner` and, on tier 3, inside `ledgerRunner`:
  *
- *   ledgerRunner(sql, claim,
- *     cashierRunner(sql, ctx, deps,
- *       proposalRunner(sql, ctx,
- *         corpusRunner(sql, claim,
- *           supplierRunner(suppliers)))))
+ *   doorRunner('planning',
+ *     ledgerRunner(sql, claim,
+ *       notebookRunner(sql, ctx,
+ *         scoutRunner(sql, ctx,
+ *           cardRunner(sql, ctx,
+ *             escalationRunner(sql, ctx,
+ *               cashierRunner(sql, ctx, deps,
+ *                 proposalRunner(sql, ctx,
+ *                   corpusRunner(sql, claim,
+ *                     supplierRunner(suppliers))))))))))
  *
- * That is netlify/functions/run-turn-background.mts. `scripts/trip.ts` composes
- * the same four wrappers WITHOUT the ledger, on purpose (one process, no crash
+ * That is netlify/functions/run-turn-background.mts, nine wrappers around
+ * `supplierRunner`, outermost first. `scripts/trip.ts` composes the same chain
+ * WITHOUT the ledger, which is eight wrappers, on purpose (one process, no crash
  * to resume from, nothing to replay), which means the paragraph below is a
  * property of tier 3 and not of this function: `npm run trip` has no
  * `beginToolCall` row standing behind its hand-off.

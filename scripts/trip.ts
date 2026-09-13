@@ -164,11 +164,18 @@ try {
        where turn_id = ${turnId} and role = 'agent' order by seq desc limit 1`
     console.log(reply?.content ?? '(no reply was written)')
 
-    // The card, and the accept button behind it (lesson 5.7). The prose above
-    // carries no amount at all, because `src/worker.ts` runs `redactCurrency`
-    // over it before anything reaches course.messages; every price below was
-    // read back out of course.tool_results by the gates. That pair is the
-    // lesson, and printing them one after the other is the only way to see it.
+    // The card, and the accept button behind it (lesson 5.7). Any amount the
+    // MODEL wrote is gone from the prose above, because `src/worker.ts` runs
+    // `redactCurrency` over a `message` step before it reaches course.messages,
+    // and every price below was read back out of course.tool_results by the
+    // gates. That pair is the lesson, and printing them one after the other is
+    // the only way to see it.
+    //
+    // The one agent message that does carry amounts is the booking hand-off,
+    // which `completeIfLinkEmitted` builds from course.link_clicks and writes
+    // through `sanitizeOutbound` alone. It is the agency's own sentence around
+    // the agency's own links, re-quoted server side, so redacting it would hide
+    // figures the server can stand behind.
     const [pending] = await sql<{ id: string }[]>`
       select id from course.proposals
        where conversation_id = ${conversationId} and decision is null

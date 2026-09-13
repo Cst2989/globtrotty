@@ -41,11 +41,13 @@ const MIN_CACHEABLE_TOKENS: Record<string, number> = {
 const MIN_CACHEABLE_FALLBACK = 4_096
 
 /**
- * Block types that accept `cache_control`. `thinking` does NOT. This is not in
- * the published documentation; it was found against the live API while building
- * the v1 harness (globtrotty, `src/model/cache.ts`) and is recorded here as an
- * experimental result with a named source rather than cited to a page that does
- * not say it.
+ * Block types that accept `cache_control`. `thinking` does NOT.
+ *
+ * Found against the live API while building the v1 harness (globtrotty,
+ * `src/model/cache.ts`), which is why this is a set here rather than a link. The
+ * prompt-caching documentation states the thinking exclusion too, so the two
+ * agree, and the provenance is kept because the set is what the code obeys and a
+ * page can be edited under a comment that cites it.
  */
 const CACHEABLE_BLOCK_TYPES: ReadonlySet<string> =
   new Set(['text', 'tool_use', 'tool_result', 'image', 'document'])

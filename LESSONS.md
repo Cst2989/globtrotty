@@ -175,10 +175,11 @@ which is what makes this class of defect so hard to see: nobody wrote a false
 comment, somebody wrote a comment that a later lesson made false.
 
 **An attack corpus is written before the defence, and the report says which
-cases already passed.** Six of the nine cases in `test/injection-corpus.test.ts`
-were green against the fixed delimiter lesson 5.2 shipped, because the escaping
-was already right. Writing that down is the difference between "we added a nonce
-and the tests pass" and knowing that the nonce is defence in depth rather than a
+cases already passed.** All six of the payload attacks `test/injection-corpus.test.ts`
+loops over were green against the fixed delimiter lesson 5.2 shipped, because
+the escaping was already right, and the twenty cases the file holds today grew
+around them. Writing that down is the difference between "we added a nonce and
+the tests pass" and knowing that the nonce is defence in depth rather than a
 repair, which is the only version of the claim worth putting in a lesson.
 
 **A blocklist and an allowlist, chosen per surface rather than by preference.**

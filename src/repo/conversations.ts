@@ -30,15 +30,36 @@ export type DeskDecision = {
  * exists exactly when this turn has paid for a classification.
  *
  * That makes an observability row load-bearing, which is worth being explicit
- * about. `pgSink` swallows its own failures by design, so a lost row here does
- * not break a turn: it costs one extra classification on the next attempt, which
- * is precisely the behaviour this reader exists to improve on. The failure mode
- * degrades to the old one rather than to a wrong answer.
+ * about, and worth being exact about too. `pgSink` swallows its own failures by
+ * design (src/repo/model-calls.ts), so a lost row here does not break a turn.
+ * What it does is spend money twice, in two different ways, and both of them
+ * over-report rather than under-report, which is the safe direction and not a
+ * harmless one.
  *
- * The earliest `front_desk` row is the routing call's. On a front-desk turn the
- * ANSWER is recorded on the same seat, so `limit 1` over `seq` is what picks the
- * call that decided the desk out of the calls that followed it. `seq` and not
- * `created_at`: every row a test writes shares one transaction timestamp.
+ * First, the ordinary case: a lost row costs one extra classification on the
+ * next attempt, which is the behaviour this reader exists to improve on.
+ *
+ * Second, the case this docstring used to deny. On a FRONT-DESK turn the answer
+ * call is recorded on this same seat, three paragraphs down. If the routing
+ * call's row is the one that was lost, and `writeDesk` landed, and the answer
+ * call's row landed, then the sub-select below returns the ANSWER call's
+ * `cost_micros` as `routing_cost`, and src/agents/driver.ts adds that figure to
+ * `turns.spend_usd_micros` on the retry. The reader cannot tell the two apart,
+ * because `course.model_calls` has no column that says which call decided the
+ * desk. README.md carries that with an owner.
+ *
+ * Third, and on every desk: a step-0 retry that FINDS the decision returns
+ * `decided.costMicros`, and the first attempt already added that same figure to
+ * `turns.spend_usd_micros`. The routing call is billed once on the ceilings,
+ * because every driver step carries `alreadyRecorded: true` and `recordSpend` is
+ * never reached, so what doubles is the turn's own reporting column and not the
+ * money.
+ *
+ * The earliest `front_desk` row is the routing call's, whenever it exists. On a
+ * front-desk turn the ANSWER is recorded on the same seat, so `limit 1` over
+ * `seq` is what picks the call that decided the desk out of the calls that
+ * followed it. `seq` and not `created_at`: every row a test writes shares one
+ * transaction timestamp.
  */
 export async function readDeskDecision(
   sql: postgres.Sql, conversationId: string, userId: string, turnId: string,

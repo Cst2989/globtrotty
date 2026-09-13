@@ -153,7 +153,12 @@ describeDb('completeTurn, the way the worker loop calls it', () => {
       let reads = 0
       const result = await turn(
         newConversation(input.conversationId), input.message,
-        fakeClient([textMessage('never reached')]), mockRunner(),
+        // Two replies, and neither is ever read as content: `turn()` makes a
+        // classification call and then an extraction call before the loop takes
+        // its first decision (src/conversation.ts). `fakeClient` throws past the
+        // end of its queue rather than repeating its last entry, so the length
+        // of this list is a statement about how many calls this path makes.
+        fakeClient([textMessage('never reached'), textMessage('never reached')]), mockRunner(),
         {
           readSpend: async () => {
             reads += 1
@@ -190,7 +195,12 @@ describeDb('continue_later, the way the worker loop handles it', () => {
       // loop hands back on its very first decision, before any model call.
       const result = await turn(
         newConversation(input.conversationId), input.message,
-        fakeClient([textMessage('never reached')]), mockRunner(),
+        // Two replies, and neither is ever read as content: `turn()` makes a
+        // classification call and then an extraction call before the loop takes
+        // its first decision (src/conversation.ts). `fakeClient` throws past the
+        // end of its queue rather than repeating its last entry, so the length
+        // of this list is a statement about how many calls this path makes.
+        fakeClient([textMessage('never reached'), textMessage('never reached')]), mockRunner(),
         { deadlineMs: Date.now() },
       )
       expect(result.outcome).toBe('continue_later')

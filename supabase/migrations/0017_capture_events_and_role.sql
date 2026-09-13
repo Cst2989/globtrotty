@@ -28,11 +28,14 @@
 
 -- 1. What a model call was actually sent, and what came back.
 --
--- Nullable and written only when the capture policy says so (capturePolicyFor,
--- src/repo/model-calls.ts). A driver or front desk call is captured in full
--- because those are the calls anyone ever debugs; everything else is truncated
--- above 8KB, because a scout's fan-out is three rows per tool call and the
--- volume is the cost.
+-- Nullable and written only when the caller captures at all (capturePolicyFor,
+-- src/repo/model-calls.ts). On this branch that is the driver and the front
+-- desk, both captured in full, because those are the calls anyone ever debugs.
+-- Every other caller writes these six columns as NULL: a scout row carries no
+-- prompt and no response at all, rather than a truncated one. The 'truncated'
+-- value the check below accepts is the rule capturePolicyFor states for a cheap
+-- seat above 8KB, and no deployed call reaches it yet, so the column is here
+-- ahead of its first writer and not behind it.
 --
 -- Every one of these columns is a credential exfiltration path by default:
 -- anything that captures model input and output captures whatever was in it.

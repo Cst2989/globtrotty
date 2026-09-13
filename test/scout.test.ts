@@ -389,6 +389,50 @@ describeDb('three scouts, one reservation', () => {
     })
   })
 
+  it('still refuses cleanly when the ceiling refund itself fails', async () => {
+    await withTestDb(async (sql) => {
+      // The refund on the ceiling path used to be the one unguarded `reconcile`
+      // in this function, and it is the one with a named catcher downstream:
+      // `scoutRunner` turns `BatchNotReservedError` into a `limit_reached` tool
+      // result the model can act on and re-throws everything else. So a refund
+      // that failed here did not merely strand the batch, it replaced a clean,
+      // recoverable refusal with a database error that fails the whole turn.
+      //
+      // `sqlWithOneFailingReconcile` fails the SECOND transaction, and on this
+      // path there are exactly two: `reserve`, then the refund. No call is
+      // dispatched, so nothing else opens one.
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      const conversationId = c!.id as string
+      const perCall = estimateMicros(SEATS.scout, batchInputTokens(THREE))
+      await sql`update course.conversations
+                   set spend_usd_micros = ${(DEFAULT_LIMITS.conversationCeilingMicros - perCall * 2n).toString()}
+                 where id = ${conversationId}`
+      const client = slowClient([0, 0, 0])
+      const logged: unknown[][] = []
+      const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        logged.push(args)
+      })
+      let out
+      try {
+        const run = scoutRunner(sqlWithOneFailingReconcile(sql), {
+          client, suppliers: countingSuppliers().suppliers, stay: STAY, conversationId,
+          userId: USER, turnId: null as never, limits: DEFAULT_LIMITS, now: Date.now,
+        }, mockRunner())
+        out = await run('research_destination',
+          { cities: ['Faro', 'Lisbon', 'Porto'], question: 'walkable?' }, 's3-b0', undefined)
+      } finally {
+        spy.mockRestore()
+      }
+      // The refusal the model can act on, not a thrown database error.
+      expect(out.isError).toBe(true)
+      expect(out.content).toContain('No scouts were sent')
+      expect(client.calls).toBe(0)
+      // The stranded refund is the accepted half, and it is logged.
+      expect(logged.filter((args) => String(args[0]).includes('could not be refunded')))
+        .toHaveLength(1)
+    })
+  })
+
   it('debits n times the per-call bound in one write', async () => {
     await withTestDb(async (sql) => {
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`

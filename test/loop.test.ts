@@ -13,14 +13,21 @@ const base = { seat: SEATS.driver, system: 'test', userText: 'hi', tools: toolsF
 
 describe('toolLoop', () => {
   it('stops a run that keeps asking for tools at the step cap', async () => {
-    const client = fakeClient([toolUseMessage('search_flights', { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: null, adults: 2, children: 1 })])
+    // One reply per step the cap allows, spelled out rather than left to the
+    // fake to repeat: `fakeClient` throws past the end of its queue, so the
+    // length of this list is the case's claim about how many calls the cap
+    // permits and the assertion below is what checks it.
+    const client = fakeClient(Array.from({ length: DEFAULT_LIMITS.maxSteps }, () =>
+      toolUseMessage('search_flights', { from: 'BER', to: 'LIS', departureDate: '2026-09-18', returnDate: null, adults: 2, children: 1 })))
     const result = await toolLoop({ ...base, client })
     expect(result.outcome).toBe('step_cap')
     expect(result.steps).toBe(DEFAULT_LIMITS.maxSteps)
     expect(client.calls).toBe(DEFAULT_LIMITS.maxSteps)
   })
   it('honours a smaller cap', async () => {
-    const client = fakeClient([toolUseMessage('search_hotels', { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 })])
+    // Three replies for a cap of three, for the reason the case above gives.
+    const client = fakeClient(Array.from({ length: 3 }, () =>
+      toolUseMessage('search_hotels', { city: 'Lagos', checkIn: '2026-09-18', checkOut: '2026-09-25', adults: 2, children: 1 })))
     const result = await toolLoop({ ...base, client, limits: { ...DEFAULT_LIMITS, maxSteps: 3 } })
     expect(result.outcome).toBe('step_cap')
     expect(result.steps).toBe(3)

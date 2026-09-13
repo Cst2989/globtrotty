@@ -150,15 +150,18 @@ describeDb('one invocation of the driver is one model call', () => {
       const { conversationId, turnId } = await seededTurn(sql)
       // A 503, which classifies `provider_down` and is retryable, so `withRetry`
       // (src/retry.ts) gives the step three attempts and each one reserves
-      // before it dispatches. `fakeClient` repeats its last entry, so all three
-      // attempts get the same outage.
+      // before it dispatches. One outage entry per attempt, spelled out rather
+      // than left to the fake to repeat: `fakeClient` throws past the end of its
+      // queue, so the count below is a claim about how many calls this step
+      // makes and not a side effect of the helper.
       //
       // No routing reply at the head of this list, unlike every other case here:
       // the outage reaches the FIRST call of the step, which from lesson 5.3 is
       // `selectDesk`'s classification call. So this now proves the routing
       // reservation is refunded too. Handing it a label first would have billed
       // one real Haiku call and left the zeroes below false.
-      const client = fakeClient([() => { throw apiError(503) }])
+      const down = () => { throw apiError(503) }
+      const client = fakeClient([down, down, down])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
       })
@@ -189,9 +192,11 @@ describeDb('one invocation of the driver is one model call', () => {
       const { conversationId, turnId } = await seededTurn(sql)
       // The other half of the case above, and the one that was untested. A valid
       // label first, so the routing call SUCCEEDS and is billed, and the outage
-      // reaches `callModel` inside `makeDriver` instead. `fakeClient` repeats its
-      // last entry, so all three attempts of the step get the same 503.
-      const client = fakeClient([labelMessage('new_trip'), () => { throw apiError(503) }])
+      // reaches `callModel` inside `makeDriver` instead. One outage entry per
+      // attempt, and exactly four entries, because the count asserted below is
+      // the point of the case and `fakeClient` throws rather than refilling.
+      const down = () => { throw apiError(503) }
+      const client = fakeClient([labelMessage('new_trip'), down, down, down])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
       })
@@ -237,6 +242,11 @@ describeDb('one invocation of the driver is one model call', () => {
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
+      // Three calls for two steps: the routing call, then one driver call per
+      // step. Asserted rather than assumed, because the queue above is what the
+      // case believes the driver does and an unasserted extra call is how
+      // lesson 5.3's routing call slipped past four cases at once.
+      expect(client.calls).toBe(3)
 
       const [row] = await sql<{ state: { messages: { role: string; content: { type: string; id?: string; tool_use_id?: string }[] }[] } }[]>`
         select state from course.turns where id = ${turnId}`
@@ -296,6 +306,10 @@ describeDb('one invocation of the driver is one model call', () => {
       expect(turn!.status).toBe('done')
       expect(turn!.fail_reason).toBe(null)
       expect(executions).toBe(1)
+      // Three model calls for two steps, the routing call included. The tool
+      // count above says the chain ran the tool once, and this says the driver
+      // did not quietly buy a fourth call to get there.
+      expect(client.calls).toBe(3)
 
       const rows = await sql<{ call_id: string; status: string }[]>`
         select call_id, status from course.tool_calls where turn_id = ${turnId}`
@@ -427,12 +441,7 @@ describeDb('one invocation of the driver is one model call', () => {
          where turn_id = ${turnId} and seat = 'front_desk'`
       expect(routing).toHaveLength(1)
     })
-  // Twenty seconds rather than vitest's default five. This case drives two whole
-  // turns against a remote database, and lesson 5.3 put a classification call,
-  // a reservation, a reconciliation, a model_calls row and a desk write in front
-  // of step 0 of each of them. It went from just inside the default to just
-  // outside it; the work is real and the deadline was the arbitrary half.
-  }, 20_000)
+  })
 })
 
 /**

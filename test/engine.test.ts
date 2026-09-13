@@ -197,10 +197,14 @@ describe('the transcript survives the column it is stored in', () => {
       ],
     }
     const after = JSON.parse(JSON.stringify(before)) as LoopMessage
-    // Field by field, because "survives" is the claim and a deep equal on the
-    // whole object would still pass if the id were the only thing that mattered
-    // and everything else were dropped together with it.
+    // The deep equal is the whole claim about the round trip: `after` came out
+    // of `JSON.parse(JSON.stringify(before))`, so any field a serialise-parse
+    // cycle dropped fails this line, the id included.
     expect(after).toEqual(before)
+    // The three assertions that follow are worth keeping for what they NAME. A
+    // deep equal says the object is unchanged and says nothing about which
+    // fields a reader of this file should know are load-bearing, and the next
+    // person to widen `LoopMessage` reads these rather than the equality.
     const use = after.content[2] as ToolUseBlock
     expect(use.id).toBe('toolu_01ABC')
     expect((use.input as { children: number }).children).toBe(1)

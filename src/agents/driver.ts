@@ -27,7 +27,9 @@ export type DriverDeps = {
   /**
    * The runner chain, built by whoever constructs the driver, so the driver
    * knows nothing about the ledger, the corpus, the gates or the cashier. Tier 3
-   * hands it all five wrappers; a test hands it `mockRunner()`.
+   * hands it all nine wrappers (netlify/functions/run-turn-background.mts), and
+   * `npm run trip` hands it the same nine minus `ledgerRunner`, which is eight.
+   * A test hands it `mockRunner()`.
    */
   run: ToolRunner
   limits: Limits
@@ -98,8 +100,8 @@ export function makeDriver(deps: DriverDeps): Agent {
       // path writes course.source_memory, so a read of it could only ever come
       // back empty and a per-turn query for it would be a round trip for
       // nothing. `rememberSourceFact` exists and test/memory.test.ts calls it,
-      // which is what pins the reader and the render against a real table. The table, the reader and the render exist in this lesson, and
-      // the writer arrives with the module that learns a fact about a property.
+      // which is what pins the reader and the render against a real table. The
+      // writer arrives with the module that learns a fact about a property.
       // `readSourceMemory` is what will scope it to the keys that turn's corpus
       // actually holds when it does.
       const sourceFacts = new Map<string, string[]>()
@@ -138,9 +140,28 @@ export function makeDriver(deps: DriverDeps): Agent {
     const { conversationMicros, dailyMicros, day } = await reserve(sql, {
       userId: ctx.userId, conversationId: ctx.conversationId, micros: reserved,
     })
-    const refund = () => reconcile(sql, {
-      userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
-    })
+    // Guarded, the way every refund in `runScouts` is (src/agents/scout.ts). Both
+    // callers below are already on a path that has decided what this step
+    // returns: one is about to hand back a `limit_reached` step the model can
+    // act on, the other is re-throwing an error the taxonomy has classified. A
+    // bare `reconcile` would let a failed bookkeeping write replace either with
+    // a database error, which turns a recoverable ending into a failed turn and
+    // points the one log line at the wrong system. What is stranded instead is
+    // the refund itself, which fails closed: the ceiling then counts more spend
+    // than really happened, never less.
+    const refund = async () => {
+      try {
+        await reconcile(sql, {
+          userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
+        })
+      } catch (refundErr) {
+        console.error(
+          `makeDriver: the refund for turn ${ctx.turnId} step ${ctx.state.step} failed. `
+          + `${reserved} micros stay reserved against this conversation and this day`,
+          refundErr,
+        )
+      }
+    }
 
     // The ceiling reads the values `reserve` RETURNED, not a reading from before
     // this call. `decideNext`'s own check at the top of `loop()` (src/worker.ts)
@@ -181,9 +202,9 @@ export function makeDriver(deps: DriverDeps): Agent {
     // (src/retry.ts) wraps the whole agent step at src/worker.ts, so one step
     // against a 503-ing provider reserves three times, and roughly 400,000
     // stranded micros per attempt land in course.daily_usage.
-    // `readSpendFailClosed` sums that column across ALL USERS for the global
-    // ceiling (src/limits.ts), so on the order of forty failed steps would cap
-    // the whole product for the rest of the UTC day at zero real spend, with no
+    // `readSpendFailClosed` (src/repo/spend.ts) sums that column across ALL
+    // USERS for the global ceiling, so on the order of forty failed steps would
+    // cap the whole product for the rest of the UTC day at zero real spend, with no
     // lever short of a manual write. `test/driver.test.ts` drives three failed
     // attempts through THIS call and holds both counters at the routing call's
     // cost and nothing more; the case beside it puts the outage on the routing
@@ -523,6 +544,17 @@ export type DeskChoice =
  * every later step it is zero, because `runTurn` adds a step's cost to
  * `turns.spend_usd_micros` once per step and the routing call is one call.
  *
+ * Said exactly, because "belongs to step 0's bill" is not the same as "is added
+ * once". A retry that comes back on step 0 and FINDS the decision adds the
+ * routing cost again, on top of the addition the first attempt already made, so
+ * `turns.spend_usd_micros` over-reports by one routing call per such retry. The
+ * ceilings do not move with it: the step carries `alreadyRecorded: true`, so
+ * `recordSpend` is never reached and `course.conversations` and
+ * `course.daily_usage` still hold exactly what `reconcile` settled. Over-report
+ * is the safe direction for a reporting column, and it is not free, so
+ * README.md owns it and `readDeskDecision` (src/repo/conversations.ts) states
+ * it beside the other way this reader can over-report.
+ *
  * ## The order of the three writes
  *
  * Reconcile, then `writeDesk`, then the row. The row is what the next attempt
@@ -567,9 +599,22 @@ export async function selectDesk(deps: DriverDeps, ctx: AgentContext): Promise<D
   const { conversationMicros, dailyMicros, day } = await reserve(deps.sql, {
     userId: ctx.userId, conversationId: ctx.conversationId, micros: reserved,
   })
-  const refund = () => reconcile(deps.sql, {
-    userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
-  })
+  // Guarded for the reason `makeDriver`'s is: this refund runs on the way to a
+  // `limit` choice or on the way out with a classified provider error, and a
+  // failed write must not replace either of those with a database error.
+  const refund = async () => {
+    try {
+      await reconcile(deps.sql, {
+        userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
+      })
+    } catch (refundErr) {
+      console.error(
+        `selectDesk: the routing refund for turn ${ctx.turnId} failed. `
+        + `${reserved} micros stay reserved against this conversation and this day`,
+        refundErr,
+      )
+    }
+  }
   // `globalMicros` is zero for the same reason it is zero in `makeDriver`:
   // `reserve` does not touch it, and `decideNext` checked all three before this
   // agent was called, so only 'conversation' or 'daily' can fire here.

@@ -66,7 +66,7 @@ describeDb('a turn that survives a crash and a resume', () => {
         select status, state from course.turns where id = ${turnId}`
       expect(row!.status).toBe('done')
       // Both searches really ran, in order. This is the assertion the counts
-      // above cannot make: three calls and three rows are equally true of a
+      // above cannot make: four calls and four rows are equally true of a
       // turn whose first reply was consumed by something else and whose first
       // search never happened.
       const asked = row!.state.messages
@@ -87,11 +87,5 @@ describeDb('a turn that survives a crash and a resume', () => {
       expect(BigInt(conv!.spend_usd_micros)).toBe(billed)
       expect(BigInt(turnRow!.spend_usd_micros)).toBe(billed)
     })
-  // Twenty seconds rather than vitest's default five, against a measured
-  // overrun and not a guess: this case drives three whole invocations against a
-  // remote database, and the routing call lesson 5.3 put in front of step 0
-  // costs another five round trips (a reserve, a model call, a reconcile, a
-  // model_calls row and a desk write). It ran in 3.9s at lesson-5-2 and runs in
-  // 5.0s now, which is on the wrong side of the default by a tenth of a second.
-  }, 20_000)
+  })
 })

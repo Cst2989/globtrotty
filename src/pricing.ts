@@ -89,6 +89,22 @@ function writeMult(p: Price, ttl: CacheTtl): number {
  * which is 1h and the dearer of the two rates, so that fallback errs HIGH and
  * never low: it can over-state a mixed write and cannot under-state one, which
  * is the only direction a spend figure may be wrong in.
+ *
+ * The split branch obeys the same rule, and it takes a second step to get there.
+ * `cache_creation_input_tokens` is the provider's own total for the write, and
+ * the two buckets are its breakdown of that total, so a split whose buckets sum
+ * to LESS than the total has not described the whole write. That happens on a
+ * provider that adds a third TTL bucket this type does not carry yet, on a
+ * partial rollout, on a proxy that fills the object and leaves the buckets at
+ * zero, and on a hand-built fixture. Pricing only the buckets would then charge
+ * a real write at a fraction of its cost, and a zeroed split would charge it at
+ * ZERO, which is the one direction this module forbids everywhere it touches
+ * money. So each bucket is priced at its own rate and the RESIDUAL, whatever the
+ * total carries above the buckets, is priced at the declared TTL, exactly as the
+ * no-split fallback prices the whole. A split that sums to the total, which is
+ * every real mixed response, has no residual and is unaffected. A split that
+ * over-counts the total is left alone rather than refunded, because the buckets
+ * are the more specific statement and the correction would err low.
  */
 function creationMicros(p: Price, u: Usage, cacheWriteTtl: CacheTtl): number {
   // Read first and unconditionally, so an unknown TTL is refused on both paths
@@ -96,9 +112,14 @@ function creationMicros(p: Price, u: Usage, cacheWriteTtl: CacheTtl): number {
   const declared = writeMult(p, cacheWriteTtl)
   const split = u.cache_creation
   if (!split) return u.cache_creation_input_tokens * p.inMicrosPerToken * declared
+  const counted = split.ephemeral_5m_input_tokens + split.ephemeral_1h_input_tokens
+  // Never negative: a split that claims more than the aggregate is priced on the
+  // buckets alone, because a negative residual would be a discount.
+  const residual = Math.max(0, u.cache_creation_input_tokens - counted)
   return (
     split.ephemeral_5m_input_tokens * p.cacheWrite5mMult +
-    split.ephemeral_1h_input_tokens * p.cacheWrite1hMult
+    split.ephemeral_1h_input_tokens * p.cacheWrite1hMult +
+    residual * declared
   ) * p.inMicrosPerToken
 }
 
@@ -116,7 +137,8 @@ function creationMicros(p: Price, u: Usage, cacheWriteTtl: CacheTtl): number {
  * lesson over-charging: a request writes at every TTL its breakpoints carry, and
  * a driver request carries a 1h head and up to three 5m transcript marks. Where
  * the provider reports the split, `creationMicros` above prices each bucket at
- * its own rate and this argument only decides the fallback.
+ * its own rate and this argument prices the fallback and any part of the
+ * reported total the buckets do not account for.
  *
  * Cache writes and cache reads are billed from separate usage fields, 1.25 or 2
  * times and 0.1 times the input rate, because collapsing them into a single

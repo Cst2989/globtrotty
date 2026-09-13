@@ -28,8 +28,18 @@ export const MAX_STORED = 64_000
  * A fixed policy rather than a sampling rate, for the reason SPEC section 7
  * gives: `driver` and `front_desk` are ALWAYS `full` and never sampled, because
  * they are the corpus module 6's evals read, and a sampled-out driver row is a
- * hole in it. The cheap, high-volume seats truncate above 8KB, because a scout
- * fan-out is three rows per tool call and the volume is the cost.
+ * hole in it. Any other seat truncates above 8KB, because a scout fan-out is
+ * three rows per tool call and the volume is the cost.
+ *
+ * That second branch has no production caller on this branch. The one caller is
+ * src/agents/driver.ts, and it passes 'driver' or 'front_desk' every time, so
+ * `'truncated'` is returned by nothing a deployed turn runs, `clip` below never
+ * clips and `MAX_STORED` bounds nothing yet. The cheap seats do not reach it by
+ * another road either: `runScouts` (src/agents/scout.ts) calls `pgSink` with no
+ * capture fields at all, so a scout row's `capture_policy`, `system_prompt`,
+ * `user_prompt` and `response` are NULL rather than truncated. The rule is
+ * written here, exercised by test/capture.test.ts, and waiting for the lesson
+ * that captures a cheap seat. README.md carries it as a residual.
  *
  * Main names a third always-full seat, `reviewer`. This branch has no reviewer:
  * `SEATS` has `driver`, `cheap`, `front_desk`, `scout` and `monitor`, and
@@ -84,10 +94,13 @@ export function redactCredentials(text: string): string {
  * The eight fields above the line have been here since lesson 2.5, apart from
  * `seatConfig`, which arrived with lesson 5.1's `0014`. The six below it are
  * lesson 5.7's capture, one per column `0017` added, and every one of them is
- * OPTIONAL. That is not laziness about types: `memorySink` and the four `pgSink`
- * callers outside the driver write none of them, and a required field would make
- * a capture nothing else performs into an edit at fourteen sites, each one
- * inventing a value for a question it was never asked.
+ * OPTIONAL. That is not laziness about types: `memorySink` and both `pgSink`
+ * callers outside src/agents/driver.ts (`runScouts` in src/agents/scout.ts and
+ * `ledgerSink` in src/repo/spend.ts) write none of them, and a required field
+ * would make a capture nothing else performs into an edit at every one of those
+ * sites, each inventing a value for a question it was never asked. What does
+ * fill them outside the driver is test/capture.test.ts, which calls `pgSink`
+ * directly so the columns are pinned against a real write.
  */
 export type CallFacts = {
   seat: SeatName

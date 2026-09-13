@@ -54,17 +54,34 @@ export function toolUseMessage(name: string, input: unknown, id = `toolu_${name}
   } as Partial<Message>)
 }
 
-/** Replies in order; a function entry throws instead of replying. */
+/**
+ * Replies in order, and a function entry throws instead of replying.
+ *
+ * Past the end of the queue it THROWS, and that is the whole point of the
+ * helper. It used to clamp at the last reply and hand it back forever, which
+ * meant a call the test never queued was absorbed rather than reported: a case
+ * that queued three replies and quietly made a fourth model call still passed,
+ * and the reply it read was the previous one repeated. That is how lesson 5.3's
+ * routing call went unnoticed in four cases at once, because `selectDesk` ate
+ * the reply each of them had queued for the agent and the clamp refilled the
+ * queue behind it. An over-consumed queue is a test whose subject changed under
+ * it, so it fails here and names the count it was given.
+ */
 export function fakeClient(replies: (Message | (() => never))[]): ModelClient & { calls: number } {
   let next = 0
   const client = {
     calls: 0,
     async create() {
       client.calls += 1
-      const reply = replies[Math.min(next, replies.length - 1)]
+      const reply = replies[next]
       next += 1
+      if (reply === undefined) {
+        throw new Error(
+          `fakeClient was queued ${replies.length} replies and asked for ${next}. `
+          + 'A call this test did not queue was made.',
+        )
+      }
       if (typeof reply === 'function') return reply()
-      if (!reply) throw new Error('fakeClient has no replies')
       return reply
     },
   }

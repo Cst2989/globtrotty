@@ -1,4 +1,7 @@
-import { BOOKING_HOSTS, bookingUrl, handOffMessage, UnknownSupplierError } from '../src/cashier.js'
+import {
+  BOOKING_HOSTS, BOOKING_LINK_PREFIXES, bookingUrl, deriveLinkPrefix, handOffMessage,
+  UnknownSupplierError,
+} from '../src/cashier.js'
 import { money } from '../src/money.js'
 import type { EmittedLink } from '../src/repo/linkClicks.js'
 
@@ -68,6 +71,48 @@ describe('bookingUrl', () => {
     // anything on this branch writes. A fourth adapter without a template would
     // make a hand-off throw at the worst possible moment.
     expect(Object.keys(BOOKING_HOSTS).sort()).toEqual(['kiwi', 'mock', 'searchapi'])
+  })
+})
+
+/**
+ * The outbound allowlist is derived from the templates rather than written out,
+ * so the derivation is the thing that has to be pinned. What it must never do is
+ * hand back a prefix looser than the template it read, because `sanitizeOutbound`
+ * (src/sanitize.ts) admits every URL that starts with one of these.
+ */
+describe('deriveLinkPrefix', () => {
+  it('derives a prefix every real booking link starts with, one per template', () => {
+    for (const supplier of Object.keys(BOOKING_HOSTS)) {
+      const url = bookingUrl(supplier, 'ITEM-1', REF)
+      const matching = BOOKING_LINK_PREFIXES.filter((prefix) => url.startsWith(prefix))
+      expect(matching).toHaveLength(1)
+      // Bound to the host AND to the path, which is the whole reason this is not
+      // a host comparison: a favicon endpoint and an open redirect live on one
+      // of these hosts.
+      expect(new URL(`${matching[0]}x`).hostname).toBe(BOOKING_HOSTS[supplier])
+      expect(matching[0]!.length).toBeGreaterThan(`https://${BOOKING_HOSTS[supplier]}/`.length)
+    }
+  })
+
+  it('refuses a template that writes the tracking ref before the item id', () => {
+    // The silent-loosening case. Cutting at whichever value interpolated first
+    // would derive `https://www.kiwi.com/deep?subid=`, which is host and path
+    // bound and still WIDER than the template, and nothing would have said so.
+    const refFirst = (id: string, ref: string) =>
+      `https://www.kiwi.com/deep?subid=${encodeURIComponent(ref)}`
+    + `&itinerary=${encodeURIComponent(id)}`
+    expect(() => deriveLinkPrefix('kiwi', refFirst)).toThrow(/before the item id/)
+  })
+
+  it('refuses a template that interpolates no item id at all', () => {
+    expect(() => deriveLinkPrefix('kiwi', () => 'https://www.kiwi.com/deep'))
+      .toThrow(/No stable link prefix/)
+  })
+
+  it('allows a template whose tracking ref follows the item id', () => {
+    const idFirst = (id: string, ref: string) =>
+      `https://example.invalid/book/${encodeURIComponent(id)}?subid=${encodeURIComponent(ref)}`
+    expect(deriveLinkPrefix('mock', idFirst)).toBe('https://example.invalid/book/')
   })
 })
 

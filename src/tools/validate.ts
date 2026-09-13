@@ -213,7 +213,7 @@ function escapeAttr(v: string): string {
  *
  * Unicode homoglyphs pass through. A payload containing a Cyrillic small letter
  * o inside `</tool_result>` is not escaped, because it is not the delimiter, and
- * it is not the delimiter, so it closes nothing. It reaches the model looking
+ * for the same reason it closes nothing. It reaches the model looking
  * like a closing tag to a human reader, which is a fact about how a human reads
  * a transcript rather than about what the model receives.
  *

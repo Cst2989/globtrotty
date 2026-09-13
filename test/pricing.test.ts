@@ -66,6 +66,52 @@ describe('a write that went out at two TTLs at once', () => {
     expect(costMicros('claude-opus-5', { ...MIXED, cache_creation: null }, '1h')).toBe(100_000n)
   })
 
+  it('prices the whole write at the declared TTL when the split is present but zeroed', () => {
+    // The hole this test exists for. A proxy that fills `cache_creation` and
+    // leaves both buckets at zero, or a provider that starts reporting a third
+    // TTL bucket this type does not carry yet, used to price the entire write at
+    // ZERO, because the aggregate was never read once a split was present. The
+    // residual is what the buckets do not account for, and it is charged at the
+    // declared TTL, which is the same rule the no-split fallback follows.
+    const zeroed = {
+      ...MIXED,
+      cache_creation_input_tokens: 5_000,
+      cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    }
+    expect(costMicros('claude-opus-5', zeroed, '1h')).not.toBe(0n)
+    // 5,000 residual at 2 times five micros in.
+    expect(costMicros('claude-opus-5', zeroed, '1h')).toBe(50_000n)
+    // And at the cheaper declared rate it is still the full write, never free.
+    expect(costMicros('claude-opus-5', zeroed, '5m')).toBe(31_250n)
+  })
+
+  it('prices the residual when the split accounts for only part of the total', () => {
+    // The partial case, which is the one a rollout produces rather than a proxy:
+    // the buckets are real and the aggregate is larger, so the difference went
+    // somewhere this type cannot name. 2,000 at 1.25 and 1,000 at 2 is 4,500
+    // token-multiples, and the 7,000 the split does not explain is charged at
+    // the declared 1h rate for 14,000 more, all of it times five micros in.
+    const partial = {
+      ...MIXED,
+      cache_creation_input_tokens: 10_000,
+      cache_creation: { ephemeral_5m_input_tokens: 2_000, ephemeral_1h_input_tokens: 1_000 },
+    }
+    expect(costMicros('claude-opus-5', partial, '1h')).toBe(92_500n)
+    // Strictly more than pricing the buckets alone, which is the undercount.
+    expect(costMicros('claude-opus-5', partial, '1h')).toBeGreaterThan(22_500n)
+  })
+
+  it('does not refund a split that claims more than the reported total', () => {
+    // A negative residual is a discount, so it is clamped at zero and the
+    // buckets stand. Errs high, which is the only direction allowed.
+    const over = {
+      ...MIXED,
+      cache_creation_input_tokens: 1_000,
+      cache_creation: { ephemeral_5m_input_tokens: 8_000, ephemeral_1h_input_tokens: 2_000 },
+    }
+    expect(costMicros('claude-opus-5', over, '1h')).toBe(70_000n)
+  })
+
   it('still refuses a TTL it has no rate for, even with a split to fall back on', () => {
     // The TTL is validated on both paths. Reading it only in the fallback would
     // mean a bad argument was silently accepted on every real response and threw

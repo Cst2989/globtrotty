@@ -587,10 +587,19 @@ itself and deleting them to make room would erase a history rather than close
 it. An owner is a lesson, a module, or a person, and "a person" means there is
 nothing to design: somebody has to type it.
 
-From lesson 5.7 the channel splits. Prose reaches her with every
-currency-shaped token replaced by `[amount]`, because prose is the model's and
-the model has read supplier payloads, and prices reach her only inside a card
-the server rendered from what the gates rehydrated out of `course.tool_results`.
+From lesson 5.7 the channel splits, and what it splits on is who wrote the
+sentence. The MODEL's prose reaches her with every currency-shaped token
+replaced by `[amount]`, because the model has read supplier payloads and an
+amount in its own words may be an invention. What `redactCurrency` removes is
+exactly that text and nothing else. Prices reach her from the SERVER in two
+shapes. One is the card, rendered from what the gates rehydrated out of
+`course.tool_results`. The other is the booking hand-off sentence, which
+`completeIfLinkEmitted` (src/worker.ts) builds from `course.link_clicks` rows
+and writes to `course.messages` through `sanitizeOutbound` and, by design, not
+through `redactCurrency`: those figures were re-quoted server side at the moment
+the links were minted, which is the same guarantee the card makes, and the
+sentence is the agency's own prose around the agency's own links rather than
+anything a supplier or the model supplied.
 The redactor is a pure function over one streamed chunk with no state between
 calls, so it over-redacts at a chunk boundary rather than buffering, and a
 stutter-free stream that costs her a stray digit is the better trade. It does
@@ -672,13 +681,32 @@ call fills the half of the capture it honestly can, which is the text the
 decision was made from: `classifyDesk` returns a `Routing`, so its own system
 prompt, the response body and the request id never leave that function.
 
+No cheap-seat call is captured at all today, which makes one branch of
+`capturePolicyFor` dead code in production. Its only caller is the driver, which
+passes `driver` or `front_desk` every time, and both return `full`, so
+`'truncated'` is never returned, `clip` never clips and `MAX_STORED` bounds
+nothing. `runScouts` calls `pgSink` with no capture fields, so a scout row's
+`capture_policy`, `system_prompt`, `user_prompt` and `response` are null rather
+than truncated, and the three model calls a fan-out makes are the highest-volume
+calls on the branch with the least recorded about them. The rule is written and
+tested and waiting for a caller. Owner: module 6, whose evals are the first
+reader with a reason to want a scout's prompt back.
+
 The monitor alarms into a log, because this repository has nowhere to page. It
 runs after the turn is closed, it can fail no turn, and its own model call is not
-metered against her ceilings, because it is ours rather than hers. What it can
-see is bounded by what it reads, which is `course.agent_events` and
-`course.model_calls`: the shape of a turn that finished, and not a turn that was
-killed, and not money that `reserve` debited and no `reconcile` gave back. Owner
-of all three: module 6.
+metered against her ceilings, because it is ours rather than hers. It writes no
+`course.model_calls` row either, and that is the larger half: `src/monitor.ts`
+calls the model and calls no sink at all, so the charge is invisible to
+`turnSpendMicros`, to `group by seat`, to the drift canary and to every ceiling.
+It runs once per completing turn, so it is a real recurring cost with no record
+anywhere, which is the exact condition `src/repo/spend.ts` calls worse than a
+row that might be refused a moment later. What it can see is bounded by what it
+reads, which is `course.agent_events` and `course.model_calls`: the shape of a
+turn that finished, and not a turn that was killed, and not money that `reserve`
+debited and no `reconcile` gave back. Owner of all four: module 6, where a
+`seat: 'monitor'` observability row through `pgSink` would make the spend
+countable without putting it on her ceilings, and where changing what
+`turnSpendMicros` returns belongs beside the evals that read it.
 
 What is owed, and where it lives. The browser's half of SPEC section 10 is not
 here, because there is no browser, and `public/index.html` is still a
@@ -715,7 +743,8 @@ reads, which is categorically different from the "an image pointing anywhere,
 with no tool call in it" path lesson 5.5 closes. The complete answer is equality
 against the links actually emitted for the turn, which changes
 `sanitizeOutbound`'s signature and has nothing to compare against on the
-`ask_user` path, since that path emits no links. Owner: the whole-branch review.
+`ask_user` path, since that path emits no links. It is a design change rather
+than an edit, which is why it is owned rather than fixed. Owner: module 6.
 
 Unicode homoglyphs of the fence delimiter, and an already-escaped payload, both
 pass through `escapeFence` unchanged. Neither is a breakout: a homoglyph is not
@@ -771,6 +800,19 @@ in one go: `classifyDesk` returns a `Routing`, so the routing call's row carries
 the text the decision was made from and no response body and no request id, and
 both the signal and the capture want the same change, which is that function
 handing back a `ModelResult`. Owner: module 6.
+
+`turns.spend_usd_micros` can over-report the routing call, in two ways, and
+neither touches a ceiling. A step-0 retry that finds the decision
+`selectDesk` already took returns that decision's cost again, and the first
+attempt had already added it to the column. And on a front-desk turn the ANSWER
+call is recorded on the same `front_desk` seat as the routing call, so if the
+routing call's best-effort `pgSink` row is the one that was lost,
+`readDeskDecision`'s `order by seq limit 1` returns the answer call's cost as
+the routing cost. Both add micros the ceilings never saw, because a driver step
+carries `alreadyRecorded: true` and `recordSpend` is never reached, so the
+conversation and daily counters hold exactly what `reconcile` settled. Telling a
+routing row from an answer row needs a column `course.model_calls` does not
+have, which is why this is owned rather than patched. Owner: module 6.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
 and one tool behind it. Both paths now read it once per agent step, which is the
@@ -858,6 +900,18 @@ is accepted rather than closed. Lesson 5.7 did not close it: the one migration
 that lesson is allowed went on the capture columns, the feed and the role, and
 adding a column to `course.tool_calls` to price a row correctly is a change to
 the ledger rather than to the channel. Owner: module 6.
+
+A resumed turn is charged twice for a `research_destination` it already ran, and
+can be refused a fan-out the ledger would have replayed for free.
+`assertSupplierBudget` runs in the driver BEFORE `deps.run`, and
+`countSupplierCalls` (src/tools/supplierBudget.ts) counts the row `ledgerRunner`
+already wrote for this same `(turn_id, call_id)`, so the resumed attempt prices
+its own replay on top of the original. Worked case: a `search_hotels` costs one
+and a three-city fan-out costs three, which puts `used` at four, and the resume
+computes four plus three against a cap of six and refuses a replay that would
+have reached no supplier at all. It fails closed and costs her turn work rather
+than money, and the fix is for the driver to ask whether a `done` row already
+exists for this call id before it prices the budget. Owner: module 6.
 
 `supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
 document outside this repository may be cited from code, and `git ls-tree` finds
