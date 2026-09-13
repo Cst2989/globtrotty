@@ -354,6 +354,29 @@ describeDb('runTurn end to end', () => {
     })
   })
 
+  it('a continue step calls the agent again in the SAME turn, appends nothing, and charges once', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      let calls = 0
+      const agent: Agent = async ({ state }) => {
+        calls++
+        if (calls === 1) return { kind: 'continue', costMicros: 0n, recordedMicros: 300n }
+        expect(state.messages).toHaveLength(1)          // nothing was appended by the continue
+        expect(state.step).toBe(1)
+        return { kind: 'message', text: `after ${calls}`, costMicros: 100n }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+      expect(calls).toBe(2)
+      const [turn] = await sql<TurnRow[]>`select * from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('done')
+      expect(BigInt(turn!.spend_usd_micros)).toBe(400n)   // 300 self-debited + 100 via recordSpend
+      const [convo] = await sql<ConversationRow[]>`select * from conversations where id = ${r.conversationId}`
+      expect(BigInt(convo!.spend_usd_micros)).toBe(100n)  // recordedMicros never reaches recordSpend
+      const msgs = await sql<MessageRow[]>`select role from messages where conversation_id = ${r.conversationId}`
+      expect(msgs).toHaveLength(2)
+    })
+  })
+
   /**
    * F4. `step.spent.micros` is debited by the tool's own run() as it executes
    * — if run() throws AFTER bumping it (a reviewer call inside

@@ -52,6 +52,14 @@ export type AgentStep =
       recordedMicros?: bigint
     }
   /**
+   * "Call me again": the agent did work that ends no turn and adds nothing to
+   * the transcript — the front desk routing a conversation to planning. The
+   * step counter still advances so a misbehaving agent cannot loop forever
+   * under maxSteps. `recordedMicros` follows the same rule as everywhere else:
+   * already debited, folded into the turn total, never passed to recordSpend.
+   */
+  | { kind: 'continue'; costMicros: bigint; recordedMicros?: bigint }
+  /**
    * Ends the turn in a NAMED failure, with words she can act on. Spec section 8:
    * a refused driver call "fails the turn with words she can act on and does not
    * consume quota" — parking would record status 'done' with fail_reason null,
@@ -350,6 +358,17 @@ async function loop(
         await heartbeat(sql, claim)
         await failTurn(sql, claim, step.reason, turnSpend.total, step.message)
         return
+      }
+      case 'continue': {
+        await heartbeat(sql, claim)
+        await recordSpend(sql, {
+          userId: claim.userId, conversationId: claim.conversationId,
+          costMicros: step.costMicros,
+        })
+        turnSpend.total += step.costMicros
+        state = { ...state, step: state.step + 1 }
+        await saveTurnState(sql, claim, state)
+        continue
       }
       case 'tool':
         break // fall through to the tool handling below
