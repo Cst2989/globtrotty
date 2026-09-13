@@ -95,6 +95,15 @@ export type AgentStep =
        * agent, which have no assistant turn to echo, are unaffected.
        */
       assistantContent?: ContentBlock[]
+      /**
+       * Micros the tool debited ITSELF during run() — a reviewer call inside
+       * propose_itinerary. Folded into the turn total in a `finally` wrapped
+       * around `run()`, so a throw after a self-debited call still reaches
+       * the turn total — exactly the property the `alreadyDebited` comment in
+       * `loop()` argues for, applied to a debit that isn't known until run()
+       * resolves (or throws). Never passed to recordSpend.
+       */
+      spent?: { micros: bigint }
     }
 
 export type Agent = (ctx: AgentContext) => Promise<AgentStep>
@@ -119,7 +128,7 @@ const EST_STEP_MS = 60_000
 // model calls, parallel workers, a 60s Retry-After sleep — keeps refreshing
 // heartbeat_at faster than the sweeper's staleness window can close on it.
 const HEARTBEAT_INTERVAL_MS = 25_000
-const EMPTY: TurnState = { step: 0, messages: [], reviewRounds: 0 }
+const EMPTY: TurnState = { step: 0, messages: [] }
 
 /** Proves the harness without a model: echoes the last user message back. */
 export const echoAgent: Agent = async ({ state }) => {
@@ -370,10 +379,21 @@ async function loop(
       // Wrapped exactly like deps.agent(...) above: a real supplier call (plan 3)
       // can run past HEARTBEAT_STALE, so heartbeat_at must keep advancing while
       // it's in flight, not just before and after.
-      result = await withHeartbeat(
-        sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
-        () => step.run(),
-      )
+      //
+      // The `finally` is F4: step.spent.micros is debited by run() ITSELF,
+      // partway through — if run() throws after that debit (the reviewer call
+      // inside propose_itinerary succeeded, then something later in the same
+      // run() failed), the money is already spent and must still land on
+      // turns.spend_usd_micros. Folding it only after a successful
+      // finishToolCall, as this used to, drops it silently on exactly that path.
+      try {
+        result = await withHeartbeat(
+          sql, claim, deps.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+          () => step.run(),
+        )
+      } finally {
+        if (step.spent !== undefined) turnSpend.total += step.spent.micros
+      }
       // ...and ahead of finishToolCall — a superseded worker must not be the one
       // recording this tool call's result as authoritative.
       await heartbeat(sql, claim)

@@ -65,3 +65,24 @@ export async function recordGateResults(
   }))
   await sql`insert into gate_results ${sql(rows)}`
 }
+
+/** Points the gate rows of ONE round at the proposal they produced. Round-scoped: other rounds stay null. */
+export async function attachProposal(
+  sql: postgres.Sql, args: { turnId: string; round: number; proposalId: string },
+): Promise<void> {
+  await sql`update gate_results set proposal_id = ${args.proposalId}
+             where turn_id = ${args.turnId} and round = ${args.round} and proposal_id is null`
+}
+
+/**
+ * How many reviewer verdicts this turn has already recorded. Persisted before
+ * any later step, so a crash cannot reset the round bound. Throws on a missing
+ * row for the same reason `countPriorGateRuns` does.
+ */
+export async function countReviewerVerdicts(sql: postgres.Sql, turnId: string): Promise<number> {
+  const rows = await sql<{ n: number }[]>`
+    select count(*)::int as n from gate_results where turn_id = ${turnId} and gate = 'reviewer'`
+  const row = rows[0]
+  if (!row) throw new Error('countReviewerVerdicts: count returned no row; refusing to assume zero')
+  return row.n
+}

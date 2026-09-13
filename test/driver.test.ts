@@ -12,6 +12,7 @@ import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { APIConnectionError, BadRequestError } from '@anthropic-ai/sdk'
 import type { FlightSearch } from '../src/supplier/types.js'
+import { LogNotifier } from '../src/notify.js'
 
 const usage = {
   input_tokens: 1000, cache_creation_input_tokens: 0,
@@ -31,6 +32,18 @@ const toolResponse = (name: string, input: unknown) => ({
   stop_reason: 'tool_use', model: 'claude-opus-5', _request_id: 'req_2', usage,
 })
 
+// The reviewer's own usage (test/reviewer.test.ts): 40 output tokens, not the
+// driver's 50 above — reviewOffer prices on THIS response, and 1000*5 + 40*25
+// is exactly the 6_000n asserted below.
+const reviewerUsage = {
+  input_tokens: 1000, cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0, output_tokens: 40,
+}
+const verdictResponse = (v: unknown) => ({
+  content: [{ type: 'text', text: JSON.stringify(v) }], stop_reason: 'end_turn',
+  model: 'claude-opus-5', _request_id: 'req_r', usage: reviewerUsage,
+})
+
 type Seeded = { userId: string; conversationId: string; turnId: string }
 
 describeDb('driver', () => {
@@ -44,7 +57,7 @@ describeDb('driver', () => {
   }
   const ctx = (s: Seeded) => ({
     state: {
-      step: 0, reviewRounds: 0,
+      step: 0,
       messages: [{ role: 'user' as const,
                    content: [{ type: 'text' as const, text: 'a week in Faro' }] }],
     },
@@ -57,6 +70,7 @@ describeDb('driver', () => {
     hotels: new MockSupplier({ kind: 'hotel' }),
     limits: DEFAULT_LIMITS,
     now: () => Date.now(),
+    notifier: new LogNotifier(() => {}),
   })
 
   it('returns a message step, writes a model_calls row, and charges NOTHING twice', async () => {
@@ -78,7 +92,7 @@ describeDb('driver', () => {
       expect(row!.seat).toBe('driver')
       expect(row!.capture_policy).toBe('full')   // the driver is never sampled out
       expect(row!.thinking_mode).toBe('adaptive')
-      expect(row!.prompt_version).toBe('driver@1')
+      expect(row!.prompt_version).toBe('driver@2')
       expect(BigInt(row!.cost_micros as string)).toBe(step.recordedMicros!)
     })
   })
@@ -344,6 +358,31 @@ describeDb('driver', () => {
     })
   })
 
+  it('counts hand_off_to_booking against the same per-turn supplier budget, though it is a code-door tool', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '28')
+      for (let i = 0; i < DEFAULT_LIMITS.maxSupplierCallsPerTurn; i++) {
+        await sql`insert into tool_calls (turn_id, call_id, name, status)
+                  values (${s.turnId}, ${'pre' + i}, 'explore_flights', 'done')`
+      }
+      const create = vi.fn().mockResolvedValue(toolResponse('hand_off_to_booking',
+        { proposalId: '00000000-0000-4000-8000-000000000001' }))
+      const d = deps(sql, create)
+      const qf = vi.spyOn(d.flights, 'quote')
+      const step = await makeDriver(d)(ctx(s))
+      expect(step.kind).toBe('tool')
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const result = String(await step.run())
+      // The budget refusal, same as any other supplier-reaching tool — never
+      // the cashier's own "no proposal"/"not been accepted" text, which would
+      // mean the gate was skipped and handOff ran instead.
+      expect(result).toMatch(/budget|limit|searches/i)
+      expect(result).toContain(String(DEFAULT_LIMITS.maxSupplierCallsPerTurn))
+      // ...and no supplier was ever asked to re-quote.
+      expect(qf).not.toHaveBeenCalled()
+    })
+  })
+
   it('records update_requirements into the notebook, as HER words', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '09')
@@ -399,7 +438,7 @@ describeDb('driver', () => {
       // and hand it to the money gate.
       const tainted = {
         state: {
-          step: 1, reviewRounds: 0,
+          step: 1,
           messages: [
             { role: 'user' as const,
               content: [{ type: 'text' as const, text: 'a week in Faro, direct flights only' }] },
@@ -523,17 +562,32 @@ describeDb('driver', () => {
       await recordResults(sql, {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params, items,
       })
-      const create = vi.fn().mockResolvedValue(toolResponse('propose_itinerary',
-        { refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' }] }))
+      const create = vi.fn()
+        .mockResolvedValueOnce(toolResponse('propose_itinerary',
+          { refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' }] }))
+        .mockResolvedValueOnce(verdictResponse({ approved: true, issues: [] }))
       const step = await makeDriver(deps(sql, create))(ctx(s))
       if (step.kind !== 'tool') throw new Error('unreachable')
       const out = String(await step.run())
-      expect(out).toMatch(/accepted/i)
+      expect(out).toMatch(/approved/i)
       expect(out).toContain(items[0]!.sourceId)
+      expect(out).toContain('proposal_id')
       const rows = await sql`
         select gate, passed from gate_results where conversation_id = ${s.conversationId}`
       expect(rows.length).toBeGreaterThan(0)
       expect(rows.some((r) => r.gate === 'provenance' && r.passed === true)).toBe(true)
+      const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
+      expect(proposals).toHaveLength(1)
+      expect(step.spent!.micros).toBe(6_000n)
+      // M1: `created_at` is transaction-start time inside withTestDb (every
+      // insert in this test transaction gets the SAME timestamp), so ordering
+      // by it and asserting an exact sequence is asserting on Postgres's tie-
+      // breaking, not on anything the driver guarantees. A multiset assertion
+      // pins what actually matters: both seats fired, exactly once each.
+      const calls = await sql`
+        select seat from model_calls where conversation_id = ${s.conversationId}`
+      expect(new Set(calls.map((r) => r.seat))).toEqual(new Set(['driver', 'reviewer']))
+      expect(calls).toHaveLength(2)
     })
   })
 
@@ -542,7 +596,7 @@ describeDb('driver', () => {
   // turn is not an edge case. round used to be hardcoded to 0 on every call,
   // so two proposals in a turn wrote two identical seven-row gate_results sets
   // under round 0, double-counting any `group by gate` fire-rate query.
-  it('derives round from the count of PRIOR propose_itinerary calls this turn, not a hardcoded 0', async () => {
+  it('derives round from the count of PRIOR gate-running tool calls this turn, not a hardcoded 0', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '23')
       // Stands in for a first propose_itinerary call this turn: `loop()`
@@ -567,8 +621,8 @@ describeDb('driver', () => {
   // The one call_id this handler must NOT count against itself: `loop()`
   // (src/worker.ts) writes THIS call's own tool_calls row via beginToolCall
   // before execute() runs, so without the `call_id != callId` exclusion every
-  // proposal — even the first — would count itself and start at round 1.
-  it('does not count its OWN in-progress tool_calls row as a prior proposal', async () => {
+  // call — even the first — would count itself and start at round 1.
+  it('does not count its OWN in-progress tool_calls row as a prior gate run', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '24')
       await sql`

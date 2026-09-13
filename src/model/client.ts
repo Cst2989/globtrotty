@@ -50,6 +50,14 @@ export type CallArgs = {
    */
   suffix?: string
   signal?: AbortSignal
+  /**
+   * Structured output. Sent as `output_config.format = {type: 'json_schema',
+   * schema}` — the canonical field (SDK 0.122 `OutputConfig.format`). NOT the
+   * deprecated top-level `output_format`, and never an assistant prefill,
+   * which 400s on Opus 5. Objects in the schema must carry
+   * `additionalProperties: false`; the API rejects the request otherwise.
+   */
+  outputSchema?: Record<string, unknown>
 }
 
 /**
@@ -111,6 +119,9 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
   const { seat, system, messages, tools } = args
   const outputConfig: Record<string, unknown> = {}
   if (seat.effort !== null) outputConfig.effort = seat.effort
+  if (args.outputSchema !== undefined) {
+    outputConfig.format = { type: 'json_schema', schema: args.outputSchema }
+  }
 
   const head = cacheableSystem(system, tools)
   const req: Record<string, unknown> = {

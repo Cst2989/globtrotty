@@ -4,6 +4,7 @@ import { DEFAULT_MAX_AGE_SECONDS } from './types.js'
 import type {
   Supplier, SupplierItem, SupplierKind, SearchParams, QuoteOutcome, SupplierCapabilities,
 } from './types.js'
+import { withTracking } from './urls.js'
 
 export type MockConfig = {
   kind: SupplierKind
@@ -80,6 +81,14 @@ export class MockSupplier implements Supplier {
    * `kind` and `detail` disagree — an object no gate downstream could
    * interpret. Refuse instead of guessing which one is right.
    */
+  bookingUrl(item: SupplierItem, trackingRef: string): string {
+    return withTracking(
+      `https://mock.example/book/${encodeURIComponent(item.sourceId)}`,
+      trackingRef,
+      (h) => h === 'mock.example',
+    )
+  }
+
   private assertKind(params: SearchParams): void {
     if (params.kind !== this.kind) {
       throw new RangeError(
@@ -97,7 +106,7 @@ export class MockSupplier implements Supplier {
       priceBasis: 'total' as const,
       fetchedAt: this.cfg.now(),
       ttlSeconds: this.capabilities.maxAgeSeconds,
-      bookingUrl: `https://example.invalid/${sourceId}`,
+      bookingUrl: `https://mock.example/book/${sourceId}`,
     }
     if (params.kind === 'flight') {
       return {

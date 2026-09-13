@@ -1,12 +1,17 @@
 import type postgres from 'postgres'
 
 /**
- * The tools that reach a metered, rate-limited third party. Kept here rather
- * than derived from TOOLS' `door` field so the budget cannot silently widen
- * when a new tool is added: adding an api-door tool must be a deliberate edit
- * to this list.
+ * The tools that reach a metered, rate-limited third party — every tool that
+ * does, whatever its `door`. Kept here rather than derived from TOOLS' `door`
+ * field so the budget cannot silently widen when a new tool is added: adding
+ * a tool that reaches a supplier must be a deliberate edit to this list.
+ *
+ * `hand_off_to_booking` is a `code`-door tool (its result is ours, never
+ * fenced) but still calls `Supplier.quote` once per item to verify the price
+ * before minting a link — ruling: one hand-off counts as one supplier call,
+ * so it is on this list despite not being an `api`-door tool.
  */
-export const SUPPLIER_DOORS: readonly string[] = ['explore_flights', 'explore_hotels']
+export const SUPPLIER_DOORS: readonly string[] = ['explore_flights', 'explore_hotels', 'hand_off_to_booking']
 
 /**
  * Spec section 8: "Supplier APIs are rate-limited and sometimes metered, and v1

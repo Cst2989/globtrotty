@@ -7,7 +7,7 @@
 // `pnpm test` run stays offline — same pattern as `test/supplier-kiwi.live.test.ts`.
 import { describe, expect, it } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
-import { callModel } from '../src/model/client.js'
+import { buildRequest, callModel } from '../src/model/client.js'
 import { SEATS } from '../src/model/seats.js'
 // Not called in the two assertions below — no single live call here is large
 // enough, or repeated enough, to reliably exercise a cache read. Imported
@@ -67,4 +67,21 @@ live('driver against the real API', () => {
     // revisited, and this test is where we would find out.
     expect(r.model).toBe('claude-opus-5')
   }, 120_000)
+
+  it('the API accepts output_config.format and returns parseable JSON for the reviewer schema', async () => {
+    const client = new Anthropic()
+    const schema = { type: 'object', properties: { approved: { type: 'boolean' }, issues: { type: 'array', items: { type: 'string' } } },
+                     required: ['approved', 'issues'], additionalProperties: false }
+    const req = buildRequest({
+      seat: SEATS.reviewer, system: 'Answer in the schema.', tools: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Approve this: a flight for €100.' }] }],
+      outputSchema: schema,
+    })
+    const res = await client.messages.create(req as never)
+    const text = res.content.find((b) => b.type === 'text')
+    expect(text).toBeDefined()
+    const parsed = JSON.parse((text as { text: string }).text)
+    expect(typeof parsed.approved).toBe('boolean')
+    expect(Array.isArray(parsed.issues)).toBe(true)
+  }, 60_000)
 })

@@ -25,6 +25,16 @@ function toStored(nb: Notebook): Record<string, unknown> {
   return { ...nb, budget }
 }
 
+/**
+ * Public alias for `toStored`, for callers outside this module that need to
+ * put a `Notebook` into a `jsonb` column — `saveProposal`
+ * (`src/repo/proposals.ts`) writes `proposals.requirements_snapshot` this way
+ * rather than `sql.json(notebook)` directly, for the same reason this module
+ * exists: `Notebook.budget.value.minor` is a `bigint`, and `JSON.stringify`
+ * (which `sql.json` calls) throws on one.
+ */
+export const notebookToStored = toStored
+
 function fromStored(raw: unknown): Notebook {
   const base = emptyNotebook()
   if (raw === null || typeof raw !== 'object') return base

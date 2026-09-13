@@ -309,6 +309,79 @@ describeDb('runTurn end to end', () => {
   })
 
   /**
+   * `step.spent` (src/agents/proposalPath.ts, Task 5) is a THIRD kind of micros
+   * on a tool step: not owed by the worker (`costMicros`) and not debited before
+   * the step started (`recordedMicros`), but debited by the tool's OWN run() —
+   * a reviewer call inside propose_itinerary — partway through, so the amount
+   * is only known once run() resolves. `loop()` must fold it into the turn
+   * total exactly once, and it must never reach `recordSpend`: the tool's
+   * reviewer call already reserved/reconciled it against the conversation
+   * ledger itself.
+   */
+  it('adds a tool step\'s self-debited spent.micros to the turn total, once, without recordSpend', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const spent = { micros: 0n }
+      const agent: Agent = async () => {
+        if (handedOut) {
+          return { kind: 'message' as const, text: 'done', costMicros: 0n }
+        }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_spent', name: 'propose_itinerary',
+          run: async () => {
+            spent.micros += 700n     // the tool's own self-debited reviewer call
+            return 'ok'
+          },
+          costMicros: 5_000n,        // the supplier/gate side: the worker still owes it
+          recordedMicros: 40_000n,   // the driver's own model call: already debited
+          spent,
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      // costMicros (5_000n) + recordedMicros (40_000n) + spent.micros (700n).
+      expect(BigInt(turn!.spend_usd_micros)).toBe(5_000n + 40_000n + 700n)
+      // ...but recordSpend only ever sees costMicros (5_000n + the message
+      // step's 0n): the 700n never crosses it, because the tool already
+      // reserved/reconciled that itself.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(5_000n)
+    })
+  })
+
+  /**
+   * F4. `step.spent.micros` is debited by the tool's own run() as it executes
+   * — if run() throws AFTER bumping it (a reviewer call inside
+   * propose_itinerary succeeded, then a later gate write failed), the amount
+   * is real money already spent and must still reach `turns.spend_usd_micros`
+   * on the failed turn. Folding it only in the success branch (after
+   * finishToolCall) drops it on this exact path.
+   */
+  it('folds a tool step\'s self-debited spent.micros into the turn total even when run() throws', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      const spent = { micros: 0n }
+      const agent: Agent = async () => ({
+        kind: 'tool' as const, callId: 'toolu_throw', name: 'propose_itinerary',
+        run: async () => {
+          spent.micros += 700n
+          throw new Error('boom')
+        },
+        costMicros: 0n,
+        spent,
+      })
+      await expect(runTurn(workerDeps(sql, agent), r.turnId!)).rejects.toThrow('boom')
+      const [turn] = await sql<TurnRow[]>`select spend_usd_micros from turns where id = ${r.turnId}`
+      expect(BigInt(turn!.spend_usd_micros)).toBe(700n)
+    })
+  })
+
+  /**
    * Defect 4. `loop()` appended the tool RESULT to the transcript but never the
    * assistant turn that ASKED for the tool. A `tool_result` block with no
    * matching `tool_use` is a 400 from the provider on the very next request, so
@@ -418,6 +491,59 @@ describeDb('runTurn end to end', () => {
       // and a copy is exactly where the double charge comes back.
       expect(BigInt(conv!.spend_usd_micros)).toBe(DEBIT)
       expect(BigInt(turn!.spend_usd_micros)).toBe(DEBIT)
+    })
+  })
+
+  // F1: an escalation (src/repo/escalations.ts) sets conversations.status =
+  // 'escalated', and is always followed in the same turn by the driver's
+  // closing message. completeTurn must not stamp 'awaiting_user' back over
+  // that terminal status.
+  it('keeps the conversation escalated through completeTurn, after a tool step escalates', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async (ctx) => {
+        if (handedOut) return { kind: 'message' as const, text: 'Someone will look at this.', costMicros: 10n }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_escalate', name: 'escalate_to_human',
+          run: async () => {
+            // Stands in for recordEscalation's status flip, without pulling in
+            // the whole escalate tool.
+            await sql`update conversations set status = 'escalated' where id = ${ctx.conversationId}`
+            return 'Escalated to a human.'
+          },
+          costMicros: 10n,
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+      const [conv] = await sql<ConversationRow[]>`select status from conversations where id = ${r.conversationId}`
+      expect(conv!.status).toBe('escalated')
+    })
+  })
+
+  // The mirror on the failure path: an escalation followed by a `fail` step
+  // (e.g. a subsequent tool call the model made was refused) must leave the
+  // conversation 'escalated', not 'failed'.
+  it('keeps the conversation escalated through failTurn, after a tool step escalates', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const agent: Agent = async (ctx) => {
+        if (handedOut) return { kind: 'fail' as const, reason: 'refused' as const, message: 'no' }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_escalate2', name: 'escalate_to_human',
+          run: async () => {
+            await sql`update conversations set status = 'escalated' where id = ${ctx.conversationId}`
+            return 'Escalated to a human.'
+          },
+          costMicros: 10n,
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+      const [conv] = await sql<ConversationRow[]>`select status from conversations where id = ${r.conversationId}`
+      expect(conv!.status).toBe('escalated')
     })
   })
 

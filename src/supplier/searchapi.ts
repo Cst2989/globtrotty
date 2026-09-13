@@ -4,6 +4,7 @@ import type {
   Supplier, SupplierItem, SupplierCapabilities, SearchParams, HotelSearch,
   QuoteOutcome, PriceBasis,
 } from './types.js'
+import { withTracking, isRegistrableHost, BookingUrlError } from './urls.js'
 
 const ENDPOINT = 'https://www.searchapi.io/api/v1/search'
 
@@ -158,5 +159,10 @@ export class SearchApiHotels implements Supplier {
     }
     const found = items.find((i) => i.sourceId === sourceId)
     return found ? { status: 'ok', item: found } : { status: 'gone' }
+  }
+
+  bookingUrl(item: SupplierItem, trackingRef: string): string {
+    if (item.bookingUrl === null) throw new BookingUrlError('searchapi item carries no link')
+    return withTracking(item.bookingUrl, trackingRef, isRegistrableHost)
   }
 }

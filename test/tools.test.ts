@@ -9,12 +9,13 @@ describe('registry', () => {
   })
 
   it('exposes exactly the planning desk tools this plan implements', () => {
-    // Every name here has a handler in Task 10. The cashier, the reviewer and
-    // revise_component are plan 3b and must NOT appear yet — an advertised tool
-    // with no handler is a tool the model will call and get an error from.
+    // Every name here has a handler. The reviewer's own tools are not
+    // planning-desk tools — an advertised tool with no handler is a tool the
+    // model will call and get an error from. The cashier IS: hand_off_to_booking
+    // is how the model reaches it.
     expect([...DESK_TOOLS.planning].sort()).toEqual(
-      ['ask_user', 'explore_flights', 'explore_hotels', 'propose_itinerary',
-       'update_requirements'].sort(),
+      ['ask_user', 'explore_flights', 'explore_hotels', 'escalate_to_human', 'hand_off_to_booking',
+       'propose_itinerary', 'revise_component', 'update_requirements'].sort(),
     )
   })
 
@@ -62,6 +63,9 @@ describe('provenance is assigned by the harness, never by the model', () => {
     update_requirements: { patch: { destination: 'Lisbon' } },
     ask_user: { questions: ['When do you want to travel?'] },
     propose_itinerary: { refs: [{ sourceId: 'KIWI-1', quantity: 1, slot: 'outbound' }] },
+    revise_component: { proposalId: '00000000-0000-4000-8000-000000000001', change: { kind: 'swap', slot: 'stay', sourceId: 'KIWI-1' } },
+    hand_off_to_booking: { proposalId: '00000000-0000-4000-8000-000000000001' },
+    escalate_to_human: { reason: 'user_request' },
   }
 
   const codeDoorTools = Object.values(TOOLS).filter((t) => t.door === 'code')

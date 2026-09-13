@@ -71,7 +71,12 @@ hardwired `full` for this seat.
 
 **Input:** the rehydrated items rendered as text (supplier, name, dates, price with age, slot),
 the notebook rendered by the existing `renderNotebook`, and the server total. The reviewer sees
-prices because they are the corpus's, not the model's.
+prices because they are the corpus's, not the model's. **Added at Task 4's review (Task 12):**
+every supplier-written field in that rendering (item name, a quote's `reason`, and similar) is
+masked with `maskUntrustedText` before it reaches the reviewer prompt, and the offer block itself
+is rendered inside the existing untrusted fence (`fenceResult`) — the fourth caller of the money
+doors is also a model seat, and parent spec §4 fences every api/worker-door result on its way to
+any model.
 
 **Output:** a fixed shape, requested through the API's structured-output field on the request:
 
@@ -178,16 +183,24 @@ modes.
 
 **URLs.** The `Supplier` port gains `bookingUrl(item: StoredItem, trackingRef: string): string`.
 Kiwi returns the item's own `bookingUrl` with the tracking ref appended as the affiliate sub-id
-parameter; SearchApi hotels build a Google Hotels URL from `property_token`. Each
-implementation asserts the final hostname against a per-supplier allowlist and throws
-otherwise — a supplier that returns a URL off its own domain is a supplier we do not link to.
-The mock returns `https://mock.example/…`.
+parameter; SearchApi hotels build a Google Hotels URL from `property_token`. **Built, not as
+specified above (Task 12, plan deviation 2):** Kiwi asserts the final hostname against a real
+per-supplier allowlist (`kiwi.com` and subdomains) and throws otherwise. SearchApi hotels cannot
+use a fixed allowlist — its `link` is each property's own site
+(`test/fixtures/searchapi-hotels.json` carries booking.com, bluepillow.com, and hotel-owned
+domains directly) — so its check is instead: `https:` scheme, no userinfo, and a registrable
+hostname (has a dot, not an IP, not `localhost`). The mock returns `https://mock.example/…`.
 
-**Minting is the point of no return.** In one transaction: insert one `link_clicks` row per item
-(`tracking_ref` minted first and embedded in the URL, `quoted_minor` = the fresh price,
-`url` = the exact string emitted), and `finishToolCall` with the links as the result. A resumed
-turn that finds the `tool_calls` row `done` replays the stored links and re-quotes nothing.
-After the commit nothing may fail the turn: the reply is assembled from the stored rows.
+**Minting is the point of no return.** **Built, not as specified above (Task 12, plan deviation
+1):** the mint — one transaction inserting one `link_clicks` row per item (`tracking_ref` minted
+first and embedded in the URL, `quoted_minor` = the fresh price, `url` = the exact string
+emitted) — is one transaction *inside the tool*, not one transaction spanning `finishToolCall`,
+which belongs to the worker, not the tool. The worker's existing `pending` `tool_calls` row is
+what prevents a re-run: a turn resumed after the mint committed but before `finishToolCall` ran
+finds the row `pending`, reports `ambiguous`, and the worker fails the turn `fenced` rather than
+re-quoting. The links already committed are recoverable by `proposal_id` on the next turn. A
+resumed turn that instead finds the `tool_calls` row `done` replays the stored links and re-quotes
+nothing.
 
 The cashier moves no money and writes no spend row.
 
@@ -215,7 +228,11 @@ another way, and the conversation status is untouched.
 port. `Notifier` is `{ notify(e: Escalation): Promise<void> }`; the only implementation in this
 plan logs. The call is best-effort and swallowed the way spans are: an escalation that could not
 be sent is still recorded, `notified_at` stays null, and a later job can retry. The row and the
-status change commit before the notifier is called. Idempotent via `tool_calls`.
+status change commit before the notifier is called. Idempotent via `tool_calls`. **Added at the
+final review (Task 12):** `conversations.status = 'escalated'` is sticky through
+`completeTurn`/`failTurn` — neither overwrites it when the turn they are closing out completes or
+fails independently of the escalation. (The sweeper's own crash-loop reap does not yet honour
+this and is filed in the backlog.)
 
 `Notifier` enters through `DriverDeps`; no environment key is added.
 

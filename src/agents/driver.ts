@@ -12,17 +12,20 @@ import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { costMicros } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
-import { countPriorProposals } from '../repo/toolCalls.js'
+import { countPriorGateRuns } from '../repo/toolCalls.js'
 import { toolsForDesk } from '../tools/registry.js'
 import { fenceResult, trimForContext, validateToolCall } from '../tools/validate.js'
-import { assertSupplierBudget } from '../tools/supplierBudget.js'
+import { assertSupplierBudget, SUPPLIER_DOORS } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
-import { constraintsFromNotebook, runGates } from '../gates/pipeline.js'
+import { runProposalPath } from './proposalPath.js'
+import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
+import { handOff } from '../tools/cashier.js'
+import { escalate } from '../tools/escalate.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
-import { sanitizeSourceId } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
+import type { EscalationReason, Notifier } from '../notify.js'
 
 /**
  * `import.meta.url`, never `__dirname` — this package is `"type": "module"` with
@@ -42,6 +45,7 @@ export type DriverDeps = {
   hotels: Supplier
   limits: Limits
   now: () => number
+  notifier: Notifier
 }
 
 /**
@@ -232,18 +236,30 @@ export function makeDriver(deps: DriverDeps): Agent {
     const assistantContent =
       result.content.filter((b) => b.type !== 'tool_use' || b.id === toolUse.id)
 
-    const asToolStep = (run: () => Promise<unknown>): AgentStep => ({
-      kind: 'tool',
-      // The PROVIDER's id. plan 1's tool_calls primary key is (turn_id, call_id),
-      // so a resumed turn that re-issues the same id is recognised as the same
-      // call rather than executed twice.
-      callId: toolUse.id,
-      name: toolUse.name,
-      run,
-      costMicros: 0n,
-      recordedMicros: actual,
-      assistantContent,
-    })
+    /**
+     * `spent` is allocated here, once per tool step, and handed both to `run`
+     * (so `execute` can pass it into `runProposalPath`, which bumps it as the
+     * reviewer's Opus call is reserved/reconciled) and onto the returned
+     * `AgentStep` (so `loop()`, src/worker.ts, reads it back after `run()`
+     * resolves and folds it into the turn total). Harmless for every OTHER
+     * tool: nothing but `propose_itinerary` ever touches it, so it stays 0n.
+     */
+    const asToolStep = (run: (spent: { micros: bigint }) => Promise<unknown>): AgentStep => {
+      const spent = { micros: 0n }
+      return {
+        kind: 'tool',
+        // The PROVIDER's id. plan 1's tool_calls primary key is (turn_id, call_id),
+        // so a resumed turn that re-issues the same id is recognised as the same
+        // call rather than executed twice.
+        callId: toolUse.id,
+        name: toolUse.name,
+        run: () => run(spent),
+        costMicros: 0n,
+        recordedMicros: actual,
+        assistantContent,
+        spent,
+      }
+    }
 
     if (!check.ok) {
       // A rejection travels the SAME durable path as a result — a tool step whose
@@ -265,7 +281,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       }
     }
 
-    if (check.def.door === 'api') {
+    if (SUPPLIER_DOORS.includes(check.def.name)) {
       const budget = await assertSupplierBudget(sql, ctx.turnId, limits.maxSupplierCallsPerTurn)
       if (!budget.ok) {
         return asToolStep(async () =>
@@ -275,8 +291,8 @@ export function makeDriver(deps: DriverDeps): Agent {
       }
     }
 
-    return asToolStep(async () => {
-      const raw = await execute(deps, ctx, notebook, check.def.name, check.input, toolUse.id)
+    return asToolStep(async (spent) => {
+      const raw = await execute(deps, ctx, notebook, check.def.name, check.input, toolUse.id, spent)
       // TRIM, then FENCE. Fencing first and trimming second would cut the
       // closing delimiter off a long result and hand the model an unterminated
       // fence — the exact structure the fence exists to make unambiguous.
@@ -364,7 +380,7 @@ function provenanceFor(ctx: AgentContext): Provenance {
  */
 async function execute(
   deps: DriverDeps, ctx: AgentContext, notebook: Notebook, name: string, input: unknown,
-  callId: string,
+  callId: string, spent: { micros: bigint },
 ): Promise<string> {
   const { sql } = deps
   switch (name) {
@@ -431,7 +447,8 @@ async function execute(
     case 'propose_itinerary': {
       // ProposalRefsSchema is z.strictObject({refs: [...]}) — an OBJECT wrapping
       // the array, because a bare array is not a legal top-level tool schema. So
-      // the validated input must be unwrapped: runGates wants the array.
+      // the validated input must be unwrapped: runProposalPath's gates want the
+      // array.
       const { refs } = input as { refs: unknown[] }
       // Derived, not hardcoded: driver.md instructs the model to fix and
       // propose again, so a SECOND proposal in this turn must land as round 1,
@@ -443,27 +460,23 @@ async function execute(
       // runs the gates twice for the same turn without this count having
       // advanced collides on insert, and `recordGateResults` has no
       // `on conflict` clause, so the turn fails outright rather than silently
-      // double-counting (see `countPriorProposals`'s doc comment in
-      // src/repo/toolCalls.ts for the precondition this now enforces).
-      const round = await countPriorProposals(sql, ctx.turnId, callId)
-      const outcome = await runGates(sql, {
-        conversationId: ctx.conversationId,
-        turnId: ctx.turnId,
-        refs,
-        notebook: constraintsFromNotebook(notebook),
-        now: new Date(deps.now()),
-        round,
-      })
-      if (outcome.ok) {
-        return `Proposal accepted. Total ${formatMoney(outcome.total)}. `
-             + `Items: ${outcome.items.map((i) => sanitizeSourceId(i.item.sourceId)).join(', ')}. `
-             + 'Tell her what you chose and why.'
-      }
-      return 'The proposal was rejected. Fix exactly these and propose again:\n'
-           + outcome.violations
-               .map((v) => `- ${v.gate} (${v.sourceIds.map(sanitizeSourceId).join(', ') || 'no ids'}): ${v.detail}`)
-               .join('\n')
+      // double-counting (see `countPriorGateRuns`'s doc comment in
+      // src/repo/toolCalls.ts for the precondition it now enforces).
+      const round = await countPriorGateRuns(sql, ctx.turnId, callId)
+      return runProposalPath(deps, ctx, spent, { refs, notebook, round, parentProposalId: null })
     }
+    case 'revise_component': {
+      const built = await buildRevisedRefs(sql, ctx.conversationId, input as ReviseInput)
+      if (!built.ok) return `Revision refused: ${built.reason}`
+      const round = await countPriorGateRuns(sql, ctx.turnId, callId)
+      return runProposalPath(deps, ctx, spent, { refs: built.refs, notebook, round, parentProposalId: built.parentProposalId })
+    }
+    case 'hand_off_to_booking': {
+      const { proposalId } = input as { proposalId: string }
+      return handOff({ sql, flights: deps.flights, hotels: deps.hotels, now: deps.now }, ctx, proposalId)
+    }
+    case 'escalate_to_human':
+      return escalate({ sql, notifier: deps.notifier, now: deps.now }, ctx, input as { reason: EscalationReason; proposalId?: string })
     default:
       // Unreachable: validateToolCall already refused anything not in
       // DESK_TOOLS.planning. Kept so adding a tool to the registry without a

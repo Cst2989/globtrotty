@@ -16,7 +16,7 @@ import type { ItemRef, RehydratedItem, Violation } from './types.js'
  * A `z.enum` rejects the bad name at the boundary AND names the valid options
  * in the parse error, so the first reply already carries the answer.
  */
-const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
+export const SLOT_NAMES = Object.keys(SLOT_KINDS) as [
   keyof typeof SLOT_KINDS, ...(keyof typeof SLOT_KINDS)[],
 ]
 
