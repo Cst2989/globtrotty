@@ -1,4 +1,5 @@
 import type postgres from 'postgres'
+import { classifyDesk } from '../classify.js'
 import type { ModelClient } from '../client.js'
 import { TODAY } from '../conversation.js'
 import { loadDesk, renderPrompt } from '../desks.js'
@@ -7,12 +8,13 @@ import { classifyError } from '../errors.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
 import type { Provenance } from '../notebook.js'
+import { readDesk, writeDesk } from '../repo/conversations.js'
 import { pgSink } from '../repo/model-calls.js'
 import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
-import { SEATS } from '../seats.js'
+import { SEATS, type SeatName } from '../seats.js'
 import type { ToolRunner } from '../tools.js'
-import { TOOLS, toolsForDesk } from '../tools/registry.js'
+import { TOOLS, toolsForDesk, type Desk } from '../tools/registry.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { validateToolCall } from '../tools/validate.js'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
@@ -54,33 +56,51 @@ export type DriverDeps = {
  *
  * ## Which desk
  *
- * The planning desk, always, in this lesson. `classify` and the front desk leave
- * the deployed path here and come back at lesson 5.3, which is the lesson that
- * owns desk selection and has a column to persist it in. LESSONS.md carries the
- * hand-off, and README.md says plainly what it costs in between: an FAQ reaches
- * the Opus seat.
+ * Whichever `selectDesk` chose, from lesson 5.3: one cheap structured-output call
+ * on the first step of a turn, remembered on `course.conversations.desk` and read
+ * back by every later step. A factual question is answered by the front desk on
+ * Haiku, which publishes no tools at all, so a front-desk step can only ever
+ * return a message; the `tool_use` branch below is unreachable for it by
+ * construction and not by a check.
  */
 export function makeDriver(deps: DriverDeps): Agent {
   return async (ctx: AgentContext): Promise<AgentStep> => {
     const { sql, limits } = deps
-    const seat = SEATS.driver
-    const desk = loadDesk('planning')
+    const { desk: deskName, costMicros: routingMicros } = await selectDesk(deps, ctx)
+    const desk = loadDesk(deskName)
+    const seat = deskName === 'front' ? SEATS.front_desk : SEATS.driver
+    // The row's label follows the seat, and does not stay the literal 'driver'
+    // lesson 5.1 wrote when the driver had one desk. `group by seat` over
+    // course.model_calls is how an FAQ turn is shown to be a Haiku turn, and a
+    // front-desk call recorded as 'driver' would make that query answer with the
+    // opposite of the truth.
+    const seatName: SeatName = deskName === 'front' ? 'front_desk' : 'driver'
 
-    const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+    // Only the planning desk has a notebook to carry. The front desk holds no
+    // tools, so nothing it can do reads a requirement, and rendering one into
+    // its request would be paying input tokens to tell a desk about fields it
+    // cannot act on. The read is skipped with it.
+    const notebook = deskName === 'front'
+      ? undefined
+      : renderNotebook(await loadNotebook(sql, ctx.conversationId, ctx.userId))
     const args: CallArgs = {
       seat,
-      // Only {{today}} now. The notebook used to be rendered into
-      // {{requirements}} and {{dropped}} inside the system prompt, which is the
-      // stable prefix lesson 5.6 caches, so every fact she stated would have
-      // thrown that prefix away. It rides in the suffix instead.
-      system: renderPrompt(desk, { today: TODAY }),
+      // Only {{today}} now, and the front desk takes no slot at all: it answers
+      // from what she asked and has no dates to reason about. The notebook used
+      // to be rendered into {{requirements}} and {{dropped}} inside the system
+      // prompt, which is the stable prefix lesson 5.6 caches, so every fact she
+      // stated would have thrown that prefix away. It rides in the suffix
+      // instead.
+      system: renderPrompt(desk, deskName === 'front' ? {} : { today: TODAY }),
       messages: ctx.state.messages,
-      tools: toolsForDesk('planning'),
+      // Empty for the front desk, so `buildRequest` omits `tools` entirely and
+      // the model is offered no door to open.
+      tools: toolsForDesk(deskName),
       // The notebook is volatile: it changes the moment she states a fact. The
       // suffix lands after the last block of the transcript, and from lesson 5.6
       // after the last cache breakpoint, so it never invalidates the cached
       // prefix behind it.
-      suffix: renderNotebook(notebook),
+      suffix: notebook,
     }
 
     // ---- 1. Reserve an upper bound BEFORE dispatch (SPEC section 8) ---------
@@ -121,7 +141,10 @@ export function makeDriver(deps: DriverDeps): Agent {
             + 'than run up more. Start a new conversation and I will pick up from what we agreed.'
           : "We have reached today's spending limit, so I have stopped here rather than run "
             + "up more. Come back tomorrow and I will pick up from what we agreed.",
-        costMicros: 0n,
+        // The routing call, and nothing else. It happened before the ceiling was
+        // read, it produced an answer, and `turns.spend_usd_micros` has to carry
+        // it or a capped turn would report itself free.
+        costMicros: routingMicros,
         alreadyRecorded: true,
       }
     }
@@ -170,14 +193,10 @@ export function makeDriver(deps: DriverDeps): Agent {
     // both look like "write a row after the call": a row that describes what
     // happened may be lost, a row that decides what may happen next may not.
     //
-    // `seat` is the literal 'driver' for exactly as long as the driver has one
-    // desk. Lesson 5.3 gives it two and replaces this literal with the seat
-    // the desk selected, in the same commit, because a row labelled 'driver'
-    // for a Haiku front-desk call would make `group by seat` a lie.
     await pgSink(sql, {
       userId: ctx.userId, conversationId: ctx.conversationId, turnId: ctx.turnId,
     })({
-      seat: 'driver', seatConfig: seat, promptVersion: desk.promptVersion,
+      seat: seatName, seatConfig: seat, promptVersion: desk.promptVersion,
       modelRequested: seat.model, modelReturned: result.model,
       usage: result.usage, costMicros: actual, latencyMs: result.latencyMs,
     })
@@ -187,12 +206,18 @@ export function makeDriver(deps: DriverDeps): Agent {
       // reservation above was reconciled to 0n, so the counter is back where it
       // started, and `alreadyRecorded` says so rather than leaving it to be
       // inferred from a zero.
+      //
+      // A refusal refunds its OWN reservation in full. It does not refund the
+      // routing call that decided which desk would refuse: that call was made,
+      // it answered, and it is billed like any other. So this step reports
+      // `routingMicros` and not zero, and `test/driver.test.ts` reads the figure
+      // back off the front_desk row rather than recomputing it.
       return {
         kind: 'fail',
         reason: 'refused',
         text: 'I cannot help with that request. If you tell me what trip you are trying to '
             + 'plan, I will pick it up from there.',
-        costMicros: 0n,
+        costMicros: routingMicros,
         alreadyRecorded: true,
       }
     }
@@ -210,7 +235,10 @@ export function makeDriver(deps: DriverDeps): Agent {
         text: text.length > 0
           ? text
           : 'I ran out of room mid-thought. Ask me again and I will keep it shorter.',
-        costMicros: actual,
+        // This call plus the routing call that sent it here. `routingMicros` is
+        // 0n on every step but the first, where `selectDesk` read the column
+        // instead of asking again.
+        costMicros: actual + routingMicros,
         alreadyRecorded: true,
       }
     }
@@ -281,7 +309,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       callId: toolUse.id,
       name: toolUse.name,
       assistantContent,
-      costMicros: actual,
+      costMicros: actual + routingMicros,
       alreadyRecorded: true,
     }
 
@@ -311,7 +339,7 @@ export function makeDriver(deps: DriverDeps): Agent {
         const { questions } = check.input as { questions: string[] }
         return {
           kind: 'message', text: questions.join('\n\n'),
-          costMicros: actual, alreadyRecorded: true,
+          costMicros: actual + routingMicros, alreadyRecorded: true,
         }
       }
       // The same shape as the budget refusal below, and for the same reason: a
@@ -361,6 +389,69 @@ export function makeDriver(deps: DriverDeps): Agent {
 
     return { ...step, run: (signal) => deps.run(toolUse.name, toolUse.input, callId, signal) }
   }
+}
+
+/**
+ * Which desk this turn is being answered from, decided on step 0 and read back
+ * on every step after it.
+ *
+ * The classification call is charged like any other model call, through the same
+ * reserve and reconcile door, so a turn's bill includes the call that decided
+ * where it went. It is a cheap-seat call against a one-line prompt, so the
+ * reservation is small and the refund is most of it.
+ *
+ * On any step but the first this reads the column and makes no call at all. A
+ * turn that resumes after a crash reads the desk the first attempt chose, which
+ * is the same reason the transcript is persisted: a resumed turn continues the
+ * conversation it was having.
+ *
+ * The reservation is refunded when the call comes back with an error BODY, on
+ * exactly the terms `makeDriver` refunds its own (`isUnbilled` below). Without
+ * that, a provider outage would strand one Haiku reservation per attempt in
+ * course.daily_usage, which `readSpendFailClosed` sums across all users for the
+ * global ceiling: the same leak lesson 5.1 closed for the driver's call, one
+ * call earlier in the step.
+ */
+export async function selectDesk(
+  deps: DriverDeps, ctx: AgentContext,
+): Promise<{ desk: Desk; costMicros: bigint }> {
+  if (ctx.state.step > 0) {
+    return { desk: await readDesk(deps.sql, ctx.conversationId, ctx.userId), costMicros: 0n }
+  }
+  const first = ctx.state.messages[0]
+  const text = first ? textOfBlocks(first.content) : ''
+  const reserved = estimateMicros(SEATS.front_desk, 200)
+  const { day } = await reserve(deps.sql, {
+    userId: ctx.userId, conversationId: ctx.conversationId, micros: reserved,
+  })
+  let routing
+  try {
+    routing = await classifyDesk(text, deps.client)
+  } catch (err) {
+    if (isUnbilled(err)) {
+      await reconcile(deps.sql, {
+        userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
+      })
+    }
+    throw err
+  }
+  await reconcile(deps.sql, {
+    userId: ctx.userId, conversationId: ctx.conversationId,
+    reserved, actual: routing.costMicros, day,
+  })
+  await pgSink(deps.sql, {
+    userId: ctx.userId, conversationId: ctx.conversationId, turnId: ctx.turnId,
+  })({
+    // The routing call's own row, labelled with the seat it was actually made
+    // on, and versioned with the hash `classifyDesk` computed over the bytes it
+    // sent. A hand-written 'classify' literal here would be the one prompt
+    // version on this branch that stops changing when its prompt does.
+    seat: 'front_desk', seatConfig: SEATS.front_desk, promptVersion: routing.promptVersion,
+    modelRequested: SEATS.front_desk.model, modelReturned: SEATS.front_desk.model,
+    usage: routing.usage, costMicros: routing.costMicros, latencyMs: 0,
+  })
+  await writeDesk(deps.sql, ctx.conversationId, ctx.userId, routing.desk)
+  return { desk: routing.desk, costMicros: routing.costMicros }
 }
 
 /**

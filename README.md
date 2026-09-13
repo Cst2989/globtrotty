@@ -124,16 +124,32 @@ closes the hole lesson 4.2 opened and named: a cancelled call used to be billed
 by the provider and recorded nowhere, and it is now debited before it leaves.
 Four functions move the spend ledger and `src/repo/spend.ts` names all four.
 
-What this lesson costs, on the record. The front desk is unreachable on the
-deployed path: `makeDriver` always loads the planning desk, so a short factual
-question is answered by Opus rather than by Haiku until lesson 5.3 moves desk
-selection into the driver and gives it `course.conversations.desk` to remember
-the answer in. `src/conversation.ts`'s `turn()` still exists and still routes,
-because `npm run trip` and the recorded fixtures from modules 1 and 2 are built
-on it; the two planning paths differ from this lesson until 5.3 puts `npm run
-trip` on the driver too. The driver held no notebook until lesson 5.2, which
-gave it a column, a reader and a place in the request after the cache
-breakpoint.
+From lesson 5.3 the driver picks the desk. One cheap-seat call on the first step
+of a turn asks for a structured label against a published JSON schema, the
+answer is written to `course.conversations.desk`, and every later step of the
+same turn reads the column instead of asking again. Any parse failure routes to
+the planning desk and is recorded as a parse failure rather than as the label
+`other`, which is a real answer and must not double as "we could not read the
+reply". Planning is the safe side rather than the cheap one: the front desk
+holds no tools, so a trip request misrouted to it cannot be planned and she is
+asked to rephrase something she phrased correctly, while a factual question
+misrouted to planning is answered correctly and costs five times as much.
+
+`npm run sentinels` greps `src/`, `netlify/` and `public/` for the service role
+key, a literal `sk-ant-` key, a `NEXT_PUBLIC_` variable carrying a secret, and
+the two desk prompts' own sentinel lines. It runs inside `npm test` as well as
+on its own, so a leak fails the suite rather than a deploy step somebody can
+skip. The leak the source articles describe, a prompt pulled into a client
+bundle by one helper import, belongs to a build this repository does not have:
+there is no bundler and no build step here, so the grep runs over what is
+actually deployed instead of over a bundle that does not exist.
+
+`npm run trip` runs the driver now, the same one tier 3 runs, so a live run
+shows the desk it chose, the seat every call was made on, and the reservation
+against the reconciliation. `src/conversation.ts`'s `turn()` is still here and
+is still what `test/conversation.test.ts` and the recorded fixtures from modules
+1 and 2 replay; it is the one-process path those lessons built and it is not the
+production one. Module 6 retires it, because its evals drive the driver.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced
@@ -268,20 +284,8 @@ she stated with its provenance, `loadNotebook` reads it at the top of every
 driver step, and it rides to the model as the request's suffix rather than
 inside the system prompt, because it changes the moment she states a fact and
 anything cached behind it would be thrown away. Two things follow. The budget
-gate can judge a budget at last, instead of recording `budget: not evaluated`
-with a reason on every proposal this branch had ever made. That is true of the
-deployed path: tier 3 reads the notebook at the top of every agent step, so a
-patch `update_requirements` wrote on step 2 is what the gates judge step 3's
-proposal against. It is not true of `npm run trip`, and this lesson does not
-make it true. That script inserts a fresh conversation on every invocation and
-reads the notebook once, before `turn()` starts, so what it reads is always an
-empty row and its budget and dates gates record `not evaluated` exactly as they
-did at lesson 5.1. It takes her message as its only argument and has no way to
-press twice against one conversation, so there is no second press that would
-fill the row either. The two places a reader can watch the verdict today are
-tier 3 and `npm run demo`, which needs no key and writes a notebook itself
-before it asks the gates anything (`scripts/demo.ts`); lesson 5.3 puts the
-script on the driver and closes the gap. And provenance has a caller: the harness
+gate judges a budget, on both paths a reader can run, instead of recording
+`budget: not evaluated` with a reason. And provenance has a caller: the harness
 decides whose word a patch is by asking whether this turn's transcript already
 holds a `tool_result`, so a patch she typed is hers and a patch the model
 composed after reading a supplier price is inferred, and an inferred patch may
@@ -306,9 +310,10 @@ a different input. The cost is that the model can quote her a price the gate
 will refuse a step later. And the fence's delimiter is a fixed string, which is
 a string an attacker can write; lesson 5.5 is where that is attacked properly.
 The planning desk now publishes `ask_user`, which the driver answers by ending
-the turn on her question; `npm run trip` runs `turn()` and `toolLoop`, which
-have no such step, so on that one path `ask_user` comes back to the model as an
-error result until lesson 5.3 puts the script on the driver.
+the turn on her question. Until lesson 5.3 `npm run trip` ran `turn()` and
+`toolLoop`, which have no such step, so on that one path `ask_user` came back to
+the model as an error result; that script runs the driver now and both paths
+park the turn on her question.
 
 From lesson 4.6 there is a cashier. It refuses unless a stored proposal row for
 this conversation carries `decision = 'accept'` decided within thirty minutes;
@@ -395,13 +400,12 @@ The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
-and one tool behind it. Nothing re-reads the notebook between the tool writing
-it and the turn ending: tier 3 reads it once per agent step, which is the step
-that then proposes, and `npm run trip` reads it once before `turn()` starts. On
-tier 3 that is a one-step delay. On the trip path it is total, because the
-script mints a new conversation per invocation, so the notebook a run writes is
-read by nothing: every run's gates see an empty row. Owner: lesson 5.3, which
-puts that script on the driver.
+and one tool behind it. Both paths now read it once per agent step, which is the
+step that then proposes, because lesson 5.3 put `npm run trip` on the same
+driver tier 3 runs. What is left is narrower: a patch and a proposal inside the
+SAME step are judged against the notebook as it was when that step began, since
+the constraints are built before the model is called. Owner: whichever lesson
+first needs a tool to write the notebook and propose in one step.
 
 `course.link_clicks.user_id` carries no constraint of its own. `proposal_id` has
 a single-column foreign key to `course.proposals(id)`, and nothing in the schema

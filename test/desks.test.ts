@@ -1,35 +1,35 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadDesk, renderPrompt } from '../src/desks.js'
-import { DESK_TOOLS, toolsForDesk } from '../src/tools/registry.js'
+import { loadDesk, promptVersion, renderPrompt } from '../src/desks.js'
+import { DESK_TOOLS, toolsForDesk, type Desk } from '../src/tools/registry.js'
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
+// The directory loadDesk reads, derived the same way loadDesk derives it, so
+// this stays right if the prompts move.
+const DESK_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'desks')
+
 /**
- * The two files a reader can run that compose a runner chain and drive a desk.
+ * The two files a reader can run that compose the product's driver and drive a
+ * desk.
  *
- * LISTED, and then checked. Until this fix the list was walked out of `scripts`
- * and `netlify/functions` by grepping each file for `turn(`, which stopped being
- * true of the deployed driver at lesson 5.1: `netlify/functions/run-turn-background.mts`
- * runs `runTurn` over `makeDriver` and matches that pattern at two lines only,
- * both of them inside docstrings describing what `turn()` USED TO do. A guard
- * that finds its subject through prose stops finding it the day someone tidies a
- * sentence, and it stops SILENTLY, still green, with the deployed chain no
- * longer looked at.
- *
- * So the discovery below is a check rather than a search: each file has to
- * contain the composition call itself, `doorRunner(`, which is the outermost
- * wrapper of both chains (src/tools.ts) and the one line neither driver can lose
- * while still putting a tool through the desk allowlist. A file that stops
- * composing a chain drops out of this list and fails the equality below by name,
- * which is the loud failure the walk could not produce.
+ * LISTED, and then checked. A guard that finds its subject through prose stops
+ * finding it the day someone tidies a sentence, and it stops SILENTLY, still
+ * green, with the deployed chain no longer looked at; that is what the old
+ * `turn(` grep did, matching two docstrings. The marker is `makeDriver(`, since
+ * lesson 5.3 put `npm run trip` on the same driver tier 3 runs, and building
+ * `makeDriver` is what "sends a desk's tools to a model" means on this branch
+ * (`runTurn(` would be worse: `scripts/demo.ts` calls it with an agent that
+ * publishes no tools). A file that stops building the driver drops out of the
+ * filter and fails the equality below by name, which is the loud failure a
+ * directory walk could not produce.
  */
 const DRIVER_FILES = ['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'] as const
 
 function drivers(): string[] {
   return DRIVER_FILES
-    .filter((file) => /\bdoorRunner\(/.test(readFileSync(path.join(REPO_ROOT, file), 'utf8')))
+    .filter((file) => /\bmakeDriver\(/.test(readFileSync(path.join(REPO_ROOT, file), 'utf8')))
     .slice()
     .sort()
 }
@@ -53,6 +53,36 @@ describe('desks', () => {
     expect(desk.promptVersion).toMatch(/^[0-9a-f]{12}$/)
     expect(loadDesk('front').promptVersion).not.toBe(desk.promptVersion)
   })
+  it('changes the version when the file changes', () => {
+    // The hash is of the file's own bytes, so a prompt edit is a new
+    // prompt_version in course.model_calls without anyone remembering to bump a
+    // string. That is the difference from a hand-maintained 'planning@1', which
+    // is right until the first edit somebody makes in a hurry.
+    const desk = loadDesk('planning')
+    expect(desk.promptVersion).toMatch(/^[0-9a-f]{12}$/)
+    expect(promptVersion(desk.prompt)).toBe(desk.promptVersion)
+    expect(promptVersion(`${desk.prompt} `)).not.toBe(desk.promptVersion)
+  })
+
+  it('gives the front desk no doors at all', () => {
+    expect(toolsForDesk('front')).toEqual([])
+  })
+
+  it('refuses a prompt file that lost its desk marker', () => {
+    // loadDesk requires the first line, and takes ONE argument: it resolves the
+    // path itself from the desk name, so there is no path to point at a fixture
+    // with. The marker is checked by writing a file into the directory loadDesk
+    // reads and taking it away again, which is the only way to reach the throw
+    // without widening the function's signature for a test.
+    const stray = path.join(DESK_DIR, 'stray-desk.md')
+    writeFileSync(stray, 'You are a desk with no marker.\n')
+    try {
+      expect(() => loadDesk('stray' as Desk)).toThrow(/must start with/)
+    } finally {
+      rmSync(stray)
+    }
+  })
+
   it('refuses to render a prompt with an unfilled slot', () => {
     // `{{today}}` is the planning desk's only slot from lesson 5.2, so the
     // prompt that can be left half-filled is the one rendered with nothing at
@@ -63,11 +93,11 @@ describe('desks', () => {
   })
 
   /**
-   * The tool list above is what BOTH drivers send: `scripts/trip.ts` through
-   * `turn()`, which builds its tools from the desk (src/conversation.ts), and
-   * `netlify/functions/run-turn-background.mts` through `makeDriver`, which
-   * builds them from the same `toolsForDesk('planning')` (src/agents/driver.ts).
-   * So a driver whose runner chain has no `proposalRunner` in it advertises
+   * The tool list above is what BOTH drivers send, because both build
+   * `makeDriver`, which publishes `toolsForDesk(deskName)` (src/agents/driver.ts)
+   * and picks the planning desk for everything that is not a short factual
+   * question. So a driver
+   * whose runner chain has no `proposalRunner` in it advertises
    * `propose_itinerary` to the model, is asked for it, and answers "Unknown
    * tool propose_itinerary" from `supplierRunner`, the innermost link. No gate
    * runs, no `course.gate_results` row is written, and the model goes back to
@@ -99,10 +129,10 @@ describe('desks', () => {
      * terminal message step (src/agents/driver.ts, lesson 5.2), because the
      * answer comes from her rather than from a tool, so there is no wrapper to
      * look for and its absence from `wrappers` is a statement rather than an
-     * omission. It costs `npm run trip` a tool: that path runs `toolLoop`,
-     * which has no step that ends a turn on a question, so `ask_user` comes
-     * back there as an error result until lesson 5.3 puts the script on the
-     * driver. README.md names it.
+     * omission. It used to cost `npm run trip` a tool, because that path ran
+     * `toolLoop`, which has no step that ends a turn on a question; lesson 5.3
+     * put the script on the driver and both paths now park the turn on her
+     * question.
      */
     const answeredByTheDriver = ['ask_user']
     // Derived, so a tool added to the desk with no wrapper named here fails

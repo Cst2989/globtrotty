@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import 'dotenv/config'
 import { config } from 'dotenv'
+import { makeDriver, provenanceFor } from '../src/agents/driver.js'
 import { cashierRunner } from '../src/cashier.js'
 import { liveClient } from '../src/client.js'
-import { newConversation, TODAY, turn } from '../src/conversation.js'
+import { TODAY } from '../src/conversation.js'
 import { connect } from '../src/db.js'
 import { loadEnv } from '../src/env.js'
 import { constraintsFromNotebook } from '../src/gates/pipeline.js'
@@ -12,13 +13,13 @@ import { submitMessage } from '../src/handler.js'
 import { DEMO_USER, HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
-import { loadNotebook } from '../src/repo/notebook.js'
-import { ledgerSink } from '../src/repo/spend.js'
-import { claimTurn } from '../src/repo/turns.js'
+import { loadNotebook, renderNotebook } from '../src/repo/notebook.js'
+import { estimateMicros } from '../src/repo/reservation.js'
+import { SEATS } from '../src/seats.js'
 import { liveSuppliers } from '../src/supplier/live.js'
-import { corpusRunner, doorRunner, notebookRunner, supplierRunner } from '../src/tools.js'
+import { corpusRunner, doorRunner, notebookRunner, supplierRunner, type ToolRunner } from '../src/tools.js'
+import { runTurn, type Agent, type AgentContext } from '../src/worker.js'
 
 config({ path: '.env.local', override: false })
 const env = loadEnv(process.env)
@@ -41,116 +42,136 @@ try {
   // the same submitMessage, a different tier doing the work.
   const { suppliers, hotelSource } = liveSuppliers()
   console.log(`suppliers: flights from kiwi (no key needed), hotels from ${hotelSource}`)
+  const client = liveClient()
 
   const inProcess = async (turnId: string) => {
     console.log(`turn ${turnId} is durable; running it now. Press ctrl-c to kill it.`)
-    // Claim the turn before running it, which this script did not have to do
-    // while it recorded nothing. From lesson 4.3 it writes to the provenance
-    // corpus, and every write a worker makes carries the claim's fencing token
-    // (src/repo/toolResults.ts), so a script that ran the turn as nobody could
-    // not append a row. Claiming is also the truer description of what this
-    // process is doing: it is the worker for this turn, in the same sense
-    // tier 3's background function is for its own.
-    //
-    // What it does NOT do is close the turn afterwards. `runTurn`
-    // (src/worker.ts) is what completes a turn, and this script deliberately
-    // stays the two-file demo lesson 2.1 built; the row it leaves behind is
-    // module 3's sweeper's to reap, exactly as the queued row it used to leave
-    // was.
-    const claim = await claimTurn(sql, turnId)
-    if (!claim) throw new Error(`trip: turn ${turnId} is owned by another worker`)
-    // Her constraints through the one mapper, exactly as tier 3 derives them,
-    // and from the row this conversation stores from lesson 5.2. On THIS script
-    // that row is always empty, and saying so is the honest version: the insert
-    // above mints a fresh conversation on every invocation, nothing has written
-    // to its notebook yet, and this read happens before `turn()` starts, so an
-    // `update_requirements` call inside the turn lands after the gates already
-    // took their copy. The script takes her message as its only argument, so
-    // there is no second press against the same conversation to fill it either.
-    // The budget and dates gates therefore record `not evaluated` on this path,
-    // exactly as they did at lesson 5.1; tier 3 reads the notebook per agent
-    // step and does judge them, and `npm run demo` shows the verdict with no key
-    // by writing a notebook itself. Lesson 5.3 puts this script on the driver.
-    const ctx = { conversationId, userId: DEMO_USER, turnId }
-    const notebook = constraintsFromNotebook(
-      await loadNotebook(sql, conversationId, DEMO_USER), TODAY)
-    const result = await turn(
-      newConversation(conversationId),
-      text,
-      liveClient(),
-      // The same chain tier 3 runs (netlify/functions/run-turn-background.mts),
-      // minus the ledger: one process, no crash to resume from, and nothing
-      // here replays a tool call.
-      //
-      // `hand_off_to_booking` is the one tool in this chain the missing ledger
-      // would matter for, and it is left out anyway. On tier 3 the ledger is
-      // what makes a crash between minting the course.link_clicks rows and
-      // recording the tool result end the turn `ambiguous_tool_call` instead of
-      // emitting a second set of links; here there is no second attempt to
-      // protect, because ctrl-c kills the only process there is and the row it
-      // leaves is the sweeper's to reap. The cashier's own refusal covers the
-      // rest: a proposal that already emitted is refused before it is
-      // re-quoted, whichever chain asks.
-      //
-      // Every wrapper the desk's tool list needs, not just the corpus one. The
-      // planning list is `DESK_TOOLS.planning` (src/tools/registry.ts) and it
-      // holds `update_requirements`, `propose_itinerary` and
-      // `hand_off_to_booking`, so a chain that stopped at `supplierRunner` would
-      // publish those tools to the model and answer "Unknown tool" to all three.
-      // That is not a missing feature the model can route around: it reads as an
-      // outage, and the reply it writes tells her our proposal system is down.
-      // The chain is the product's, so this script runs the product's. The
-      // searches ask for the SAME currency the gates expect, off the same
-      // constraints object, so a corpus and the currency gate cannot disagree by
-      // construction.
-      //
-      // `ask_user` is the one tool on that list nothing here answers. It is
-      // terminal in the driver (src/agents/driver.ts) and `toolLoop` has no step
-      // that ends a turn on a question, so on this path it comes back as an
-      // error result. Lesson 5.3 puts this script on the driver; README.md
-      // carries it as a residual until then.
-      doorRunner('planning', notebookRunner(
+
+    /**
+     * The same chain tier 3 composes (netlify/functions/run-turn-background.mts),
+     * minus the ledger: one process, no crash to resume from, and nothing here
+     * replays a tool call.
+     *
+     * `hand_off_to_booking` is the one tool in this chain the missing ledger
+     * would matter for, and it is left out anyway. On tier 3 the ledger is what
+     * makes a crash between minting the course.link_clicks rows and recording
+     * the tool result end the turn `ambiguous_tool_call` instead of emitting a
+     * second set of links; here there is no second attempt to protect, because
+     * ctrl-c kills the only process there is. The cashier's own refusal covers
+     * the rest: a proposal that already emitted is refused before it is
+     * re-quoted, whichever chain asks.
+     *
+     * Built per agent step, like tier 3's, because the notebook is read fresh
+     * every step and because `corpusRunner` fences its writes on a claim whose
+     * `attempts` only the harness knows.
+     */
+    const runnerFor = async (ctx: AgentContext): Promise<ToolRunner> => {
+      const claim = {
+        turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
+        attempts: ctx.attempts, state: ctx.state,
+      }
+      const notebook = constraintsFromNotebook(
+        await loadNotebook(sql, ctx.conversationId, ctx.userId), TODAY)
+      const gateCtx = { conversationId, userId: DEMO_USER, turnId }
+      return doorRunner('planning', notebookRunner(
         sql,
         {
           conversationId, userId: DEMO_USER,
-          // 'inferred' unconditionally, and that is the conservative reading
-          // rather than a shortcut. `provenanceFor` (src/agents/driver.ts)
-          // decides from the harness's own transcript, and this path has none:
-          // `toolLoop` keeps its messages in a local array inside `turn()`,
-          // which is the whole problem lesson 5.1 fixed for tier 3. So a patch
-          // written here may tighten a constraint and never relax one, whenever
-          // in the turn it was written.
-          source: () => 'inferred' as const,
+          // Derived from this step's transcript, the same way tier 3 derives it.
+          // Until this lesson this script passed `() => 'inferred'`
+          // unconditionally, because `turn()` kept its messages in a local array
+          // inside the call and there was no transcript here to read. The driver
+          // persists one, so the real rule applies on this path too.
+          source: () => provenanceFor(ctx),
           now: () => new Date(),
         },
         cashierRunner(
-          sql, ctx,
+          sql, gateCtx,
           { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
           proposalRunner(
             sql,
-            { ...ctx, notebook, now: () => new Date() },
+            { ...gateCtx, notebook, now: () => new Date() },
+            // The searches ask for the SAME currency the gates expect, off the
+            // same constraints object, so a corpus and the currency gate cannot
+            // disagree by construction.
             corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
           ),
         ),
-      )),
+      ))
+    }
+
+    /**
+     * The driver, and `runTurn` around it: the same two pieces tier 3 runs, so
+     * what a reader watches here is what the product does. Until lesson 5.3 this
+     * script ran `turn()` in one process instead, which meant `ask_user` came
+     * back to the model as an error result and the desk was always the planning
+     * one.
+     *
+     * No `record:` sink and no `ledgerSink` any more. The driver reserves before
+     * every call and reconciles after (src/agents/driver.ts), and writes its own
+     * row through `pgSink`, so handing it a sink that also moves money would
+     * charge the same micros twice.
+     */
+    const agent: Agent = async (ctx) => makeDriver({
+      sql, client, run: await runnerFor(ctx), limits: DEFAULT_LIMITS, now: Date.now,
+    })(ctx)
+
+    await runTurn(
       {
-        // ledgerSink, not the bare model_calls sink: this is the one path in
-        // the whole course that calls a live model and spends real dollars,
-        // and pgSink alone would write rows to course.model_calls while
-        // leaving conversations.spend_usd_micros and daily_usage.cost_micros
-        // at zero forever, which is exactly the ceiling this lesson exists to
-        // enforce. loadEnv already refused to start this script without
-        // DATABASE_URL, so `sql` is always connected here. No `readSpend` is
-        // passed: this script records what it spends but does not enforce a
-        // ceiling on itself, so a run here always completes rather than
-        // stopping partway through the demo.
-        record: ledgerSink(sql, { userId: DEMO_USER, conversationId, turnId }),
+        sql,
+        limits: DEFAULT_LIMITS,
+        agent,
+        now: Date.now,
+        // Ten minutes, and a hand-back that says so rather than re-invoking: a
+        // script has nothing to re-invoke itself with, and a reader watching a
+        // turn stop for want of wall clock should be told that is what happened.
+        deadlineMs: () => Date.now() + 10 * 60_000,
+        reinvoke: async (id) => console.log(`turn ${id} was handed back; run the script again`),
       },
+      turnId,
     )
-    console.log(result.text)
-    console.log(`outcome ${result.outcome}, ${result.steps} steps, ${dollars(result.costMicros)}`)
+
+    const [reply] = await sql<{ content: string }[]>`
+      select content from course.messages
+       where turn_id = ${turnId} and role = 'agent' order by seq desc limit 1`
+    console.log(reply?.content ?? '(no reply was written)')
+
+    // What this module added, read back off the rows rather than asserted: which
+    // desk the classifier chose, which seat every call was billed on, and the
+    // reservation against the reconciliation.
+    const [conv] = await sql<{ desk: string; spend_usd_micros: string }[]>`
+      select desk, spend_usd_micros from course.conversations where id = ${conversationId}`
+    const [turnRow] = await sql<{ status: string; fail_reason: string | null; spend_usd_micros: string }[]>`
+      select status, fail_reason, spend_usd_micros from course.turns where id = ${turnId}`
+    const calls = await sql<{ seat: string; model_requested: string; cost_micros: string }[]>`
+      select seat, model_requested, cost_micros from course.model_calls
+       where turn_id = ${turnId} order by seq`
+
+    console.log(`desk: ${conv!.desk}, decided on step 0 and remembered on course.conversations.desk`)
+    calls.forEach((call, i) => {
+      console.log(`  call ${i + 1}: seat ${call.seat}, model ${call.model_requested}, `
+        + dollars(BigInt(call.cost_micros)))
+    })
+    const routing = calls.find((c) => c.seat === 'front_desk')
+    if (routing) {
+      // The one reservation this script can recompute exactly, because it is a
+      // constant: `selectDesk` bounds the routing call at 200 input tokens on the
+      // front desk seat. The gap between the two numbers is what `reconcile`
+      // gave back.
+      console.log(`  routing call: reserved ${dollars(estimateMicros(SEATS.front_desk, 200))} `
+        + `before dispatch, cost ${dollars(BigInt(routing.cost_micros))} after reconcile`)
+    }
+    const billed = calls.reduce((sum, c) => sum + BigInt(c.cost_micros), 0n)
+    console.log(`spend: conversation ${dollars(BigInt(conv!.spend_usd_micros))}, `
+      + `turn ${dollars(BigInt(turnRow!.spend_usd_micros))}, `
+      + `${calls.length} recorded call(s) totalling ${dollars(billed)}`)
+    console.log(`turn ${turnRow!.status}${turnRow!.fail_reason ? ` (${turnRow!.fail_reason})` : ''}`)
+    // `renderNotebook` returns an empty string when nothing has been recorded,
+    // because it is written to be appended to a request and an empty heading
+    // would be noise the model pays for. A terminal is not a request, so say it.
+    const rendered = renderNotebook(await loadNotebook(sql, conversationId, DEMO_USER))
     console.log('notebook:')
-    console.log(notebookForPrompt(result.conversation.notebook))
+    console.log(rendered === '' ? '(nothing recorded yet)' : rendered)
   }
 
   const submitted = await submitMessage(

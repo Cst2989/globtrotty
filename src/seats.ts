@@ -49,9 +49,20 @@ export const SEATS = {
    * 4.5 takes no effort setting. The name is kept rather than renamed to main's
    * `front_desk`, because `cheap` is already written into course.model_calls
    * rows and renaming a value a row carries loses the ability to ask what those
-   * rows were. Lesson 5.3 adds `front_desk` beside it.
+   * rows were. Lesson 5.3 added `front_desk` beside it, below.
    */
   cheap: seat(HAIKU, null, 1_024),
+  /**
+   * The desk that answers a factual question in three sentences, and the seat
+   * that decides which desk she reaches. Haiku 4.5 takes no effort setting.
+   * Added beside `cheap` rather than replacing it: `cheap` is the name lesson
+   * 1.2 gave the Haiku seat, rows in course.model_calls carry it, and
+   * `classify` and `extract` still use it inside `turn()`. The names differ so
+   * that a query can tell a routing call from the `classify` and `extract` calls
+   * inside `turn()`, the one-process path modules 1 and 2 built and
+   * `test/conversation.test.ts` still replays.
+   */
+  front_desk: seat(HAIKU, null, 1_024),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS

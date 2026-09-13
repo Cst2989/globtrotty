@@ -33,6 +33,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-4-6 | The cashier | npm run migrate, then npm test (test/cashier.test.ts, test/cashier-links.test.ts, test/point-of-no-return.test.ts), then npm run demo for scenario 6, which reaches a booking link with no API key |
 | lesson-5-1 | The driver in the harness | npm run migrate, then npm test (test/request-shape.test.ts, test/driver.test.ts, test/resume.test.ts) |
 | lesson-5-2 | Tools are doors | npm run migrate, then npm test (test/registry.test.ts, test/doors.test.ts, test/notebook-repo.test.ts) |
+| lesson-5-3 | The front desk and the planning desk | npm run migrate, then npm test (test/desk-routing.test.ts, test/sentinels.test.ts, test/desks.test.ts) |
 
 ## How this branch was built
 
@@ -214,25 +215,28 @@ of the URL is right and the value is obviously not live. It is never read from
 the environment, because a missing value would silently emit an unattributed
 link rather than failing.
 
-Open at lesson 5.1: the front desk is unreachable on the deployed path.
-`makeDriver` loads the planning desk unconditionally, so `classify`'s routing,
-which tier 3 got through `turn()`, is not on the path a deployed turn takes. An
-FAQ is answered by the Opus seat and is billed at Opus rates. Lesson 5.3 moves
-desk selection into the driver and persists it on `course.conversations.desk`,
-which is a column `0001` created and nothing has ever read.
+Closed at lesson 5.3: the front desk is back on the deployed path. `selectDesk`
+(src/agents/driver.ts) classifies on the first step of a turn and writes the
+answer to `course.conversations.desk`, a column 0001 created and nothing had
+ever read. A factual question is answered on Haiku at a fifth of the price, and
+`test/desk-routing.test.ts` asserts both calls of an FAQ turn carry
+`seat = 'front_desk'` in course.model_calls.
 
-Open at lesson 5.2: `ask_user` is published to the planning desk and answered
-only by the driver, which ends the turn on her question. `npm run trip` runs
+Closed at lesson 5.3: `ask_user` is published to the planning desk and answered
+only by the driver, which ends the turn on her question. `npm run trip` ran
 `turn()` and `toolLoop`, which have no step that parks a turn on a question, so
-on that path the tool comes back to the model as an error result. Lesson 5.3
-puts the script on the driver and closes it. `test/desks.test.ts` names the
+on that path the tool came back to the model as an error result. That script now
+builds `makeDriver` and `runTurn`, the same two pieces tier 3 builds, and a live
+run of it ends on her three questions. `test/desks.test.ts` still names the
 exemption rather than deriving around it, so the day a wrapper is expected the
 list says who was meant to answer.
 
-Open at lesson 5.2: migration `0006`'s comment on `course.tool_calls.call_id`
-says the id is derived from the call's POSITION in the turn and never from the
-model's `toolu_` id. Lesson 5.1 made that false on the deployed path: the driver
-keys on the provider's id, because a persisted transcript replays the same one.
-Migrations are append-only and byte-identical, and this module's one migration
-slot per lesson is spent, so the correction is a comment-only migration a later
-lesson owes, on the precedent `0011` set.
+Withdrawn at lesson 5.3: this residual said migration `0006`'s comment on
+`course.tool_calls.call_id` had been made false by lesson 5.1, and owed a
+comment-only migration to correct it. The comment is true. Lesson 5.1's own fix
+round restored the positional key (`s${step}-b${blockIndex}`,
+src/agents/driver.ts) and the driver uses the provider's `toolu_` id only for
+the `tool_result` block it pairs with, which never reaches the ledger. Nothing
+is owed. The residual was written against the pre-fix shape and is the defect
+class this file already names: a note about the system that describes a version
+of it that no longer exists.

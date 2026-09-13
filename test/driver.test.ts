@@ -71,7 +71,13 @@ describeDb('one invocation of the driver is one model call', () => {
   it('charges the conversation exactly once for a call, through one door', async () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId } = await seededTurn(sql)
-      const client = fakeClient([textMessage('Three stays near the beach in Faro.')])
+      // Two replies, because a routing call now comes first: `selectDesk`
+      // classifies her message on step 0 and writes the answer to
+      // course.conversations.desk (lesson 5.3).
+      const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
+        textMessage('Three stays near the beach in Faro.'),
+      ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
       })
@@ -81,15 +87,19 @@ describeDb('one invocation of the driver is one model call', () => {
         select spend_usd_micros from course.conversations where id = ${conversationId}`
       const [turn] = await sql<{ spend_usd_micros: string }[]>`
         select spend_usd_micros from course.turns where id = ${turnId}`
-      const [call] = await sql<{ cost_micros: string }[]>`
-        select cost_micros from course.model_calls where turn_id = ${turnId} order by seq`
+      const calls = await sql<{ seat: string; cost_micros: string }[]>`
+        select seat, cost_micros from course.model_calls where turn_id = ${turnId} order by seq`
+      // The routing call and the driver call, in that order, and the sum of the
+      // two is what both counters have to read.
+      expect(calls.map((c) => c.seat)).toEqual(['front_desk', 'driver'])
+      const billed = calls.reduce((sum, c) => sum + BigInt(c.cost_micros), 0n)
       // The three have to agree exactly. This is the test that discriminates the
       // double charge: the driver reserves and reconciles its own spend, so a
       // step that also reported costMicros without alreadyRecorded would apply
       // the identical increment a second time and the conversation would read
       // twice the call.
-      expect(BigInt(conv!.spend_usd_micros)).toBe(BigInt(call!.cost_micros))
-      expect(BigInt(turn!.spend_usd_micros)).toBe(BigInt(call!.cost_micros))
+      expect(BigInt(conv!.spend_usd_micros)).toBe(billed)
+      expect(BigInt(turn!.spend_usd_micros)).toBe(billed)
     })
   })
 
@@ -101,20 +111,30 @@ describeDb('one invocation of the driver is one model call', () => {
         stop_details: { type: 'refusal', category: 'policy', explanation: null },
       } as never)
       const agent = makeDriver({
-        sql, client: fakeClient([refusal]), run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        sql,
+        client: fakeClient([textMessage(JSON.stringify({ label: 'new_trip' })), refusal]),
+        run: mockRunner(),
+        limits: DEFAULT_LIMITS,
+        now: Date.now,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
       const [conv] = await sql<{ spend_usd_micros: string }[]>`
         select spend_usd_micros from course.conversations where id = ${conversationId}`
-      // SPEC section 8: a refusal fails the turn and does not consume quota. The
-      // counter is back exactly where it started, not merely close to it. Zero
-      // is the right figure only while the driver makes exactly one call per
-      // step; lesson 5.3 puts a charged routing call in front of step 0 and
-      // moves this assertion to that call's cost, in the same commit that adds
-      // it, because a refusal refunds its own reservation and not the call that
-      // decided where it went.
-      expect(BigInt(conv!.spend_usd_micros)).toBe(0n)
+      // SPEC section 8: a refusal fails the turn and does not consume quota, and
+      // the refused call's own reservation is back exactly where it started.
+      //
+      // Not zero any more, and the difference is the point. A refusal refunds
+      // its own reservation in full; it does not refund the routing call that
+      // decided which desk would refuse. The figure is read back off the
+      // front_desk row rather than recomputed here, so this asserts that the
+      // conversation was charged exactly what was recorded and nothing else.
+      const [routing] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.model_calls
+         where turn_id = ${turnId} and seat = 'front_desk' order by seq`
+      const routingCost = BigInt(routing!.cost_micros)
+      expect(BigInt(conv!.spend_usd_micros)).toBe(routingCost)
+      expect(routingCost).toBeGreaterThan(0n)
       const [row] = await sql<{ fail_reason: string }[]>`
         select fail_reason from course.turns where id = ${turnId}`
       expect(row!.fail_reason).toBe('refused')
@@ -128,6 +148,12 @@ describeDb('one invocation of the driver is one model call', () => {
       // (src/retry.ts) gives the step three attempts and each one reserves
       // before it dispatches. `fakeClient` repeats its last entry, so all three
       // attempts get the same outage.
+      //
+      // No routing reply at the head of this list, unlike every other case here:
+      // the outage reaches the FIRST call of the step, which from lesson 5.3 is
+      // `selectDesk`'s classification call. So this now proves the routing
+      // reservation is refunded too. Handing it a label first would have billed
+      // one real Haiku call and left the zeroes below false.
       const client = fakeClient([() => { throw apiError(503) }])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
@@ -158,6 +184,7 @@ describeDb('one invocation of the driver is one model call', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -184,6 +211,7 @@ describeDb('one invocation of the driver is one model call', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -236,6 +264,7 @@ describeDb('one invocation of the driver is one model call', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -252,7 +281,8 @@ describeDb('one invocation of the driver is one model call', () => {
         }),
         turnId,
       )
-      expect(client.calls).toBe(1)
+      // Two calls for that one step: the routing call, then the driver's.
+      expect(client.calls).toBe(2)
 
       const [held] = await sql<{ status: string; state: { messages: unknown[] } }[]>`
         select status, state from course.turns where id = ${turnId}`
@@ -262,10 +292,12 @@ describeDb('one invocation of the driver is one model call', () => {
       expect(held!.state.messages).toHaveLength(3)
 
       await runTurn(workerDeps(sql, { agent }), turnId)
-      // Two calls in total for the whole turn, not four. The second attempt
-      // picked up the conversation rather than re-running it, which is the
-      // difference between a resume and a restart.
-      expect(client.calls).toBe(2)
+      // Three in total for the whole turn, not five. The second attempt picked
+      // up the conversation rather than re-running it, which is the difference
+      // between a resume and a restart, and it did not classify again either:
+      // the resumed step is step 1, so `selectDesk` read
+      // course.conversations.desk instead of asking the model.
+      expect(client.calls).toBe(3)
     })
   })
 
@@ -275,8 +307,13 @@ describeDb('one invocation of the driver is one model call', () => {
       const search = {
         city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1,
       }
+      // A routing reply before each of the two attempts, because rewinding the
+      // state below puts the resumed turn back on step 0 and `selectDesk`
+      // classifies again there.
       const client = fakeClient([
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         toolUseMessage('search_hotels', search, 'toolu_01FIRST'),
+        textMessage(JSON.stringify({ label: 'new_trip' })),
         // The identical request, with the fresh id a real provider mints on
         // every response. This is the reply the re-ask below receives, and it
         // is what makes an id read off the reply useless as a ledger key.
@@ -337,7 +374,12 @@ describeDb('one invocation of the driver is one model call', () => {
       expect(rows[0]!.status).toBe('done')
       expect(executions).toBe(1)
     })
-  })
+  // Twenty seconds rather than vitest's default five. This case drives two whole
+  // turns against a remote database, and lesson 5.3 put a classification call,
+  // a reservation, a reconciliation, a model_calls row and a desk write in front
+  // of step 0 of each of them. It went from just inside the default to just
+  // outside it; the work is real and the deadline was the arbitrary half.
+  }, 20_000)
 })
 
 /**

@@ -95,6 +95,11 @@ export default async (req: Request): Promise<Response> => {
     // the corpus either; `gate_results` is an observation and is deliberately
     // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids,
     // and the cashier takes the same three for the same reason.
+    // The door is the planning desk's, and that is not a guess about which desk
+    // `selectDesk` chose: the front desk publishes no tools at all
+    // (`toolsForDesk('front')` is empty), so a front-desk step can never produce
+    // a tool call for this chain to answer. The one desk that can reach a door
+    // is the one named here.
     return doorRunner('planning', ledgerRunner(
       sql, claim,
       notebookRunner(

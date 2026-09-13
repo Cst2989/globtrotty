@@ -25,6 +25,14 @@ export type LoadedDesk = {
   promptVersion: string
 }
 
+/**
+ * The seat each desk's prompt is READ for, which is `turn()`'s question
+ * (src/conversation.ts). It is deliberately not the driver's: `makeDriver` picks
+ * `SEATS.front_desk` or `SEATS.driver` from the desk NAME `selectDesk` chose, and
+ * the front desk's row here stays `cheap` because that is the name `turn()`'s
+ * front-desk calls are already recorded under in course.model_calls and
+ * `test/model-calls.test.ts` pins them.
+ */
 const DESK_SEATS: Record<Desk, Seat> = { front: SEATS.cheap, planning: SEATS.driver }
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'desks')

@@ -14,6 +14,7 @@
     "trip": "tsx scripts/trip.ts",
     "demo": "tsx scripts/demo.ts",
     "migrate": "tsx scripts/migrate.ts",
+    "sentinels": "tsx scripts/check-sentinels.ts",
     "messages": "tsx scripts/messages.ts"
   },
   "devDependencies": {
