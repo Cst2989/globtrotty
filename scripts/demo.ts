@@ -68,6 +68,10 @@ const demoAgent: Agent = async ({ state }) => {
   if (state.step === 0) {
     return {
       kind: 'tool', callId: `search-${state.step}`, name: 'search_flights', costMicros: 2_000n,
+      // A demo agent says nothing before it calls: there is no assistant turn to
+      // echo, and an empty array is the honest answer rather than a fabricated
+      // one (src/worker.ts's AgentStep).
+      assistantContent: [],
       run: async () => {
         sideEffects += 1
         step(`tool search_flights EXECUTED (execution number ${sideEffects})`)
@@ -75,7 +79,10 @@ const demoAgent: Agent = async ({ state }) => {
       },
     }
   }
-  const found = state.messages.filter((m) => m.role === 'tool').length
+  // From lesson 5.1 a tool result is a `tool_result` BLOCK inside a user
+  // message, not a line under a 'tool' role, so the count is over blocks.
+  const found = state.messages
+    .filter((m) => m.content.some((b) => b.type === 'tool_result')).length
   return { kind: 'message', text: `Found ${found} result set. The cheapest is 184 EUR.`, costMicros: 3_000n }
 }
 
@@ -141,7 +148,7 @@ async function main() {
   // scenario proves nothing.
   const partial: TurnState = {
     step: 0,
-    messages: [{ role: 'user', content: 'A cheap week in Faro in September?' }],
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'A cheap week in Faro in September?' }] }],
   }
   await saveTurnState(sql, claim, partial)
   console.log('   !!  the process dies here: no completeTurn, no failTurn')

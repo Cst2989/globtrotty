@@ -119,6 +119,12 @@ describeDb('pgSink', () => {
         expect(Number(row.cache_creation_input_tokens)).toBe(0)
         expect(Number(row.cache_read_input_tokens)).toBe(0)
         expect(BigInt(row.cost_micros)).toBe(cheapCost)
+        // The seat's own settings, written from the seat rather than from three
+        // fields beside it: null effort stays null, and does not become the
+        // string 'null' or the driver's 'high'.
+        expect(row.effort).toBeNull()
+        expect(Number(row.max_tokens)).toBe(SEATS.cheap.maxTokens)
+        expect(row.model_config_id).toBe(SEATS.cheap.modelConfigId)
       }
       const expectDriverRow = (row: (typeof rows)[number]) => {
         expect(row.seat).toBe('driver')
@@ -130,6 +136,12 @@ describeDb('pgSink', () => {
         expect(Number(row.cache_read_input_tokens)).toBe(0)
         expect(BigInt(row.cost_micros)).toBe(driverCost)
         expect(row.prompt_version).toBe(planningVersion)
+        expect(row.effort).toBe('high')
+        expect(Number(row.max_tokens)).toBe(SEATS.driver.maxTokens)
+        // The drift anchor. model_requested and model_returned are the same
+        // string here and would stay the same string across a weights swap;
+        // this column is the one that would not.
+        expect(row.model_config_id).toBe(SEATS.driver.modelConfigId)
       }
       expectCheapRow(rows[0]!)
       expectCheapRow(rows[1]!)

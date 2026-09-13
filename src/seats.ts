@@ -3,13 +3,55 @@ import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resource
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** A seat is a model plus the settings we give it; every call names a seat, never a model. */
-export type Seat = { model: string; effort: Effort | null }
+export type Seat = {
+  readonly model: string
+  readonly effort: Effort | null
+  /**
+   * The output ceiling, on the seat rather than at the call site. Three call
+   * sites each own a number today and none of them asks the seat: `toolLoop`
+   * hardcodes `max_tokens: 8000` for whatever seat it is handed (src/loop.ts),
+   * `classify` asks for 64 and `extract` for 400. Nothing ties any of the three
+   * to the seat that will be billed for them, so a reservation computed before
+   * a call could only guess at the output it was bounding. It is a property of
+   * the seat because the reservation (src/repo/reservation.ts) bounds output at
+   * exactly this number.
+   */
+  readonly maxTokens: number
+  /**
+   * The drift anchor. `response.model` echoes the ALIAS for an aliased model,
+   * and `claude-opus-5` is alias only, so a recorded response reads identically
+   * before and after a weights swap and a string comparison detects nothing.
+   * This string is the only record of the configuration we INTENDED, so it
+   * encodes model plus effort plus maxTokens: changing any of them changes the
+   * id, and `group by model_config_id` separates the eras. Lesson 5.6's canary
+   * is pinned against it.
+   */
+  readonly modelConfigId: string
+}
+
+const configId = (model: string, effort: Effort | null, maxTokens: number): string =>
+  `${model}/${effort ?? 'noeffort'}/${maxTokens}`
+
+const seat = (model: string, effort: Effort | null, maxTokens: number): Seat =>
+  ({ model, effort, maxTokens, modelConfigId: configId(model, effort, maxTokens) })
+
+// claude-opus-5 carries no date suffix: appending one 404s.
+const OPUS = 'claude-opus-5'
+// Haiku 4.5 is the only current model with a real dated snapshot, and it is the
+// highest volume seat, so it is pinned exactly (SPEC section 7).
+const HAIKU = 'claude-haiku-4-5-20251001'
 
 export const SEATS = {
-  /** The seat that decides what happens next: strongest model, default effort. */
-  driver: { model: 'claude-opus-5', effort: 'high' },
-  /** Short answers we can check against her message. Haiku 4.5 takes no effort setting. */
-  cheap: { model: 'claude-haiku-4-5-20251001', effort: null },
+  /** The seat that decides what happens next: strongest model, high effort. */
+  driver: seat(OPUS, 'high', 16_000),
+  /**
+   * Short answers we can check against her message: classify and extract. Haiku
+   * 4.5 takes no effort setting. The name is kept rather than renamed to main's
+   * `front_desk`, because `cheap` is already written into course.model_calls
+   * rows and renaming a value a row carries loses the ability to ask what those
+   * rows were. Lesson 5.3 adds `front_desk` beside it.
+   */
+  cheap: seat(HAIKU, null, 1_024),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS
@@ -28,7 +70,13 @@ export function seatNameOf(seat: Seat): SeatName {
 
 type SeatlessParams = Omit<MessageCreateParamsNonStreaming, 'model'>
 
-/** Writes the seat's model and effort into a request; effort is omitted, not nulled, when the seat has none. */
+/**
+ * Writes the seat's model and effort into a request; effort is omitted, not
+ * nulled, when the seat has none. Still used by `classify` and `extract`, which
+ * call the SDK's typed client directly. The driver assembles its request through
+ * `buildRequest` (src/model/client.ts) instead, because that request carries
+ * fields the SDK's own types do not know about.
+ */
 export function withSeat(seat: Seat, params: SeatlessParams): MessageCreateParamsNonStreaming {
   if (seat.effort === null) return { ...params, model: seat.model }
   return {

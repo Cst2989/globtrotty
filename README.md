@@ -98,18 +98,41 @@ call are both cancelled rather than merely not being followed by another one.
 Two gaps are left and neither is silent: `classify` and `extract`
 (src/classify.ts, src/extract.ts) are single short calls on the cheap seat and
 are not given the signal, so a fence landing during one of them still pays for
-it; and cancelling a call does not un-charge it. The provider may already have
-generated most of a reply and billed for it, and `callAndRecord`
-(src/metered.ts) records only what came BACK, so an aborted call writes no
-`course.model_calls` row, no `daily_usage` increment and no
-`conversations.spend_usd_micros` increment. That charge is invisible to every
-later ceiling check, and it is a real hole this lesson opened rather than one
-it closed: `course.model_calls` has no column that could name a call that never
-returned, so recording it needs a migration this module does not do. Module 5's
-reserve-before-call, where a call is counted before it is made, is where it
-closes. `fencedModelCallSink` answers the OTHER case, a call that returned into
-a fence: it records that row before refusing the next call, and it never sees a
-cancelled one, because a cancelled call never reaches a sink.
+it; and, on the `turn()` path, cancelling a call does not un-charge it. The
+provider may already have generated most of a reply and billed for it, and
+`callAndRecord` (src/metered.ts) records only what came BACK, so an aborted
+call there writes no `course.model_calls` row, no `daily_usage` increment and
+no `conversations.spend_usd_micros` increment. `fencedModelCallSink` answers
+the OTHER case, a call that returned into a fence: it records that row before
+refusing the next call, and it never sees a cancelled one, because a cancelled
+call never reaches a sink.
+
+From lesson 5.1 the model runs inside the harness. One invocation of the driver
+is one model call plus, if the model asked for one, one tool execution, so a
+turn that runs out of wall clock is handed back with its transcript in
+`course.turns.state` and the next invocation picks the conversation up rather
+than starting it again. The transcript holds the blocks the API accepts, a
+`tool_use` block with its id and its structured input, a `thinking` block with
+its signature, and a `tool_result` inside a user message that names the call it
+answers, so a resumed turn sends what the previous worker was actually saying.
+
+A call is now counted before it is made. `reserve` debits an upper bound against
+`course.conversations` and `course.daily_usage`, the ceiling check reads the
+numbers that debit returned rather than numbers from before the turn, and
+`reconcile` applies the difference afterwards, which is normally a refund. That
+closes the hole lesson 4.2 opened and named: a cancelled call used to be billed
+by the provider and recorded nowhere, and it is now debited before it leaves.
+Four functions move the spend ledger and `src/repo/spend.ts` names all four.
+
+What this lesson costs, on the record. The front desk is unreachable on the
+deployed path: `makeDriver` always loads the planning desk, so a short factual
+question is answered by Opus rather than by Haiku until lesson 5.3 moves desk
+selection into the driver and gives it `course.conversations.desk` to remember
+the answer in. `src/conversation.ts`'s `turn()` still exists and still routes,
+because `npm run trip` and the recorded fixtures from modules 1 and 2 are built
+on it; the two planning paths differ from this lesson until 5.3 puts `npm run
+trip` on the driver too. And the driver holds no notebook: it renders "nothing
+yet" into its prompt on every step, which is what lesson 5.2 is for.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced

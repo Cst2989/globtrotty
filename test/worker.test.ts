@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import type postgres from 'postgres'
 import { APIConnectionError } from '@anthropic-ai/sdk/core/error'
+import { textOfBlocks } from '../src/engine.js'
 import { RefusalError } from '../src/errors.js'
 import { TURN_FAILED_MESSAGE } from '../src/failure-message.js'
 import { submitMessage } from '../src/handler.js'
@@ -56,7 +57,7 @@ describeDb('runTurn', () => {
       const r = await submit(sql, 'hi', 'w1b')
       const agent: Agent = async () =>
         ({ kind: 'message', text: 'two options near Faro', costMicros: 4_000n, alreadyRecorded: true })
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
 
       const [t] = await sql`select status, spend_usd_micros from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('done')
@@ -75,7 +76,7 @@ describeDb('runTurn', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'w1c')
       const agent: Agent = async () => ({ kind: 'continue_later', costMicros: 500n })
-      const deps = workerDeps(sql, agent)
+      const deps = workerDeps(sql, { agent: agent })
 
       await runTurn(deps, r.turnId!)                  // first attempt: 500 spent, handed back
       await runTurn(deps, r.turnId!)                  // the re-invocation claims it again
@@ -109,7 +110,7 @@ describeDb('runTurn', () => {
         seen.push(state.messages.length)
         return { kind: 'message', text: `saw ${state.messages.length} lines`, costMicros: 1_000n }
       }
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
       // Her message was loaded out of the database, not invented.
       expect(seen).toEqual([1])
     })
@@ -130,9 +131,15 @@ describeDb('runTurn', () => {
                 values (${r.conversationId}, ${USER}, null, 'user', 'and I forgot the crib')`
       const agent: Agent = async ({ state }) => {
         const last = [...state.messages].reverse().find((m) => m.role === 'user')
-        return { kind: 'message', text: `answering: ${last?.content}`, costMicros: 10n }
+        // textOfBlocks, not the raw content: from lesson 5.1 a line's content is
+        // an array of blocks, and interpolating it would read `[object Object]`.
+        return {
+          kind: 'message',
+          text: `answering: ${last ? textOfBlocks(last.content) : ''}`,
+          costMicros: 10n,
+        }
       }
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
       const msgs = await sql`select content from course.messages
                               where conversation_id = ${r.conversationId} order by seq`
       expect(msgs[msgs.length - 1]!.content).toBe('answering: a week in Portugal')
@@ -146,19 +153,24 @@ describeDb('runTurn', () => {
       const agent: Agent = async () => {
         if (!handedOut) {
           handedOut = true
-          return { kind: 'tool', callId: 'toolu_1', name: 'search_hotels', run: sideEffect, costMicros: 10n }
+          return {
+            kind: 'tool', callId: 'toolu_1', name: 'search_hotels', run: sideEffect,
+            // Nothing was said to ask for this call: a counting agent has no
+            // assistant turn to echo, and an empty array is the honest answer.
+            assistantContent: [], costMicros: 10n,
+          }
         }
         return { kind: 'message', text: 'done', costMicros: 10n }
       }
 
       const r = await submit(sql, 'hi', 'w4')
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
       expect(sideEffect).toHaveBeenCalledTimes(1)
 
       // A crash and a resume: reopen the turn and run it again.
       await sql`update course.turns set status = 'queued' where id = ${r.turnId}`
       handedOut = false
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
       expect(sideEffect).toHaveBeenCalledTimes(1)      // NOT twice
     })
   })
@@ -168,12 +180,12 @@ describeDb('runTurn', () => {
       const r = await submit(sql, 'hi', 'w5')
       const sideEffect = vi.fn().mockResolvedValue({ ok: true })
       const agent: Agent = async () =>
-        ({ kind: 'tool', callId: 'toolu_1', name: 'escalate', run: sideEffect, costMicros: 10n })
+        ({ kind: 'tool', callId: 'toolu_1', name: 'escalate', run: sideEffect, assistantContent: [], costMicros: 10n })
 
       // Leave the intent behind with no result, the way a kill mid call does.
       await sql`insert into course.tool_calls (turn_id, call_id, name, status)
                 values (${r.turnId}, 'toolu_1', 'escalate', 'pending')`
-      await runTurn(workerDeps(sql, agent), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: agent }), r.turnId!)
 
       expect(sideEffect).not.toHaveBeenCalled()
       const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
@@ -199,7 +211,7 @@ describeDb('runTurn', () => {
         beatsDuringStep = beats.count
         return { kind: 'message', text: 'ok', costMicros: 10n }
       }
-      const deps = workerDeps(sql, slow)
+      const deps = workerDeps(sql, { agent: slow })
       deps.heartbeatIntervalMs = 20
       deps.onHeartbeat = () => { beats.count += 1 }
       await runTurn(deps, r.turnId!)
@@ -229,7 +241,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 60))
         return { kind: 'message', text: 'ok', costMicros: 10n }
       }
-      const deps = workerDeps(sql, agent)
+      const deps = workerDeps(sql, { agent: agent })
       deps.heartbeatIntervalMs = 15
       deps.onHeartbeat = () => { beats.count += 1 }
       await runTurn(deps, r.turnId!)
@@ -252,7 +264,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 60))
         throw boom
       }
-      const deps = workerDeps(sql, agent)
+      const deps = workerDeps(sql, { agent: agent })
       deps.heartbeatIntervalMs = 15
       deps.onHeartbeat = () => { beats.count += 1 }
       await expect(runTurn(deps, r.turnId!)).rejects.toThrow('agent exploded')
@@ -280,7 +292,7 @@ describeDb('runTurn', () => {
         await new Promise((resolve) => setTimeout(resolve, 150))
         return { kind: 'message', text: 'too late', costMicros: 10n }
       }
-      const deps = workerDeps(sql, agent)
+      const deps = workerDeps(sql, { agent: agent })
       deps.heartbeatIntervalMs = 20
       const run = runTurn(deps, r.turnId!)
       // Let the claim's own first heartbeat tick or two pass uneventfully.
@@ -331,7 +343,7 @@ describeDb('runTurn', () => {
       const headers = new Headers({ 'retry-after': '900' })      // fifteen minutes
       let calls = 0
       const agent: Agent = async () => { calls += 1; throw apiError(429, headers) }
-      const deps = workerDeps(sql, agent)
+      const deps = workerDeps(sql, { agent: agent })
       deps.deadlineMs = () => Date.now() + 120_000              // two minutes left
       await runTurn(deps, r.turnId!)
 
@@ -339,7 +351,12 @@ describeDb('runTurn', () => {
       expect(deps.reinvoke).toHaveBeenCalledWith(r.turnId)
       const [t] = await sql`select status, state, attempts from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('queued')
-      expect(t!.state).toEqual({ step: 0, messages: [{ role: 'user', content: 'hi' }] })
+      // Her one line, as blocks, which is what a resumed worker now reads back
+      // and sends: the seeded user message is a text block rather than a string
+      // from lesson 5.1 on.
+      expect(t!.state).toEqual({
+        step: 0, messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      })
       expect(t!.attempts).toBe(1)                               // continueLater does not bump it itself
       const [c] = await sql`select status from course.conversations where id = ${r.conversationId}`
       expect(c!.status).toBe('working')                         // untouched: no closer ever ran
@@ -394,7 +411,7 @@ describeDb('runTurn, when the step throws', () => {
         if (calls < 3) throw apiError(429)
         return { kind: 'message', text: 'ok in the end', costMicros: 10n }
       }
-      await runTurn(workerDeps(sql, flaky), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: flaky }), r.turnId!)
       expect(calls).toBe(3)
       const [t] = await sql`select status from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('done')
@@ -404,7 +421,7 @@ describeDb('runTurn, when the step throws', () => {
   it('records a permanent request fault as provider_rejected, not provider_down', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e2')
-      await expect(runTurn(workerDeps(sql, throwing(apiError(400))), r.turnId!)).rejects.toThrow()
+      await expect(runTurn(workerDeps(sql, { agent: throwing(apiError(400)) }), r.turnId!)).rejects.toThrow()
       const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('failed')
       expect(t!.fail_reason).toBe('provider_rejected')
@@ -415,7 +432,7 @@ describeDb('runTurn, when the step throws', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e3')
       const err = new APIConnectionError({ message: 'socket hang up' })
-      await expect(runTurn(workerDeps(sql, throwing(err)), r.turnId!)).rejects.toThrow()
+      await expect(runTurn(workerDeps(sql, { agent: throwing(err) }), r.turnId!)).rejects.toThrow()
       const [t] = await sql`select fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.fail_reason).toBe('fetch_failed')
     })
@@ -425,7 +442,7 @@ describeDb('runTurn, when the step throws', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e4')
       await expect(
-        runTurn(workerDeps(sql, throwing(new RefusalError('cyber', 'no'))), r.turnId!),
+        runTurn(workerDeps(sql, { agent: throwing(new RefusalError('cyber', 'no')) }), r.turnId!),
       ).rejects.toThrow(RefusalError)
       const [t] = await sql`select fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.fail_reason).toBe('refused')
@@ -443,7 +460,7 @@ describeDb('runTurn, when the step throws', () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e5')
       await expect(
-        runTurn(workerDeps(sql, throwing(new TypeError('x is not a function'))), r.turnId!),
+        runTurn(workerDeps(sql, { agent: throwing(new TypeError('x is not a function')) }), r.turnId!),
       ).rejects.toThrow(TypeError)
       const [t] = await sql`select fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.fail_reason).toBe('unclassified')
@@ -455,7 +472,7 @@ describeDb('runTurn, when the step throws', () => {
   it('leaves a permanent failure terminal, and the sweeper leaves it alone', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e6')
-      await expect(runTurn(workerDeps(sql, throwing(apiError(401))), r.turnId!)).rejects.toThrow()
+      await expect(runTurn(workerDeps(sql, { agent: throwing(apiError(401)) }), r.turnId!)).rejects.toThrow()
       await silentFor(sql, r.turnId!, 10 * 60)
       const out = await sweep(sql)
       expect(out.requeued).not.toContain(r.turnId)
@@ -469,7 +486,7 @@ describeDb('runTurn, when the step throws', () => {
   it('never classifies a FencedError', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'hi', 'e7')
-      await runTurn(workerDeps(sql, throwing(new FencedError(r.turnId!))), r.turnId!)
+      await runTurn(workerDeps(sql, { agent: throwing(new FencedError(r.turnId!)) }), r.turnId!)
       const [t] = await sql`select status, fail_reason from course.turns where id = ${r.turnId}`
       expect(t!.status).toBe('running')
       expect(t!.fail_reason).toBeNull()

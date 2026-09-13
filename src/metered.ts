@@ -26,6 +26,7 @@ export async function callAndRecord(
     const usage = usageOf(message)
     await meta.record({
       seat: seatNameOf(meta.seat),
+      seatConfig: meta.seat,
       promptVersion: meta.promptVersion,
       modelRequested: params.model,
       modelReturned: message.model,

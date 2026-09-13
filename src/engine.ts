@@ -1,14 +1,48 @@
-/** One line of a turn's transcript, as the harness stores it. */
-export type LoopMessage = { role: 'user' | 'assistant' | 'tool'; content: string }
+/**
+ * The transcript, in the shape a provider actually accepts.
+ *
+ * THERE IS NO `'tool'` ROLE. An Anthropic transcript carries a tool result as a
+ * `tool_result` block inside a USER message, referencing by `tool_use_id` the
+ * `id` of the `tool_use` block in the preceding ASSISTANT message. Two things
+ * die if this is flattened to a string, which is what this type was until this
+ * lesson:
+ *
+ *  - the `tool_use` id and its structured `input`. Without the id, a result
+ *    cannot be paired with the call it answers, and an unpaired `tool_result`
+ *    is a 400 on the next request rather than a degraded answer.
+ *  - a `thinking` block's `signature`. Extended thinking must be echoed back to
+ *    the same model byte for byte across a multi-step loop, and a stringified
+ *    thinking block is rejected.
+ *
+ * `course.turns.state` has been `jsonb` since lesson 2.1, so widening this
+ * needed no migration. What it does need is that every block survives a JSON
+ * round trip unchanged, which test/engine.test.ts pins block by block, because
+ * the column is where a resumed turn reads its transcript back from.
+ */
+export type TextBlock = { type: 'text'; text: string }
+export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
+export type ThinkingBlock = { type: 'thinking'; thinking: string; signature: string }
+export type ToolResultBlock = {
+  type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean
+}
+export type ContentBlock = TextBlock | ToolUseBlock | ThinkingBlock | ToolResultBlock
+
+/** One line of a turn's transcript, as the harness stores it and as the API takes it. */
+export type LoopMessage = { role: 'user' | 'assistant'; content: ContentBlock[] }
 
 /**
  * What the harness knows about a turn in progress, and the whole of what a fresh
- * worker gets when it resumes one. `messages` is the harness's own transcript,
- * deliberately plain strings: module 5 replaces it with the model's content
- * blocks when the driver moves inside the harness, and everything in module 3
- * works the same way either side of that change.
+ * worker gets when it resumes one. From this lesson `messages` is the model's
+ * own transcript rather than a paraphrase of it, so a worker that picks up a
+ * released turn sends the conversation the previous worker was having instead
+ * of starting a new one.
  */
 export type TurnState = { step: number; messages: LoopMessage[] }
+
+/** Every text block of a message, joined. Tool blocks and thinking blocks are not text. */
+export function textOfBlocks(content: ContentBlock[]): string {
+  return content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n')
+}
 
 /**
  * Every terminal state a turn can be recorded in, as one array rather than a

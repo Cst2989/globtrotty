@@ -49,6 +49,20 @@ export const HEARTBEAT_STALE = 90
  * it is not a diagnostic counter, it is the value every subsequent write carries
  * to prove it comes from the run that currently owns this row.
  */
+/**
+ * A `TurnState` as the parameter `sql.json` takes, which needs one cast and is
+ * worth the sentence explaining it. From lesson 5.1 the transcript carries a
+ * `tool_use` block whose `input` is `unknown`, because a tool's arguments are
+ * the tool's shape and not this file's, and `postgres`'s own `JSONValue` union
+ * has no member an `unknown` fits. Every value that actually reaches here came
+ * out of a JSON response or is about to go back into one, so the round trip is
+ * safe; the type system simply cannot see through that one field. Written once
+ * here rather than four times inline, so there is one place to look when a
+ * future block type makes the claim untrue.
+ */
+type JsonParam = Parameters<postgres.Sql['json']>[0]
+const asJson = (state: TurnState): JsonParam => state as unknown as JsonParam
+
 export type Claim = {
   turnId: string
   conversationId: string
@@ -149,7 +163,7 @@ export async function claimTurn(sql: postgres.Sql, turnId: string): Promise<Clai
  */
 export async function saveTurnState(sql: postgres.Sql, claim: Claim, state: TurnState): Promise<void> {
   const rows = await sql`
-    update course.turns set state = ${sql.json(state)}, heartbeat_at = now()
+    update course.turns set state = ${sql.json(asJson(state))}, heartbeat_at = now()
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)
@@ -217,7 +231,7 @@ export async function releaseForContinuation(
 ): Promise<void> {
   const rows = await sql`
     update course.turns
-       set state = ${sql.json(state)}, status = 'queued', queued_at = now(), heartbeat_at = now(),
+       set state = ${sql.json(asJson(state))}, status = 'queued', queued_at = now(), heartbeat_at = now(),
            spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
@@ -306,7 +320,7 @@ export async function completeTurn(
   await sql.begin(async (tx) => {
     const rows = await tx`
       update course.turns
-         set status = 'done', state = ${tx.json(opts.state)},
+         set status = 'done', state = ${tx.json(asJson(opts.state))},
              finished_at = now(), heartbeat_at = now(),
              spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
        where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
@@ -390,7 +404,7 @@ export async function completeReapedTurn(
   await sql.begin(async (tx) => {
     const rows = await tx`
       update course.turns
-         set status = 'done', state = ${tx.json(opts.state)},
+         set status = 'done', state = ${tx.json(asJson(opts.state))},
              finished_at = now(), heartbeat_at = now(),
              spend_usd_micros = spend_usd_micros + ${opts.spendMicros.toString()}
        where id = ${claim.turnId} and attempts = ${claim.attempts}

@@ -1,15 +1,14 @@
+import { makeDriver } from '../../src/agents/driver.js'
 import { cashierRunner } from '../../src/cashier.js'
 import { liveClient } from '../../src/client.js'
-import { newConversation, turn } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { constraintsFromNotebook } from '../../src/gates/pipeline.js'
 import { proposalRunner } from '../../src/gates/runner.js'
-import { isFailReason } from '../../src/engine.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { emptyNotebook } from '../../src/notebook.js'
-import { fencedModelCallSink, ledgerSink, readSpendFailClosed } from '../../src/repo/spend.js'
+import type { Claim } from '../../src/repo/turns.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
 import { corpusRunner, ledgerRunner, supplierRunner, type ToolRunner } from '../../src/tools.js'
@@ -44,64 +43,41 @@ export default async (req: Request): Promise<Response> => {
   const startedMs = Date.now()
   const sql = connect(env.DATABASE_URL, 2)
 
-  /**
-   * Module 1's whole `turn()` as ONE agent step. That is the honest shape today:
-   * the driver decides and acts inside its own loop, so the harness can only see
-   * a turn start and a turn end, and a crash lands between turns rather than
-   * between model calls. Module 5 splits it into the driver's own steps; nothing
-   * in the harness changes when it does, which is the point of the Agent type.
-   */
-  const driverAgent: Agent = async ({ state, conversationId, userId, turnId, attempts, signal }) => {
-    const last = [...state.messages].reverse().find((m) => m.role === 'user')
-    // ledgerRunner (src/tools.ts) fences its writes on a full Claim, not a bare
-    // turn id, since lesson 3.4's fix round: a superseded worker must not be
-    // able to write tool-call intent for a turn it no longer owns. Rebuilt here
-    // from the pieces AgentContext carries rather than handed the harness's own
-    // Claim object, which would let this driver bypass the loop's own closers.
-    const claim = { turnId, conversationId, userId, attempts, state }
+  // ONE pair for the whole invocation, built before anything runs and shared by
+  // the searches and by the cashier's re-quote. A cashier re-quoting against a
+  // different supplier instance than the one that searched would be checking one
+  // system's price against another's, and the mock's own `quote` keeps the
+  // results of the search it just ran (src/supplier/mock.ts), so two instances
+  // would not even be asking the same question.
+  const suppliers = liveSuppliers().suppliers
+  const client = liveClient()
 
-    // A `turn()` running fourteen minutes' worth of classify/extract/tool-loop
-    // calls had no boundary this driver could reach mid-call until lesson 4.2
-    // threaded an abort signal through src/loop.ts itself. It has one now: the
-    // guards below still refuse to START the next call, and the same signal,
-    // handed to `turn()` below, cancels the model call and the supplier fetch
-    // already in flight. `classify` and `extract` are the one exception and
-    // are deliberately not given it (src/conversation.ts), so a fence landing
-    // during one of those two short cheap-seat calls is still paid for.
-    //
-    // What cancelling costs, said plainly: the provider may already have
-    // generated most of a reply and may already have charged for it, and
-    // `callAndRecord` (src/metered.ts) records only what CAME BACK, so an
-    // aborted call writes no course.model_calls row, no daily_usage increment
-    // and no conversations.spend_usd_micros increment. That charge is
-    // invisible to every later ceiling check. It is not closed here and
-    // course.model_calls has no column that could name it; module 5's
-    // reserve-before-call is where a call becomes countable before it is made.
-    //
-    // fencedModelCallSink (src/repo/spend.ts) answers the OTHER case, a call
-    // that returned into a fence: it records every such call unconditionally,
-    // since it already happened and already cost real money by the time the
-    // sink runs, and only refuses the NEXT one. It never sees a cancelled
-    // call, because a cancelled call never reaches a sink.
-    //
-    // An aborted model call does not fail this turn either. It classifies as
-    // `unclassified` (src/errors.ts), the driver turns that into a `fail`
-    // step, and `withHeartbeat`'s check after `work()` settles (src/worker.ts)
-    // throws the captured FencedError before `runTurn` can reach the fail
-    // branch, so nothing is stamped on a turn this worker no longer owns. That
-    // post-check is load bearing here in a way it was not before 4.2.
-    const record = fencedModelCallSink(ledgerSink(sql, { userId, conversationId, turnId }), signal)
+  /**
+   * The five wrappers, outermost first: the ledger decides whether the tool runs
+   * at all (lesson 3.4), the cashier re-quotes and emits the links (lesson 4.6),
+   * the proposal runner puts a proposal through the gates (lesson 4.5), the
+   * corpus records what a search returned (lesson 4.3), the supplier runner
+   * makes the call. Each layer knows one thing, and the live adapters get all of
+   * it by being handed to the innermost one.
+   *
+   * Built per agent step rather than once before `runTurn`, because two of these
+   * wrappers fence their writes on a full `Claim` and a claim's `attempts` is
+   * only known after `claimTurn` has taken the row. Reading the turn a second
+   * time here to guess at it would be a second reader of a number the harness
+   * already owns; taking it from the `AgentContext` the harness hands us is the
+   * same value by construction. Construction is a handful of closures, and the
+   * supplier pair above, which is the part with any cost in it, is built once.
+   */
+  const runnerFor = (claim: Claim): ToolRunner => {
     // Her constraints, DERIVED through the one mapper rather than written here
-    // as three literal nulls. Nothing on this branch stores a notebook: `turn()`
-    // builds an empty one at the top of every turn (src/conversation.ts), fills
-    // it from her message and drops it when the turn ends, and this runner is
-    // constructed outside `turn()` in any case. So this call receives an empty
-    // notebook and every field really is null, which is the same three values
-    // the literal had and a different claim: this line reads a notebook, and
-    // the day the conversation stores one it reads that one instead and nothing
-    // else in the chain moves. Module 5.2 puts the tool registry inside the
-    // harness, where the turn's own notebook is in scope, and this becomes
-    // constraintsFromNotebook(conversation.notebook).
+    // as three literal nulls. Nothing on this branch stores a notebook: the
+    // driver renders "nothing yet" into its prompt on every step
+    // (src/agents/driver.ts) and this runner is built outside it in any case. So
+    // this call receives an empty notebook and every field really is null, which
+    // is the same three values the literal had and a different claim: this line
+    // reads a notebook, and the day the conversation stores one it reads that
+    // one instead and nothing else in the chain moves. Lesson 5.2 persists the
+    // notebook on the conversation and this becomes a read of that row.
     //
     // What that costs today, on the record: the pipeline writes `budget` and
     // `dates` as not evaluated WITH A REASON on every proposal a live run
@@ -111,26 +87,15 @@ export default async (req: Request): Promise<Response> => {
     // drives proposalRunner, this exact seam, with a real budget in it
     // (test/gate-pipeline.test.ts).
     const notebook = constraintsFromNotebook(emptyNotebook())
-    const gateCtx = { conversationId, userId, turnId }
-    // ONE pair, built once and shared by the searches and by the cashier's
-    // re-quote. A cashier re-quoting against a different supplier instance than
-    // the one that searched would be checking one system's price against
-    // another's, and the mock's own `quote` keeps the results of the search it
-    // just ran (src/supplier/mock.ts), so two instances would not even be
-    // asking the same question.
-    const suppliers = liveSuppliers().suppliers
-    // Five wrappers, outermost first. The ledger decides whether the tool runs
-    // at all (lesson 3.4); the cashier re-quotes and emits the links (lesson
-    // 4.6); the proposal runner puts a proposal through the gates (lesson 4.5);
-    // the corpus records what a search returned (lesson 4.3); the supplier
-    // runner makes the call. Each layer knows one thing, and the live adapters
-    // get all of it by being handed to the innermost one.
+    const gateCtx = {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    }
     // The two that WRITE fenced take the same claim, because a worker this
     // driver has already lost cannot record a tool call and cannot append to
     // the corpus either; `gate_results` is an observation and is deliberately
     // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids,
     // and the cashier takes the same three for the same reason.
-    const baseRunner = ledgerRunner(
+    return ledgerRunner(
       sql, claim,
       cashierRunner(
         sql, gateCtx,
@@ -147,60 +112,41 @@ export default async (req: Request): Promise<Response> => {
         ),
       ),
     )
-    const runner: ToolRunner = async (name, input, callId, sig) => {
-      // A tool call is the opposite case: checked BEFORE it starts, so a
-      // fence refuses to run the tool at all rather than recording one that
-      // already fired. Nothing has happened yet at this point, unlike the
-      // model call above, so there is no row to lose by refusing here.
-      if (signal.aborted) throw signal.reason
-      return baseRunner(name, input, callId, sig)
-    }
-
-    const result = await turn(
-      newConversation(conversationId),
-      last?.content ?? '',
-      liveClient(),
-      // Every supplier call goes through the ledger, so a kill mid search costs
-      // one call and never two (lesson 3.4).
-      runner,
-      {
-        deadlineMs: startedMs + BACKGROUND_BUDGET_MS,
-        record,
-        readSpend: () => readSpendFailClosed(sql, userId, conversationId),
-        // Closed in lesson 4.2: the fence now reaches a call already in flight,
-        // not only the next one. README.md's residual paragraph moves with it.
-        signal,
-      },
-    )
-    // continue_later is neither a fail reason nor a message: the driver's own
-    // budget (src/loop.ts's toolLoop, checked against the same deadlineMs)
-    // ran out mid-turn, not the work itself. Mapping it into the message
-    // branch would record an unfinished turn as `done` with a blank reply,
-    // outside both the live-turn index and the sweeper's predicate, with
-    // nothing left able to pick it back up.
-    //
-    // It still reports what it spent getting there, like every other branch:
-    // a restart pays for classify, extract and every tool step again, and a
-    // turn that continued three times has to end with all three attempts on
-    // its own row.
-    if (result.outcome === 'continue_later') {
-      return { kind: 'continue_later', costMicros: result.costMicros, alreadyRecorded: true }
-    }
-    // What `turn()` itself spent, on every branch, with `alreadyRecorded` set:
-    // `ledgerSink` has already added each of those model calls to
-    // course.conversations and course.daily_usage as it made them, so the
-    // harness must not charge them a second time, but `turns.spend_usd_micros`
-    // is written by nothing else at all (completeTurn, failTurn and
-    // releaseForContinuation, src/repo/turns.ts) and reporting 0n here left it
-    // reading as free for every turn tier 3 ran.
-    if (isFailReason(result.outcome)) {
-      return {
-        kind: 'fail', reason: result.outcome, text: result.text || null,
-        costMicros: result.costMicros, alreadyRecorded: true,
-      }
-    }
-    return { kind: 'message', text: result.text, costMicros: result.costMicros, alreadyRecorded: true }
   }
+
+  /**
+   * The driver, from lesson 5.1: one invocation is one model call plus, if the
+   * model asked for one, one tool execution. Until this lesson the whole of
+   * `turn()` ran inside a single agent step, so the harness could see a turn
+   * start and a turn end and nothing in between, and a crash landed between
+   * turns rather than between model calls. Now the harness owns every step, and
+   * a turn handed back for want of wall clock resumes from the transcript in
+   * `course.turns.state` instead of starting the conversation again.
+   *
+   * Closed at lesson 5.1. A call is counted BEFORE it is made: the driver
+   * reserves an upper bound against course.conversations and
+   * course.daily_usage, then reconciles the real figure after. A call that is
+   * aborted mid flight leaves the reservation debited, which is the
+   * conservative direction, because the provider may have generated and
+   * billed a response we never saw. `src/agents/driver.ts` refunds in full
+   * only when an error BODY came back, since an error body carries no usage.
+   *
+   * `fencedModelCallSink` and `ledgerSink` left this file with `turn()`. The
+   * driver records its span through `pgSink`, which moves no money, and takes
+   * its own door to the ledger through `reserve` and `reconcile`; handing it
+   * `ledgerSink` as well would charge the same micros twice. It checks
+   * `ctx.signal` through `callModel`, so a fence still cancels a call in flight.
+   */
+  const agent: Agent = async (ctx) => makeDriver({
+    sql,
+    client,
+    run: runnerFor({
+      turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
+      attempts: ctx.attempts, state: ctx.state,
+    }),
+    limits: DEFAULT_LIMITS,
+    now: Date.now,
+  })(ctx)
 
   try {
     try {
@@ -208,7 +154,7 @@ export default async (req: Request): Promise<Response> => {
         {
           sql,
           limits: DEFAULT_LIMITS,
-          agent: driverAgent,
+          agent,
           now: Date.now,
           deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
           reinvoke: httpInvoke(env),

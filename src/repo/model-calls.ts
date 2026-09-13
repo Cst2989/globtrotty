@@ -1,10 +1,12 @@
 import type postgres from 'postgres'
 import type { Usage } from '../pricing.js'
-import type { SeatName } from '../seats.js'
+import type { Seat, SeatName } from '../seats.js'
 
 /** Everything one model call is worth recording. */
 export type CallFacts = {
   seat: SeatName
+  /** The seat's own settings, so the row records the configuration we intended. */
+  seatConfig: Seat
   promptVersion: string
   /** The model string we sent. */
   modelRequested: string
@@ -32,13 +34,15 @@ export function pgSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
         conversation_id, turn_id, user_id, seat, prompt_version,
         model_requested, model_returned,
         input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens,
-        cost_micros, latency_ms
+        cost_micros, latency_ms,
+        effort, max_tokens, model_config_id
       ) values (
         ${ctx.conversationId}, ${ctx.turnId}, ${ctx.userId}, ${facts.seat}, ${facts.promptVersion},
         ${facts.modelRequested}, ${facts.modelReturned},
         ${facts.usage.input_tokens}, ${facts.usage.cache_creation_input_tokens},
         ${facts.usage.cache_read_input_tokens}, ${facts.usage.output_tokens},
-        ${facts.costMicros.toString()}, ${facts.latencyMs}
+        ${facts.costMicros.toString()}, ${facts.latencyMs},
+        ${facts.seatConfig.effort}, ${facts.seatConfig.maxTokens}, ${facts.seatConfig.modelConfigId}
       )`
     } catch (err) {
       // The call already happened and she already paid for it: a row that

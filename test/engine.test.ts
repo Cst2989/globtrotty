@@ -1,4 +1,5 @@
-import { decideNext, exceedsAnyCeiling, type DecideInput } from '../src/engine.js'
+import { decideNext, exceedsAnyCeiling, type DecideInput, type LoopMessage, type ThinkingBlock,
+  type ToolResultBlock, type ToolUseBlock } from '../src/engine.js'
 
 const LIMITS = {
   conversationCeilingMicros: 8_000_000n,   // $8
@@ -176,5 +177,41 @@ describe('exceedsAnyCeiling', () => {
     expect(exceedsAnyCeiling(spend({ conversationMicros: 20_000_000n }), LIMITS)).toBe(true)
     expect(exceedsAnyCeiling(spend({ dailyMicros: 9_000_000n }), LIMITS)).toBe(false)
     expect(exceedsAnyCeiling(spend({ globalMicros: 20_000_000n }), LIMITS)).toBe(false)
+  })
+})
+
+describe('the transcript survives the column it is stored in', () => {
+  it('keeps a tool_use id and its structured input across a JSON round trip', () => {
+    const before: LoopMessage = {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'she said one toddler', signature: 'BDaL4VrbR2Oj0hO4XpJx' },
+        { type: 'text', text: 'Let me look at Faro.' },
+        { type: 'tool_use', id: 'toolu_01ABC', name: 'search_hotels',
+          input: { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 } },
+      ],
+    }
+    const after = JSON.parse(JSON.stringify(before)) as LoopMessage
+    // Field by field, because "survives" is the claim and a deep equal on the
+    // whole object would still pass if the id were the only thing that mattered
+    // and everything else were dropped together with it.
+    expect(after).toEqual(before)
+    const use = after.content[2] as ToolUseBlock
+    expect(use.id).toBe('toolu_01ABC')
+    expect((use.input as { children: number }).children).toBe(1)
+    const think = after.content[0] as ThinkingBlock
+    // The signature is the field the API compares byte for byte. A transcript
+    // that lost it would be rejected on the next step of the same turn.
+    expect(think.signature).toBe('BDaL4VrbR2Oj0hO4XpJx')
+  })
+
+  it('pairs a tool_result with the call it answers, in a user message', () => {
+    const result: LoopMessage = {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'toolu_01ABC', content: '[]', is_error: false }],
+    }
+    const after = JSON.parse(JSON.stringify(result)) as LoopMessage
+    expect(after.role).toBe('user')
+    expect((after.content[0] as ToolResultBlock).tool_use_id).toBe('toolu_01ABC')
   })
 })

@@ -184,7 +184,7 @@ describeDb('a driver throw ends as something she can see', () => {
         { userId: OUTAGE_USER, conversationId: null, message: 'a week in Portugal', idempotencyKey: randomUUID() },
       )
       const agent: Agent = async () => { throw new SpendUnconfirmedError('cannot confirm') }
-      await expect(runTurn(workerDeps(sql, agent), submitted.turnId!)).rejects.toThrow(SpendUnconfirmedError)
+      await expect(runTurn(workerDeps(sql, { agent: agent }), submitted.turnId!)).rejects.toThrow(SpendUnconfirmedError)
 
       const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('failed')          // not queued, and not running

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { FAIL_REASONS } from '../src/engine.js'
+import { SEATS, type SeatName } from '../src/seats.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
 // Imported, not retyped: a hand-copied array would only be checked for
@@ -91,6 +92,31 @@ describeDb('the constraints and the types', () => {
         sql`insert into course.turns (conversation_id, user_id, idempotency_key)
             values (${c2!.id}, ${USER}, 'same-key')`,
       ).rejects.toThrow(/turns_user_idempotency/)
+    })
+  })
+
+  it('accepts every seat name the code can produce', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      for (const name of Object.keys(SEATS) as SeatName[]) {
+        await sql`
+          insert into course.model_calls (conversation_id, user_id, seat, prompt_version,
+                                          model_requested, model_returned)
+          values (${c!.id}, ${USER}, ${name}, 'v', ${SEATS[name].model}, ${SEATS[name].model})`
+      }
+      const rows = await sql`select seat from course.model_calls where conversation_id = ${c!.id}`
+      expect(rows).toHaveLength(Object.keys(SEATS).length)
+    })
+  })
+
+  it('refuses a seat nobody declared', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      await expect(
+        sql`insert into course.model_calls (conversation_id, user_id, seat, prompt_version,
+                                            model_requested, model_returned)
+            values (${c!.id}, ${USER}, 'concierge', 'v', 'claude-opus-5', 'claude-opus-5')`,
+      ).rejects.toThrow(/model_calls_seat_check/)
     })
   })
 })

@@ -31,6 +31,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-4-4 | The rehydration gate | npm run migrate, then npm test (test/tampered-price.test.ts, test/gate-rehydrate.test.ts) |
 | lesson-4-5 | Freshness, currency, slots, totals, budget, dates | npm run migrate, then npm test (test/gate-freshness-currency.test.ts, test/gate-totals-budget-dates.test.ts, test/gate-pipeline.test.ts) |
 | lesson-4-6 | The cashier | npm run migrate, then npm test (test/cashier.test.ts, test/cashier-links.test.ts, test/point-of-no-return.test.ts), then npm run demo for scenario 6, which reaches a booking link with no API key |
+| lesson-5-1 | The driver in the harness | npm run migrate, then npm test (test/request-shape.test.ts, test/driver.test.ts, test/resume.test.ts) |
 
 ## How this branch was built
 
@@ -118,6 +119,15 @@ hand-kept list would have been written by the same person who wrote the
 migration, and would have listed exactly the tables that person was already
 thinking about.
 
+**Count the doors that move money, by name.** Four functions move
+`course.conversations.spend_usd_micros` and `course.daily_usage.cost_micros`:
+`recordSpend`, `ledgerSink` (which calls it), `reserve` and `reconcile`. A model
+call charges through exactly one of those paths, never both, and
+`src/repo/spend.ts` says so on `recordSpend` itself. The comment it replaced
+claimed `recordSpend` was the only writer, and it was true when it was written,
+which is what makes this class of defect so hard to see: nobody wrote a false
+comment, somebody wrote a comment that a later lesson made false.
+
 ## Hand-offs
 
 Closed at lesson 3.5: the `queued` turn with no message that two presses of one
@@ -178,3 +188,10 @@ placeholder shared by all three templates, not a per-supplier account. The shape
 of the URL is right and the value is obviously not live. It is never read from
 the environment, because a missing value would silently emit an unattributed
 link rather than failing.
+
+Open at lesson 5.1: the front desk is unreachable on the deployed path.
+`makeDriver` loads the planning desk unconditionally, so `classify`'s routing,
+which tier 3 got through `turn()`, is not on the path a deployed turn takes. An
+FAQ is answered by the Opus seat and is billed at Opus rates. Lesson 5.3 moves
+desk selection into the driver and persists it on `course.conversations.desk`,
+which is a column `0001` created and nothing has ever read.

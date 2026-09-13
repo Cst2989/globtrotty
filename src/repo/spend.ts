@@ -36,9 +36,17 @@ export class SpendUnconfirmedError extends Error {
 
 /**
  * Records spend against a conversation and against the caller's daily total,
- * atomically, and returns the values after the increment. This is the only
- * writer of `course.conversations.spend_usd_micros` and
- * `course.daily_usage.cost_micros`.
+ * atomically, and returns the values after the increment.
+ *
+ * FOUR functions move `course.conversations.spend_usd_micros` and
+ * `course.daily_usage.cost_micros`, and this is one of them. The others are
+ * `reserve` and `reconcile` (src/repo/reservation.ts, lesson 5.1), which are the
+ * driver's own door and are never called for the same micros this one records,
+ * and `ledgerSink` below, which calls this one. A model call charges exactly
+ * once: `turn()`'s calls go through `ledgerSink` into this function, and the
+ * driver's go through reserve and reconcile and never touch this one. An agent
+ * step that reports `alreadyRecorded` is the harness being told which of the two
+ * doors was used (src/worker.ts).
  *
  * The daily upsert is a single insert-on-conflict-do-update, not a read then a
  * write, so ten concurrent increments cannot clobber each other.

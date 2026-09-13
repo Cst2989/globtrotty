@@ -222,14 +222,20 @@ export async function toolLoop(options: LoopOptions): Promise<LoopResult> {
     const results: ContentBlockParam[] = []
     for (const [index, block] of message.content.entries()) {
       if (block.type !== 'tool_use') continue
-      // Position, not `block.id`. A resumed turn asks the model the same
-      // questions and gets fresh toolu_ ids back for the same calls, so an id
-      // from the reply cannot recognise a call we already made. Step number and
-      // block index can, because a turn replayed from its own transcript asks in
-      // the same order. Not desk-scoped: `turn()` re-runs `classify` on every
-      // resume and can reach a different desk, but only the planning desk has
-      // any tools to call (src/desks.ts's DESK_TOOLS), so two desks cannot
-      // both write to the same call id today. beginToolCall's own name check
+      // Position, not `block.id`, and that is right for THIS loop and wrong for
+      // the driver. `toolLoop` holds its transcript in a local array that dies
+      // with the call, so a resumed turn asks the model the same questions and
+      // gets fresh toolu_ ids back for the same calls. The driver
+      // (src/agents/driver.ts, lesson 5.1) keeps its transcript in
+      // course.turns.state, replays the same assistant blocks and therefore the
+      // same ids, and uses the provider's id.
+      //
+      // So: an id from the reply cannot recognise a call we already made here.
+      // Step number and block index can, because a turn replayed from its own
+      // transcript asks in the same order. Not desk-scoped: `turn()` re-runs
+      // `classify` on every resume and can reach a different desk, but only the
+      // planning desk has any tools to call (src/desks.ts's DESK_TOOLS), so two
+      // desks cannot both write to the same call id today. beginToolCall's own name check
       // (src/repo/toolCalls.ts) is what catches a resume that reaches the
       // same desk with a different tool at this position; add the desk to
       // this id the day the front desk gains a tool of its own.

@@ -184,9 +184,12 @@ export type ToolRunner = (name: string, input: unknown, callId: string, signal?:
  * True for a value shaped like a real `ToolOutcome`, not merely typed as one.
  * Unchanged from `lesson-3-7`, and it sits inside the replaced range, so it has
  * to be carried across rather than dropped: `ledgerRunner` below still calls it
- * on the `unknown` a replayed `jsonb` result comes back as.
+ * on the `unknown` a replayed `jsonb` result comes back as. Exported from lesson
+ * 5.1 for a second caller with the same problem: `toolResultBlock`
+ * (src/worker.ts) has to turn that same `unknown` into the block the model
+ * reads, and a tool's own error flag is worth keeping when it is really there.
  */
-function isToolOutcome(value: unknown): value is ToolOutcome {
+export function isToolOutcome(value: unknown): value is ToolOutcome {
   return typeof value === 'object' && value !== null
     && typeof (value as Record<string, unknown>).content === 'string'
     && typeof (value as Record<string, unknown>).isError === 'boolean'

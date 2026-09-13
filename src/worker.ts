@@ -1,6 +1,9 @@
 import type postgres from 'postgres'
 import { handOffMessage } from './cashier.js'
-import { decideNext, type FailReason, type Limits, type TurnState } from './engine.js'
+import {
+  decideNext, textOfBlocks,
+  type ContentBlock, type FailReason, type Limits, type ToolResultBlock, type TurnState,
+} from './engine.js'
 import { classifyError } from './errors.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
@@ -8,6 +11,7 @@ import { readSpendOrLimitReached } from './loop.js'
 import { emittedLinks } from './repo/linkClicks.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
+import { isToolOutcome } from './tools.js'
 import {
   claimTurn, completeTurn, failTurn, heartbeat, loadTurnInput, releaseForContinuation, saveTurnState,
   FencedError, HEARTBEAT_INTERVAL, MAX_ATTEMPTS, type Claim, type TurnCloser,
@@ -75,7 +79,20 @@ type StepCost = { costMicros: bigint; alreadyRecorded?: boolean }
  */
 export type AgentStep =
   | ({ kind: 'message'; text: string } & StepCost)
-  | ({ kind: 'tool'; callId: string; name: string; run: (signal: AbortSignal) => Promise<unknown> } & StepCost)
+  | ({
+      kind: 'tool'; callId: string; name: string
+      run: (signal: AbortSignal) => Promise<unknown>
+      /**
+       * The assistant turn that ASKED for this tool, appended to the transcript
+       * before the result is. An Anthropic `tool_result` block references the
+       * `tool_use` block's id in the preceding assistant message, so a harness
+       * that appended only the result would send an unpaired `tool_result` on
+       * the next step: a 400, on every tool call the system ever made, rather
+       * than a degraded answer. `echoAgent` and the counting agents in the tests
+       * pass an empty array, which is honest: they asked for nothing.
+       */
+      assistantContent: ContentBlock[]
+    } & StepCost)
   | ({ kind: 'fail'; reason: FailReason; text: string | null } & StepCost)
   /**
    * The driver's OWN budget ran out mid-step, not the harness's. Tier 3's
@@ -135,7 +152,8 @@ const emptyState = (): TurnState => ({ step: 0, messages: [] })
 /** Proves the harness without a model: says back what she said. */
 export const echoAgent: Agent = async ({ state }) => {
   const last = [...state.messages].reverse().find((m) => m.role === 'user')
-  return { kind: 'message', text: `You said: ${last?.content ?? '(nothing)'}`, costMicros: 1_000n }
+  const said = last ? textOfBlocks(last.content) : ''
+  return { kind: 'message', text: `You said: ${said || '(nothing)'}`, costMicros: 1_000n }
 }
 
 /**
@@ -461,7 +479,7 @@ async function loop(
     const input = await loadTurnInput(sql, claim.turnId)
     state = {
       ...state,
-      messages: input ? [{ role: 'user', content: input.message }] : [],
+      messages: input ? [{ role: 'user', content: [{ type: 'text', text: input.message }] }] : [],
     }
     progress.state = state
   }
@@ -603,11 +621,31 @@ async function loop(
     state = {
       ...state,
       step: state.step + 1,
-      messages: [...state.messages, { role: 'tool', content: JSON.stringify(result) }],
+      messages: [
+        ...state.messages,
+        { role: 'assistant', content: step.assistantContent },
+        { role: 'user', content: [toolResultBlock(step.callId, result)] },
+      ],
     }
     progress.state = state
     await saveTurnState(sql, claim, state)
   }
+}
+
+/**
+ * A tool's answer as the block that goes back to the model. `result` came back
+ * from `step.run` typed `unknown`, and on a replay it came back out of a jsonb
+ * column the type system never saw written, so the shape is checked rather than
+ * asserted. A `ToolOutcome` carries the model's own error flag and that flag is
+ * kept: `is_error: true` is how the model learns a gate refused its proposal
+ * rather than reading a rejection as a result. Anything else is stringified,
+ * which is what a test's counting runner returns.
+ */
+function toolResultBlock(callId: string, result: unknown): ToolResultBlock {
+  if (isToolOutcome(result)) {
+    return { type: 'tool_result', tool_use_id: callId, content: result.content, is_error: result.isError }
+  }
+  return { type: 'tool_result', tool_use_id: callId, content: JSON.stringify(result), is_error: false }
 }
 
 /**

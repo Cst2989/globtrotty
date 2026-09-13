@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { fencedModelCallSink, ledgerSink, readSpendFailClosed, recordSpend } from '../src/repo/spend.js'
+import { SEATS } from '../src/seats.js'
 
 // Fresh per run, the same reason withRealDb invents one (test/helpers/db.ts):
 // a fixed id is also `scripts/trip.ts`'s demo user, so a reader's own live
@@ -152,7 +153,7 @@ describeDb('ledgerSink', () => {
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning *`
       const sink = ledgerSink(sql, { userId: USER, conversationId: c!.id, turnId: null })
       await sink({
-        seat: 'driver', promptVersion: 'p1',
+        seat: 'driver', seatConfig: SEATS.driver, promptVersion: 'p1',
         modelRequested: 'claude-opus-5', modelReturned: 'claude-opus-5',
         usage: { input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
         costMicros: 750n, latencyMs: 12,
@@ -178,7 +179,7 @@ describeDb('ledgerSink', () => {
 // for its own write failures; fencedModelCallSink must not do it either.
 describeDb('fencedModelCallSink', () => {
   const facts = {
-    seat: 'driver' as const, promptVersion: 'p1',
+    seat: 'driver' as const, seatConfig: SEATS.driver, promptVersion: 'p1',
     modelRequested: 'claude-opus-5', modelReturned: 'claude-opus-5',
     usage: { input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     costMicros: 750n, latencyMs: 12,

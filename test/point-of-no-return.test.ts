@@ -51,7 +51,7 @@ describeDb('after a link is emitted, the worker', () => {
       // change is what it WRITES before it does, not whether it propagates.
       // Tier 3's own catch is what turns this into a 200 (see
       // netlify/functions/run-turn-background.mts).
-      await expect(runTurn({ ...workerDeps(sql, dying) }, submitted.turnId))
+      await expect(runTurn({ ...workerDeps(sql, { agent: dying }) }, submitted.turnId))
         .rejects.toThrow(/killed after emitting/)
 
       const [t] = await sql`select status, fail_reason from course.turns where id = ${submitted.turnId}`
@@ -76,7 +76,7 @@ describeDb('after a link is emitted, the worker', () => {
       const dying: Agent = async () => { throw new Error('killed before emitting') }
       // The pre-existing behaviour, unchanged, and worth pinning here: the new
       // branch must be reachable ONLY through a link_clicks row.
-      await expect(runTurn({ ...workerDeps(sql, dying) }, submitted.turnId!)).rejects.toThrow(/killed/)
+      await expect(runTurn({ ...workerDeps(sql, { agent: dying }) }, submitted.turnId!)).rejects.toThrow(/killed/)
       const [t] = await sql`select status from course.turns where id = ${submitted.turnId}`
       expect(t!.status).toBe('failed')
       const msgs = await sql`select content from course.messages
@@ -94,7 +94,7 @@ describeDb('after a link is emitted, the worker', () => {
         verified: false, quotedAt: new Date(Date.now() - 4 * 3_600_000),
       })
       const dying: Agent = async () => { throw new Error('killed after emitting') }
-      await expect(runTurn({ ...workerDeps(sql, dying) }, submitted.turnId))
+      await expect(runTurn({ ...workerDeps(sql, { agent: dying }) }, submitted.turnId))
         .rejects.toThrow(/killed after emitting/)
 
       const [m] = await sql`select content from course.messages
@@ -140,7 +140,7 @@ describeDb('after a link is emitted, no exit from the loop fails the turn', () =
       // exit that can fire on a turn that has already done its work: a resumed
       // turn arrives with `state.step` past the cap.
       const never: Agent = async () => { throw new Error('the agent must not be called') }
-      const deps = { ...workerDeps(sql, never), limits: { ...DEFAULT_LIMITS, maxSteps: 0 } }
+      const deps = { ...workerDeps(sql, { agent: never }), limits: { ...DEFAULT_LIMITS, maxSteps: 0 } }
       await runTurn(deps, submitted.turnId)
       await expectHandedOff(sql, submitted.turnId)
     })
@@ -155,7 +155,7 @@ describeDb('after a link is emitted, no exit from the loop fails the turn', () =
       const failing: Agent = async () => ({
         kind: 'fail', reason: 'provider_down', text: 'I could not finish that.', costMicros: 0n,
       })
-      await runTurn(workerDeps(sql, failing), submitted.turnId)
+      await runTurn(workerDeps(sql, { agent: failing }), submitted.turnId)
       await expectHandedOff(sql, submitted.turnId)
     })
   })
@@ -169,9 +169,10 @@ describeDb('after a link is emitted, no exit from the loop fails the turn', () =
                 values (${submitted.turnId}, 'call-1', 'search_flights', 'pending')`
       const tooling: Agent = async () => ({
         kind: 'tool', callId: 'call-1', name: 'search_flights',
-        run: async () => { throw new Error('the tool must not be run') }, costMicros: 0n,
+        run: async () => { throw new Error('the tool must not be run') },
+        assistantContent: [], costMicros: 0n,
       })
-      await runTurn(workerDeps(sql, tooling), submitted.turnId)
+      await runTurn(workerDeps(sql, { agent: tooling }), submitted.turnId)
       await expectHandedOff(sql, submitted.turnId)
       // The operator step lesson 3.4 wrote down is unchanged: the pending row
       // stays, and it is still what somebody reads.
@@ -189,7 +190,7 @@ describeDb('after a link is emitted, no exit from the loop fails the turn', () =
       // ends it `deadline_exceeded` instead.
       await sql`update course.turns set attempts = ${MAX_ATTEMPTS - 1} where id = ${submitted.turnId}`
       const handingBack: Agent = async () => ({ kind: 'continue_later', costMicros: 0n })
-      const deps = workerDeps(sql, handingBack)
+      const deps = workerDeps(sql, { agent: handingBack })
       await runTurn(deps, submitted.turnId)
       await expectHandedOff(sql, submitted.turnId)
       expect(deps.reinvoke).not.toHaveBeenCalled()
@@ -222,7 +223,7 @@ describeDb('a turn that handed off twice', () => {
                   quoted: money(31_900n, 'EUR') }],
       })
       const dying: Agent = async () => { throw new Error('killed after emitting') }
-      await expect(runTurn(workerDeps(sql, dying), submitted.turnId))
+      await expect(runTurn(workerDeps(sql, { agent: dying }), submitted.turnId))
         .rejects.toThrow(/killed after emitting/)
 
       const [m] = await sql`select content from course.messages
@@ -258,7 +259,7 @@ describeDb('a turn that handed off twice', () => {
                   quoted: money(40_000n, 'USD') }],
       })
       const dying: Agent = async () => { throw new Error('killed after emitting') }
-      await expect(runTurn(workerDeps(sql, dying), submitted.turnId))
+      await expect(runTurn(workerDeps(sql, { agent: dying }), submitted.turnId))
         .rejects.toThrow(/killed after emitting/)
       // Not CurrencyMismatchError: the reason the turn died is the one that
       // reaches the log, and no message is written, because there is no

@@ -43,6 +43,14 @@ export function replayClient(name: string): ReplayClient {
     async create(request) {
       const exchange = exchanges[next]
       if (!exchange) throw new Error(`Fixture ${name} holds ${exchanges.length} calls and the test asked for one more.`)
+      // Matched on the model and on nothing else, deliberately. A fixture that
+      // also compared the request body would go red on every prompt edit and on
+      // every cache breakpoint move, which is a fixture that gets deleted rather
+      // than a fixture that catches anything. The request's SHAPE is pinned
+      // somewhere a fixture cannot be: test/request-shape.test.ts asserts what
+      // `buildRequest` assembles, field by field, with no key and no network, so
+      // the thing a body comparison would have guarded is already guarded and is
+      // guarded by an assertion a reader can read.
       if (exchange.request.model !== request.model) {
         throw new Error(`Fixture ${name}, call ${next + 1}: recorded ${exchange.request.model}, test sent ${request.model}.`)
       }

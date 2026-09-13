@@ -1,4 +1,5 @@
-import { SEATS, seatNameOf, withSeat, type Seat } from '../src/seats.js'
+import { PRICES } from '../src/pricing.js'
+import { SEATS, seatNameOf, withSeat, type Seat, type SeatName } from '../src/seats.js'
 
 describe('withSeat', () => {
   it('writes the driver seat as Opus at high effort', () => {
@@ -29,7 +30,33 @@ describe('seatNameOf', () => {
     // A hand-built seat pointed at the driver's model string, at a different
     // effort: two seats sharing a model is exactly the case a model-keyed
     // lookup cannot tell apart, and this one must not come back 'driver'.
-    const impostor: Seat = { model: SEATS.driver.model, effort: 'low' }
+    const impostor: Seat = {
+      model: SEATS.driver.model, effort: 'low',
+      maxTokens: 16_000, modelConfigId: 'claude-opus-5/low/16000',
+    }
     expect(() => seatNameOf(impostor)).toThrow(/No seat named/)
+  })
+})
+
+describe('the settings the seat carries', () => {
+  it('puts the output ceiling on the seat rather than at the call site', () => {
+    expect(SEATS.driver.maxTokens).toBe(16_000)
+    // Eight times smaller than the 8000 `toolLoop` hardcoded for every seat,
+    // which is the whole of the over-reservation this field removes.
+    expect(SEATS.cheap.maxTokens).toBe(1_024)
+  })
+
+  it('encodes model, effort and ceiling into the config id', () => {
+    expect(SEATS.driver.modelConfigId).toBe('claude-opus-5/high/16000')
+    expect(SEATS.cheap.modelConfigId).toBe('claude-haiku-4-5-20251001/noeffort/1024')
+  })
+
+  it('prices every seat it declares', () => {
+    // A seat with no price row throws at costMicros rather than charging zero
+    // (src/pricing.ts), which would surface as a dead turn rather than as a
+    // wrong number. Cheaper to fail here.
+    for (const name of Object.keys(SEATS) as SeatName[]) {
+      expect(PRICES[SEATS[name].model]).toBeDefined()
+    }
   })
 })
