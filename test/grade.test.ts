@@ -144,6 +144,25 @@ describe('grading the output', () => {
     expect(grade.checks.find((c) => c.name === 'inside_her_window')!.passed).toBe(true)
   })
 
+  it('fails inside_her_window on a stay that falls outside the month she named', async () => {
+    // The dates half of the same seam. The stay the helper builds runs
+    // 2026-09-19 to 2026-09-26, so a window in October is one `checkDates`
+    // really does refuse, and the sentence under the verdict is the gate's own
+    // rather than one reassembled here.
+    const items = await rehydrated()
+    const cheapest = items.reduce((a, b) => (a.item.price.minor < b.item.price.minor ? a : b))
+    const october = { earliest: '2026-10-01', latest: '2026-10-31' }
+    const grade = gradeOutput('A crib is included.', items, EXPECTED,
+      { verdicts: verdictsFor([cheapest], BUDGET, october) })
+    const window = grade.checks.find((c) => c.name === 'inside_her_window')!
+    expect(window.passed).toBe(false)
+    expect(window.detail)
+      .toBe(`These items fall outside the 2026-10-01 to 2026-10-31 travel window: ${cheapest.item.sourceId}.`)
+    // And the budget gate, which had nothing against the same stay, is still a
+    // pass. One false check does not drag its neighbour down with it.
+    expect(grade.checks.find((c) => c.name === 'within_budget')!.passed).toBe(true)
+  })
+
   it('keeps a gate that could not say as a null, and never reads it as a pass', async () => {
     // The regression this check exists for. A conversation that never named a
     // budget makes the budget gate record `passed: null`, and the gate files no

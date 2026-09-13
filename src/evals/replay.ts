@@ -45,13 +45,19 @@ export type ReplayResult = {
 /**
  * Which round each replay mode writes under.
  *
- * Round 0 is production's verdict and nothing here ever writes it. The two
- * replay modes are separated because they disagree ON PURPOSE: run against one
- * proposal, the snapshot replay records what production decided and the live
- * replay records what her notebook would decide today. Two rows for one gate at
- * one round would be two answers to one question with nothing in the table
- * saying which is which, which is the exact indistinguishability this file's
- * round argument was introduced to prevent.
+ * Round 0 is production's verdict and neither of these DEFAULTS to it. That is
+ * all this constant enforces: `replayGates` still takes `round?: number`, so a
+ * caller may pass 0 and write one from here. Nothing is at risk if it does,
+ * because such a row still carries a `proposal_id` and `gateMetrics`
+ * (src/evals/gateMetrics.ts) excludes it on the second of its two predicates,
+ * which is the case that predicate is there for.
+ *
+ * The two replay modes are separated because they disagree ON PURPOSE: run
+ * against one proposal, the snapshot replay records what production decided and
+ * the live replay records what her notebook would decide today. Two rows for
+ * one gate at one round would be two answers to one question with nothing in
+ * the table saying which is which, which is the exact indistinguishability this
+ * file's round argument was introduced to prevent.
  */
 export const REPLAY_ROUNDS = { snapshot: 1, live: 2 } as const
 
@@ -128,13 +134,23 @@ export async function replayGates(
 }
 
 /**
- * The rows this replay just wrote, by gate.
+ * Every row at `(proposal_id, round)`, by gate, which for one replay per mode is
+ * the set that replay just wrote.
  *
- * Ordered by `seq` and written into the map in that order, so replaying one
- * proposal twice in one mode leaves the LATEST verdict standing rather than an
- * arbitrary one. `recordGateResults` only accepts a `GateName`, so the filter
- * below can never drop a row today. It is here because the column is text, and
- * `gateMetrics` carries the same guard for the same reason.
+ * It is not narrowed to this run, and the sentence above says so rather than
+ * claiming otherwise. Ordered by `seq`, a bigint identity since migration 0012,
+ * and written into the map in that order, so replaying one proposal twice in
+ * one mode leaves the LATEST verdict for each gate standing rather than an
+ * arbitrary one. The case that leaves behind is a second same-mode replay that
+ * short-circuits on provenance and writes fewer rows: the older row for a gate
+ * this run never reached would survive and be read as this run's. Narrowing to
+ * the rows above the highest `seq` seen before the write would close it, and it
+ * is not done here because nothing replays one proposal twice in one mode, so
+ * the guard would be untested code standing in for a case no caller produces.
+ *
+ * `recordGateResults` only accepts a `GateName`, so the filter below can never
+ * drop a row today. It is here because the column is text, and `gateMetrics`
+ * carries the same guard for the same reason.
  */
 async function verdictsFor(
   sql: postgres.Sql, proposalId: string, round: number,
