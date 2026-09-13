@@ -69,6 +69,10 @@ describe('estimateMicros', () => {
   it('prices a Haiku seat lower than an Opus seat for the same input', () => {
     expect(estimateMicros(SEATS.scout, 1000)).toBeLessThan(estimateMicros(SEATS.driver, 1000))
   })
+
+  it('estimateMicros adds an extra upper bound when asked', () => {
+    expect(estimateMicros(SEATS.scout, 100, 30_000n)).toBe(estimateMicros(SEATS.scout, 100) + 30_000n)
+  })
 })
 
 describeDb('reserve / reconcile', () => {
