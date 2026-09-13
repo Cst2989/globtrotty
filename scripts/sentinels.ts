@@ -20,6 +20,14 @@ export type Sentinel = { name: string; pattern: RegExp; why: string }
  * prompt into a response body is the same mistake without a bundler, and the
  * secret patterns are the ones SPEC section 10 names and that this repository
  * can genuinely commit today.
+ *
+ * `evals/` is the fourth root and the exception to that sentence, because it is
+ * deployed nowhere: `netlify.toml` publishes `public` and reads its functions
+ * from `netlify/functions`, and neither covers it. It is walked from lesson 6.1
+ * because it is where the golden cases will live, and a case somebody writes by
+ * hand is somewhere a prompt gets pasted to see what the model did with it. At
+ * this tag it holds one runner and nothing to find, which is the cheapest
+ * moment there will ever be to start walking it.
  */
 export const SENTINELS: readonly Sentinel[] = [
   {

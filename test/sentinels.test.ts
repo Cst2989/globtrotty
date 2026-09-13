@@ -1,16 +1,23 @@
-import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { findSentinels, SENTINELS } from '../scripts/sentinels.js'
 
 describe('the sentinel grep', () => {
-  it('finds nothing in the four directories this repository deploys or publishes', () => {
+  it('finds nothing in the four roots the sentinel check walks', () => {
     // The check itself, run inside the suite, so `npm test` fails on a leak
-    // rather than a deploy step somebody can skip. The four are the roots
-    // `scripts/check-sentinels.ts` walks, and `evals` is the fourth from lesson
-    // 6.1: a case file a reader opens is somewhere a prompt gets pasted, and a
-    // root nobody walks is a root nobody checks.
+    // rather than a deploy step somebody can skip.
     expect(findSentinels(['src', 'netlify', 'public', 'evals'])).toEqual([])
+  })
+
+  it('walks the roots the CLI actually names, which is a list no test can call', () => {
+    // A source check, because ROOTS is a module-local constant in the CLI
+    // rather than an export: the CLI runs the walk and exits, so there is
+    // nothing to call. Without this, the array in the case above is a second
+    // copy of the list, and dropping a root from EITHER copy leaves both cases
+    // green, since a walk over three clean roots also finds nothing.
+    const src = readFileSync(new URL('../scripts/check-sentinels.ts', import.meta.url), 'utf8')
+    expect(src).toContain("const ROOTS = ['src', 'netlify', 'public', 'evals']")
   })
 
   it('finds a planted key, so the empty result above means something', () => {

@@ -9,6 +9,12 @@
  * over either one goes red on the other for no reason anybody cares about.
  * Lesson 6.3 gives it real golden cases and a real conversation to drive, and
  * from lesson 6.2 it also reads course.gate_results and needs DATABASE_URL.
+ *
+ * It exits 1 at this tag, on purpose. The second world's reply never mentions
+ * the crib she asked for twice (src/her.ts), so `must_include` is a real red
+ * verdict and the first card this course prints is not a wall of green. The
+ * four nulls per case leave the exit code alone, which is the whole argument
+ * for a third value: a property nobody could reach has not failed.
  */
 import { gradeOutput, gradeTrajectory, type Grade, type Trace } from '../src/evals/grade.js'
 import { renderScorecard, scorecardOf } from '../src/evals/scorecard.js'
@@ -29,10 +35,18 @@ const EXPECTED = {
   window: { earliest: '2026-09-15', latest: '2026-09-30' },
 }
 
-/** The two worlds, by the seed that produces each, exactly as the test names them. */
+/**
+ * The two worlds, by the seed that produces each, and one reply per world.
+ *
+ * The replies differ, and they have to. `gradeOutput`'s `must_include` reads
+ * nothing but the reply, so two identical strings would put ONE evaluation in
+ * the card twice and print `2/2 (100%)` over it. The second reply is the answer
+ * she actually gets when the agency forgets half the request: three good stays,
+ * and not a word about the cot.
+ */
 const WORLDS = [
   { caseId: 'faro-seed-1', seed: 1, reply: 'A beachfront stay in Faro with a crib in the room.' },
-  { caseId: 'faro-seed-77', seed: 77, reply: 'A beachfront stay in Faro with a crib in the room.' },
+  { caseId: 'faro-seed-77', seed: 77, reply: 'Three beachfront stays in Faro, sea view, for your week.' },
 ]
 
 async function main(): Promise<void> {
@@ -54,13 +68,19 @@ async function main(): Promise<void> {
     })
   }
   console.log(renderScorecard(scorecardOf(graded, WORLDS.length)))
-  for (const g of graded) {
-    for (const grade of g.grades) {
-      for (const check of grade.checks) {
-        if (check.passed === null) console.log(`  ${g.caseId}  ${check.name}: ${check.detail}`)
-      }
-    }
+  const checks = graded.flatMap((g) => g.grades.flatMap((grade) =>
+    grade.checks.map((check) => ({ caseId: g.caseId, check }))))
+  for (const { caseId, check } of checks) {
+    if (check.passed === false) console.log(`  FAIL  ${caseId}  ${check.name}: ${check.detail}`)
   }
+  for (const { caseId, check } of checks) {
+    if (check.passed === null) console.log(`  ${caseId}  ${check.name}: ${check.detail}`)
+  }
+  // Red on a verdict and never on a null. A proof command that cannot go red is
+  // the shape of problem this module opens on, and one that went red because
+  // four properties have not been built yet would train the reader to ignore it.
+  const failed = checks.filter(({ check }) => check.passed === false).length
+  if (failed > 0) process.exitCode = 1
 }
 
 await main()

@@ -925,7 +925,10 @@ not looked at yet. Each null carries the lesson that reaches it, 6.2 for the
 budget and the travel window and 6.5 for the path, and `npm run evals` prints
 those lines under the card rather than only in the code. This is deliberate
 rather than owed: a scorecard that reported four unbuilt checks as passes would
-be the exact failure lesson 6.1 exists to retire.
+be the exact failure lesson 6.1 exists to retire. The runner exits 1 when a
+check is false and 0 when the only unfinished business is a null, so the proof
+command can go red on a real verdict without the four unbuilt checks reddening
+it every time somebody runs it.
 
 ## What is next
 

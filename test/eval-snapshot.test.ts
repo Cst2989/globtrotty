@@ -50,7 +50,7 @@ describe('the snapshot test module 5 would have written', () => {
     const rehydrated = items.map((item) => ({
       ref: { sourceId: item.sourceId, quantity: 1, slot: 'stay' }, item, lineTotal: item.price,
     }))
-    // The loosened snapshot passed this world. The grader files the currency and
+    // The loosening this lesson describes passed this world. The grader files the currency and
     // the crib as verdicts, and files the budget as unreached with the lesson
     // that reaches it, which is a different sentence from "fine".
     //

@@ -1,4 +1,4 @@
-import { gradeOutput, gradeTrajectory, NOT_YET, type Trace } from '../src/evals/grade.js'
+import { gradeOutput, gradeTrajectory, NOT_YET, overBudget, type Trace } from '../src/evals/grade.js'
 import type { RehydratedItem } from '../src/gates/types.js'
 import { money } from '../src/money.js'
 import { mockSuppliers, type MockConfig } from '../src/supplier/mock.js'
@@ -47,6 +47,29 @@ describe('grading the output', () => {
     expect(check.detail).toContain('USD')
   })
 
+  it('files the currency as unreached when it was handed no items at all', () => {
+    // A proposal of nothing has nothing priced in the wrong currency and
+    // nothing priced in the right one. A pass here would put a property nobody
+    // examined into the numerator of `rate`, which is the one direction this
+    // module exists to close off.
+    const grade = gradeOutput('A crib is included.', [], EXPECTED)
+    const check = grade.checks.find((c) => c.name === 'one_currency')!
+    expect(check.passed).toBeNull()
+    expect(check.detail).toContain('no items to price')
+  })
+
+  it('files must_include as unreached when the case requires no words', async () => {
+    // The same fault in the neighbouring check. An omitted `mustInclude` is
+    // what a hand-written golden case gets wrong, and lesson 6.3 brings
+    // hand-written golden cases.
+    const grade = gradeOutput('Anything at all.', await rehydrated(), { ...EXPECTED, mustInclude: [] })
+    const check = grade.checks.find((c) => c.name === 'must_include')!
+    expect(check.passed).toBeNull()
+    expect(check.detail).toContain('no required words')
+    // And the detail does not render as a sentence with nothing after its colon.
+    expect(check.detail).not.toContain(': .')
+  })
+
   it('reports the budget and the window as unreached rather than as passed', async () => {
     // The two the gates own. They carry a reason naming lesson 6.2, so a reader
     // of this tag's scorecard is told what has not been looked at.
@@ -90,12 +113,32 @@ describe('grading the path', () => {
     expect(grade.checks.find((c) => c.name === 'call_count_fits_the_job')!.passed).toBe(true)
   })
 
-  it('reports the two P3 names and lesson 6.5 has not built as unreached', () => {
+  it('reports the two properties lesson 6.5 has not built as unreached', () => {
     const grade = gradeTrajectory(trace(['search_flights']), {
       minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3,
     })
     for (const name of ['every_number_has_a_search', 'questions_before_guesses']) {
       expect(grade.checks.find((c) => c.name === name)!.passed).toBeNull()
     }
+  })
+})
+
+describe('the budget arithmetic', () => {
+  it('is true only when the total is strictly over the figure she stated', () => {
+    expect(overBudget(money(150_001n, 'EUR'), money(150_000n, 'EUR'))).toBe(true)
+    expect(overBudget(money(150_000n, 'EUR'), money(150_000n, 'EUR'))).toBe(false)
+    expect(overBudget(money(1n, 'EUR'), money(150_000n, 'EUR'))).toBe(false)
+  })
+
+  it('refuses to answer across two currencies rather than clearing the total', () => {
+    // `compareMoney` throws on a mismatch, so the two available answers are a
+    // refusal and a lie. A `false` here would read as "within budget" for a
+    // comparison nobody made, and the amount is chosen to make that loud: a
+    // million minor units against a budget of a hundred and fifty thousand.
+    expect(overBudget(money(1_000_000n, 'USD'), money(150_000n, 'EUR'))).toBeNull()
+  })
+
+  it('refuses to answer when she stated no budget', () => {
+    expect(overBudget(money(150_001n, 'EUR'), null)).toBeNull()
   })
 })

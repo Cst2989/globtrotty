@@ -7,11 +7,12 @@ export type ScorecardRow = { name: string; tally: Tally }
  * `casesExpected` and `casesGraded` are two numbers and not one, and the gap
  * between them is the whole reason this type exists.
  *
- * P3's closing rule is that every pass rate carries its denominator, because
- * "92% pass" means nothing if traces dropped silently. A run that was asked for
- * twenty cases and graded eighteen has a real denominator of twenty, and a
- * scorecard that reported eighteen would be reporting a number that improves
- * every time something breaks badly enough to lose a case.
+ * The rule this module holds itself to is that every pass rate carries its
+ * denominator, because "92% pass" means nothing if traces dropped silently. A
+ * run that was asked for twenty cases and graded eighteen has a real
+ * denominator of twenty, and a scorecard that reported eighteen would be
+ * reporting a number that improves every time something breaks badly enough to
+ * lose a case.
  */
 export type Scorecard = { rows: ScorecardRow[]; casesExpected: number; casesGraded: number }
 

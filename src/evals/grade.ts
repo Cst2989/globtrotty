@@ -25,7 +25,8 @@ export type TraceCall = { name: string; callId: string }
  * What one run of one case left behind, as much of it as lesson 6.1 can see.
  * Lesson 6.5 moves this type into src/evals/trajectory.ts and gives it the turn
  * id, the source ids and the amounts a reply quoted, because those are what the
- * three trajectory checks read and none of them exists here yet.
+ * two deferred trajectory checks below read, and none of those three fields is
+ * on this type yet.
  */
 export type Trace = { calls: TraceCall[]; replies: string[] }
 
@@ -65,8 +66,9 @@ export const NOT_YET = {
  * against the provenance corpus and against a notebook this function is not
  * given, and lesson 6.2 is where they get their verdict. They are recorded as
  * nulls with a reason rather than left out of the list, because a check that is
- * absent from a scorecard cannot be counted and a denominator that silently
- * shrinks is the failure P3's last section is about.
+ * absent from a scorecard cannot be counted, and a denominator that silently
+ * shrinks is the failure `casesExpected` and `casesGraded` exist to make
+ * visible (src/evals/scorecard.ts).
  */
 export function gradeOutput(
   reply: string, items: RehydratedItem[], expected: OutputExpectation,
@@ -79,20 +81,37 @@ export function gradeOutput(
     checks: [
       {
         name: 'must_include',
-        passed: missing.length === 0,
-        detail: missing.length === 0
-          ? `Every required word appeared: ${expected.mustInclude.join(', ')}.`
-          : `Missing from the reply: ${missing.join(', ')}.`,
+        // A case that required nothing has had nothing checked for it. `true`
+        // there would put a property nobody examined into rate()'s numerator
+        // and render `Every required word appeared: .` underneath it, so the
+        // empty list is a null. No lesson reaches it, which is why it carries
+        // its own sentence rather than one of NOT_YET's: what is missing is a
+        // field on the case, not a piece of this repository.
+        passed: expected.mustInclude.length === 0 ? null : missing.length === 0,
+        detail: expected.mustInclude.length === 0
+          ? 'not evaluated: this case names no required words.'
+          : missing.length === 0
+            ? `Every required word appeared: ${expected.mustInclude.join(', ')}.`
+            : `Missing from the reply: ${missing.join(', ')}.`,
       },
       {
         name: 'one_currency',
         // Checked here rather than deferred to the gates, because it needs no
         // corpus and no notebook: a proposal that mixes currencies is wrong
         // whatever her budget is, and src/money.ts refuses to add them.
-        passed: currencies.length <= 1 && (currencies[0] ?? expected.currency) === expected.currency,
+        //
+        // Zero items is null and not true. A set with no prices in it has
+        // nothing in the wrong currency and nothing in the right one, so there
+        // is no verdict to reach, and an agency that proposed nothing at all
+        // would otherwise score a green row in rate()'s numerator: a property
+        // nobody could look at, reading exactly like one that was looked at and
+        // held.
+        passed: currencies.length === 0
+          ? null
+          : currencies.length === 1 && currencies[0] === expected.currency,
         detail: currencies.length === 0
-          ? 'No items to price.'
-          : `Items priced in ${currencies.join(', ')}; she asked in ${expected.currency}.`,
+          ? 'not evaluated: no items to price.'
+          : `Items priced in ${currencies.join(', ')}, but she asked in ${expected.currency}.`,
       },
       {
         name: 'within_budget',
@@ -117,10 +136,10 @@ export function gradeOutput(
  *
  * A hotel lookup that took fourteen frontier turns and a whole trip that took
  * four are both wrong, in opposite directions, so the call count is checked
- * against a RANGE and never against a ceiling. The other two checks P3 names,
- * every quoted number having a search behind it and questions arriving before
- * guesses, need the transcript and the corpus, and lesson 6.5 is where they get
- * read.
+ * against a RANGE and never against a ceiling. The other two properties this
+ * module owes, every quoted number having a search behind it and questions
+ * arriving before guesses, need the transcript and the corpus, and lesson 6.5
+ * is where they get read.
  */
 export function gradeTrajectory(trace: Trace, expected: TrajectoryExpectation): Grade {
   const frontier = trace.calls.length
@@ -143,8 +162,24 @@ export function gradeTrajectory(trace: Trace, expected: TrajectoryExpectation): 
   }
 }
 
-/** Kept off the public surface until something needs it; here so `compareMoney` has a caller. */
-export function overBudget(total: Money, budget: Money | null): boolean {
-  if (!budget || total.currency !== budget.currency) return false
+/**
+ * Is `total` strictly over `budget`, with "nobody could say" as a third answer.
+ *
+ * The three values are `Check.passed`'s, for the reason `Check.passed` has
+ * them. A budget in one currency and a total in another cannot be compared at
+ * all, because `compareMoney` throws on a mismatch (src/money.ts), so the only
+ * options are a refusal and a guess. Answering `false` would be the guess: it
+ * reads as "within budget" for a comparison nobody made, and it is the fail-open
+ * collapse this file's `Check` doc argues against. `checkCurrency` takes the
+ * same view one layer down and reports a mixed set as a violation rather than
+ * pricing it (src/gates/checks.ts). A missing budget is null for the same
+ * reason: with no figure stated, nothing was exceeded and nothing was cleared.
+ *
+ * Nothing in this repository calls it at lesson 6.1, and test/grade.test.ts is
+ * its only exercise. Lesson 6.2 turns `within_budget` from a null into a
+ * verdict and is where the caller arrives.
+ */
+export function overBudget(total: Money, budget: Money | null): boolean | null {
+  if (!budget || total.currency !== budget.currency) return null
   return compareMoney(total, budget) > 0
 }
