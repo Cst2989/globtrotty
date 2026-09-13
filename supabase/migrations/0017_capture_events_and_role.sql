@@ -94,26 +94,35 @@ comment on table course.agent_events is
 -- 3. The role the worker connects as, so that a forgotten `and user_id =` is a
 -- row that is not returned rather than a row that is.
 --
--- Created idempotently, because migrations run on a database that may already
--- have it and because a course reader's Supabase project is not ours to assume
--- anything about. The membership grant beside it is what lets `withUser`
--- (src/db.ts) run `set local role course_worker` at all. Postgres 16 and later
--- grant the creator that membership implicitly; saying it here makes the
--- migration independent of that, and it is inside the same branch as the create
--- so a pre-existing role somebody else owns is left exactly as it is.
+-- CREATED idempotently and GRANTED unconditionally, which are two decisions and
+-- not one. The create is guarded because migrations run on a database that may
+-- already have the role and because a course reader's Supabase project is not
+-- ours to assume anything about. The membership grant below is outside that
+-- guard, because it is what lets `withUser` (src/db.ts) run `set local role
+-- course_worker` at all, and a role is cluster-wide while
+-- `course.schema_migrations` is database-scoped: a fresh database in a cluster
+-- that already holds `course_worker` skips the create, and a grant sharing that
+-- guard would be skipped with it, leaving every policy applied and every
+-- `withUser` failing at run time. Postgres 16 and later grant the creator that
+-- membership implicitly, so saying it here makes the migration independent of
+-- that too.
+--
+-- What it costs: a `course_worker` that belongs to somebody else is no longer
+-- left untouched, because this issues a grant against it on every apply. On a
+-- role this migration does not have admin option over, that grant fails HERE,
+-- with a must-have-admin-option error and a migration that does not record
+-- itself, which is the better of the two failures: the alternative was a
+-- migration that reported success and a worker that could not set its role at
+-- run time, in production, with nothing at migrate time to warn.
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'course_worker') then
     create role course_worker nologin;
   end if;
-  -- OUTSIDE the branch, and that is the whole of the correction. A role is
-  -- cluster-wide and `course.schema_migrations` is database-scoped, so a fresh
-  -- database in a cluster that already holds `course_worker` skips the create,
-  -- and if the grant sat inside the branch it would skip that too: the policies
-  -- would all apply and `withUser`'s `set local role course_worker` would then
-  -- fail at run time with "permission denied to set role", with nothing at
-  -- migrate time to warn. Granting a role to a member that already has it is a
-  -- no-op, so running it every time costs nothing and closes that case.
+  -- OUTSIDE the branch above, for the reason the section comment gives at
+  -- length. Granting a role to a member that already has it is a no-op, so
+  -- running it on every apply costs nothing and covers the database that found
+  -- the role already there.
   execute format('grant course_worker to %I', current_user);
 end
 $$;
