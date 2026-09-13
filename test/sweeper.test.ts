@@ -91,6 +91,29 @@ describeDb('sweep', () => {
     })
   })
 
+  it('keeps a crash-looping conversation escalated instead of overwriting it to failed', async () => {
+    await withTestDb(async (sql) => {
+      const cid = await convo(sql)
+      await sql`update conversations set status = 'escalated' where id = ${cid}`
+      const [t] = await sql`
+        insert into turns (conversation_id, user_id, idempotency_key, status,
+                           attempts, started_at, heartbeat_at)
+        values (${cid}, ${USER}, 'k', 'running', ${MAX_ATTEMPTS},
+                now() - interval '10 minutes', now() - interval '10 minutes')
+        returning id`
+      const out = await sweep(sql, {})
+
+      expect(out.reaped).toContain(t!.id)
+
+      const [turn] = await sql`select status, fail_reason from turns where id = ${t!.id}`
+      expect(turn!.status).toBe('failed')
+      expect(turn!.fail_reason).toBe('crash_loop')
+
+      const [c] = await sql`select status from conversations where id = ${cid}`
+      expect(c!.status).toBe('escalated')
+    })
+  })
+
   it('does not reap a live turn even at MAX_ATTEMPTS', async () => {
     await withTestDb(async (sql) => {
       const cid = await convo(sql)

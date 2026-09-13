@@ -68,4 +68,24 @@ describeDb('escalate_to_human', () => {
     await new LogNotifier((l) => lines.push(l)).notify({ id: 'x', conversationId: 'c1', userId: 'u', turnId: null, proposalId: null, reason: 'safety', createdAt: NOW })
     expect(lines).toHaveLength(1); expect(lines[0]).toContain('safety'); expect(lines[0]).toContain('c1')
   })
+  it('does not fail the turn when the notified_at stamp fails after a successful notify', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '07')
+      const notify = vi.fn().mockResolvedValue(undefined)
+      // A stamp that cannot land: make the escalations row unreachable for the update
+      // by wrapping sql so that `update escalations set notified_at` throws.
+      const failingSql = new Proxy(sql, {
+        apply(target, thisArg, args: unknown[]) {
+          const text = String((args[0] as TemplateStringsArray).join('?'))
+          if (text.includes('update escalations set notified_at')) throw new Error('stamp down')
+          return Reflect.apply(target as unknown as (...a: unknown[]) => unknown, thisArg, args)
+        },
+      }) as typeof sql
+      const out = await escalate({ sql: failingSql, notifier: { notify }, now: () => NOW.getTime() }, s, { reason: 'safety' })
+      expect(out).toMatch(/escalated/i)
+      expect(notify).toHaveBeenCalledTimes(1)
+      const [e] = await sql`select notified_at from escalations where conversation_id = ${s.conversationId}`
+      expect(e!.notified_at).toBeNull()
+    })
+  })
 })

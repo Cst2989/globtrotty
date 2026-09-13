@@ -35,6 +35,11 @@ export async function escalate(
   } catch (err) {
     console.error(`escalate: notifier failed for ${e.id}: ${(err as Error).message}`)
   }
-  if (notified) await markNotified(deps.sql, e.id)
+  if (notified) {
+    // Best-effort, like the notify itself: the row exists and the human was paged.
+    await markNotified(deps.sql, e.id).catch((err: unknown) => {
+      console.error(`escalate: notified_at stamp failed for ${e.id}: ${(err as Error).message}`)
+    })
+  }
   return `Escalated to a human (reason: ${input.reason}). Tell her someone will look at this and stop planning; do not promise a time.`
 }
