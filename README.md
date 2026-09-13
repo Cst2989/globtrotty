@@ -936,6 +936,33 @@ with the reason. The runner exits 1 when a check is false and 0 when the only
 unfinished business is a null, so the proof command can go red on a real verdict
 without the unbuilt checks reddening it every time somebody runs it.
 
+Open at lesson 6.3: three golden cases ship, and P3 describes twenty
+adversarially chosen ones. The missing seventeen are named in the lesson (the
+discovery conversation, the unstated budget, the gibberish opener, the request
+in Portuguese, and the rest) and each costs one recorded fixture to add, which
+is the whole of why three shipped. Owner: a person, growing the file one case at
+a time with the recording that makes it replayable.
+
+Also open at lesson 6.3, and found by the eval rather than by reading the code:
+the planning desk spends most of its steps writing the notebook. Every one of
+the three cases fails `call_count_fits_the_job`, at 21, 40 and 52 tool calls
+against ceilings of 10, 4 and 8, and the great majority of those calls are
+`update_requirements` re-sending facts the notebook already holds. The red row
+is the eval working rather than a threshold set too tight, and closing it is a
+change to the desk prompt and to what the tool result says back, which is a
+lesson of its own. Owner: module 6, once the judge in 6.6 can say whether a
+shorter path answered her as well.
+
+What the first run of these cases found and this lesson DID close: the desk
+could not record a single fact. `update_requirements` publishes `patch` as a
+free record, nothing told the model the eight names the notebook accepts, and
+`applyRequirements` refuses a patch WHOLE when one key is unknown (src/notebook.ts),
+so every patch the desk composed was discarded and every turn after the first
+one started with an empty notebook and no memory. One paragraph in
+`src/desks/planning-desk.md` names the fields and their shapes, and the three
+recordings were made against it. Nothing but a multi-turn conversation could
+have found this, because a single-turn trip never reads the notebook back.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

@@ -83,6 +83,32 @@ export const SEATS = {
    * so this line is checked rather than assumed.
    */
   monitor: seat(HAIKU, null, 2_048),
+  /**
+   * The traveller, simulated, for the eval suite and for nothing else.
+   *
+   * Haiku 4.5 because a persona reply is one or two sentences and the job is
+   * reading a question and answering it from a list of facts, which is not a
+   * job worth Opus rates twenty cases at a time. 512 tokens because the
+   * reservation bounds output at exactly this number
+   * (src/repo/reservation.ts), and a simulated traveller who writes four
+   * paragraphs is a simulated traveller whose variance drowns the thing being
+   * measured.
+   *
+   * It is a real seat rather than a test double so its calls are PRICED: every
+   * one of them writes a course.model_calls row with seat = 'sim_user' and this
+   * seat's model_config_id, which is what makes "the simulated user's model,
+   * prompt and seat are pinned and traced" a fact in a table rather than a
+   * promise in a comment. The default eval run does not use it at all, because
+   * the scripted traveller (src/evals/sim-user.ts) needs no model.
+   *
+   * No migration: `sim_user` is one of the eight names `0014`'s
+   * `model_calls_seat_check` already accepts, and `0014`'s own comment says why
+   * the six module-5 names landed in one migration, so that a lesson which adds
+   * a seat adds a line here and nothing else. `test/schema.test.ts` walks every
+   * SeatName against that constraint, so this line is checked rather than
+   * assumed.
+   */
+  sim_user: seat(HAIKU, null, 512),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS

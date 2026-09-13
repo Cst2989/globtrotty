@@ -1,42 +1,47 @@
 /**
- * The eval runner. Keyless by design, and from lesson 6.2 it needs a database:
+ * The eval runner. Keyless by design, and it needs a database:
  *
  *   npm run evals
  *
- * What it grades today is two worlds the mock supplier produces from two seeds,
- * which is the pair lesson 6.1's snapshot test could not tell apart: every
- * offer in each is as defensible as every offer in the other, and a snapshot
- * over either one goes red on the other for no reason anybody cares about.
- * Lesson 6.3 gives it real golden cases and a real conversation to drive, and
- * from lesson 6.2 it also reads course.gate_results and needs DATABASE_URL.
+ * What it grades from lesson 6.3 is three golden cases (`evals/golden-trips.json`),
+ * each one a whole conversation driven end to end with nobody typing: the
+ * scripted traveller (src/evals/sim-user.ts) answers from her persona's facts,
+ * the real handler and the real worker do the work, and every model response
+ * comes off a recording, so a reader with no key runs the same three
+ * conversations the author recorded. Until this lesson it graded two worlds the
+ * mock supplier produced from two seeds and a reply written into a constant,
+ * which is not an eval of an agency.
  *
- * It exits 1 at this tag, on purpose. The second world's reply never mentions
- * the crib she asked for twice (src/her.ts), so `must_include` is a real red
- * verdict and the first card this course prints is not a wall of green. The
- * four nulls per case leave the exit code alone, which is the whole argument
- * for a third value: a property nobody could reach has not failed.
+ * It may exit 1, on purpose, and at this tag it does. A check that reached a
+ * verdict and failed is the run going red; the nulls leave the exit code alone,
+ * which is the whole argument for a third value: a property nobody could reach
+ * has not failed.
  *
  * The database half is the gate section. It reads course.gate_results, which is
  * where the production checks record every verdict they reach, so the card
  * carries the gates' own numbers beside the graded ones rather than a second
- * set computed here. At this tag that section prints zeroes, because nothing
- * has run a gate under this run's user id yet, and a section printed empty is
- * the honest version of a section left out: the reader can see what is missing.
- * The gate rows do not decide the exit code: a gate that refused a bad proposal
- * is the system working, and reddening the run for it would teach a reader that
- * a red gate row is noise.
+ * set computed here. It is asked for each case's own user id and the rows are
+ * summed, so the `gate:` rows are this run's gates and nobody else's. The gate
+ * rows do not decide the exit code: a gate that refused a bad proposal is the
+ * system working, and reddening the run for it would teach a reader that a red
+ * gate row is noise.
+ *
+ * `replayClient` comes from `test/`, which is the one place this runner reaches
+ * into that directory. It is the branch's only keyless model client and a copy
+ * under `src/` would be two clients to keep in step, so `tsconfig.json` compiles
+ * both roots and the import is legal.
  */
-import { randomUUID } from 'node:crypto'
 import 'dotenv/config'
 import { config } from 'dotenv'
 import { connect } from '../src/db.js'
+import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
 import { gateMetrics, gateRows, type GateMetric } from '../src/evals/gateMetrics.js'
-import { gradeOutput, gradeTrajectory, type Grade, type Trace } from '../src/evals/grade.js'
+import type { Grade } from '../src/evals/grade.js'
+import { runCase } from '../src/evals/runner.js'
+import { makeSimulatedUser } from '../src/evals/sim-user.js'
 import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
-import { money } from '../src/money.js'
-import type { RehydratedItem } from '../src/gates/types.js'
-import { mockSuppliers } from '../src/supplier/mock.js'
-import type { HotelSearch } from '../src/supplier/types.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
+import { replayClient } from '../test/model/replay.js'
 
 // The guard is scripts/demo.ts's, word for word: two scripts giving different
 // advice about the same missing variable is how a reader learns to ignore both.
@@ -46,62 +51,62 @@ if (!process.env.DATABASE_URL) {
   process.exit(1)
 }
 
-const STAY: HotelSearch = {
-  kind: 'hotel', query: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26',
-  adults: 2, currency: 'EUR',
-}
-
-const EXPECTED = {
-  budget: money(150_000n, 'EUR'),
-  currency: 'EUR',
-  mustInclude: ['crib'],
-  window: { earliest: '2026-09-15', latest: '2026-09-30' },
-}
-
 /**
- * The two worlds, by the seed that produces each, and one reply per world.
+ * One run's gate counts, from the per-case counts.
  *
- * The replies differ, and they have to. `gradeOutput`'s `must_include` reads
- * nothing but the reply, so two identical strings would put ONE evaluation in
- * the card twice and print `2/2 (100%)` over it. The second reply is the answer
- * she actually gets when the agency forgets half the request: three good stays,
- * and not a word about the cot.
+ * Summed over the cases rather than asked once for all of them, because
+ * `gateMetrics` is scoped to ONE user id and `runCase` mints a fresh one per
+ * case so that no case's spend can exhaust another's. Added by gate NAME, so a
+ * row this file cannot place (`OTHER_GATES`) survives the addition instead of
+ * being dropped into whichever position it happened to occupy.
  */
-const WORLDS = [
-  { caseId: 'faro-seed-1', seed: 1, reply: 'A beachfront stay in Faro with a crib in the room.' },
-  { caseId: 'faro-seed-77', seed: 77, reply: 'Three beachfront stays in Faro, sea view, for your week.' },
-]
+function sumMetrics(perCase: GateMetric[][]): GateMetric[] {
+  const byGate = new Map<string, GateMetric>()
+  for (const metrics of perCase) {
+    for (const m of metrics) {
+      const seen = byGate.get(m.gate)
+      if (!seen) { byGate.set(m.gate, { ...m }); continue }
+      seen.passed += m.passed
+      seen.failed += m.failed
+      seen.notEvaluated += m.notEvaluated
+    }
+  }
+  return [...byGate.values()]
+}
 
 async function main(): Promise<void> {
+  const cases = loadGoldenCases()
   const graded: { caseId: string; grades: Grade[] }[] = []
-  for (const world of WORLDS) {
-    const items = await mockSuppliers({ hotel: { seed: world.seed } }).hotel.search(STAY)
-    const rehydrated: RehydratedItem[] = items.map((item) => ({
-      ref: { sourceId: item.sourceId, quantity: 1, slot: 'stay' }, item, lineTotal: item.price,
-    }))
-    // One search and one reply, so the trace is one call. Lesson 6.3 replaces
-    // this with what the driver actually did.
-    const trace: Trace = { calls: [{ name: 'search_hotels', callId: 's0-b0' }], replies: [world.reply] }
-    graded.push({
-      caseId: world.caseId,
-      grades: [
-        gradeOutput(world.reply, rehydrated, EXPECTED),
-        gradeTrajectory(trace, { minFrontierCalls: 1, maxFrontierCalls: 6, maxQuestionsAsked: 3 }),
-      ],
-    })
-  }
-  // A fresh id per run, so the gate counts are this run's and not the sum of
-  // every run since the database was created. Lesson 6.4 gives the reason in
-  // full, when an eval run starts costing money and meets the per-user cap.
-  const evalUser = randomUUID()
+  const evalUsers: string[] = []
   const sql = connect(process.env.DATABASE_URL!, 2)
-  let metrics: GateMetric[]
   try {
-    metrics = await gateMetrics(sql, { userId: evalUser })
+    for (const kase of cases) {
+      try {
+        const result = await runCase(
+          {
+            sql, client: replayClient(fixtureFor(kase.id)),
+            limits: DEFAULT_LIMITS, simUser: makeSimulatedUser,
+          },
+          kase,
+        )
+        evalUsers.push(result.userId)
+        graded.push({ caseId: result.caseId, grades: result.grades })
+      } catch (err) {
+        // Counted in casesExpected and not in casesGraded, and named on the way
+        // past. A case that threw is not a case that failed a check, and folding
+        // the two together is how a suite reports 100% over the three cases that
+        // still run.
+        console.error(`case ${kase.id} did not complete: ${String(err)}`)
+      }
+    }
+    const perCase: GateMetric[][] = []
+    for (const userId of evalUsers) perCase.push(await gateMetrics(sql, { userId }))
+    const card = withRows(scorecardOf(graded, cases.length), gateRows(sumMetrics(perCase)))
+    console.log(renderScorecard(card))
   } finally {
     await sql.end({ timeout: 5 })
   }
-  console.log(renderScorecard(withRows(scorecardOf(graded, WORLDS.length), gateRows(metrics))))
+
   const checks = graded.flatMap((g) => g.grades.flatMap((grade) =>
     grade.checks.map((check) => ({ caseId: g.caseId, check }))))
   for (const { caseId, check } of checks) {

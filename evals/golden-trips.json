@@ -1,0 +1,103 @@
+[
+  {
+    "id": "portugal-toddler-01",
+    "firstMessage": "We want a week in Portugal in the second half of September, flying from Berlin, two adults and a toddler of two, somewhere near a beach with a crib in the room. Our budget for flights and hotel together is 1,500 euros.",
+    "persona": {
+      "facts": {
+        "originCity": "Berlin",
+        "destination": "Portugal",
+        "month": "September 2026",
+        "dates": "any week in the second half of September 2026",
+        "nights": 7,
+        "adults": 2,
+        "infants": 1,
+        "budget": "1500 EUR",
+        "budgetCovers": "flights and hotel together",
+        "flexibleDates": true,
+        "needsCrib": true,
+        "nearBeach": true
+      },
+      "style": "brief, types fast, lowercase",
+      "refuses": [
+        "car hire",
+        "travel insurance"
+      ]
+    },
+    "expect": {
+      "mustInclude": [
+        "crib"
+      ],
+      "minFrontierCalls": 2,
+      "maxFrontierCalls": 10,
+      "maxQuestionsAsked": 3,
+      "proposals": 1,
+      "gates": "all pass"
+    }
+  },
+  {
+    "id": "hotel-only-02",
+    "firstMessage": "We already have the flights to Faro. We just need somewhere near the beach with a crib, 19 to 26 September, under 600 euros.",
+    "persona": {
+      "facts": {
+        "destination": "Faro",
+        "month": "September 2026",
+        "dates": "19 to 26 September 2026",
+        "nights": 7,
+        "adults": 2,
+        "infants": 1,
+        "budget": "600 EUR",
+        "budgetCovers": "the hotel alone",
+        "flightsBooked": "we already have our flights to Faro, we only need the hotel",
+        "needsCrib": true,
+        "nearBeach": true
+      },
+      "style": "brief, knows what she wants",
+      "refuses": [
+        "booking flights"
+      ]
+    },
+    "expect": {
+      "mustInclude": [
+        "crib"
+      ],
+      "minFrontierCalls": 1,
+      "maxFrontierCalls": 4,
+      "maxQuestionsAsked": 2,
+      "proposals": 1,
+      "gates": "all pass"
+    }
+  },
+  {
+    "id": "no-for-1500-03",
+    "firstMessage": "Two adults and a toddler, Berlin to the Algarve, the whole of August, beachfront, 1,500 euros all in for flights and hotel.",
+    "persona": {
+      "facts": {
+        "originCity": "Berlin",
+        "destination": "Algarve",
+        "month": "August 2026",
+        "dates": "1 to 29 August 2026",
+        "nights": 28,
+        "adults": 2,
+        "infants": 1,
+        "budget": "1500 EUR",
+        "budgetCovers": "flights and hotel together",
+        "nearBeach": true
+      },
+      "style": "firm about the budget",
+      "refuses": [
+        "a higher budget",
+        "a different month"
+      ]
+    },
+    "expect": {
+      "mustInclude": [
+        "not"
+      ],
+      "minFrontierCalls": 1,
+      "maxFrontierCalls": 8,
+      "maxQuestionsAsked": 3,
+      "proposals": 0,
+      "gates": "any fail"
+    }
+  }
+]
