@@ -141,9 +141,14 @@ export async function turn(
   const patch = Object.fromEntries(Object.entries(extracted.requirements).filter(([, v]) => v !== null))
   // `.next` from lesson 5.2: `applyRequirements` also names the keys it
   // refused, which the `update_requirements` tool answers the model with
-  // (`notebookRunner`, src/tools.ts). Nothing on this path has anything to tell
-  // her about a refusal, because this patch is her own extracted words and a
-  // user-sourced patch is never refused.
+  // (`notebookRunner`, src/tools.ts). This path discards that list, because
+  // `turn()` has nothing to tell her with. It is not empty in general:
+  // `PatchSchema` bounds values `RequirementsSchema` cannot bound, since the
+  // API's `output_config.format` rejects numeric keywords (src/extract.ts), so
+  // an extracted `nights: 90` or a party of twelve is refused here and refused
+  // WHOLESALE, and her destination and budget go with it, with nothing in the
+  // log to say so. Lesson 5.3 puts this script on the driver, where the
+  // refusal reaches the model as a tool result.
   const { next: notebook } = applyRequirements(
     conversation.notebook, patch, 'user', new Date().toISOString())
   const desk = loadDesk('planning')
