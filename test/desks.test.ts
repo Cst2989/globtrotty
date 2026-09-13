@@ -1,6 +1,7 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SENTINELS } from '../scripts/sentinels.js'
 import { loadDesk, promptVersion, renderPrompt } from '../src/desks.js'
 import { DESK_TOOLS, toolsForDesk, type Desk } from '../src/tools/registry.js'
 
@@ -62,6 +63,26 @@ describe('desks', () => {
     expect(desk.promptVersion).toMatch(/^[0-9a-f]{12}$/)
     expect(promptVersion(desk.prompt)).toBe(desk.promptVersion)
     expect(promptVersion(`${desk.prompt} `)).not.toBe(desk.promptVersion)
+  })
+
+  it('never sends a sentinel, or any other HTML comment, to the provider', () => {
+    // The one exfiltration path this repository actually has for a prompt is
+    // the model repeating its instructions to a traveller, whose reply
+    // `completeTurn` writes to course.messages. `npm run sentinels` cannot see
+    // that path at all: it greps files, and the prompt file is allowed to hold
+    // its own sentinel. So the string that "must never appear in anything we
+    // deploy" has to be taken OUT of the bytes we send, and this is the
+    // assertion that says it was.
+    //
+    // The patterns come from the check itself rather than being spelled again
+    // here, so a sentinel renamed in one place cannot be missed in the other.
+    for (const name of ['front', 'planning'] as const) {
+      const system = renderPrompt(loadDesk(name), name === 'front' ? {} : { today: '2026-09-13' })
+      expect(system).not.toContain('<!--')
+      for (const s of SENTINELS) {
+        expect(s.pattern.test(system), `${name} desk sends ${s.name}`).toBe(false)
+      }
+    }
   })
 
   it('gives the front desk no doors at all', () => {

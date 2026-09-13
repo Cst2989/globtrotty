@@ -151,8 +151,11 @@ export default async (req: Request): Promise<Response> => {
    * `fencedModelCallSink` and `ledgerSink` left this file with `turn()`. The
    * driver records its span through `pgSink`, which moves no money, and takes
    * its own door to the ledger through `reserve` and `reconcile`; handing it
-   * `ledgerSink` as well would charge the same micros twice. It checks
-   * `ctx.signal` through `callModel`, so a fence still cancels a call in flight.
+   * `ledgerSink` as well would charge the same micros twice. It passes
+   * `ctx.signal` into `callModel`, so a fence cancels its own call in flight.
+   * Not the routing call: `classifyDesk` takes no signal (src/classify.ts), so
+   * the first call of a turn's step 0 is the one call here a fence cannot stop.
+   * It is in README's residuals with an owner.
    */
   const agent: Agent = async (ctx) => makeDriver({
     sql,

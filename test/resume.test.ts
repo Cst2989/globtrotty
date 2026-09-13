@@ -5,7 +5,7 @@ import { DEFAULT_LIMITS } from '../src/limits.js'
 import { mockRunner } from '../src/tools.js'
 import { runTurn } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
-import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
+import { fakeClient, labelMessage, textMessage, toolUseMessage } from './model/fake.js'
 import { workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
@@ -26,6 +26,12 @@ describeDb('a turn that survives a crash and a resume', () => {
     await withTestDb(async (sql) => {
       const { conversationId, turnId } = await seededTurn(sql)
       const client = fakeClient([
+        // The routing reply first, because from lesson 5.3 the FIRST model call
+        // of step 0 is `selectDesk`'s. Without it the classifier reads a
+        // `tool_use` reply, which carries no text block, `JSON.parse('')`
+        // throws, the turn is routed to planning on a parse failure and the
+        // search below is silently eaten by the call that was meant to route.
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         toolUseMessage('search_flights',
@@ -38,7 +44,9 @@ describeDb('a turn that survives a crash and a resume', () => {
       })
 
       // One step per invocation, so the turn is handed back twice, which is
-      // three claims of the same row.
+      // three claims of the same row. The third `runTurn` claims a turn that is
+      // still queued: the second hand-back happens after the flight search, and
+      // the answer below is the step it has left.
       const oneStep = () => {
         let budget = 1
         return workerDeps(sql, {
@@ -49,17 +57,27 @@ describeDb('a turn that survives a crash and a resume', () => {
       await runTurn(oneStep(), turnId)
       await runTurn(workerDeps(sql, { agent }), turnId)
 
-      // Three calls for three steps. At lesson-4-6 the same shape cost eight,
-      // because each attempt re-ran classify, extract and the searches.
-      expect(client.calls).toBe(3)
+      // Four calls for three steps: one routing call on step 0, then one driver
+      // call per step. At lesson-4-6 the same shape cost eight, because each
+      // attempt re-ran classify, extract and the searches.
+      expect(client.calls).toBe(4)
 
-      const [row] = await sql<{ status: string }[]>`
-        select status from course.turns where id = ${turnId}`
+      const [row] = await sql<{ status: string; state: { messages: { content: { type: string; name?: string }[] }[] } }[]>`
+        select status, state from course.turns where id = ${turnId}`
       expect(row!.status).toBe('done')
+      // Both searches really ran, in order. This is the assertion the counts
+      // above cannot make: three calls and three rows are equally true of a
+      // turn whose first reply was consumed by something else and whose first
+      // search never happened.
+      const asked = row!.state.messages
+        .flatMap((m) => m.content)
+        .filter((b) => b.type === 'tool_use')
+        .map((b) => b.name)
+      expect(asked).toEqual(['search_hotels', 'search_flights'])
 
       const calls = await sql<{ cost_micros: string }[]>`
         select cost_micros from course.model_calls where turn_id = ${turnId} order by seq`
-      expect(calls).toHaveLength(3)
+      expect(calls).toHaveLength(4)
       const billed = calls.reduce((sum, c) => sum + BigInt(c.cost_micros), 0n)
       const [conv] = await sql<{ spend_usd_micros: string }[]>`
         select spend_usd_micros from course.conversations where id = ${conversationId}`
@@ -69,5 +87,11 @@ describeDb('a turn that survives a crash and a resume', () => {
       expect(BigInt(conv!.spend_usd_micros)).toBe(billed)
       expect(BigInt(turnRow!.spend_usd_micros)).toBe(billed)
     })
-  })
+  // Twenty seconds rather than vitest's default five, against a measured
+  // overrun and not a guess: this case drives three whole invocations against a
+  // remote database, and the routing call lesson 5.3 put in front of step 0
+  // costs another five round trips (a reserve, a model call, a reconcile, a
+  // model_calls row and a desk write). It ran in 3.9s at lesson-5-2 and runs in
+  // 5.0s now, which is on the wrong side of the default by a tenth of a second.
+  }, 20_000)
 })

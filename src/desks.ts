@@ -42,10 +42,36 @@ export function promptVersion(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12)
 }
 
+/**
+ * Everything between `<!--` and `-->`, taken out before the prompt is anything a
+ * model can see.
+ *
+ * The file's own markers are for us: the desk marker `loadDesk` checks below,
+ * and the sentinel line `npm run sentinels` greps for. Neither is an
+ * instruction, so neither belongs in the bytes we pay input tokens for, and the
+ * sentinel in particular is documented as a string that "must never appear in
+ * anything we deploy" (scripts/sentinels.ts). The grep cannot see the one
+ * exfiltration path a prompt really has here, which is the model repeating its
+ * instructions to a traveller and `completeTurn` writing that reply to
+ * course.messages, so the string is removed rather than watched.
+ *
+ * It runs before `promptVersion`, so the hash is over the bytes that were SENT,
+ * which is the property src/classify.ts argues a prompt version should have: an
+ * edit to a comment is not a new prompt, and an edit to an instruction is.
+ */
+function withoutComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->[ \t]*\n?/g, '').replace(/^\n+/, '')
+}
+
 export function loadDesk(name: Desk): LoadedDesk {
-  const prompt = readFileSync(path.join(DIR, `${name}-desk.md`), 'utf8')
+  const file = readFileSync(path.join(DIR, `${name}-desk.md`), 'utf8')
   const sentinel = `<!-- desk: ${name} -->`
-  if (!prompt.startsWith(sentinel)) throw new Error(`${name}-desk.md must start with ${sentinel}`)
+  // Checked against the FILE, because the marker is one of the comments the
+  // line below removes: a desk whose prompt has lost its marker is a file
+  // somebody copied without reading, and the whole point is to catch that
+  // before it is sent.
+  if (!file.startsWith(sentinel)) throw new Error(`${name}-desk.md must start with ${sentinel}`)
+  const prompt = withoutComments(file)
   return { name, seat: DESK_SEATS[name], prompt, promptVersion: promptVersion(prompt) }
 }
 

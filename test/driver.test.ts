@@ -10,7 +10,7 @@ import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { apiError } from './helpers/errors.js'
-import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
+import { fakeClient, labelMessage, textMessage, toolUseMessage } from './model/fake.js'
 import { claimOf, workerDeps } from './helpers/worker.js'
 
 const USER = randomUUID()
@@ -75,7 +75,7 @@ describeDb('one invocation of the driver is one model call', () => {
       // classifies her message on step 0 and writes the answer to
       // course.conversations.desk (lesson 5.3).
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         textMessage('Three stays near the beach in Faro.'),
       ])
       const agent = makeDriver({
@@ -112,7 +112,7 @@ describeDb('one invocation of the driver is one model call', () => {
       } as never)
       const agent = makeDriver({
         sql,
-        client: fakeClient([textMessage(JSON.stringify({ label: 'new_trip' })), refusal]),
+        client: fakeClient([labelMessage('new_trip'), refusal]),
         run: mockRunner(),
         limits: DEFAULT_LIMITS,
         now: Date.now,
@@ -180,11 +180,51 @@ describeDb('one invocation of the driver is one model call', () => {
     })
   })
 
+  it("refunds the driver's OWN reservation when its call comes back 5xx, not just the router's", async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seededTurn(sql)
+      // The other half of the case above, and the one that was untested. A valid
+      // label first, so the routing call SUCCEEDS and is billed, and the outage
+      // reaches `callModel` inside `makeDriver` instead. `fakeClient` repeats its
+      // last entry, so all three attempts of the step get the same 503.
+      const client = fakeClient([labelMessage('new_trip'), () => { throw apiError(503) }])
+      const agent = makeDriver({
+        sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+      })
+      await expect(runTurn(workerDeps(sql, { agent }), turnId)).rejects.toThrow()
+      // One routing call plus one driver call per attempt. The routing call is
+      // not repeated, because the decision it wrote is read back by attempts 2
+      // and 3 rather than bought again.
+      expect(client.calls).toBe(4)
+      const routing = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.model_calls
+         where turn_id = ${turnId} and seat = 'front_desk' order by seq`
+      expect(routing).toHaveLength(1)
+      const routingCost = BigInt(routing[0]!.cost_micros)
+      expect(routingCost).toBeGreaterThan(0n)
+
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from course.conversations where id = ${conversationId}`
+      const [day] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.daily_usage where user_id = ${USER}`
+      // The routing call and NOTHING else on either ceiling. Three driver
+      // reservations of roughly 400,000 micros were made and all three came back:
+      // delete `if (isUnbilled(err)) await refund()` from `makeDriver` and this
+      // reads over a million micros against one Haiku call that really happened.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(routingCost)
+      expect(BigInt(day?.cost_micros ?? '0')).toBe(routingCost)
+
+      const [turn] = await sql<{ fail_reason: string }[]>`
+        select fail_reason from course.turns where id = ${turnId}`
+      expect(turn!.fail_reason).toBe('provider_down')
+    })
+  })
+
   it('appends the assistant turn carrying the tool_use before the tool_result', async () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -211,7 +251,7 @@ describeDb('one invocation of the driver is one model call', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -264,7 +304,7 @@ describeDb('one invocation of the driver is one model call', () => {
     await withTestDb(async (sql) => {
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach in Faro.'),
@@ -307,13 +347,13 @@ describeDb('one invocation of the driver is one model call', () => {
       const search = {
         city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1,
       }
-      // A routing reply before each of the two attempts, because rewinding the
-      // state below puts the resumed turn back on step 0 and `selectDesk`
-      // classifies again there.
+      // ONE routing reply, for the whole turn. Rewinding the state below puts
+      // the resumed turn back on step 0, which is the window `selectDesk` is
+      // idempotent across: it finds this turn's own front_desk row and reuses
+      // the decision instead of paying for a second one.
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels', search, 'toolu_01FIRST'),
-        textMessage(JSON.stringify({ label: 'new_trip' })),
         // The identical request, with the fresh id a real provider mints on
         // every response. This is the reply the re-ask below receives, and it
         // is what makes an id read off the reply useless as a ledger key.
@@ -373,6 +413,15 @@ describeDb('one invocation of the driver is one model call', () => {
       expect(rows[0]!.call_id).toBe('s0-b0')
       expect(rows[0]!.status).toBe('done')
       expect(executions).toBe(1)
+
+      // And ONE routing row for the whole turn. The resumed attempt came back
+      // on step 0, so a `selectDesk` that branched on the step counter alone
+      // would classify her message a second time here, bill a second Haiku call
+      // and rewrite course.conversations.desk for a decision already taken.
+      const routing = await sql`
+        select 1 from course.model_calls
+         where turn_id = ${turnId} and seat = 'front_desk'`
+      expect(routing).toHaveLength(1)
     })
   // Twenty seconds rather than vitest's default five. This case drives two whole
   // turns against a remote database, and lesson 5.3 put a classification call,
@@ -401,7 +450,7 @@ describeDb('what the driver answers by itself', () => {
       // on step 0 before the driver's own call (lesson 5.3), so the first reply
       // queued here is the one it reads.
       const client = fakeClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('ask_user', { questions }),
       ])
       const chain = countingRunner()
@@ -445,7 +494,7 @@ describeDb('what the driver answers by itself', () => {
         // classifies her message on step 0 (lesson 5.3) and takes the first
         // reply queued here. Step 1 reads the desk off the column and asks
         // nothing, so the two below are the driver's two steps.
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         // What the registry's `AskUser` schema refuses: objects rather than
         // strings. `questions.join('\n\n')` on this array is the string
         // "[object Object]", and until this fix that string was the turn's reply
@@ -498,7 +547,7 @@ describeDb('what the driver answers by itself', () => {
         // The routing reply `selectDesk` consumes on step 0 (lesson 5.3), then
         // the driver's own two steps. 'new_trip' keeps the turn on the planning
         // desk, which is the only desk that publishes `search_hotels` at all.
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         toolUseMessage('search_hotels',
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Here is what I already have for Faro.'),
@@ -553,7 +602,7 @@ describeDb('what the driver answers by itself', () => {
       // 'new_trip' routes to the planning desk, which is the desk that carries a
       // notebook at all; the front desk is handed none on purpose.
       const client = recordingClient([
-        textMessage(JSON.stringify({ label: 'new_trip' })),
+        labelMessage('new_trip'),
         textMessage('Three stays near the beach in Faro.'),
       ])
       const agent = makeDriver({

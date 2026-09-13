@@ -1,4 +1,5 @@
 import type { Message } from '@anthropic-ai/sdk/resources/messages'
+import type { Label } from '../../src/classify.js'
 import type { ModelClient } from '../../src/client.js'
 
 // The installed SDK's Usage carries more required fields than the four we
@@ -19,6 +20,26 @@ export function textMessage(text: string, overrides: Partial<Message> = {}): Mes
     usage: USAGE,
     ...overrides,
   } as Message
+}
+
+/**
+ * The front desk's reply, the one `classifyDesk` parses: the structured output
+ * a published JSON schema asks for, spelled by hand and not recorded.
+ *
+ * Hand-written because the recorder cannot produce it. A recorded fixture is a
+ * reply the live API actually returned, and the two replies this course needs
+ * from the front desk are "a label" and "something the schema cannot read";
+ * there is no way to ask an API for the second, and the first would tie every
+ * routing test to one afternoon's answer. Both live here instead, beside the
+ * other hand-written shapes.
+ *
+ * It takes a `Label` rather than a string so a test cannot queue a label the
+ * schema would reject, which is the one failure this helper exists to make
+ * impossible and `test/desk-routing.test.ts` still proves on purpose with
+ * `textMessage`.
+ */
+export function labelMessage(label: Label): Message {
+  return textMessage(JSON.stringify({ label }))
 }
 
 /**

@@ -124,20 +124,35 @@ closes the hole lesson 4.2 opened and named: a cancelled call used to be billed
 by the provider and recorded nowhere, and it is now debited before it leaves.
 Four functions move the spend ledger and `src/repo/spend.ts` names all four.
 
-From lesson 5.3 the driver picks the desk. One cheap-seat call on the first step
-of a turn asks for a structured label against a published JSON schema, the
-answer is written to `course.conversations.desk`, and every later step of the
-same turn reads the column instead of asking again. Any parse failure routes to
-the planning desk and is recorded as a parse failure rather than as the label
-`other`, which is a real answer and must not double as "we could not read the
-reply". Planning is the safe side rather than the cheap one: the front desk
+From lesson 5.3 the driver picks the desk. One cheap-seat call per turn asks for
+a structured label against a published JSON schema, the answer is written to
+`course.conversations.desk`, and everything after it reuses that decision: every
+later step, every retry of a step, and a resume that comes back on step 0. What
+recognises a decision already taken is the turn's own `front_desk` row in
+`course.model_calls`, not the column, because `desk` is `not null default
+'planning'` (migration 0001) and a row nobody has written reads exactly like a
+row that was written planning. The routing call reserves and checks the ceiling
+before it dispatches, the same way every other call does, so a capped
+conversation does not still buy one Haiku call per turn.
+
+Any parse failure routes to the planning desk, and the failure is logged: a rate
+that climbs is how a model update that changed the way it answers a schema shows
+up. Nothing durable carries the label, so the question "how often did the
+structured output fail?" is answered from logs rather than by SQL, which is a
+smaller claim than this file used to make. What the parse failure is NOT is the
+label `other`, which is a real answer and must not double as "we could not read
+the reply". Planning is the safe side rather than the cheap one: the front desk
 holds no tools, so a trip request misrouted to it cannot be planned and she is
 asked to rephrase something she phrased correctly, while a factual question
 misrouted to planning is answered correctly and costs five times as much.
 
 `npm run sentinels` greps `src/`, `netlify/` and `public/` for the service role
 key, a literal `sk-ant-` key, a `NEXT_PUBLIC_` variable carrying a secret, and
-the two desk prompts' own sentinel lines. It runs inside `npm test` as well as
+the two desk prompts' own sentinel lines. Those sentinel lines are HTML
+comments, and `loadDesk` strips every comment out of a prompt before it is
+assembled, so the string the check calls undeployable is not in the bytes we send
+either: the grep reads files, and the one exfiltration path a prompt really has
+here is the model repeating its instructions into a reply. It runs inside `npm test` as well as
 on its own, so a leak fails the suite rather than a deploy step somebody can
 skip. The leak the source articles describe, a prompt pulled into a client
 bundle by one helper import, belongs to a build this repository does not have:
@@ -398,6 +413,15 @@ requeue paths.
 
 The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
+
+`classifyDesk` (src/classify.ts) takes no `AbortSignal`. `callAndRecord`'s meta
+accepts one (src/metered.ts) and the routing call passes none, so it is the one
+model call on the deployed path a fence cannot cancel: a turn another worker has
+claimed keeps that call in flight and still writes its reconcile, its row and its
+desk against a conversation somebody else is now driving. The exposure is a
+one-line Haiku prompt, which is why it is named rather than fixed under a frozen
+tag. Owner: lesson 5.6, which already threads a new argument through
+`src/classify.ts`, `src/metered.ts` and every other call site of `costMicros`.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
 and one tool behind it. Both paths now read it once per agent step, which is the

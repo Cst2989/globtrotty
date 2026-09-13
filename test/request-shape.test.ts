@@ -2,6 +2,7 @@ import { buildCountTokensRequest, buildRequest, estimateInputTokens, withSuffix 
 import type { CallArgs } from '../src/model/client.js'
 import type { LoopMessage } from '../src/engine.js'
 import { SEATS } from '../src/seats.js'
+import { toolsForDesk } from '../src/tools/registry.js'
 
 const user = (text: string): LoopMessage => ({ role: 'user', content: [{ type: 'text', text }] })
 
@@ -55,6 +56,24 @@ describe('the request we actually send', () => {
     // the key with a null is a different request from not sending the key.
     const req = buildRequest({ ...base, seat: SEATS.cheap })
     expect(req).not.toHaveProperty('output_config')
+  })
+
+  it("omits tools entirely for the front desk, so the model is offered no door", () => {
+    // The front desk's half of the claim `src/agents/driver.ts` and its
+    // docstring both lean on: the `tool_use` branch is unreachable for it by
+    // construction and not by a check. `test/desks.test.ts` proves the registry
+    // half (`toolsForDesk('front')` is empty) and this proves the request half,
+    // which is the one that decides what the model is actually offered.
+    //
+    // `tools: []` is not the same request as no `tools` key. An empty array is a
+    // published, empty tool list, and a model handed one has been told the
+    // subject exists; the front desk is told nothing of the kind.
+    const req = buildRequest({ ...base, seat: SEATS.front_desk, tools: toolsForDesk('front') })
+    expect(req).not.toHaveProperty('tools')
+    expect(everyKey(req)).not.toContain('tools')
+    // And the same assembler does publish them when a desk has some, so the line
+    // above is about this desk and not about a function that never sends tools.
+    expect(buildRequest({ ...base, tools: toolsForDesk('planning') })).toHaveProperty('tools')
   })
 
   it('takes max_tokens from the seat', () => {

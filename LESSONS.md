@@ -209,6 +209,16 @@ writes `proposals.decision`. That is lesson 5.7, the accept button, and it is
 the same lesson that makes the first residual above reachable. Whoever writes
 5.7 owns both.
 
+Open at lesson 5.3: `classifyDesk` (src/classify.ts) takes no `AbortSignal`.
+`callAndRecord` accepts one and the routing call passes none, so the first model
+call of every step 0 is the one call on the deployed path a fence cannot cancel:
+a fenced turn keeps it in flight and still writes its reconcile, its
+`course.model_calls` row and its desk afterwards, against a conversation another
+worker is now driving. It is one Haiku call against a one-line prompt with a
+1,024 token ceiling, which is the whole reason it is named instead of fixed
+here. The fix is one parameter. Owner: lesson 5.6, which threads a new argument
+through `src/classify.ts` and `src/metered.ts` already.
+
 Open at lesson 4.6: the affiliate id inside every emitted link is one
 placeholder shared by all three templates, not a per-supplier account. The shape
 of the URL is right and the value is obviously not live. It is never read from
@@ -216,9 +226,13 @@ the environment, because a missing value would silently emit an unattributed
 link rather than failing.
 
 Closed at lesson 5.3: the front desk is back on the deployed path. `selectDesk`
-(src/agents/driver.ts) classifies on the first step of a turn and writes the
-answer to `course.conversations.desk`, a column 0001 created and nothing had
-ever read. A factual question is answered on Haiku at a fifth of the price, and
+(src/agents/driver.ts) classifies once per turn and writes the answer to
+`course.conversations.desk`, a column 0001 created and nothing had ever read.
+Once per TURN and not once per step counter: `withRetry` wraps the whole agent
+step and a resume whose state write was lost comes back on step 0, so the
+decision is recognised by the turn's own `front_desk` row in
+`course.model_calls` rather than by the column, which is `not null default
+'planning'` and cannot say "nobody has decided". A factual question is answered on Haiku at a fifth of the price, and
 `test/desk-routing.test.ts` asserts both calls of an FAQ turn carry
 `seat = 'front_desk'` in course.model_calls.
 

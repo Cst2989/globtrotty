@@ -8,7 +8,7 @@ import { classifyError } from '../errors.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
 import type { Provenance } from '../notebook.js'
-import { readDesk, writeDesk } from '../repo/conversations.js'
+import { readDeskDecision, writeDesk } from '../repo/conversations.js'
 import { pgSink } from '../repo/model-calls.js'
 import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
@@ -57,16 +57,21 @@ export type DriverDeps = {
  * ## Which desk
  *
  * Whichever `selectDesk` chose, from lesson 5.3: one cheap structured-output call
- * on the first step of a turn, remembered on `course.conversations.desk` and read
- * back by every later step. A factual question is answered by the front desk on
- * Haiku, which publishes no tools at all, so a front-desk step can only ever
- * return a message; the `tool_use` branch below is unreachable for it by
- * construction and not by a check.
+ * per turn, remembered on `course.conversations.desk` and reused by every later
+ * step, by every retry of a step and by a resume that comes back on step 0. A
+ * factual question is answered by the front desk on Haiku, which publishes no
+ * tools at all, so a front-desk step can only ever return a message; the
+ * `tool_use` branch below is unreachable for it by construction and not by a
+ * check.
  */
 export function makeDriver(deps: DriverDeps): Agent {
   return async (ctx: AgentContext): Promise<AgentStep> => {
     const { sql, limits } = deps
-    const { desk: deskName, costMicros: routingMicros } = await selectDesk(deps, ctx)
+    // The routing call reserves and checks the ceiling exactly the way the call
+    // below does, so a capped conversation stops before it, not after it.
+    const chosen = await selectDesk(deps, ctx)
+    if (chosen.kind === 'limit') return limitReachedStep(chosen.reached, 0n)
+    const { desk: deskName, costMicros: routingMicros } = chosen
     const desk = loadDesk(deskName)
     const seat = deskName === 'front' ? SEATS.front_desk : SEATS.driver
     // The row's label follows the seat, and does not stay the literal 'driver'
@@ -130,23 +135,12 @@ export function makeDriver(deps: DriverDeps): Agent {
     )
     if (reached !== null) {
       await refund()
-      return {
-        kind: 'fail',
-        reason: 'limit_reached',
-        // Which ceiling fired changes what she can do about it, so the two are
-        // not one sentence: a capped conversation is fixed by starting another
-        // one, and a capped day is not.
-        text: reached === 'conversation'
-          ? 'This conversation has reached its spending limit, so I have stopped here rather '
-            + 'than run up more. Start a new conversation and I will pick up from what we agreed.'
-          : "We have reached today's spending limit, so I have stopped here rather than run "
-            + "up more. Come back tomorrow and I will pick up from what we agreed.",
-        // The routing call, and nothing else. It happened before the ceiling was
-        // read, it produced an answer, and `turns.spend_usd_micros` has to carry
-        // it or a capped turn would report itself free.
-        costMicros: routingMicros,
-        alreadyRecorded: true,
-      }
+      // The routing call, and nothing else. It happened before the ceiling was
+      // read, it produced an answer, and `turns.spend_usd_micros` has to carry
+      // it or a capped turn would report itself free. The step `selectDesk`
+      // returns when ITS own reservation fires the ceiling carries zero for the
+      // opposite reason: that call never went out.
+      return limitReachedStep(reached, routingMicros)
     }
 
     // ---- 2. Call, and classify before touching content ----------------------
@@ -169,7 +163,10 @@ export function makeDriver(deps: DriverDeps): Agent {
     // ceiling (src/limits.ts), so on the order of forty failed steps would cap
     // the whole product for the rest of the UTC day at zero real spend, with no
     // lever short of a manual write. `test/driver.test.ts` drives three failed
-    // attempts and holds both counters at zero.
+    // attempts through THIS call and holds both counters at the routing call's
+    // cost and nothing more; the case beside it puts the outage on the routing
+    // call instead, where the step never reaches this line, and holds both at
+    // zero.
     let result: ModelResult
     try {
       result = await callModel(deps.client, { ...args, signal: ctx.signal }, deps.now)
@@ -392,18 +389,78 @@ export function makeDriver(deps: DriverDeps): Agent {
 }
 
 /**
- * Which desk this turn is being answered from, decided on step 0 and read back
- * on every step after it.
+ * The sentence a capped turn ends on, and the two costs that reach it.
+ *
+ * One function because the ceiling is now checked in two places, before the
+ * routing call and before the driver's own, and two copies of a sentence a
+ * traveller reads is one copy that gets edited.
+ */
+function limitReachedStep(
+  reached: 'account' | 'conversation' | 'daily', costMicros: bigint,
+): AgentStep {
+  return {
+    kind: 'fail',
+    reason: 'limit_reached',
+    // Which ceiling fired changes what she can do about it, so the two are not
+    // one sentence: a capped conversation is fixed by starting another one, and
+    // a capped day is not.
+    text: reached === 'conversation'
+      ? 'This conversation has reached its spending limit, so I have stopped here rather '
+        + 'than run up more. Start a new conversation and I will pick up from what we agreed.'
+      : "We have reached today's spending limit, so I have stopped here rather than run "
+        + "up more. Come back tomorrow and I will pick up from what we agreed.",
+    costMicros,
+    alreadyRecorded: true,
+  }
+}
+
+/** Which desk answers this turn, or the ceiling the routing call's own reservation crossed. */
+export type DeskChoice =
+  | { kind: 'desk'; desk: Desk; costMicros: bigint }
+  | { kind: 'limit'; reached: 'account' | 'conversation' | 'daily' }
+
+/**
+ * Which desk this turn is being answered from, decided once per TURN and read
+ * back by everything after it.
+ *
+ * ## Once per turn, and not once per step counter
+ *
+ * The decision is looked up before anything else happens, from
+ * `readDeskDecision` (src/repo/conversations.ts), which answers null when this
+ * turn has not taken one. Branching on `ctx.state.step > 0` instead would be
+ * wrong in the one window that costs money: `withRetry` (src/retry.ts) wraps the
+ * whole agent step, and a resume whose state write was lost comes back on step
+ * 0, so a second attempt would classify again, bill a second Haiku call, write a
+ * second `front_desk` row and rewrite the column for a decision already taken.
+ * The column cannot answer it alone, because `desk` is `not null default
+ * 'planning'` and a row nobody has written reads the same as a row that was
+ * written planning; the turn's own `front_desk` row is what tells them apart.
+ *
+ * `costMicros` follows the same rule the fresh decision follows: the routing
+ * call belongs to step 0's bill, whether this attempt made it or found it. On
+ * every later step it is zero, because `runTurn` adds a step's cost to
+ * `turns.spend_usd_micros` once per step and the routing call is one call.
+ *
+ * ## The order of the three writes
+ *
+ * Reconcile, then `writeDesk`, then the row. The row is what the next attempt
+ * reads as "already decided", so it is written last on purpose: a crash between
+ * the desk write and the row costs one more classification, while the opposite
+ * order would hand the next attempt a decision the column had not been given
+ * yet, and it would answer from whatever the default says.
+ *
+ * ## The money
  *
  * The classification call is charged like any other model call, through the same
  * reserve and reconcile door, so a turn's bill includes the call that decided
  * where it went. It is a cheap-seat call against a one-line prompt, so the
  * reservation is small and the refund is most of it.
  *
- * On any step but the first this reads the column and makes no call at all. A
- * turn that resumes after a crash reads the desk the first attempt chose, which
- * is the same reason the transcript is persisted: a resumed turn continues the
- * conversation it was having.
+ * It also reads the counters `reserve` RETURNED before it dispatches, exactly
+ * the way `makeDriver` does one call later. Without that, a conversation one
+ * micro under its ceiling passes `decideNext`'s check at the top of `loop()`,
+ * reserves past the cap here and buys a model call anyway, so every turn on a
+ * capped conversation still costs one call and up to three under `withRetry`.
  *
  * The reservation is refunded when the call comes back with an error BODY, on
  * exactly the terms `makeDriver` refunds its own (`isUnbilled` below). Without
@@ -412,33 +469,44 @@ export function makeDriver(deps: DriverDeps): Agent {
  * global ceiling: the same leak lesson 5.1 closed for the driver's call, one
  * call earlier in the step.
  */
-export async function selectDesk(
-  deps: DriverDeps, ctx: AgentContext,
-): Promise<{ desk: Desk; costMicros: bigint }> {
-  if (ctx.state.step > 0) {
-    return { desk: await readDesk(deps.sql, ctx.conversationId, ctx.userId), costMicros: 0n }
+export async function selectDesk(deps: DriverDeps, ctx: AgentContext): Promise<DeskChoice> {
+  const decided = await readDeskDecision(deps.sql, ctx.conversationId, ctx.userId, ctx.turnId)
+  if (decided !== null) {
+    return {
+      kind: 'desk',
+      desk: decided.desk,
+      costMicros: ctx.state.step === 0 ? decided.costMicros : 0n,
+    }
   }
   const first = ctx.state.messages[0]
   const text = first ? textOfBlocks(first.content) : ''
   const reserved = estimateMicros(SEATS.front_desk, 200)
-  const { day } = await reserve(deps.sql, {
+  const { conversationMicros, dailyMicros, day } = await reserve(deps.sql, {
     userId: ctx.userId, conversationId: ctx.conversationId, micros: reserved,
   })
+  const refund = () => reconcile(deps.sql, {
+    userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
+  })
+  // `globalMicros` is zero for the same reason it is zero in `makeDriver`:
+  // `reserve` does not touch it, and `decideNext` checked all three before this
+  // agent was called, so only 'conversation' or 'daily' can fire here.
+  const reached = whichCeiling({ conversationMicros, dailyMicros, globalMicros: 0n }, deps.limits)
+  if (reached !== null) {
+    await refund()
+    return { kind: 'limit', reached }
+  }
   let routing
   try {
     routing = await classifyDesk(text, deps.client)
   } catch (err) {
-    if (isUnbilled(err)) {
-      await reconcile(deps.sql, {
-        userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day,
-      })
-    }
+    if (isUnbilled(err)) await refund()
     throw err
   }
   await reconcile(deps.sql, {
     userId: ctx.userId, conversationId: ctx.conversationId,
     reserved, actual: routing.costMicros, day,
   })
+  await writeDesk(deps.sql, ctx.conversationId, ctx.userId, routing.desk)
   await pgSink(deps.sql, {
     userId: ctx.userId, conversationId: ctx.conversationId, turnId: ctx.turnId,
   })({
@@ -448,10 +516,9 @@ export async function selectDesk(
     // version on this branch that stops changing when its prompt does.
     seat: 'front_desk', seatConfig: SEATS.front_desk, promptVersion: routing.promptVersion,
     modelRequested: SEATS.front_desk.model, modelReturned: SEATS.front_desk.model,
-    usage: routing.usage, costMicros: routing.costMicros, latencyMs: 0,
+    usage: routing.usage, costMicros: routing.costMicros, latencyMs: routing.latencyMs,
   })
-  await writeDesk(deps.sql, ctx.conversationId, ctx.userId, routing.desk)
-  return { desk: routing.desk, costMicros: routing.costMicros }
+  return { kind: 'desk', desk: routing.desk, costMicros: routing.costMicros }
 }
 
 /**

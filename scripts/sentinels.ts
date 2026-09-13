@@ -74,12 +74,38 @@ function walk(dir: string): string[] {
   })
 }
 
+/**
+ * The file's lines, or null when it is not there any more.
+ *
+ * `walk` lists every path first and this reads them afterwards, so anything that
+ * removes a file inside that window arrives here as an ENOENT. That window is
+ * real and not theoretical: `test/desks.test.ts` writes src/desks/stray-desk.md
+ * and removes it in a `finally`, and vitest runs test files in parallel by
+ * default, so the check can be handed a path that existed a microsecond ago.
+ * A file that is gone cannot be leaking anything, and failing the whole check
+ * with an ENOENT naming a file nobody wrote is the worst kind of red to debug.
+ *
+ * ENOENT only. Any other read failure (a permission, an I/O error) is something
+ * we could not look at rather than something we looked at and found clean, and a
+ * secret check that quietly skips what it cannot read is a check that passes by
+ * not looking.
+ */
+function linesOf(file: string): string[] | null {
+  try {
+    return readFileSync(file, 'utf8').split('\n')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
 export function findSentinels(roots: string[]): Finding[] {
   const findings: Finding[] = []
   for (const root of roots) {
     for (const file of walk(root)) {
       if (ALLOWED.some((a) => path.resolve(file).endsWith(a))) continue
-      const lines = readFileSync(file, 'utf8').split('\n')
+      const lines = linesOf(file)
+      if (lines === null) continue
       lines.forEach((text, i) => {
         for (const s of SENTINELS) {
           if (!s.pattern.test(text)) continue

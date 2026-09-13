@@ -81,6 +81,16 @@ export type Routing = {
   promptVersion: string
   usage: Usage
   costMicros: bigint
+  /**
+   * How long the call took, measured here because the caller writes the row.
+   * `callAndRecord` measures its own (src/metered.ts) and does not return the
+   * figure, and `selectDesk` (src/agents/driver.ts) is handed no sink, so a
+   * caller with nothing to return would have to write a literal. Every other row
+   * in course.model_calls carries a real measurement, and one seat reporting
+   * exactly zero is the fastest seat in the product by a percentile query an
+   * operator would act on.
+   */
+  latencyMs: number
 }
 
 const VERSION = promptVersion(SYSTEM)
@@ -107,6 +117,7 @@ const VERSION = promptVersion(SYSTEM)
 export async function classifyDesk(
   text: string, client: ModelClient, record?: ModelCallSink,
 ): Promise<Routing> {
+  const startedMs = Date.now()
   const message = await callAndRecord(
     client,
     withSeat(SEATS.front_desk, {
@@ -121,6 +132,7 @@ export async function classifyDesk(
     // compile, and would be a second copy of a value that is already there.
     { seat: SEATS.front_desk, promptVersion: VERSION, record },
   )
+  const latencyMs = Date.now() - startedMs
   const usage = usageOf(message)
   const cost = costMicros(SEATS.front_desk.model, usage)
 
@@ -133,10 +145,10 @@ export async function classifyDesk(
   }
   if (label === null) {
     console.error('classifyDesk: structured label did not parse, routing to planning')
-    return { desk: 'planning', label: null, promptVersion: VERSION, usage, costMicros: cost }
+    return { desk: 'planning', label: null, promptVersion: VERSION, usage, costMicros: cost, latencyMs }
   }
   return {
     desk: label === 'faq' ? 'front' : 'planning',
-    label, promptVersion: VERSION, usage, costMicros: cost,
+    label, promptVersion: VERSION, usage, costMicros: cost, latencyMs,
   }
 }
