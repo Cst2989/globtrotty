@@ -74,10 +74,12 @@ describeDb('proposal path', () => {
   it('a reviewer rejection below the bound asks for a revision and saves nothing', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '03')
-      const out = await runProposalPath(deps(sql, vi.fn().mockResolvedValue(verdict(false, ['stay ends before the return flight']))), s, { micros: 0n },
+      const spent = { micros: 0n }
+      const out = await runProposalPath(deps(sql, vi.fn().mockResolvedValue(verdict(false, ['stay ends before the return flight']))), s, spent,
         { refs: refsOf(s), notebook: withBudget(emptyNotebook()), round: 0, parentProposalId: null })
       expect(out).toMatch(/^Revise: stay ends before the return flight/)
       expect(await sql`select 1 from proposals where conversation_id = ${s.conversationId}`).toHaveLength(0)
+      expect(spent.micros).toBe(6_000n)
     })
   })
 

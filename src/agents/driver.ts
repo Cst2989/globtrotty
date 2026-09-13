@@ -18,6 +18,7 @@ import { fenceResult, trimForContext, validateToolCall } from '../tools/validate
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { runProposalPath } from './proposalPath.js'
+import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
 import { recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
@@ -459,6 +460,12 @@ async function execute(
       // src/repo/toolCalls.ts for the precondition it now enforces).
       const round = await countPriorGateRuns(sql, ctx.turnId, callId)
       return runProposalPath(deps, ctx, spent, { refs, notebook, round, parentProposalId: null })
+    }
+    case 'revise_component': {
+      const built = await buildRevisedRefs(sql, ctx.conversationId, input as ReviseInput)
+      if (!built.ok) return `Revision refused: ${built.reason}`
+      const round = await countPriorGateRuns(sql, ctx.turnId, callId)
+      return runProposalPath(deps, ctx, spent, { refs: built.refs, notebook, round, parentProposalId: built.parentProposalId })
     }
     default:
       // Unreachable: validateToolCall already refused anything not in
