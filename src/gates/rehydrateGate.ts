@@ -54,10 +54,11 @@ export const ProposalRefsSchema = z.strictObject({
     // structural fault by design. Zero and minus one are not quantities of
     // anything and 17 is past any party this product books, so none of them is
     // a proposal an itemised reply could help with, and each lands here as a
-    // provenance rejection rather than as a totals verdict. `ProposeInput`
-    // (src/tools.ts) publishes these same two bounds, so a model reads them
-    // instead of discovering them, and test/tools.test.ts pins that the
-    // published document and this boundary still agree.
+    // provenance rejection rather than as a totals verdict. From lesson 5.2 the
+    // model reads these same two bounds rather than discovering them, because
+    // the registry publishes THIS schema (`toolsForDesk`, src/tools/registry.ts)
+    // rather than a second declaration of it; test/registry.test.ts pins that
+    // they survive `z.toJSONSchema`, which silently drops the `.refine` below.
     quantity: z.int().positive().max(16),
     slot: z.enum(SLOT_NAMES),
   })).min(1).max(24)

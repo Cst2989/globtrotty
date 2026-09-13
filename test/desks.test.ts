@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DESK_TOOLS, loadDesk, renderPrompt, toolsFor } from '../src/desks.js'
+import { loadDesk, renderPrompt } from '../src/desks.js'
+import { DESK_TOOLS, toolsForDesk } from '../src/tools/registry.js'
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
@@ -21,12 +22,13 @@ function drivers(): string[] {
 
 describe('desks', () => {
   it('gives the front desk no tools at all, gates included', () => {
-    expect(toolsFor(loadDesk('front'))).toEqual([])
+    expect(toolsForDesk('front')).toEqual([])
     expect(DESK_TOOLS.front).toEqual([])
   })
-  it('lets the planning desk search and propose, and nothing else', () => {
-    expect(toolsFor(loadDesk('planning')).map((t) => t.name))
-      .toEqual(['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
+  it('lets the planning desk write the notebook, ask, search and propose, and nothing else', () => {
+    expect((toolsForDesk('planning') as { name: string }[]).map((t) => t.name))
+      .toEqual(['update_requirements', 'ask_user', 'search_flights', 'search_hotels',
+                'propose_itinerary', 'hand_off_to_booking'])
   })
   it('seats the front desk on Haiku and the planning desk on Opus', () => {
     expect(loadDesk('front').seat.model).toBe('claude-haiku-4-5-20251001')
@@ -38,7 +40,12 @@ describe('desks', () => {
     expect(loadDesk('front').promptVersion).not.toBe(desk.promptVersion)
   })
   it('refuses to render a prompt with an unfilled slot', () => {
-    expect(() => renderPrompt(loadDesk('planning'), { today: '2026-08-29' })).toThrow(/requirements/)
+    // `{{today}}` is the planning desk's only slot from lesson 5.2, so the
+    // prompt that can be left half-filled is the one rendered with nothing at
+    // all. The notebook used to fill `{{requirements}}` here and now rides in
+    // the request's suffix (src/model/client.ts), where it lands after the
+    // cache breakpoint instead of inside the stable prefix.
+    expect(() => renderPrompt(loadDesk('planning'), {})).toThrow(/today/)
   })
 
   /**
@@ -62,20 +69,32 @@ describe('desks', () => {
    * listed twice: lesson 4.6 added `hand_off_to_booking` to that list and a
    * guard that still only looked for `proposalRunner` would have watched the
    * new tool go out unanswered, which is the exact regression this case exists
-   * to make impossible. Module 5.2 rebuilds the registry inside the harness; a
-   * chain that loses a wrapper there fails here first.
+   * to make impossible. Lesson 5.2 moved the registry inside the harness and
+   * added two tools to this desk; a chain that loses a wrapper fails here first.
    */
   it('wires a runner for every tool the planning desk sends into every driver', () => {
     const wrappers: Record<string, string> = {
+      update_requirements: 'notebookRunner',
       propose_itinerary: 'proposalRunner',
       hand_off_to_booking: 'cashierRunner',
     }
+    /**
+     * `ask_user` is answered by the DRIVER and never by the chain: it is a
+     * terminal message step (src/agents/driver.ts, lesson 5.2), because the
+     * answer comes from her rather than from a tool, so there is no wrapper to
+     * look for and its absence from `wrappers` is a statement rather than an
+     * omission. It costs `npm run trip` a tool: that path runs `toolLoop`,
+     * which has no step that ends a turn on a question, so `ask_user` comes
+     * back there as an error result until lesson 5.3 puts the script on the
+     * driver. README.md names it.
+     */
+    const answeredByTheDriver = ['ask_user']
     // Derived, so a tool added to the desk with no wrapper named here fails
     // this line rather than passing unnoticed.
     const needed = DESK_TOOLS.planning
-      .filter((tool) => !tool.startsWith('search_'))
+      .filter((tool) => !tool.startsWith('search_') && !answeredByTheDriver.includes(tool))
       .map((tool) => wrappers[tool] ?? `NO WRAPPER NAMED FOR ${tool}`)
-    expect(needed).toEqual(['proposalRunner', 'cashierRunner'])
+    expect(needed).toEqual(['notebookRunner', 'proposalRunner', 'cashierRunner'])
     expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'])
     for (const file of drivers()) {
       const source = readFileSync(path.join(REPO_ROOT, file), 'utf8')

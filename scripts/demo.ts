@@ -23,12 +23,14 @@ import { config } from 'dotenv'
 import { cashierRunner } from '../src/cashier.js'
 import { connect } from '../src/db.js'
 import type { TurnState } from '../src/engine.js'
+import { TODAY } from '../src/conversation.js'
 import { constraintsFromNotebook } from '../src/gates/pipeline.js'
 import { proposalRunner } from '../src/gates/runner.js'
 import { submitMessage } from '../src/handler.js'
 import { DEMO_SCRIPT_USER } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { emptyNotebook } from '../src/notebook.js'
+import { money } from '../src/money.js'
+import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
 import { decideProposal } from '../src/repo/proposals.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
@@ -249,6 +251,18 @@ async function main() {
   const ctx = {
     conversationId: booking.conversationId, userId: DEMO_SCRIPT_USER, turnId: bookingClaim.turnId,
   }
+  // Her notebook, written to course.conversations.requirements (migration 0015,
+  // lesson 5.2) before the gates are asked anything. In a real turn this row is
+  // written by `update_requirements` through `notebookRunner`; here the script
+  // states it directly, because this scenario is about what the gates can judge
+  // rather than about how the notebook got filled.
+  await applyRequirementsPatch(sql, {
+    conversationId: booking.conversationId, userId: DEMO_SCRIPT_USER,
+    source: 'user', at: new Date().toISOString(),
+    patch: { budget: money(1_000_000n, 'EUR'), month: 'September', nights: 7 },
+  })
+  const hers = constraintsFromNotebook(
+    await loadNotebook(sql, booking.conversationId, DEMO_SCRIPT_USER), TODAY)
   // The chain tier 3 builds (netlify/functions/run-turn-background.mts), minus
   // ledgerRunner: the ledger is scenario 3's subject rather than this one's.
   const run = cashierRunner(
@@ -256,8 +270,8 @@ async function main() {
     { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
     proposalRunner(
       sql,
-      { ...ctx, notebook: constraintsFromNotebook(emptyNotebook()), now: () => new Date() },
-      corpusRunner(sql, bookingClaim, supplierRunner(suppliers)),
+      { ...ctx, notebook: hers, now: () => new Date() },
+      corpusRunner(sql, bookingClaim, supplierRunner(suppliers, hers.currency)),
     ),
   )
 
@@ -284,9 +298,10 @@ async function main() {
     select gate, passed from course.gate_results
      where conversation_id = ${booking.conversationId} order by gate`
   ok(`course.gate_results: ${gates.map((g) => `${g.gate}=${g.passed ?? 'not evaluated'}`).join(' ')}`)
-  note('budget and dates read "not evaluated" rather than "passed": nothing stores')
-  note('her notebook yet, so this script and tier 3 both derive constraints from')
-  note('an empty one, and a gate that never fired must not count as a pass.')
+  note('budget and dates reach a verdict from lesson 5.2, because the notebook has')
+  note('a column and a reader. Until then both read "not evaluated": this script and')
+  note('tier 3 derived their constraints from an empty notebook, and a gate that')
+  note('never fired must not count as a pass.')
 
   step('she accepts. In production that click is the proposal card (lesson 5.7);')
   step('this script answers for her, in process, so the demo can reach a link...')

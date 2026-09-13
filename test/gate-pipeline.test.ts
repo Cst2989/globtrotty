@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
-import { constraintsFromNotebook } from '../src/gates/notebookConstraints.js'
+import { checkDates } from '../src/gates/checks.js'
+import { constraintsFromNotebook, travelWindowFrom } from '../src/gates/notebookConstraints.js'
 import { NOT_EVALUATED, runGates } from '../src/gates/pipeline.js'
 import { rehydrateRefs } from '../src/gates/rehydrateGate.js'
 import { proposalRunner } from '../src/gates/runner.js'
 import { GATE_NAMES } from '../src/gates/types.js'
 import { submitMessage } from '../src/handler.js'
 import { money } from '../src/money.js'
-import { emptyNotebook, type Notebook } from '../src/notebook.js'
+import { applyRequirements, emptyNotebook, type Notebook } from '../src/notebook.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
@@ -142,27 +143,74 @@ function withField<K extends keyof Notebook>(nb: Notebook, key: K, value: unknow
 
 describe('constraintsFromNotebook', () => {
   it('takes both the budget and the trip currency from the ONE budget field', () => {
-    const c = constraintsFromNotebook(withField(emptyNotebook(), 'budget', money(250_000n, 'EUR')))
+    const c = constraintsFromNotebook(
+      withField(emptyNotebook(), 'budget', money(250_000n, 'EUR')), '2026-08-29')
     expect(c.budget!.minor).toBe(250_000n)
     expect(c.currency).toBe('EUR')
   })
 
   it('reports a null currency when no budget is set, never a default of EUR', () => {
-    const c = constraintsFromNotebook(emptyNotebook())
+    const c = constraintsFromNotebook(emptyNotebook(), '2026-08-29')
     expect(c.budget).toBeNull()
     expect(c.currency).toBeNull()
   })
 
-  it('yields NO travel window, because this notebook has a month and not two dates', () => {
-    // The gap is deliberate and it is stated on the function. A window built
-    // from a month name would accept a departure she already ruled out; one
-    // built from month plus nights would assert an itinerary she never stated.
-    // Widening the notebook touches src/extract.ts, its recorded fixtures and
-    // test/extract.test.ts, and it lands in module 5 with the prompt rewrite.
+  it('derives a travel window from the month and the nights, and none without a month', () => {
+    // Inverted at lesson 5.2. This case used to assert two nulls and state that
+    // a window built from month plus nights would be the gate asserting an
+    // itinerary she never stated. That is still true of the window's WIDTH and
+    // it was the wrong conclusion, because the alternative was `passed: null`
+    // on every proposal the branch had ever judged.
     let nb = withField(emptyNotebook(), 'month', 'September')
     nb = withField(nb, 'nights', 7)
-    expect(constraintsFromNotebook(nb).window).toBeNull()
-    expect(constraintsFromNotebook(emptyNotebook()).window).toBeNull()
+    expect(constraintsFromNotebook(nb, '2026-08-29').window)
+      .toEqual({ earliest: '2026-09-01', latest: '2026-10-07' })
+    expect(constraintsFromNotebook(emptyNotebook(), '2026-08-29').window).toBeNull()
+  })
+})
+
+describe('the window we can derive', () => {
+  const AT = '2026-08-29T10:00:00Z'
+
+  it('takes the next September when she writes in August', () => {
+    const { next } = applyRequirements(emptyNotebook(), { month: 'September', nights: 7 }, 'user', AT)
+    const w = travelWindowFrom(next, '2026-08-29')!
+    expect(w.earliest).toBe('2026-09-01')
+    // Thirty days in September plus seven nights.
+    expect(w.latest).toBe('2026-10-07')
+  })
+
+  it('takes next year when the month has already passed', () => {
+    const { next } = applyRequirements(emptyNotebook(), { month: 'March', nights: 3 }, 'user', AT)
+    expect(travelWindowFrom(next, '2026-08-29')!.earliest.slice(0, 4)).toBe('2027')
+  })
+
+  it('returns null when she named no month, so the gate still refuses to evaluate', () => {
+    // Wide is better than nothing. Invented is not: with no month at all there
+    // is nothing to widen, and a window from a default would be the system
+    // stating a trip she never described.
+    expect(travelWindowFrom(emptyNotebook(), '2026-08-29')).toBeNull()
+  })
+
+  it('rejects a March proposal against a September window', () => {
+    // The failure that has passed the dates gate on every run this branch has
+    // ever made, because the window was null and the gate recorded a reason
+    // instead of a verdict.
+    const { next } = applyRequirements(emptyNotebook(), { month: 'September', nights: 7 }, 'user', AT)
+    const item = {
+      sourceId: 'flight-0-1111', supplier: 'mock', kind: 'flight' as const, name: 'BER to FAO',
+      price: money(17_800n, 'EUR'), priceBasis: 'total' as const,
+      fetchedAt: new Date('2026-08-29T09:00:00Z'), ttlSeconds: 3_600, bookingUrl: null,
+      detail: { kind: 'flight' as const, outbound: { departureLocal: '2027-03-14T07:45' } } as never,
+    }
+    const out = checkDates([{ ref: { sourceId: item.sourceId, quantity: 1, slot: 'outbound' },
+                              item, lineTotal: item.price }],
+                           travelWindowFrom(next, '2026-08-29'))
+    expect(out).toHaveLength(1)
+    expect(out[0]!.gate).toBe('dates')
+    expect(out[0]!.detail).toContain('2026-09-01')
+    expect(out[0]!.sourceIds).toEqual(['flight-0-1111'])
+    console.log(out[0]!.detail)
   })
 })
 
@@ -406,7 +454,7 @@ describeDb('runGates', () => {
       // in test/tools.test.ts because the deadlock is a property of the seam
       // and the gate TOGETHER, and neither file alone can show it.
       const hers = constraintsFromNotebook(
-        withField(emptyNotebook(), 'budget', money(1_000_000n, 'USD')))
+        withField(emptyNotebook(), 'budget', money(1_000_000n, 'USD')), '2026-08-29')
       const search = flightSearchFrom(
         { from: 'BER', to: 'FAO', departureDate: '2026-09-23', returnDate: '2026-09-30',
           adults: 2, children: 0 },

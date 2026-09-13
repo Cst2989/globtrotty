@@ -131,8 +131,9 @@ selection into the driver and gives it `course.conversations.desk` to remember
 the answer in. `src/conversation.ts`'s `turn()` still exists and still routes,
 because `npm run trip` and the recorded fixtures from modules 1 and 2 are built
 on it; the two planning paths differ from this lesson until 5.3 puts `npm run
-trip` on the driver too. And the driver holds no notebook: it renders "nothing
-yet" into its prompt on every step, which is what lesson 5.2 is for.
+trip` on the driver too. The driver held no notebook until lesson 5.2, which
+gave it a column, a reader and a place in the request after the cache
+breakpoint.
 
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced
@@ -251,21 +252,51 @@ fallback for a traveller who has named no budget and therefore no currency. Not
 doing this would have deadlocked the currency gate for every trip priced outside
 the euro area, which the course's own EUR example would never have shown.
 
-Two of the six still have nothing to check against, and both say so on the row
-rather than reporting a pass. The dates gate has no travel window, because this
-branch's notebook carries a month and not two dates; widening it touches
-`src/extract.ts` and its recorded fixtures and belongs to module 5. And on the
-paths you can run, the budget gate has no budget: nothing stores a notebook, so
-both drivers derive their constraints from an empty one and every live proposal
-records `budget: not evaluated` with the reason. `npm run trip` and tier 3 build
-the same chain here, `proposalRunner` outside `corpusRunner`, so both can
-propose and both write `course.gate_results` rows; the ledger is the one layer
-`npm run trip` leaves out, because it is one process with no crash to resume
-from. The gate itself is exercised in `test/gate-pipeline.test.ts` through
-`proposalRunner`, the same seam and the same `runGates` call both drivers make,
-with a real budget in the context. Module 5.2 moves
-the registry inside the harness, where the turn's own notebook is in scope, and
-closes both.
+From lesson 5.2 the tool registry is inside the harness. Every tool declares the
+door it stands behind, `code` for our own gates and notebook and cashier, `api`
+for a supplier we paid to answer, and the door is what decides whether a result
+is fenced on its way into the model's context. `doorRunner` sits outside every
+other wrapper, so a tool the desk does not hold and a call whose input does not
+parse are refused before `course.tool_calls` records that anything started, and
+the model gets a sentence it can correct itself from rather than an unknown-tool
+string out of the supplier layer. On the way back a result is trimmed and then
+fenced, in that order, because fencing first would cut the closing delimiter off
+a long result and hand the model an unterminated fence.
+
+The notebook is stored. `course.conversations.requirements` holds every field
+she stated with its provenance, `loadNotebook` reads it at the top of every
+driver step, and it rides to the model as the request's suffix rather than
+inside the system prompt, because it changes the moment she states a fact and
+anything cached behind it would be thrown away. Two things follow. The budget
+gate judges a budget, on both paths a reader can run, instead of recording
+`budget: not evaluated` with a reason. And provenance has a caller: the harness
+decides whose word a patch is by asking whether this turn's transcript already
+holds a `tool_result`, so a patch she typed is hers and a patch the model
+composed after reading a supplier price is inferred, and an inferred patch may
+tighten a constraint and never relax one, and may not touch a field she stated
+herself at all.
+
+The dates gate reaches a verdict too, and the window it uses is a stopgap this
+lesson names as one. It runs from the first of the month she gave to the last
+day of that month plus her nights, which catches a trip proposed in March and
+does not catch a departure in the half of the month she did not want. The honest
+window needs `departureDate` and `returnDate` on the notebook, which means
+changing `RequirementsSchema` and the extraction prompt, which changes what the
+recorded `extract-portugal` fixture would return, and no test run has a key to
+record a new one. Module 6 records fresh fixtures and is where the notebook
+grows dates.
+
+What is still owed here. `trimForContext` cuts on size and not on price age:
+SPEC section 5's `pricePersistence` half would strip a price past its window and
+tell the model to search again, and this branch judges a stale price at the
+freshness gate instead, so adding it would be a second definition of stale over
+a different input. The cost is that the model can quote her a price the gate
+will refuse a step later. And the fence's delimiter is a fixed string, which is
+a string an attacker can write; lesson 5.5 is where that is attacked properly.
+The planning desk now publishes `ask_user`, which the driver answers by ending
+the turn on her question; `npm run trip` runs `turn()` and `toolLoop`, which
+have no such step, so on that one path `ask_user` comes back to the model as an
+error result until lesson 5.3 puts the script on the driver.
 
 From lesson 4.6 there is a cashier. It refuses unless a stored proposal row for
 this conversation carries `decision = 'accept'` decided within thirty minutes;
@@ -351,13 +382,12 @@ requeue paths.
 The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
 
-`src/notebook.ts`'s comment on the `relaxes` currency branch still points
-forward at "module 4's supplier lesson, when a tool starts writing the
-notebook". Module 4 is over and no tool writes the notebook: `applyRequirements`
-has one production caller, `src/conversation.ts`, and it passes `'user'`. The
-file was never touched in the range, which is why no task review saw it. Owner:
-module 5.2, where the registry moves inside the harness and the turn's notebook
-comes into scope.
+`course.conversations.requirements` has one writer, `applyRequirementsPatch`,
+and one tool behind it. Nothing re-reads the notebook between the tool writing
+it and the turn ending: tier 3 reads it once per agent step, which is the step
+that then proposes, and `npm run trip` reads it once before `turn()` starts. So
+a patch written mid-turn on the trip path is judged by the gates on her NEXT
+press. Owner: lesson 5.3, which puts that script on the driver.
 
 `course.link_clicks.user_id` carries no constraint of its own. `proposal_id` has
 a single-column foreign key to `course.proposals(id)`, and nothing in the schema

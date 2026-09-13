@@ -1,5 +1,6 @@
+import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import type { ModelClient } from './client.js'
-import { loadDesk, renderPrompt, toolsFor } from './desks.js'
+import { loadDesk, renderPrompt } from './desks.js'
 import { classify } from './classify.js'
 import { exceedsAnyCeiling, type Spend } from './engine.js'
 import { extract } from './extract.js'
@@ -9,6 +10,7 @@ import { addUsage, readSpendOrLimitReached, toolLoop, type LoopResult } from './
 import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
 import type { ModelCallSink } from './repo/model-calls.js'
 import type { ToolRunner } from './tools.js'
+import { toolsForDesk } from './tools/registry.js'
 
 export type Conversation = {
   id: string
@@ -18,6 +20,26 @@ export type Conversation = {
 }
 
 export const TODAY = '2026-08-29'
+
+/**
+ * The published tool definitions for the two desks `turn()` drives, cast once
+ * each to the SDK's `Tool`.
+ *
+ * `toolsForDesk` (src/tools/registry.ts) returns `unknown[]` on purpose: what
+ * goes on the wire is the API's shape and not the shape the installed SDK types
+ * describe, which is the same reason `buildRequest` (src/model/client.ts)
+ * returns a plain object. `toolLoop` still takes the SDK's array, so the two
+ * facts meet in these two casts rather than in five call sites.
+ *
+ * From lesson 5.2 the planning list holds `update_requirements` and `ask_user`
+ * as well. The chain `npm run trip` builds answers the first (`notebookRunner`,
+ * src/tools.ts) and not the second: `ask_user` is terminal in the driver
+ * (src/agents/driver.ts) and `toolLoop` has no step that ends a turn on a
+ * question, so on that path it comes back as an error result. README.md names
+ * it; lesson 5.3 puts `npm run trip` on the driver.
+ */
+const PUBLISHED_FRONT = toolsForDesk('front') as Tool[]
+const PUBLISHED_PLANNING = toolsForDesk('planning') as Tool[]
 
 export function newConversation(id = 'conv-1'): Conversation {
   return { id, notebook: emptyNotebook(), replies: [] }
@@ -97,7 +119,7 @@ export async function turn(
       seat: desk.seat,
       system: renderPrompt(desk, {}),
       userText: text,
-      tools: toolsFor(desk),
+      tools: PUBLISHED_FRONT,
       run,
       client,
       deadlineMs: options.deadlineMs,
@@ -117,7 +139,13 @@ export async function turn(
   }
   const extracted = await extract(text, client, options.record)
   const patch = Object.fromEntries(Object.entries(extracted.requirements).filter(([, v]) => v !== null))
-  const notebook = applyRequirements(conversation.notebook, patch, 'user', new Date().toISOString())
+  // `.next` from lesson 5.2: `applyRequirements` also names the keys it
+  // refused, which the `update_requirements` tool answers the model with
+  // (`notebookRunner`, src/tools.ts). Nothing on this path has anything to tell
+  // her about a refusal, because this patch is her own extracted words and a
+  // user-sourced patch is never refused.
+  const { next: notebook } = applyRequirements(
+    conversation.notebook, patch, 'user', new Date().toISOString())
   const desk = loadDesk('planning')
   const system = renderPrompt(desk, {
     today: TODAY,
@@ -128,7 +156,7 @@ export async function turn(
     seat: desk.seat,
     system,
     userText: text,
-    tools: toolsFor(desk),
+    tools: PUBLISHED_PLANNING,
     run,
     client,
     deadlineMs: options.deadlineMs,

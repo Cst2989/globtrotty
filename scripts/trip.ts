@@ -3,7 +3,7 @@ import 'dotenv/config'
 import { config } from 'dotenv'
 import { cashierRunner } from '../src/cashier.js'
 import { liveClient } from '../src/client.js'
-import { newConversation, turn } from '../src/conversation.js'
+import { newConversation, TODAY, turn } from '../src/conversation.js'
 import { connect } from '../src/db.js'
 import { loadEnv } from '../src/env.js'
 import { constraintsFromNotebook } from '../src/gates/pipeline.js'
@@ -12,12 +12,13 @@ import { submitMessage } from '../src/handler.js'
 import { DEMO_USER, HER_MESSAGE } from '../src/her.js'
 import { httpInvoke } from '../src/invoke.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { emptyNotebook, notebookForPrompt } from '../src/notebook.js'
+import { notebookForPrompt } from '../src/notebook.js'
 import { dollars } from '../src/pricing.js'
+import { loadNotebook } from '../src/repo/notebook.js'
 import { ledgerSink } from '../src/repo/spend.js'
 import { claimTurn } from '../src/repo/turns.js'
 import { liveSuppliers } from '../src/supplier/live.js'
-import { corpusRunner, supplierRunner } from '../src/tools.js'
+import { corpusRunner, doorRunner, notebookRunner, supplierRunner } from '../src/tools.js'
 
 config({ path: '.env.local', override: false })
 const env = loadEnv(process.env)
@@ -59,13 +60,15 @@ try {
     const claim = await claimTurn(sql, turnId)
     if (!claim) throw new Error(`trip: turn ${turnId} is owned by another worker`)
     // Her constraints through the one mapper, exactly as tier 3 derives them,
-    // and empty for the same reason: nothing on this branch stores a notebook,
-    // so budget, window and currency are all null here and every proposal this
-    // command produces records `budget` and `dates` as not evaluated with a
-    // reason. The day a conversation stores a notebook, this line reads that
-    // one and nothing else in the chain moves.
+    // and from the row this conversation stores from lesson 5.2. It is empty on
+    // the FIRST press of a fresh conversation, because nothing has written to it
+    // yet; a second press, or an `update_requirements` call on this one, gives
+    // the budget and dates gates something to judge. Read once here rather than
+    // per step, because this path runs the whole of `turn()` in one go and the
+    // chain is composed before it starts; tier 3 reads it per agent step.
     const ctx = { conversationId, userId: DEMO_USER, turnId }
-    const notebook = constraintsFromNotebook(emptyNotebook())
+    const notebook = constraintsFromNotebook(
+      await loadNotebook(sql, conversationId, DEMO_USER), TODAY)
     const result = await turn(
       newConversation(conversationId),
       text,
@@ -84,31 +87,47 @@ try {
       // rest: a proposal that already emitted is refused before it is
       // re-quoted, whichever chain asks.
       //
-      // All four wrappers, not just the corpus one. The planning desk's tool
-      // list is `DESK_TOOLS.planning` (src/desks.ts) and it holds
-      // `propose_itinerary` and `hand_off_to_booking`, so a chain that stopped
-      // at `supplierRunner` would publish two tools to the model and answer
-      // "Unknown tool" to both. That is not a missing feature the model can
-      // route around: it reads as an outage, and the reply it writes tells her
-      // our proposal system is down. The chain is the product's, so this script
-      // runs the product's. The searches ask for the SAME currency the gates
-      // expect, off the same constraints object, so a corpus and the currency
-      // gate cannot disagree by construction.
+      // Every wrapper the desk's tool list needs, not just the corpus one. The
+      // planning list is `DESK_TOOLS.planning` (src/tools/registry.ts) and it
+      // holds `update_requirements`, `propose_itinerary` and
+      // `hand_off_to_booking`, so a chain that stopped at `supplierRunner` would
+      // publish those tools to the model and answer "Unknown tool" to all three.
+      // That is not a missing feature the model can route around: it reads as an
+      // outage, and the reply it writes tells her our proposal system is down.
+      // The chain is the product's, so this script runs the product's. The
+      // searches ask for the SAME currency the gates expect, off the same
+      // constraints object, so a corpus and the currency gate cannot disagree by
+      // construction.
       //
-      // The notebook is empty here for the same reason it is empty in tier 3:
-      // nothing on this branch stores one, and `turn()` builds its own inside
-      // itself while this runner is constructed outside it. So `budget` and
-      // `dates` record as not evaluated on every proposal this command makes,
-      // which is what the README says of the path a reader can run.
-      cashierRunner(
-        sql, ctx,
-        { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-        proposalRunner(
-          sql,
-          { ...ctx, notebook, now: () => new Date() },
-          corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+      // `ask_user` is the one tool on that list nothing here answers. It is
+      // terminal in the driver (src/agents/driver.ts) and `toolLoop` has no step
+      // that ends a turn on a question, so on this path it comes back as an
+      // error result. Lesson 5.3 puts this script on the driver; README.md
+      // carries it as a residual until then.
+      doorRunner('planning', notebookRunner(
+        sql,
+        {
+          conversationId, userId: DEMO_USER,
+          // 'inferred' unconditionally, and that is the conservative reading
+          // rather than a shortcut. `provenanceFor` (src/agents/driver.ts)
+          // decides from the harness's own transcript, and this path has none:
+          // `toolLoop` keeps its messages in a local array inside `turn()`,
+          // which is the whole problem lesson 5.1 fixed for tier 3. So a patch
+          // written here may tighten a constraint and never relax one, whenever
+          // in the turn it was written.
+          source: () => 'inferred' as const,
+          now: () => new Date(),
+        },
+        cashierRunner(
+          sql, ctx,
+          { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+          proposalRunner(
+            sql,
+            { ...ctx, notebook, now: () => new Date() },
+            corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+          ),
         ),
-      ),
+      )),
       {
         // ledgerSink, not the bare model_calls sink: this is the one path in
         // the whole course that calls a live model and spends real dollars,

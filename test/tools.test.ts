@@ -1,41 +1,16 @@
-import { ProposalRefsSchema } from '../src/gates/rehydrateGate.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import { UnusableResponseError, type Supplier } from '../src/supplier/types.js'
-import { itemForModel, mockRunner, TOOLS } from '../src/tools.js'
+import { itemForModel, mockRunner } from '../src/tools.js'
 
+/**
+ * What is left here after lesson 5.2: the runner's own behaviour. The two cases
+ * about the published tool list moved to test/registry.test.ts with the list
+ * itself, and the case pinning that `ProposeInput` and `ProposalRefsSchema`
+ * agreed went with `ProposeInput`, which the registry deleted by publishing the
+ * boundary's own schema.
+ */
 describe('tools', () => {
   const run = mockRunner()
-  it('describes every tool with a JSON schema the API accepts', () => {
-    // Literal, and it grows with the product: `propose_itinerary` joined in
-    // lesson 4.5 and `hand_off_to_booking` in lesson 4.6. A list derived from
-    // TOOLS would assert only that TOOLS equals itself, and this is the one
-    // place a tool added by accident is caught.
-    expect(TOOLS.map((t) => t.name))
-      .toEqual(['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
-    for (const tool of TOOLS) expect(tool.input_schema.type).toBe('object')
-  })
-  it('publishes the quantity bounds the gate boundary actually enforces', () => {
-    // The published schema is documentation and `ProposalRefsSchema`
-    // (src/gates/rehydrateGate.ts) is the boundary that decides, so the two
-    // are two declarations of one shape and they have to agree on the bounds.
-    // A model reading a wider bound than the boundary keeps sends a quantity
-    // the boundary refuses structurally, and a structural refusal is a
-    // provenance violation carrying no source ids: the reply cannot name the
-    // item that was wrong. Published, it is a value the model never sends.
-    const propose = TOOLS.find((t) => t.name === 'propose_itinerary')!
-    const props = propose.input_schema.properties as {
-      refs: { items: { properties: Record<string, Record<string, unknown>> } }
-    }
-    const quantity = props.refs.items.properties.quantity!
-    expect(quantity.exclusiveMinimum).toBe(0)
-    expect(quantity.maximum).toBe(16)
-    // The boundary's own verdict on the two edges and on the largest value it
-    // still calls well formed, so this pins agreement rather than two numbers.
-    const proposal = (q: number) => ({ refs: [{ sourceId: 'flight-0-1', quantity: q, slot: 'flight' }] })
-    expect(ProposalRefsSchema.safeParse(proposal(0)).success).toBe(false)
-    expect(ProposalRefsSchema.safeParse(proposal(17)).success).toBe(false)
-    expect(ProposalRefsSchema.safeParse(proposal(16)).success).toBe(true)
-  })
   it('returns offers as JSON', async () => {
     // 's0-b0' is a call id: mockRunner forwards it to a runner that ignores
     // it, but calling a value typed as ToolRunner needs all three arguments

@@ -32,6 +32,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-4-5 | Freshness, currency, slots, totals, budget, dates | npm run migrate, then npm test (test/gate-freshness-currency.test.ts, test/gate-totals-budget-dates.test.ts, test/gate-pipeline.test.ts) |
 | lesson-4-6 | The cashier | npm run migrate, then npm test (test/cashier.test.ts, test/cashier-links.test.ts, test/point-of-no-return.test.ts), then npm run demo for scenario 6, which reaches a booking link with no API key |
 | lesson-5-1 | The driver in the harness | npm run migrate, then npm test (test/request-shape.test.ts, test/driver.test.ts, test/resume.test.ts) |
+| lesson-5-2 | Tools are doors | npm run migrate, then npm test (test/registry.test.ts, test/doors.test.ts, test/notebook-repo.test.ts) |
 
 ## How this branch was built
 
@@ -48,6 +49,18 @@ What found them was not reading the test. It was writing the wrong
 implementation and checking that the test actually fails: `test/regressions.test.ts`
 carries the three that reached a tag, and the plan for each one says to break it,
 watch it fail, restore it, and paste both outputs.
+
+**A defence with no reachable caller defends nothing.** `applyRequirements`
+refused a tool-sourced relaxation of a budget from lesson 1.7, it was tested,
+and no production call site could reach that branch, because the only caller
+passed `'user'` unconditionally. The test that found it is not a unit test of
+the function: it reads `src/conversation.ts` and asserts what the call site
+passes. Provenance is now derived from whether the turn has already ingested a
+tool result, which is a fact about the transcript rather than a constant
+somebody chose, and the guard was widened from `source === 'tool'` to every
+source that is not hers, because the harness stamps `'user'` or `'inferred'` and
+never `'tool'`: a guard naming one of the three would have gone on defending
+nothing while the module claimed it did.
 
 **Evidence, not assertions.** "I added a test that discriminates" is worth
 roughly nothing between two agents. A pasted failing output is worth a great
@@ -195,3 +208,19 @@ which tier 3 got through `turn()`, is not on the path a deployed turn takes. An
 FAQ is answered by the Opus seat and is billed at Opus rates. Lesson 5.3 moves
 desk selection into the driver and persists it on `course.conversations.desk`,
 which is a column `0001` created and nothing has ever read.
+
+Open at lesson 5.2: `ask_user` is published to the planning desk and answered
+only by the driver, which ends the turn on her question. `npm run trip` runs
+`turn()` and `toolLoop`, which have no step that parks a turn on a question, so
+on that path the tool comes back to the model as an error result. Lesson 5.3
+puts the script on the driver and closes it. `test/desks.test.ts` names the
+exemption rather than deriving around it, so the day a wrapper is expected the
+list says who was meant to answer.
+
+Open at lesson 5.2: migration `0006`'s comment on `course.tool_calls.call_id`
+says the id is derived from the call's POSITION in the turn and never from the
+model's `toolu_` id. Lesson 5.1 made that false on the deployed path: the driver
+keys on the provider's id, because a persisted transcript replays the same one.
+Migrations are append-only and byte-identical, and this module's one migration
+slot per lesson is spent, so the correction is a comment-only migration a later
+lesson owes, on the precedent `0011` set.

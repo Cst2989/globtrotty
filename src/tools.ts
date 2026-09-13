@@ -1,110 +1,20 @@
-import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import type postgres from 'postgres'
-import { z } from 'zod'
-import { SLOT_NAMES } from './gates/rehydrateGate.js'
+import type { z } from 'zod'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
+import { applyRequirementsPatch, renderNotebook } from './repo/notebook.js'
 import { recordResults } from './repo/toolResults.js'
 import type { Claim } from './repo/turns.js'
+import type { Provenance } from './notebook.js'
 import { mockSuppliers } from './supplier/mock.js'
 import {
   UnusableResponseError,
   type FlightSearch, type HotelSearch, type SearchParams, type SupplierItem, type SupplierPair,
 } from './supplier/types.js'
+import { FlightInput, HotelInput, type Desk } from './tools/registry.js'
+import { fenceResult, trimForContext, validateToolCall } from './tools/validate.js'
 
-/**
- * A date on the wire is ISO yyyy-mm-dd, and the schema enforces it rather than
- * only describing it, because the alternative is a mislabelled failure. A hotel
- * date the model sends reaches `nightsBetween` (`src/supplier/dates.ts`), which
- * throws a RangeError on anything else; that throw surfaces from inside
- * `supplier.search`, where `supplierRunner` has no way left to tell it apart
- * from a supplier that fell over, and would report the model's own typo as an
- * outage. A flight date never reaches it and fails worse: the mock hashes the
- * string it was given and hands the model an itinerary whose `departureLocal`
- * is built out of the typo. A model told the supplier failed re-issues the
- * identical call. A model told its input was invalid fixes the date. So the
- * shape is checked here at the seam, while the mistake still has the model's
- * name on it.
- *
- * This is a format check and not a calendar check: `2026-02-31` passes here and
- * `nightsBetween` will happily count to it. Rejecting an impossible date is
- * lesson 4.5's dates gate, which has her trip in front of it and can say what
- * is wrong with it.
- */
-const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('yyyy-mm-dd')
-
-const FlightInput = z.object({
-  from: z.string().describe('IATA code of the departure airport'),
-  to: z.string().describe('IATA code of the arrival airport'),
-  departureDate: IsoDate,
-  returnDate: IsoDate.nullable().describe('yyyy-mm-dd, or null for one way'),
-  adults: z.number().int().min(1),
-  children: z.number().int().min(0),
-})
-const HotelInput = z.object({
-  city: z.string(),
-  checkIn: IsoDate,
-  checkOut: IsoDate,
-  adults: z.number().int().min(1),
-  children: z.number().int().min(0),
-})
-
-/**
- * What the model may propose, as a JSON schema the API can publish.
- *
- * Deliberately a SECOND declaration of the same shape `ProposalRefsSchema`
- * (src/gates/rehydrateGate.ts) enforces, rather than the same object. Two
- * reasons. `ProposalRefsSchema` carries a `.refine` for duplicate ids, and
- * `z.toJSONSchema` cannot represent a refinement, so publishing it directly is
- * not possible. And the two have different jobs: this one is documentation the
- * model reads, with a `describe` on every field, and that one is the boundary
- * that decides. `runGates` re-parses the raw input with the real schema, so
- * this being wrong is a worse tool description and never a weaker gate. The
- * slot list is shared, not copied.
- *
- * The quantity bounds are the boundary's own, repeated here rather than left
- * open. A published `z.int()` says every integer is well formed, and the
- * boundary answers 0 or 17 with a structural provenance rejection carrying no
- * source ids, so the one reply the model gets back cannot name the item it got
- * wrong. Two numbers in a JSON schema cost nothing and the model never sends
- * either value.
- */
-const ProposeInput = z.object({
-  refs: z.array(z.object({
-    sourceId: z.string().describe('The sourceId of a search result from THIS conversation, exactly as the search returned it'),
-    quantity: z.int().positive().max(16).describe('Always 1. Every price here already covers the whole booking: a flight price covers the party, a hotel price covers the stay'),
-    slot: z.enum(SLOT_NAMES).describe('Which part of the trip this item is'),
-  })).min(1).max(24).describe('The items you propose, as references. There is no price field: the server reads every price back out of its own record of the search'),
-})
-
-const HandOffInput = z.object({
-  proposalId: z.string().describe('The id propose_itinerary returned for the proposal she accepted'),
-})
-
-/** Every tool the product owns, in one list; a desk sees a subset (lesson 1.6). */
-export const TOOLS: Tool[] = [
-  {
-    name: 'search_flights',
-    description: 'Search return flights between two airports. Returns offers with a price the supplier quoted, its age and how long it stays quotable. Quote those prices exactly, never a total you worked out yourself.',
-    input_schema: z.toJSONSchema(FlightInput) as Tool['input_schema'],
-  },
-  {
-    name: 'search_hotels',
-    description: 'Search hotels in a city for a stay. Returns offers priced for the whole stay, with the price\'s age. Quote those prices exactly, never a total you worked out yourself.',
-    input_schema: z.toJSONSchema(HotelInput) as Tool['input_schema'],
-  },
-  {
-    name: 'propose_itinerary',
-    description: 'Propose a set of search results as her trip. Send references only: {sourceId, quantity, slot}. Never send a price, a total or a name; the server reads all of those from its own record of the search and will reject a proposal that carries any of them. Returns the server-computed total when every check passes, and the list of problems when they do not.',
-    input_schema: z.toJSONSchema(ProposeInput) as Tool['input_schema'],
-  },
-  {
-    name: 'hand_off_to_booking',
-    description: 'Hand her over to the supplier to book a proposal she has accepted. Send the proposal id and nothing else: the server re-checks every price with the supplier, builds every link itself, and refuses if anything moved or could not be confirmed. Returns the links and the exact wording to show her.',
-    input_schema: z.toJSONSchema(HandOffInput) as Tool['input_schema'],
-  },
-]
-
+/** The parsed shapes `flightSearchFrom` and `hotelSearchFrom` take, from the one schema that defines them. */
 export type FlightToolInput = z.infer<typeof FlightInput>
 export type HotelToolInput = z.infer<typeof HotelInput>
 
@@ -414,6 +324,47 @@ export function corpusRunner(sql: postgres.Sql, claim: Claim, inner: SupplierRun
 }
 
 /**
+ * The desk allowlist and the schema, in front of everything durable.
+ *
+ * The OUTERMOST wrapper, outside `ledgerRunner`, and the order is the whole
+ * point: a tool the desk does not hold, or a call whose input does not parse,
+ * must not reach a `pending` row in `course.tool_calls`. Until this lesson a
+ * name the model invented fell through every layer to `supplierRunner`, which
+ * answered `Unknown tool <name>` after the ledger had already written that the
+ * call was starting, so a turn that crashed there left a pending row a person
+ * has to clear for a call that could never have run.
+ *
+ * On the way back it trims and then fences, in that order. Fencing first and
+ * trimming second would cut the closing delimiter off a long result and hand the
+ * model an unterminated fence, which is the exact structure the fence exists to
+ * make unambiguous.
+ *
+ * The fence is applied HERE rather than inside the ledger, so what
+ * `finishToolCall` stores is the raw result and every replay is fenced afresh.
+ * That matters from lesson 5.5, when the delimiter carries a per-call nonce: a
+ * stored fence would replay yesterday's nonce.
+ *
+ * A rejection is returned as an error result, not thrown, so the model gets one
+ * round trip to correct itself. This is the same door a gate rejection uses
+ * (src/gates/runner.ts) and for the same reason: it is something the model can
+ * fix with the step it has left.
+ */
+export function doorRunner(desk: Desk, inner: ToolRunner): ToolRunner {
+  return async (name, input, callId, signal) => {
+    const check = validateToolCall(desk, name, input)
+    if (!check.ok) return { content: check.content, isError: true }
+    // The PARSED input goes on, never the raw one. A handler that read the raw
+    // object would be reading a shape nothing checked, which is how a schema
+    // becomes decoration.
+    const outcome = await inner(name, check.input, callId, signal)
+    return {
+      content: fenceResult(check.def.name, check.def.door, trimForContext(outcome.content)),
+      isError: outcome.isError,
+    }
+  }
+}
+
+/**
  * Any runner, made safe to run twice. The ledger decides whether the inner
  * runner is called at all, so a crash between the supplier answering and the
  * turn recording it costs one wasted call and never a second one. Takes the
@@ -463,5 +414,47 @@ export function ledgerRunner(sql: postgres.Sql, claim: Claim, inner: ToolRunner)
       throw new AmbiguousToolCallError(callId, name)
     }
     return result
+  }
+}
+
+/** Whose notebook this patch belongs to, and who is judged to be speaking. */
+export type NotebookContext = {
+  conversationId: string
+  userId: string
+  /**
+   * Read at the moment of the call, not at chain construction, because the
+   * answer changes inside a turn: a patch made before any search is her words
+   * and a patch made after one is not.
+   */
+  source: () => Provenance
+  now: () => Date
+}
+
+/**
+ * The `update_requirements` link of the runner chain, inside the ledger so a
+ * replayed call does not apply the patch twice, and every other name falls
+ * through to `inner` so this layer knows exactly one thing.
+ *
+ * The rejection is not a failure. `applyRequirements` refuses two different
+ * ways: an unrecognised key is dropped and a refused constraint is named, so
+ * neither "recorded" nor "nothing was recorded" is true in general, and the
+ * rendered notebook underneath is the authoritative answer to what landed. That
+ * is why it is always sent rather than only on success.
+ */
+export function notebookRunner(
+  sql: postgres.Sql, ctx: NotebookContext, inner: ToolRunner,
+): ToolRunner {
+  return async (name, input, callId, signal) => {
+    if (name !== 'update_requirements') return inner(name, input, callId, signal)
+    const { patch } = input as { patch: unknown }
+    const { next, rejected } = await applyRequirementsPatch(sql, {
+      conversationId: ctx.conversationId, userId: ctx.userId, patch,
+      source: ctx.source(), at: ctx.now().toISOString(),
+    })
+    const head = rejected.length === 0
+      ? 'Recorded. The notebook now reads:'
+      : `Refused: ${rejected.join(', ')}. Do not re-send a refused key; ask her instead. `
+        + 'The notebook now reads:'
+    return { content: `${head}\n\n${renderNotebook(next)}`.trimEnd(), isError: false }
   }
 }

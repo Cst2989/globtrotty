@@ -1,18 +1,21 @@
-import { makeDriver } from '../../src/agents/driver.js'
+import { makeDriver, provenanceFor } from '../../src/agents/driver.js'
 import { cashierRunner } from '../../src/cashier.js'
 import { liveClient } from '../../src/client.js'
+import { TODAY } from '../../src/conversation.js'
 import { connect } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { constraintsFromNotebook } from '../../src/gates/pipeline.js'
 import { proposalRunner } from '../../src/gates/runner.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
-import { emptyNotebook } from '../../src/notebook.js'
+import { loadNotebook } from '../../src/repo/notebook.js'
 import type { Claim } from '../../src/repo/turns.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
-import { corpusRunner, ledgerRunner, supplierRunner, type ToolRunner } from '../../src/tools.js'
-import { runTurn, type Agent } from '../../src/worker.js'
+import {
+  corpusRunner, doorRunner, ledgerRunner, notebookRunner, supplierRunner, type ToolRunner,
+} from '../../src/tools.js'
+import { runTurn, type Agent, type AgentContext } from '../../src/worker.js'
 
 /**
  * Tier 3: the background function. Netlify Functions v2 (esbuild bundled, .mts)
@@ -53,40 +56,37 @@ export default async (req: Request): Promise<Response> => {
   const client = liveClient()
 
   /**
-   * The five wrappers, outermost first: the ledger decides whether the tool runs
-   * at all (lesson 3.4), the cashier re-quotes and emits the links (lesson 4.6),
-   * the proposal runner puts a proposal through the gates (lesson 4.5), the
-   * corpus records what a search returned (lesson 4.3), the supplier runner
-   * makes the call. Each layer knows one thing, and the live adapters get all of
-   * it by being handed to the innermost one.
+   * Seven wrappers, outermost first. The door checks the desk allowlist and
+   * the schema before anything durable happens and fences the answer on the
+   * way back (lesson 5.2); the ledger decides whether the tool runs at all
+   * (lesson 3.4); the notebook records what she stated (lesson 5.2); the
+   * cashier re-quotes and emits the links (lesson 4.6); the proposal runner
+   * puts a proposal through the gates (lesson 4.5); the corpus records what a
+   * search returned (lesson 4.3); the supplier runner makes the call. Each
+   * layer knows one thing, and the live adapters get all of it by being handed
+   * to the innermost one.
    *
    * Built per agent step rather than once before `runTurn`, because two of these
    * wrappers fence their writes on a full `Claim` and a claim's `attempts` is
-   * only known after `claimTurn` has taken the row. Reading the turn a second
-   * time here to guess at it would be a second reader of a number the harness
-   * already owns; taking it from the `AgentContext` the harness hands us is the
-   * same value by construction. Construction is a handful of closures, and the
-   * supplier pair above, which is the part with any cost in it, is built once.
+   * only known after `claimTurn` has taken the row, and because the notebook is
+   * read fresh at every step: a patch `update_requirements` wrote on step 2 has
+   * to be the notebook the gates judge step 3's proposal against. Taking both
+   * from the `AgentContext` the harness hands us is the same value by
+   * construction. Construction is a handful of closures and one small read, and
+   * the supplier pair above, which is the part with any cost in it, is built
+   * once.
    */
-  const runnerFor = (claim: Claim): ToolRunner => {
-    // Her constraints, DERIVED through the one mapper rather than written here
-    // as three literal nulls. Nothing on this branch stores a notebook: the
-    // driver renders "nothing yet" into its prompt on every step
-    // (src/agents/driver.ts) and this runner is built outside it in any case. So
-    // this call receives an empty notebook and every field really is null, which
-    // is the same three values the literal had and a different claim: this line
-    // reads a notebook, and the day the conversation stores one it reads that
-    // one instead and nothing else in the chain moves. Lesson 5.2 persists the
-    // notebook on the conversation and this becomes a read of that row.
-    //
-    // What that costs today, on the record: the pipeline writes `budget` and
-    // `dates` as not evaluated WITH A REASON on every proposal a live run
-    // produces, rather than as passes. `npm run trip` (scripts/trip.ts) derives
-    // its constraints the same way from the same empty notebook, so that is
-    // both of the paths a reader can run, which is why lesson 4.5's own proof
-    // drives proposalRunner, this exact seam, with a real budget in it
-    // (test/gate-pipeline.test.ts).
-    const notebook = constraintsFromNotebook(emptyNotebook())
+  const runnerFor = async (ctx: AgentContext): Promise<ToolRunner> => {
+    const claim: Claim = {
+      turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
+      attempts: ctx.attempts, state: ctx.state,
+    }
+    // Her constraints, from the notebook this conversation actually stored.
+    // Lesson 5.1 built an empty one on every step and every proposal recorded
+    // `budget: not evaluated` because of it; 0015 gave the notebook a column and
+    // this reads it.
+    const notebook = constraintsFromNotebook(
+      await loadNotebook(sql, ctx.conversationId, ctx.userId), TODAY)
     const gateCtx = {
       conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
     }
@@ -95,28 +95,40 @@ export default async (req: Request): Promise<Response> => {
     // the corpus either; `gate_results` is an observation and is deliberately
     // not fenced (src/repo/gateResults.ts), so the proposal runner takes ids,
     // and the cashier takes the same three for the same reason.
-    return ledgerRunner(
+    return doorRunner('planning', ledgerRunner(
       sql, claim,
-      cashierRunner(
-        sql, gateCtx,
-        { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-        proposalRunner(
-          sql,
-          { ...gateCtx, notebook, now: () => new Date() },
-          // The searches ask for the SAME currency the gates expect, off the same
-          // constraints object, so a corpus and the currency gate cannot disagree
-          // by construction. Null on this branch, which supplierRunner reads as
-          // TRIP_CURRENCY (lesson 4.5); a stored USD budget makes both sides USD
-          // in one move.
-          corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+      notebookRunner(
+        sql,
+        {
+          conversationId: claim.conversationId, userId: claim.userId,
+          // Derived from THIS step's transcript, not from a constant: a patch
+          // written before any search is her words, and one written after a
+          // tool result has landed is something the model worked out from text
+          // we merely paid for (src/agents/driver.ts).
+          source: () => provenanceFor(ctx),
+          now: () => new Date(),
+        },
+        cashierRunner(
+          sql, gateCtx,
+          { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+          proposalRunner(
+            sql,
+            { ...gateCtx, notebook, now: () => new Date() },
+            // The searches ask for the SAME currency the gates expect, off the
+            // same constraints object, so a corpus and the currency gate cannot
+            // disagree by construction. Null until she states a budget, which
+            // supplierRunner reads as TRIP_CURRENCY (lesson 4.5); a stored USD
+            // budget makes both sides USD in one move.
+            corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+          ),
         ),
       ),
-    )
+    ))
   }
 
   /**
    * The driver, from lesson 5.1: one invocation is one model call plus, if the
-   * model asked for one, one tool execution. Until this lesson the whole of
+   * model asked for one, one tool execution. Until that lesson the whole of
    * `turn()` ran inside a single agent step, so the harness could see a turn
    * start and a turn end and nothing in between, and a crash landed between
    * turns rather than between model calls. Now the harness owns every step, and
@@ -140,10 +152,7 @@ export default async (req: Request): Promise<Response> => {
   const agent: Agent = async (ctx) => makeDriver({
     sql,
     client,
-    run: runnerFor({
-      turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
-      attempts: ctx.attempts, state: ctx.state,
-    }),
+    run: await runnerFor(ctx),
     limits: DEFAULT_LIMITS,
     now: Date.now,
   })(ctx)

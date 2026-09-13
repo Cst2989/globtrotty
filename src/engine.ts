@@ -91,6 +91,15 @@ export type Limits = {
   dailyCeilingMicros: bigint
   globalCeilingMicros: bigint
   maxSteps: number
+  /**
+   * How many api-door tool calls one turn may make, counted from the rows
+   * `ledgerRunner` writes BEFORE each call (`countSupplierCalls`,
+   * src/tools/supplierBudget.ts), so an attempt that died mid flight still
+   * counts. A step cap is not a supplier cap: a turn that never proposes can
+   * spend every step it has on searches, and a supplier is rate limited and
+   * sometimes metered whether or not the turn ends well.
+   */
+  maxSupplierCallsPerTurn: number
 }
 
 /**

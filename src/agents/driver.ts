@@ -1,15 +1,19 @@
 import type postgres from 'postgres'
 import type { ModelClient } from '../client.js'
 import { TODAY } from '../conversation.js'
-import { loadDesk, renderPrompt, toolsFor } from '../desks.js'
+import { loadDesk, renderPrompt } from '../desks.js'
 import { textOfBlocks, whichCeiling, type ContentBlock, type Limits } from '../engine.js'
 import { classifyError } from '../errors.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
+import type { Provenance } from '../notebook.js'
 import { pgSink } from '../repo/model-calls.js'
+import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { SEATS } from '../seats.js'
 import type { ToolRunner } from '../tools.js'
+import { TOOLS, toolsForDesk } from '../tools/registry.js'
+import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 
 export type DriverDeps = {
@@ -61,15 +65,21 @@ export function makeDriver(deps: DriverDeps): Agent {
     const seat = SEATS.driver
     const desk = loadDesk('planning')
 
+    const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
     const args: CallArgs = {
       seat,
-      system: renderPrompt(desk, {
-        today: TODAY,
-        requirements: 'nothing yet',
-        dropped: 'none',
-      }),
+      // Only {{today}} now. The notebook used to be rendered into
+      // {{requirements}} and {{dropped}} inside the system prompt, which is the
+      // stable prefix lesson 5.6 caches, so every fact she stated would have
+      // thrown that prefix away. It rides in the suffix instead.
+      system: renderPrompt(desk, { today: TODAY }),
       messages: ctx.state.messages,
-      tools: toolsFor(desk) as unknown[],
+      tools: toolsForDesk('planning'),
+      // The notebook is volatile: it changes the moment she states a fact. The
+      // suffix lands after the last block of the transcript, and from lesson 5.6
+      // after the last cache breakpoint, so it never invalidates the cached
+      // prefix behind it.
+      suffix: renderNotebook(notebook),
     }
 
     // ---- 1. Reserve an upper bound BEFORE dispatch (SPEC section 8) ---------
@@ -253,8 +263,26 @@ export function makeDriver(deps: DriverDeps): Agent {
      */
     const callId = `s${ctx.state.step}-b${blockIndex}`
 
-    return {
-      kind: 'tool',
+    if (toolUse.name === 'ask_user') {
+      // Terminal by construction: the answer comes from her, not from a tool. It
+      // is a `message` step rather than a new kind of step, because a question to
+      // her IS the turn's reply: `completeTurn` writes it to course.messages and
+      // parks the conversation on `awaiting_user`, which is what a parked turn
+      // already meant. No fail reason is added for it, because nothing failed.
+      const { questions } = (toolUse.input as { questions?: string[] } | null) ?? {}
+      if (Array.isArray(questions) && questions.length > 0) {
+        return {
+          kind: 'message', text: questions.join('\n\n'),
+          costMicros: actual, alreadyRecorded: true,
+        }
+      }
+    }
+
+    // `assistantContent` is computed above and is the same on both branches:
+    // the model asked for this call either way, and the transcript has to carry
+    // the ask before it carries the answer or the next request is a 400.
+    const step = {
+      kind: 'tool' as const,
       /**
        * The PROVIDER's id here, and the positional one above, because the two
        * ids answer two different questions and `toolLoop` already separates
@@ -266,12 +294,79 @@ export function makeDriver(deps: DriverDeps): Agent {
        */
       callId: toolUse.id,
       name: toolUse.name,
-      run: (signal) => deps.run(toolUse.name, toolUse.input, callId, signal),
       assistantContent,
       costMicros: actual,
       alreadyRecorded: true,
     }
+
+    const def = TOOLS[toolUse.name]
+    if (def?.door === 'api') {
+      const budget = await assertSupplierBudget(sql, ctx.turnId, limits.maxSupplierCallsPerTurn)
+      if (!budget.ok) {
+        // A refusal the model can act on, travelling the same durable path a
+        // result does, so course.tool_calls records that the attempt happened.
+        // Deliberately still a tool step and not a `fail`: an unmet supplier
+        // budget is not a fail reason, and the model has steps left in which to
+        // propose from what it already has.
+        return {
+          ...step,
+          run: async () => ({
+            content: `You have used all ${budget.max} supplier searches for this turn `
+              + `(${budget.used} so far). No more searches will run. Propose from what you `
+              + 'already have, or ask her a question.',
+            isError: true,
+          }),
+        }
+      }
+    }
+
+    return { ...step, run: (signal) => deps.run(toolUse.name, toolUse.input, callId, signal) }
   }
+}
+
+/**
+ * Whose word this patch is recording, decided from the transcript at the moment
+ * of the call, and never by the model, whose tool schema carries no field for it.
+ *
+ * ## Why it is not the constant 'user'
+ *
+ * A constant would leave the whole provenance system with no reachable caller,
+ * which is exactly the state lesson 5.1 left it in: `applyRequirementsPatch` is
+ * `applyRequirements`'s only production caller, so a hardcoded `'user'` makes
+ * src/notebook.ts's relax refusal and its `source !== 'user'` guard dead code,
+ * and the module that exists to stop an inferred value relaxing something she
+ * said would stop nothing.
+ *
+ * That is reachable with no adversary at all. A supplier result reaches the
+ * model's context fenced but present. The model reads "cheapest is EUR 1,650"
+ * against her EUR 1,500 budget, calls `update_requirements` to make its own plan
+ * work, and stamped `'user'` both guards pass, the budget is relaxed by a number
+ * the MODEL chose, and `constraintsFromNotebook` hands it to the budget gate,
+ * which then passes a proposal it was built to reject.
+ *
+ * ## Why it is not the constant 'inferred' either
+ *
+ * `'inferred'` trips the relax guard on every constraint field, so once she set
+ * a budget she could never raise it again through this desk. The rule would be
+ * inverted rather than enforced. Provenance is not a constant.
+ *
+ * ## What the transcript actually tells us
+ *
+ * `loop()` seeds a fresh turn from `course.messages` as one user text block, so
+ * step 0 of every turn is provably her words alone. A `tool_result` block
+ * anywhere in this turn's transcript means something untrusted has already been
+ * ingested and the model is no longer transcribing only what she said.
+ *
+ * The cost to her is nothing she would notice: before any search she may relax
+ * anything she likes, after a search a patch may still tighten a value or
+ * establish a first one, since the guard only blocks relaxations, and her next
+ * message starts a clean transcript.
+ */
+export function provenanceFor(ctx: AgentContext): Provenance {
+  const tainted = ctx.state.messages.some(
+    (m) => m.content.some((b) => b.type === 'tool_result'),
+  )
+  return tainted ? 'inferred' : 'user'
 }
 
 /**

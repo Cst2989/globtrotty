@@ -1,9 +1,10 @@
 import type { Label } from './classify.js'
 import type { ModelClient } from './client.js'
 import { newConversation, turn } from './conversation.js'
-import { loadDesk, type DeskName } from './desks.js'
+import { loadDesk } from './desks.js'
 import type { Outcome, ToolTrace } from './loop.js'
 import type { ToolRunner } from './tools.js'
+import type { Desk } from './tools/registry.js'
 
 export type Handled = {
   label: Label
@@ -12,7 +13,7 @@ export type Handled = {
   toolTrace: ToolTrace[]
   outcome: Outcome
   steps: number
-  desk: DeskName
+  desk: Desk
   promptVersion: string
 }
 

@@ -23,48 +23,84 @@ export type NotebookConstraints = {
 }
 
 /**
+ * The travel window the dates gate compares a proposal against, derived from the
+ * two fields the notebook actually carries.
+ *
+ * ## Why this exists, when the previous version of this file argued against it
+ *
+ * That argument was that `month` plus `nights` is the gate asserting an
+ * itinerary she never stated: she said the second half of September, and a
+ * window running from the first would accept a departure she had already ruled
+ * out, which is a pass the gate did not earn. Every word of that is still true,
+ * and the conclusion drawn from it was wrong, because the alternative was never
+ * a strict gate. It was `passed: null` on every proposal ever made, which is not
+ * a rejection either: a proposal for March passed the dates gate, and nothing in
+ * the system ever noticed.
+ *
+ * So the window is deliberately WIDE and the lesson calls it a stopgap. It runs
+ * from the first day of the month she named to the last day of that month plus
+ * her nights, which is a real constraint on the only failure that has ever
+ * mattered here, a trip proposed in the wrong month, and it is not a constraint
+ * on the half of the month she prefers. `checkDates` prints the window back to
+ * the model on a rejection, so what the model is told matches what was checked.
+ *
+ * ## Why extraction is not widened instead
+ *
+ * The honest fix is `departureDate` and `returnDate` on the notebook, and it
+ * costs more than this module has. It means changing `RequirementsSchema`
+ * (src/extract.ts), which changes the extraction prompt, which changes what the
+ * recorded `test/fixtures/model/extract-portugal.json` would return, and that
+ * fixture cannot be re-recorded without a key that `npm test` does not have. A
+ * fixture is a contract with the past. Module 6 records fresh ones for its
+ * evals and is where the notebook grows dates.
+ *
+ * ## The year
+ *
+ * `month` is a name and not a date, so the year is the next occurrence of that
+ * month on or after `today`. She writes to a travel agency in August about
+ * September, and the September she means is the one that has not happened yet.
+ *
+ * ## The type
+ *
+ * `DateWindow` on this branch is two yyyy-mm-dd STRINGS and not two `Date`s
+ * (src/gates/checks.ts, lesson 4.5), because `checkDates` compares them against
+ * the first ten characters of a supplier's local timestamp, with no parsing and
+ * no zone. So the arithmetic is done in UTC here and handed back as the same
+ * ten characters the gate reads.
+ */
+export function travelWindowFrom(nb: Notebook, today: string): DateWindow | null {
+  if (nb.month === null) return null
+  const index = MONTHS.indexOf(nb.month.value.trim().toLowerCase())
+  if (index === -1) return null
+  const now = new Date(`${today}T00:00:00Z`)
+  const year = index >= now.getUTCMonth() ? now.getUTCFullYear() : now.getUTCFullYear() + 1
+  const earliest = new Date(Date.UTC(year, index, 1))
+  // The last day of the month, then the stay on top of it, so a trip that starts
+  // on the 30th and runs a week is inside the window rather than outside it by
+  // six days.
+  const nights = nb.nights?.value ?? 0
+  const latest = new Date(Date.UTC(year, index + 1, 0 + nights))
+  return { earliest: day(earliest), latest: day(latest) }
+}
+
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
+                'july', 'august', 'september', 'october', 'november', 'december']
+
+/** The date half of an ISO timestamp, which is what a DateWindow holds. */
+function day(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+/**
  * Maps the notebook into the shape the gates consume. The only mapper: two call
  * sites deriving a trip currency from a budget independently is how one of them
  * ends up defaulting.
  *
- * ## Why `window` is always null on this branch
- *
- * `checkDates` takes a CLOSED window, `{earliest, latest}`, and this branch's
- * notebook has no dates to build one from. It carries `month` (a string like
- * "September") and `nights` (a number), and neither is a calendar date. Three
- * ways to invent one were considered and all three are worse than not having
- * one:
- *
- *  - The whole of the named month. She said the second half of September, and a
- *    window running from the 1st would accept a departure she already ruled
- *    out, which is a gate that reports a pass it did not earn.
- *  - `month` plus `nights`. Combining two fields she never linked is the gate
- *    asserting an itinerary she did not state.
- *  - A sentinel `latest`. `checkDates` prints the window back to the model
- *    ("outside the 2026-09-01 to 9999-12-31 travel window"), so the model is
- *    handed a constraint that reads as a bug.
- *
- * So the dates gate records `passed: null` with `NOT_EVALUATED.noWindow`
- * (src/gates/pipeline.ts) on every proposal today, which is honest, queryable,
- * and distinguishable from a pass. Widening the notebook to carry
- * `departureDate` and `returnDate` means changing `RequirementsSchema` in
- * `src/extract.ts`, the recorded extraction fixtures and `test/extract.test.ts`
- * with it, and the spec assigns none of that to this module: it lands in module
- * 5, where the desk prompts are rewritten anyway. `checkDates` ships fully
- * tested against a window a caller supplies, so the day the notebook has one,
- * the only change here is this function.
- *
- * The cost of the gap is real and worth naming: a proposal for March passes the
- * dates gate today. The stack's guarantee is about PRICES, that no number
- * reaches her a supplier did not quote, and a wrong window cannot be un-guessed
- * by the model, which would be left re-searching against a window we made up.
- * Refuse to evaluate; never invent.
+ * `today` is required and has no default, because a default is how one caller
+ * silently keeps the old behaviour: every production caller passes `TODAY`
+ * (src/conversation.ts), which is the one place the course's fixed date lives.
  */
-export function constraintsFromNotebook(nb: Notebook): NotebookConstraints {
+export function constraintsFromNotebook(nb: Notebook, today: string): NotebookConstraints {
   const budget = nb.budget?.value ?? null
-  return {
-    budget,
-    currency: budget?.currency ?? null,
-    window: null,
-  }
+  return { budget, currency: budget?.currency ?? null, window: travelWindowFrom(nb, today) }
 }

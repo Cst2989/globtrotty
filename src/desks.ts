@@ -2,28 +2,30 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import { SEATS, type Seat } from './seats.js'
-import { TOOLS } from './tools.js'
+import { type Desk } from './tools/registry.js'
 
-export type DeskName = 'front' | 'planning'
-
-export type Desk = {
-  name: DeskName
+/**
+ * A desk prompt, loaded and versioned. Renamed from `Desk` at lesson 5.2:
+ * `Desk` is now the union of desk NAMES and lives in src/tools/registry.ts
+ * beside the allowlist, and one module cannot export two things called Desk.
+ * The record kept the longer name rather than the union, because the union is
+ * the one written at call sites: `loadDesk('planning')`, `toolsForDesk(desk)`,
+ * `DESK_TOOLS[desk]`.
+ *
+ * `tools` is gone. It duplicated `DESK_TOOLS[name]` into a second object, so a
+ * tool added to the registry and not to the desk record would have advertised
+ * one list and validated against another.
+ */
+export type LoadedDesk = {
+  name: Desk
   seat: Seat
   prompt: string
   /** First twelve hex characters of the prompt's SHA-256: a change to the file changes the version. */
   promptVersion: string
-  tools: string[]
 }
 
-/** The doors out of each desk. The front desk has none, so an FAQ can never start a search. */
-export const DESK_TOOLS: Record<DeskName, string[]> = {
-  front: [],
-  planning: ['search_flights', 'search_hotels', 'propose_itinerary', 'hand_off_to_booking'],
-}
-
-const DESK_SEATS: Record<DeskName, Seat> = { front: SEATS.cheap, planning: SEATS.driver }
+const DESK_SEATS: Record<Desk, Seat> = { front: SEATS.cheap, planning: SEATS.driver }
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'desks')
 
@@ -32,25 +34,15 @@ export function promptVersion(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12)
 }
 
-export function loadDesk(name: DeskName): Desk {
+export function loadDesk(name: Desk): LoadedDesk {
   const prompt = readFileSync(path.join(DIR, `${name}-desk.md`), 'utf8')
   const sentinel = `<!-- desk: ${name} -->`
   if (!prompt.startsWith(sentinel)) throw new Error(`${name}-desk.md must start with ${sentinel}`)
-  return {
-    name,
-    seat: DESK_SEATS[name],
-    prompt,
-    promptVersion: promptVersion(prompt),
-    tools: DESK_TOOLS[name],
-  }
-}
-
-export function toolsFor(desk: Desk): Tool[] {
-  return TOOLS.filter((tool) => desk.tools.includes(tool.name))
+  return { name, seat: DESK_SEATS[name], prompt, promptVersion: promptVersion(prompt) }
 }
 
 /** Fills {{name}} slots; a slot with no value is an error, because a half-filled prompt reads as an instruction. */
-export function renderPrompt(desk: Desk, vars: Record<string, string>): string {
+export function renderPrompt(desk: LoadedDesk, vars: Record<string, string>): string {
   return desk.prompt.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const value = vars[key]
     if (value === undefined) throw new Error(`Prompt for ${desk.name} desk needs {{${key}}}`)

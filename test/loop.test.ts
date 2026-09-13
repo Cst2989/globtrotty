@@ -1,14 +1,15 @@
 import { RateLimitError } from '@anthropic-ai/sdk'
+import type { Tool } from '@anthropic-ai/sdk/resources/messages'
 import { vi } from 'vitest'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { toolLoop } from '../src/loop.js'
 import { SpendUnconfirmedError } from '../src/repo/spend.js'
 import { SEATS } from '../src/seats.js'
-import { TOOLS } from '../src/tools.js'
+import { toolsForDesk } from '../src/tools/registry.js'
 import { fakeClient, textMessage, toolUseMessage } from './model/fake.js'
 
 const run = async () => ({ content: '[]', isError: false })
-const base = { seat: SEATS.driver, system: 'test', userText: 'hi', tools: TOOLS, run }
+const base = { seat: SEATS.driver, system: 'test', userText: 'hi', tools: toolsForDesk('planning') as Tool[], run }
 
 describe('toolLoop', () => {
   it('stops a run that keeps asking for tools at the step cap', async () => {
