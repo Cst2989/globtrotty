@@ -21,6 +21,7 @@
 import 'dotenv/config'
 import { config } from 'dotenv'
 import { cashierRunner } from '../src/cashier.js'
+import { acceptCard, cardForProposal } from '../src/channel.js'
 import { connect } from '../src/db.js'
 import type { TurnState } from '../src/engine.js'
 import { TODAY } from '../src/conversation.js'
@@ -31,7 +32,6 @@ import { DEMO_SCRIPT_USER } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { money } from '../src/money.js'
 import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
-import { decideProposal } from '../src/repo/proposals.js'
 import { beginToolCall, finishToolCall } from '../src/repo/toolCalls.js'
 import { claimTurn, saveTurnState, FencedError } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
@@ -123,6 +123,9 @@ async function cleanup() {
   await sql`delete from course.gate_results where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.tool_results where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.model_calls where user_id = ${DEMO_SCRIPT_USER}`
+  // Above the turns delete, because agent_events.turn_id is `on delete set
+  // null` and a feed row would outlive the turn it describes.
+  await sql`delete from course.agent_events where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.messages where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.turns where user_id = ${DEMO_SCRIPT_USER}`
   await sql`delete from course.conversations where user_id = ${DEMO_SCRIPT_USER}`
@@ -303,15 +306,28 @@ async function main() {
   note('tier 3 derived their constraints from an empty notebook, and a gate that')
   note('never fired must not count as a pass.')
 
-  step('she accepts. In production that click is the proposal card (lesson 5.7);')
-  step('this script answers for her, in process, so the demo can reach a link...')
-  await decideProposal(sql, {
-    proposalId: proposal.proposalId, conversationId: booking.conversationId, decision: 'accept',
+  step('the server renders the card she is shown. Every price on it was read')
+  step('back out of course.tool_results; none of it came off the model...')
+  const card = await cardForProposal(sql, {
+    proposalId: proposal.proposalId, conversationId: booking.conversationId,
+    currency: hers.currency,
   })
+  for (const c of card!.components) note(`${c.slot.padEnd(9)} ${c.price.padStart(9)}   [change]`)
+  note(`${'total'.padEnd(9)} ${card!.total.padStart(9)}`)
+  note(card!.footer)
 
-  const handed = await run('hand_off_to_booking', { proposalId: proposal.proposalId }, 'demo-handoff')
-  const handOff = JSON.parse(handed.content) as
-    { ok: boolean; verified: boolean; links: { sourceId: string; url: string }[] }
+  step('she presses accept. That click is one server-side function, acceptCard,')
+  step('and it is the only production caller decideProposal has (lesson 5.7)...')
+  const handOff = await acceptCard(sql, {
+    proposalId: proposal.proposalId, conversationId: booking.conversationId,
+    userId: DEMO_SCRIPT_USER, turnId: bookingClaim.turnId,
+    suppliers, limits: DEFAULT_LIMITS, now: new Date(),
+  })
+  if (!handOff.ok) throw new Error(`the cashier refused: ${handOff.refusal.kind}`)
+  const [decided] = await sql<{ decision: string }[]>`
+    select decision from course.proposals where id = ${proposal.proposalId}`
+  ok(`course.proposals.decision is '${decided!.decision}', written in production for the `
+   + 'first time since lesson 4.6')
   ok(`verified ${handOff.verified}, ${handOff.links.length} links, every one on an allowlisted host`)
   for (const l of handOff.links) note(l.url)
   const clicks = await sql<{ url: string }[]>`

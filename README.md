@@ -579,11 +579,116 @@ be mistaken for a run that checked the live path.
 
 ## Residuals
 
-Everything module 4 knows about and did not close, each with an owner. The
-first four are the module's own; the rest are what the whole-branch review found
-across all six lessons and decided was worth naming rather than fixing under a
-frozen tag. An owner is a lesson, a module, or a person, and "a person" means
-there is nothing to design: somebody has to type it.
+Everything this branch knows about and did not close, each with an owner. What
+module 5 built and what it left is first, added at lesson 5.7; module 4's own
+list follows it, unchanged except where lesson 5.7 closed an entry or changed
+what was true about one, because eight of those entries are module 4's record of
+itself and deleting them to make room would erase a history rather than close
+it. An owner is a lesson, a module, or a person, and "a person" means there is
+nothing to design: somebody has to type it.
+
+From lesson 5.7 the channel splits. Prose reaches her with every
+currency-shaped token replaced by `[amount]`, because prose is the model's and
+the model has read supplier payloads, and prices reach her only inside a card
+the server rendered from what the gates rehydrated out of `course.tool_results`.
+The redactor is a pure function over one streamed chunk with no state between
+calls, so it over-redacts at a chunk boundary rather than buffering, and a
+stutter-free stream that costs her a stray digit is the better trade. It does
+not try to tell a real price from an invented one, because it cannot: every
+amount goes, and the card underneath carries the ones the server can stand
+behind.
+
+The card is a structure and not markup, and `renderProposalCard` refuses a
+rejected proposal outright rather than rendering one with a caveat on it. Every
+component carries its own change action, mapping to `revise_component`, so
+changing one night does not mean restating the whole trip, and every card
+carries the line saying the agency never asks for a payment, a card number or a
+document in a message. That line is on the card rather than only in the desk
+prompt because a prompt is an instruction to a model and this is a promise to
+her, and the two fail differently. A source id on a card goes through
+`sanitizeSourceId` and a supplier's NAME does not: that function has been an
+allowlist of `[A-Za-z0-9_-]` since lesson 5.5's fix round, which is right for an
+id and would render "Beachfront apartment, Faro, 7 nights" as one unreadable
+word, so a name loses its control characters and its length past a cap and keeps
+everything she has to be able to read.
+
+Nothing in production wrote `proposals.decision` from lesson 4.6 until now.
+`decideProposal` was written and tested and its caller was a person's click on a
+card that did not exist. The card exists, its accept action calls it, and
+`npm run trip` reaches a real booking link through a real decision rather than
+through a script answering for her.
+
+A request that needs a person ends the turn `done` and the conversation
+`escalated`, with no fail reason, because nothing failed: the turn ran, it
+decided the agency could not do this, and it said so. `escalated` needed no
+migration, and that is worth saying plainly because the plan for this lesson
+expected one: `conversations_status_check` has accepted the value since 0004.
+What was missing was a writer and a sentence, so `escalationRunner` records the
+event and `statusInWords` turns any of the seven statuses into something she can
+act on. `FAIL_REASONS` and `turns_fail_reason_check` did not move in this module,
+and two tests say so.
+
+`course_worker` exists, with a policy on each of the eight tables that carry a
+traveller's own rows and a grant to that role by name. Four tables are granted
+nothing at all: `course.model_calls`, `course.daily_usage`, `course.tool_calls`
+and `course.gate_results`, which the owner connection writes instead. The grant
+is by name rather than `on all tables in schema course` because a table with a
+grant and no policy is a table every worker session reads in full, which is the
+opposite of what a migration that then enables RLS on eight tables reads as
+doing; `test/isolation.test.ts` has a case per ungranted table that goes red the
+moment the grant widens, and a pair of cases that run one unscoped query as the
+owner and as the worker, because either half alone proves nothing.
+
+What actually RUNS under that role today is one read: the per-step notebook read
+in `netlify/functions/run-turn-background.mts`, through `withUser`. That is less
+than the role is built for and the reason is `withUser` itself, which is one
+transaction. A turn on tier 3 is up to fourteen minutes of work whose heartbeat
+has to be visible to the sweeper while it runs, and whose `course.link_clicks`
+rows have to be committed before the model is handed the URLs built from them,
+so a turn wrapped in one transaction would break the crash recovery this whole
+branch is built on. Putting the rest of a turn's own rows under the role means
+giving the harness a unit of work smaller than a turn. Owner: module 6, together
+with the two tables the runner chain writes that have no policy at all, where a
+forgotten `and user_id =` inside `ledgerRunner` or the gate pipeline is still a
+forgotten clause; both are keyed on a turn id the worker already proved it owns,
+which bounds it.
+
+`course.daily_usage` and `course.model_calls` carry no policy on purpose, and
+that is the important half: the global daily ceiling sums `cost_micros` across
+all users on every check, and under a per-user policy that sum would silently
+return only the caller's own rows, so the one ceiling that stops the whole
+system spending unbounded money in a day would stop firing with no error and no
+failing test. RLS is enabled and not forced, so the owner still bypasses it,
+which is what makes that possible and what makes `npm run migrate` work; the
+isolation this buys is against a query we forgot to scope and not against
+somebody holding the owner's connection string.
+
+The capture columns on `course.model_calls` are written by the driver and by
+nothing else. `redactCredentials` runs inside `pgSink` rather than at the call
+sites, so a caller cannot skip it, and it runs BEFORE serialisation with the
+result parsed back to an object, because `sql.json(<a string>)` stores a jsonb
+string scalar on which `response->>'stop_reason'` is null forever. The routing
+call fills the half of the capture it honestly can, which is the text the
+decision was made from: `classifyDesk` returns a `Routing`, so its own system
+prompt, the response body and the request id never leave that function.
+
+The monitor alarms into a log, because this repository has nowhere to page. It
+runs after the turn is closed, it can fail no turn, and its own model call is not
+metered against her ceilings, because it is ours rather than hers. Owner of both:
+module 6.
+
+What is owed, and where it lives. The browser's half of SPEC section 10 is not
+here, because there is no browser, and `public/index.html` is still a
+placeholder. Nothing streams either: `callModel` sends a non-streaming request
+and tier 3 writes one message at the end of a turn, so `redactCurrency` runs
+over a whole message. It is written as a pure function of one chunk with no
+state between calls anyway, and the chunk-boundary case is tested, because that
+is the property a redactor cannot be given later: a stateful one that buffers
+until it has seen enough is a stream that stutters, and swapping it out once
+prose is arriving live is a change nobody makes calmly. And `src/conversation.ts`'s
+`turn()` is still the one-process path modules 1 and 2 built, still replayed by
+`test/conversation.test.ts` and four recorded fixtures, and no longer the
+production one; module 6 retires it, because its evals drive the driver.
 
 The browser's half of the outbound check does not exist. `sanitizeOutbound`
 (src/sanitize.ts, lesson 5.5) strips a remote image and a remote link from every
@@ -616,30 +721,35 @@ anything either, while unescaping it to make a transcript read better is exactly
 how the hole would be created. Both are accepted deliberately and are recorded
 in `fenceResult`'s own docstring as decisions. Owner: nobody.
 
-Nothing in production sets `decision`. `decideProposal` is written and tested,
-and its production caller is the accept button on a proposal card, which is
-lesson 5.7: this module has no surface for a person's click. `npm run demo`'s
-sixth scenario answers for her in process, so the keyless proof does reach a
-real link, a real `course.link_clicks` row and a real hand-off message; what is
-missing is her own click, not the path behind it. Owner: lesson 5.7.
+CLOSED at lesson 5.7: nothing in production set `decision`. `decideProposal` was
+written and tested, and its production caller was the accept button on a
+proposal card that did not exist. `acceptCard` (src/channel.ts) is that button's
+one server-side path now, `npm run trip` prints the card and takes it, and
+`npm run demo`'s sixth scenario answers through it rather than in process.
 
-The two paths that REQUEUE a turn rather than end it do not read the table:
-`continueLater`'s hand-back in `src/worker.ts` and the sweeper's requeue arm.
-Neither can emit the same link twice, because the cashier refuses a second
-hand-off of a proposal that already emitted and `unique (proposal_id, item_id)`
-stands behind that; a restarted turn that proposes again, though, gets a new
-proposal id, which that constraint does not cover. Nothing in production writes
-`proposals.decision` yet, so this is not reachable today, and it stops being
-unreachable in the same commit that closes the residual above. Owner: lesson
-5.7, both halves together.
+Open at lesson 5.7, and reachable from lesson 5.7: the two paths that REQUEUE a
+turn rather than end it still do not read `course.link_clicks`. They are
+`continueLater`'s hand-back in `src/worker.ts` and the sweeper's requeue arm,
+and they are the unenforced half of module 4's headline invariant. What changed
+here is not the code on those paths, which is untouched, but the world around
+them: 4.6 could say the second set of links for one trip was unreachable because
+nothing in production wrote `proposals.decision`, and the accept action on the
+card writes it now. Neither path can emit the same link twice, because the
+cashier refuses a second hand-off of a proposal that already emitted and
+`unique (proposal_id, item_id)` stands behind that; a requeued turn that proposes
+again gets a NEW proposal id, which that constraint does not cover. Closing it
+means deciding what a requeue owes a turn that has already handed off, which is a
+harness question rather than a channel one. Owner: module 6, which also owns the
+one turn the sweeper's crash arm can leave alive-looking, for the same reason 4.6
+handed these two over together.
 
 The sweeper's crash arm can leave exactly one turn alive-looking: one that
 handed off twice in two currencies, which `handOffMessage` cannot total
 (`sumMoney` refuses to combine two codes). There is no sentence to write, so the
 failure is logged and the row is left for the next walk rather than marked
 failed, which rule 6 forbids. The cashier refuses a second hand-off today, so
-nothing in production can build such a turn. Owner: module 5, alongside the
-requeue paths.
+nothing in production can build such a turn. Owner: module 6, alongside the
+requeue paths, which is where lesson 5.7 moved both.
 
 The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
@@ -653,7 +763,11 @@ one-line Haiku prompt, which is why it is named rather than fixed under a frozen
 tag. Lesson 5.6 threaded a new required argument through `src/classify.ts`,
 `src/metered.ts` and every other call site of `costMicros` and did not add the
 signal with it, so the exposure is unchanged and only its owner has moved.
-Owner: lesson 5.7.
+Lesson 5.7 did not close it either, and it now has a second reason to be closed
+in one go: `classifyDesk` returns a `Routing`, so the routing call's row carries
+the text the decision was made from and no response body and no request id, and
+both the signal and the capture want the same change, which is that function
+handing back a `ModelResult`. Owner: module 6.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
 and one tool behind it. Both paths now read it once per agent step, which is the
@@ -668,9 +782,12 @@ a single-column foreign key to `course.proposals(id)`, and nothing in the schema
 ties a link row's user to its proposal's user, because `course.proposals` has
 `unique (id, conversation_id)` and no `unique (id, user_id)`, so the composite
 key every other child table here carries is not available. The one writer
-compares them in code and refuses a mismatch (`src/cashier.ts`), and lesson 5.7
-adds the second writer. Owner: module 5, in the migration that next touches this
-table; 0013 is frozen.
+compares them in code and refuses a mismatch (`src/cashier.ts`). Lesson 5.7 was
+expected to add a second writer and did not: `acceptCard` is a second CALLER of
+`handOffToBooking`, which is still the only thing that writes this table, so the
+in-code comparison still covers every row. Owner: module 6, in the migration
+that next touches this table; 0013 is frozen, and the fix needs
+`unique (id, user_id)` on `course.proposals` first.
 
 `gate_results.proposal_id` is always null and `round` is always zero. `runGates`
 accepts both and no caller in `src`, `scripts` or `netlify` supplies either,
@@ -719,14 +836,20 @@ way; that one is caught rather than propagated, so the brief, its
 `src/agents/scout.ts` says what each failure leaves behind. Losing a refund
 fails closed, which is why neither is treated as an emergency. Closing either
 needs a reservation something can sweep, which means rows rather than two
-counters. Owner: lesson 5.7, which builds the monitor that would see it.
+counters. Lesson 5.7 built the monitor, and the monitor is what can SEE it: a
+turn's shape carries what it spent beside what it did, so a batch that stranded
+its reservation is visible as spend with no tools finished. Seeing is not
+sweeping, and nothing sweeps a reservation yet. Owner: module 6.
 
 A `research_destination` row already in `course.tool_calls` is priced at three
 supplier searches whatever it really asked for, because migration 0006 stores no
 input and nothing else in the row can say. A turn that fans out to one city is
 therefore charged for three, which can refuse a later search that would have
 fitted. It fails in the safe direction and the alternative is a migration, so it
-is accepted rather than closed. Owner: lesson 5.7.
+is accepted rather than closed. Lesson 5.7 did not close it: the one migration
+that lesson is allowed went on the capture columns, the feed and the role, and
+adding a column to `course.tool_calls` to price a row correctly is a change to
+the ledger rather than to the channel. Owner: module 6.
 
 `supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
 document outside this repository may be cited from code, and `git ls-tree` finds

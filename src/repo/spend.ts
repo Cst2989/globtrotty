@@ -82,6 +82,33 @@ export async function recordSpend(
 }
 
 /**
+ * What one turn's model calls cost, summed off `course.model_calls`.
+ *
+ * A READ, and never a writer, which is why adding it leaves the four functions
+ * that move `course.conversations.spend_usd_micros` and
+ * `course.daily_usage.cost_micros` at four: `recordSpend` above, `ledgerSink`
+ * which calls it, and `reserve` and `reconcile`. This one touches neither
+ * column and nothing about the ceilings changes because it exists.
+ *
+ * It is not the same number as `turns.spend_usd_micros`, and the difference is
+ * worth knowing before a reader reaches for either. That column is what the
+ * harness accumulated and wrote at the end of an attempt, including a step's
+ * self-reported cost; this is what the ledger rows for the turn actually say.
+ * The monitor (src/monitor.ts) wants the second, because the shape it reports is
+ * built out of rows rather than out of what a step claimed.
+ *
+ * Cast to text and parsed as a bigint, like every money read in this file: these
+ * are micros, and a sum past 2^53 arriving as a float is a wrong number with no
+ * error beside it.
+ */
+export async function turnSpendMicros(sql: postgres.Sql, turnId: string): Promise<bigint> {
+  const [row] = await sql<{ total: string }[]>`
+    select coalesce(sum(cost_micros), 0)::text as total
+      from course.model_calls where turn_id = ${turnId}`
+  return BigInt(row!.total)
+}
+
+/**
  * The two reads `readSpendFailClosed` and `readSpendForNewConversation` share:
  * her daily total and every user's total today. Factored out so the two
  * queries exist once rather than twice, since it is exactly the "the three

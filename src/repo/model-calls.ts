@@ -2,7 +2,79 @@ import type postgres from 'postgres'
 import type { Usage } from '../pricing.js'
 import type { Seat, SeatName } from '../seats.js'
 
-/** Everything one model call is worth recording. */
+export type CapturePolicy = 'full' | 'truncated' | 'sampled_out'
+
+/** Above this, a cheap seat's prompts are truncated rather than stored whole. */
+const TRUNCATE_ABOVE_BYTES = 8_192
+
+/** The most of one prompt a truncated row keeps. */
+const MAX_STORED = 64_000
+
+/**
+ * A fixed policy rather than a sampling rate, for the reason SPEC section 7
+ * gives: `driver` and `front_desk` are ALWAYS `full` and never sampled, because
+ * they are the corpus module 6's evals read, and a sampled-out driver row is a
+ * hole in it. The cheap, high-volume seats truncate above 8KB, because a scout
+ * fan-out is three rows per tool call and the volume is the cost.
+ *
+ * Main names a third always-full seat, `reviewer`. This branch has no reviewer:
+ * `SEATS` has `driver`, `cheap`, `front_desk`, `scout` and `monitor`, and
+ * `GATE_NAMES` deliberately leaves `reviewer` out for the same reason, so that
+ * the pipeline cannot write a row claiming a reviewer ran. Module 6 adds the
+ * seat and adds it here in the same commit; naming it now would be a branch no
+ * `SeatName` can reach and a comment describing main rather than this branch.
+ *
+ * `sampled_out` is in the type and is returned by nothing. The column's check
+ * constraint accepts it (migration 0017) so that a sampler added later is a
+ * change to this function rather than a change to the schema, and so a reader
+ * of the table knows the value is possible.
+ */
+export function capturePolicyFor(
+  seat: SeatName, systemBytes: number, userBytes: number,
+): CapturePolicy {
+  if (seat === 'driver' || seat === 'front_desk') return 'full'
+  return systemBytes + userBytes > TRUNCATE_ABOVE_BYTES ? 'truncated' : 'full'
+}
+
+/**
+ * SPEC section 7: credentials cannot enter the ledger, enforced by a test that
+ * names one case per pattern.
+ *
+ * Prompts carry tool results, and a tool result is text we merely paid for: a
+ * supplier error body can echo a URL with an embedded password. This runs on
+ * everything written to the capture columns, inside `pgSink`, rather than at the
+ * call sites, because a redaction a caller applies is a redaction the next
+ * caller forgets.
+ *
+ * Patterns are deliberately broad: over-redacting a trace costs a little
+ * debuggability, under-redacting writes a live credential to a table module 7
+ * keeps for ninety days.
+ */
+const CREDENTIAL_PATTERNS: RegExp[] = [
+  /sk-ant-[A-Za-z0-9_-]{8,}/g,                       // Anthropic keys
+  /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,            // bearer tokens
+  /\bBasic\s+[A-Za-z0-9+/]{8,}=*/gi,                 // basic auth
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@/gi,   // user:password@host in any URL
+  /\b(api[_-]?key|apikey|access[_-]?token|secret)\b\s*[=:]\s*"?[A-Za-z0-9._~+/-]{8,}"?/gi,
+]
+
+export function redactCredentials(text: string): string {
+  let out = text
+  for (const re of CREDENTIAL_PATTERNS) out = out.replace(re, '[REDACTED]')
+  return out
+}
+
+/**
+ * Everything one model call is worth recording.
+ *
+ * The eight fields above the line have been here since lesson 2.5, apart from
+ * `seatConfig`, which arrived with lesson 5.1's `0014`. The six below it are
+ * lesson 5.7's capture, one per column `0017` added, and every one of them is
+ * OPTIONAL. That is not laziness about types: `memorySink` and the four `pgSink`
+ * callers outside the driver write none of them, and a required field would make
+ * a capture nothing else performs into an edit at fourteen sites, each one
+ * inventing a value for a question it was never asked.
+ */
 export type CallFacts = {
   seat: SeatName
   /** The seat's own settings, so the row records the configuration we intended. */
@@ -15,6 +87,16 @@ export type CallFacts = {
   usage: Usage
   costMicros: bigint
   latencyMs: number
+  /** The provider's own id for the call, for a support conversation about one. */
+  requestId?: string | null
+  /** What `capturePolicyFor` said about this call, when the caller asked it. */
+  capturePolicy?: CapturePolicy
+  systemPrompt?: string | null
+  userPrompt?: string | null
+  /** What we asked the provider to do about thinking, e.g. 'adaptive'. */
+  thinkingMode?: string | null
+  /** The response, as an object. Redacted and re-parsed below, never a string. */
+  response?: unknown
 }
 
 /** Who the call was for. Both ids are null when a call runs outside a turn. */
@@ -30,19 +112,52 @@ export type ModelCallSink = (facts: CallFacts) => Promise<void>
 export function pgSink(sql: postgres.Sql, ctx: TurnContext): ModelCallSink {
   return async (facts) => {
     try {
+      // Redacted HERE and not at the call site, so a caller cannot skip it, and
+      // in UTF-8 BYTES rather than `.length`: `capturePolicyFor`'s threshold is
+      // a byte count, and a code-unit count undercounts CJK text threefold.
+      const system = facts.systemPrompt == null ? null : redactCredentials(facts.systemPrompt)
+      const user = facts.userPrompt == null ? null : redactCredentials(facts.userPrompt)
+      // Null when nothing was captured at all, which is every caller outside
+      // the driver: a row that says 'full' and carries no prompt would describe
+      // a capture that never happened. Derived rather than trusted when a
+      // prompt IS present and the caller stated no policy, so there is no path
+      // to an unclipped prompt.
+      const policy: CapturePolicy | null = system === null && user === null
+        ? (facts.capturePolicy ?? null)
+        : facts.capturePolicy ?? capturePolicyFor(
+          facts.seat,
+          Buffer.byteLength(system ?? '', 'utf8'),
+          Buffer.byteLength(user ?? '', 'utf8'),
+        )
+      const clip = (s: string | null) =>
+        (s !== null && policy === 'truncated' ? s.slice(0, MAX_STORED) : s)
+      // Redact, THEN parse back to an object. `sql.json(<a string>)` stores a
+      // jsonb STRING SCALAR, and `response->>'stop_reason'` on a string scalar is
+      // null forever, so the row would be there and unqueryable. Redacting before
+      // serialising is also what stops a credential nested inside a content block
+      // from slipping through: a top-level scan of the object would never look
+      // inside `content[2].text`.
+      const response: unknown = facts.response === undefined
+        ? null
+        : JSON.parse(redactCredentials(JSON.stringify(facts.response)))
+
       await sql`insert into course.model_calls (
         conversation_id, turn_id, user_id, seat, prompt_version,
         model_requested, model_returned,
         input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens,
         cost_micros, latency_ms,
-        effort, max_tokens, model_config_id
+        effort, max_tokens, model_config_id,
+        request_id, capture_policy, thinking_mode, system_prompt, user_prompt, response
       ) values (
         ${ctx.conversationId}, ${ctx.turnId}, ${ctx.userId}, ${facts.seat}, ${facts.promptVersion},
         ${facts.modelRequested}, ${facts.modelReturned},
         ${facts.usage.input_tokens}, ${facts.usage.cache_creation_input_tokens},
         ${facts.usage.cache_read_input_tokens}, ${facts.usage.output_tokens},
         ${facts.costMicros.toString()}, ${facts.latencyMs},
-        ${facts.seatConfig.effort}, ${facts.seatConfig.maxTokens}, ${facts.seatConfig.modelConfigId}
+        ${facts.seatConfig.effort}, ${facts.seatConfig.maxTokens}, ${facts.seatConfig.modelConfigId},
+        ${facts.requestId ?? null}, ${policy}, ${facts.thinkingMode ?? null},
+        ${clip(system)}, ${clip(user)},
+        ${response === null ? null : sql.json(response as never)}
       )`
     } catch (err) {
       // The call already happened and she already paid for it: a row that

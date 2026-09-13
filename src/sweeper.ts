@@ -259,9 +259,14 @@ export async function sweep(
    * live-turn slot never released.
    *
    * Reaped BEFORE the batch below is chosen, so a turn that is out of attempts is
-   * never also counted as requeued. All three writes, the turn, her message and
-   * the conversation, happen in one statement through chained CTEs, so a sweeper
-   * killed mid statement leaves none of them.
+   * never also counted as requeued. All four writes, the turn, her message, the
+   * conversation and the `failed` row on the feed she watches, happen in one
+   * statement through chained CTEs, so a sweeper killed mid statement leaves none
+   * of them. It said four and listed three from lesson 3.5 until lesson 4.6's
+   * whole-branch fix, which corrected the count to three; the fourth write
+   * arrives here, so the number goes back to four for the first time honestly.
+   * The tags in between keep whichever sentence they were tagged with, because a
+   * history that is edited is not one.
    *
    * The `not exists` sits in `dead` rather than on the message insert, which is
    * where it used to sit. That is the whole of B10 in SQL: a turn with a
@@ -297,6 +302,17 @@ export async function sweep(
     convo as (
       update course.conversations c set status = 'failed', updated_at = now()
         from reap r where c.id = r.conversation_id and c.user_id = r.user_id and c.status = 'working'
+    ),
+    -- The fourth write, and the reason the docstring's count went back up. A
+    -- crash-looped turn is the one ending on this branch that she can be told
+    -- about by nobody but the floor walk, so its feed row is written here or
+    -- nowhere. recordAgentEvent is deliberately not called instead: that one is
+    -- best effort and separate, and this row has to land in the same statement
+    -- as the three beside it, or a sweeper killed mid statement leaves a feed
+    -- saying a turn failed and a turn that is still running.
+    events as (
+      insert into course.agent_events (conversation_id, user_id, turn_id, kind, detail)
+      select r.conversation_id, r.user_id, r.id, 'failed', 'crash_loop' from reap r
     )
     select id from reap`
 

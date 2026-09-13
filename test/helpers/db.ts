@@ -60,6 +60,10 @@ export async function withRealDb<T>(fn: (sql: postgres.Sql, userId: string) => P
     // rows never commit. The first writer that commits one is what has to give
     // this list a line, and it will need a key of its own to delete by.
     await sql`delete from course.user_memory where user_id = ${userId}`
+    // Above the turns delete, because course.agent_events.turn_id is
+    // `on delete set null` (migration 0017): a feed row would survive the turn
+    // that wrote it and outlive the test that made it.
+    await sql`delete from course.agent_events where user_id = ${userId}`
     await sql`delete from course.messages where user_id = ${userId}`
     await sql`delete from course.turns where user_id = ${userId}`
     await sql`delete from course.conversations where user_id = ${userId}`

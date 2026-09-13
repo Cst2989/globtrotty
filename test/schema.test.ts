@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { CONVERSATION_STATUSES } from '../src/channel.js'
 import { FAIL_REASONS } from '../src/engine.js'
 import { SEATS, type SeatName } from '../src/seats.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -115,6 +116,38 @@ describeDb('the constraints and the types', () => {
       }
       const rows = await sql`select seat from course.model_calls where conversation_id = ${c!.id}`
       expect(rows).toHaveLength(Object.keys(SEATS).length)
+    })
+  })
+
+  it('has a sentence for every conversation status the constraint accepts', async () => {
+    // The other half of the pinning in test/channel.test.ts, which walks
+    // CONVERSATION_STATUSES and asserts a distinct sentence for each. This one
+    // reads the constraint itself, so the list in src/channel.ts cannot drift
+    // from the column: a status added to the check with no sentence behind it
+    // would leave her reading "Ready when you are" while a person is in fact
+    // waiting to pick her request up. One list, two readers, which is the same
+    // arrangement GATE_NAMES already has.
+    await withTestDb(async (sql) => {
+      const [row] = await sql<{ def: string }[]>`
+        select pg_get_constraintdef(oid) as def from pg_constraint
+         where conname = 'conversations_status_check'`
+      const accepted = [...row!.def.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!)
+      expect(new Set(accepted)).toEqual(new Set(CONVERSATION_STATUSES))
+    })
+  })
+
+  // 'escalated' is a CONVERSATION status and not a turn fail reason, and the
+  // distinction is the whole of lesson 5.7's decision about it. A turn that
+  // escalated did not fail: it ran, it decided a person was needed, it said so
+  // and it ended `done`. `turns_fail_reason_check` and FAIL_REASONS therefore do
+  // not move in this module, and this case is what says so out loud.
+  it('keeps escalated out of the fail reasons', async () => {
+    await withTestDb(async (sql) => {
+      const [row] = await sql<{ def: string }[]>`
+        select pg_get_constraintdef(oid) as def from pg_constraint
+         where conname = 'turns_fail_reason_check'`
+      expect(row!.def).not.toContain('escalated')
+      expect(REASONS).not.toContain('escalated')
     })
   })
 

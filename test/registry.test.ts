@@ -120,12 +120,26 @@ describe('the registry', () => {
     expect(exact.success).toBe(true)
   })
 
-  it('does not advertise revise_component yet', () => {
-    // Lesson 5.7's tool. Named here so that adding it early, which is easy and
-    // tempting once the card exists, fails a test rather than quietly changing
-    // what the planning desk can do three lessons before the renderer exists.
-    expect(TOOLS.revise_component).toBeUndefined()
-    expect(DESK_TOOLS.planning).not.toContain('revise_component')
+  it('advertises revise_component now that there is a card to revise', () => {
+    // The case this replaces asserted the tool was NOT here, from lesson 5.2 to
+    // 5.6, because a tool for revising a component of a card is a tool the model
+    // will call and get an error from until the card exists.
+    expect(TOOLS.revise_component!.door).toBe('code')
+    expect(DESK_TOOLS.planning).toContain('revise_component')
+  })
+
+  it('carries an escalation whose every field is an id or an enum', () => {
+    // No free text at all, and that is the design: an escalation is read by a
+    // person who is deciding whether to act, and a model-written summary of why
+    // a person is needed is a model persuading a person.
+    expect(TOOLS.escalate_to_human!.door).toBe('code')
+    expect(DESK_TOOLS.planning).toContain('escalate_to_human')
+    expect(TOOLS.escalate_to_human!.schema.safeParse(
+      { reason: 'outside_scope', proposalId: null }).success).toBe(true)
+    expect(TOOLS.escalate_to_human!.schema.safeParse(
+      { reason: 'she is upset', proposalId: null }).success).toBe(false)
+    expect(TOOLS.escalate_to_human!.schema.safeParse(
+      { reason: 'safety', proposalId: null, note: 'trust me' }).success).toBe(false)
   })
 })
 

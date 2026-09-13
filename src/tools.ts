@@ -7,7 +7,9 @@ import { constraintsFromNotebook } from './gates/notebookConstraints.js'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
 import { applyRequirementsPatch, renderNotebook } from './repo/notebook.js'
+import { loadProposal } from './repo/proposals.js'
 import { recordResults } from './repo/toolResults.js'
+import { sanitizeSourceId } from './sanitize.js'
 import type { Claim } from './repo/turns.js'
 import type { Notebook, Provenance } from './notebook.js'
 import { mockSuppliers } from './supplier/mock.js'
@@ -686,6 +688,122 @@ export function scoutRunner(sql: postgres.Sql, ctx: ScoutContext, inner: ToolRun
     }
     return {
       content: results.map((r) => `### ${r.city}\n\n${r.brief}`).join('\n\n'),
+      isError: false,
+    }
+  }
+}
+
+/**
+ * Who a card action belongs to. The same three ids `CashierContext` carries, and
+ * declared separately for the same reason that one is: a `Claim` cannot express
+ * the `turnId: null` a revision made outside a turn would have, and neither of
+ * these two links writes anything fenced.
+ */
+export type CardContext = {
+  conversationId: string
+  userId: string
+  turnId: string | null
+}
+
+/**
+ * The `revise_component` link of the runner chain, inside `ledgerRunner` so a
+ * replayed call is not charged twice and outside `proposalRunner` so the trip it
+ * builds goes through the same seven gates the original did. A revision is a
+ * proposal, and a revision that skipped the gates would be the one path to a
+ * card whose prices nothing rehydrated.
+ *
+ * It does not search and it does not propose. It reads the proposal she is
+ * looking at, hands the model back the components it must keep and the one she
+ * asked to change, in words, and lets the model do the search it already has
+ * tools for. A runner that searched here would be a second, unreviewed copy of
+ * the planning loop living inside a tool.
+ *
+ * Scoped by (proposalId, conversationId) through `loadProposal`, never by id
+ * alone, for the reason that function already gives: a proposal id that leaked
+ * into another thread must not be revisable from there.
+ */
+export function cardRunner(
+  sql: postgres.Sql, ctx: CardContext, inner: ToolRunner,
+): ToolRunner {
+  return async (name, input, callId, signal) => {
+    if (name !== 'revise_component') return inner(name, input, callId, signal)
+    const { proposalId, slot, instruction } = input as
+      { proposalId: string; slot: string; instruction: string }
+    const proposal = await loadProposal(sql, proposalId, ctx.conversationId)
+    // The same sentence a missing proposal and somebody else's proposal both
+    // get, deliberately, and the same one `handOffToBooking` uses: a refusal
+    // that distinguished them would confirm that another thread's id is real.
+    if (!proposal) {
+      return { content: `No proposal ${proposalId} in this conversation.`, isError: true }
+    }
+    const keep = proposal.refs.filter((r) => r.slot !== slot)
+    if (keep.length === proposal.refs.length) {
+      return {
+        content: `Proposal ${proposalId} has no ${slot} component to change. `
+          + `It has: ${proposal.refs.map((r) => r.slot).join(', ')}.`,
+        isError: true,
+      }
+    }
+    // Her words are passed through untouched and the source ids are not: the
+    // ids are the supplier's strings and this text goes into the model's
+    // context, so they get lesson 5.5's mask on the way.
+    return {
+      content: `She asked to change the ${slot}: ${instruction}\n\n`
+        + 'Keep these exactly as they are: '
+        + `${keep.map((r) => `${r.slot} ${sanitizeSourceId(r.sourceId)}`).join(', ')}.\n`
+        + `Search for a replacement ${slot} only, then call propose_itinerary with all `
+        + `${proposal.refs.length} components.`,
+      isError: false,
+    }
+  }
+}
+
+/** How many escalations one traveller may raise in a UTC day before we stop. */
+export const ESCALATIONS_PER_DAY = 3
+
+/**
+ * The `escalate_to_human` link, immediately inside `cardRunner` and inside
+ * `ledgerRunner` with it, so a replayed call does not raise a second escalation.
+ *
+ * The row it writes is the one `course.agent_events` row that is NOT best
+ * effort. Everything else on that feed describes what happened;
+ * `src/worker.ts`'s completion arm reads this one to decide whether the
+ * conversation ends `escalated`, so a lost write here is a request a person
+ * never picks up. It verifies its own effect through `returning`, like every
+ * writer in src/repo.
+ *
+ * The day is UTC, spelled `(now() at time zone 'utc')::date` rather than
+ * `current_date`, for the reason src/repo/spend.ts gives at length: a session's
+ * date silently depends on the connection's TimeZone, and a cap that rolls over
+ * at the wrong hour is a cap that counts the wrong day.
+ */
+export function escalationRunner(
+  sql: postgres.Sql, ctx: CardContext, inner: ToolRunner,
+): ToolRunner {
+  return async (name, input, callId, signal) => {
+    if (name !== 'escalate_to_human') return inner(name, input, callId, signal)
+    const { reason } = input as { reason: string }
+    const [row] = await sql<{ n: number }[]>`
+      select count(*)::int as n from course.agent_events
+       where user_id = ${ctx.userId} and kind = 'escalated'
+         and created_at >= (now() at time zone 'utc')::date`
+    if ((row?.n ?? 0) >= ESCALATIONS_PER_DAY) {
+      // A tool result and not a fail reason: nothing failed, and the model gets
+      // one round trip to say something useful to her instead.
+      return {
+        content: 'This conversation has already been escalated today. Tell her a person '
+          + 'has the request and will come back to her, and do not call this again.',
+        isError: true,
+      }
+    }
+    const written = await sql<{ id: string }[]>`
+      insert into course.agent_events (conversation_id, user_id, turn_id, kind, detail)
+      values (${ctx.conversationId}, ${ctx.userId}, ${ctx.turnId}, 'escalated', ${reason})
+      returning id`
+    if (written.length === 0) throw new Error('escalationRunner: the escalation was not recorded')
+    return {
+      content: 'Recorded. A person from the agency has this now. Tell her so, plainly, '
+        + 'and stop: do not propose anything further in this turn.',
       isError: false,
     }
   }

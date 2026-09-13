@@ -251,6 +251,15 @@ describeDb('sweep', () => {
       // slot is what gates her, and this reap released it. Mirrors the stalled
       // test below, so TURN_FAILED_MESSAGE's last sentence, "Please send it
       // again", is a tested promise here too.
+      // The fourth write, from lesson 5.7, and the reason the docstring on this
+      // statement says "all four" again after module 4 corrected it to three.
+      // The crash arm is the one ending on this branch that no worker is alive
+      // to record, so the feed row she watches is written in the same statement
+      // as the turn, her message and the conversation, or nowhere.
+      const feed = await sql<{ kind: string; detail: string }[]>`
+        select kind, detail from course.agent_events where turn_id = ${turnId}`
+      expect(feed).toEqual([{ kind: 'failed', detail: 'crash_loop' }])
+
       const again = await submitMessage(handlerDeps(sql), {
         userId: USER, conversationId: cid, message: 'anything at all', idempotencyKey: 'w6-retry',
       })

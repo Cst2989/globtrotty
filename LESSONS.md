@@ -37,12 +37,15 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-4 | Staff | npm run migrate, then npm test (test/scout.test.ts) |
 | lesson-5-5 | Fence text you did not write | npm test (test/injection-corpus.test.ts, test/outbound.test.ts) |
 | lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the canary |
+| lesson-5-7 | What she sees | npm run migrate, then npm test (test/channel.test.ts, test/isolation.test.ts, test/capture.test.ts, test/monitor.test.ts), then npm run trip for the offer card |
 
 ## How this branch was built
 
-Module 3's seven lessons and module 4's six, one tag each, and a review between
-every one of them. What the reviews actually caught, across both, and what it
-cost to catch it:
+Module 3's seven lessons, module 4's six and module 5's seven, one tag each, and
+a review between every one of them. The count is corrected here at lesson 5.7,
+the last of the three modules, because the bullets underneath it grew through
+module 5 while the sentence above them still said two modules. What the reviews
+actually caught, across all three, and what it cost to catch it:
 
 **Tests that pass against the wrong implementation.** The commonest defect in the
 whole build, by a distance. A fifty-press test that pressed against a
@@ -203,6 +206,28 @@ required parameter rather than reading a field from a constant: the inventory is
 produced by the typechecker and not by somebody's memory of where the function is
 called.
 
+**A security control that disables a money control is not an improvement.** Row
+level security on `course.daily_usage` would have made the global daily
+ceiling's cross-user sum return one user's rows, so the ceiling would have
+stopped firing with no error anywhere. The two tables that carry money stay
+owner-read and every table that carries a traveller's own rows carries a policy,
+and `test/isolation.test.ts` asserts both halves, including that the global sum
+is still global.
+
+**Anything that captures model input and output is a credential exfiltration
+path by default.** `redactCredentials` runs before serialisation and the result
+is parsed back to an object, and the case that motivates the design is a
+credential nested inside a content block, which a top-level scan would never
+find. That case rested on code inspection until it got a test here.
+
+**A cleaner named for one kind of string will be reached for by the next.**
+`sanitizeSourceId` was narrowed to an allowlist of `[A-Za-z0-9_-]` in lesson
+5.5's fix round, which is exactly right for an id, and lesson 5.7's plan then
+called it on a supplier's NAME as well, where it would have printed "Beachfront
+apartment, Faro, 7 nights" on her card as one unreadable word. Two strings that
+both come from a supplier are not therefore the same kind of string, and the card
+cleans them differently for reasons written at the function that does it.
+
 ## Hand-offs
 
 Closed at lesson 3.5: the `queued` turn with no message that two presses of one
@@ -238,25 +263,24 @@ cannot close is a turn that handed off twice in two currencies, which
 `handOffMessage` cannot total; that turn is logged and left for the next walk
 rather than failed, and README.md names it.
 
-Open at lesson 4.6: nothing in production writes `proposals.decision`. The
-accept button is a person's click on a proposal card, which is lesson 5.7.
-`decideProposal` exists and is tested directly, `test/cashier.test.ts` calls it
-in its own fixture, and `npm run demo`'s sixth scenario calls it in process so
-the keyless proof reaches a real booking link rather than a refusal. What is
-missing is her click, not the path behind it.
+Closed at lesson 5.7: `proposals.decision` is written in production. The accept
+action on the proposal card calls `decideProposal`, `npm run trip` reaches a
+real booking link through a real decision, and `npm run demo`'s sixth scenario
+answers through the card rather than in process.
 
-Open at lesson 4.6: the two paths that REQUEUE a turn rather than end it do not
-read `course.link_clicks`. They are `continueLater`'s hand-back in
-`src/worker.ts` and the sweeper's requeue arm, and this is the unenforced half
-of the module's headline invariant, which is why it is worth naming here rather
-than only in README. Neither can emit the same link twice today: the cashier
-refuses a second hand-off of a proposal that already emitted, and `unique
-(proposal_id, item_id)` stands behind that. A requeued turn that PROPOSES again
-gets a new proposal id, which that constraint does not cover, so the second set
-of links for one trip becomes reachable the moment something in production
-writes `proposals.decision`. That is lesson 5.7, the accept button, and it is
-the same lesson that makes the first residual above reachable. Whoever writes
-5.7 owns both.
+Open at lesson 5.7, and reachable from lesson 5.7: the two paths that REQUEUE a
+turn rather than end it still do not read `course.link_clicks`. They are
+`continueLater`'s hand-back in `src/worker.ts` and the sweeper's requeue arm,
+and they are the unenforced half of module 4's headline invariant. What changed
+here is not the code on those paths, which is untouched, but the world around
+them: 4.6 could say the second set of links for one trip was unreachable because
+nothing in production wrote `proposals.decision`, and the accept action on the
+card writes it now. A requeued turn that proposes again gets a new proposal id,
+which `unique (proposal_id, item_id)` does not cover. Closing it means deciding
+what a requeue owes a turn that has already handed off, which is a harness
+question rather than a channel one. Owner: module 6, which also owns the one
+turn the sweeper's crash arm can leave alive-looking, for the same reason 4.6
+handed these two over together.
 
 Open at lesson 5.3: `classifyDesk` (src/classify.ts) takes no `AbortSignal`.
 `callAndRecord` accepts one and the routing call passes none, so the first model

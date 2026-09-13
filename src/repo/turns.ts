@@ -315,6 +315,19 @@ export async function completeTurn(
     agentMessage: string | null
     parked: boolean
     spendMicros: bigint
+    /**
+     * The conversation status this ending leaves behind, when it is not the one
+     * `parked` implies. One value today, `escalated`, and it is passed by
+     * `src/worker.ts`'s completion arm after it reads the feed.
+     *
+     * It is here rather than in a second writer for the rule this module has
+     * kept everywhere: the turn, her message and the conversation land in one
+     * transaction or not at all. A `update course.conversations set status =
+     * 'escalated'` beside this call would be a second writer of that column on
+     * this path, and a crash between the two would leave a `done` turn on a
+     * conversation that still reads as waiting on her.
+     */
+    conversationStatus?: 'escalated'
   },
 ): Promise<void> {
   await sql.begin(async (tx) => {
@@ -339,8 +352,9 @@ export async function completeTurn(
     // 'working' forever: the exact half-done state this function's opening
     // sentence promises cannot happen. `recordSpend` (src/repo/spend.ts) checks
     // this same statement for the same reason.
+    const status = opts.conversationStatus ?? (opts.parked ? 'awaiting_user' : 'active')
     const conv = await tx`update course.conversations
-                             set status = ${opts.parked ? 'awaiting_user' : 'active'}, updated_at = now()
+                             set status = ${status}, updated_at = now()
                            where id = ${claim.conversationId} and user_id = ${claim.userId}
                           returning id`
     if (conv.length === 0) throw new Error('completeTurn: conversation not found (fail closed)')
@@ -359,7 +373,16 @@ export async function completeTurn(
 export type TurnCloser = (
   sql: postgres.Sql,
   claim: Claim,
-  opts: { state: TurnState; agentMessage: string | null; parked: boolean; spendMicros: bigint },
+  opts: {
+    state: TurnState; agentMessage: string | null; parked: boolean; spendMicros: bigint
+    /**
+     * Optional here and read by only one of the two closers.
+     * `completeReapedTurn` ignores it, and that is correct rather than an
+     * oversight: the sweeper closes a turn whose worker died, so there is
+     * nobody left who knows what the conversation should say next.
+     */
+    conversationStatus?: 'escalated'
+  },
 ) => Promise<void>
 
 /**

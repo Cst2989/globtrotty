@@ -70,6 +70,19 @@ export const SEATS = {
    * anyway, which is the cost this seat exists to avoid.
    */
   scout: seat(HAIKU, null, 2_048),
+  /**
+   * The seat that reads what a finished turn did and says whether it looks
+   * wrong. Haiku, because it decides nothing: `runMonitor` (src/monitor.ts)
+   * alarms into a log and can never fail a turn, so the cheap seat is not a
+   * saving made against correctness. 2048 tokens, the scout's number, because
+   * its answer is one sentence and its input is a JSON summary of one turn.
+   *
+   * No migration: `monitor` is a name `0014`'s `model_calls_seat_check` already
+   * accepts, for the reason lesson 5.3 established for `front_desk` and 5.4 for
+   * `scout`. `test/schema.test.ts` walks every SeatName against that constraint,
+   * so this line is checked rather than assumed.
+   */
+  monitor: seat(HAIKU, null, 2_048),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS

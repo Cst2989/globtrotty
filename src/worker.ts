@@ -1,5 +1,6 @@
 import type postgres from 'postgres'
 import { handOffMessage } from './cashier.js'
+import { redactCurrency } from './channel.js'
 import {
   decideNext, textOfBlocks,
   type ContentBlock, type FailReason, type Limits, type ToolResultBlock, type TurnState,
@@ -8,6 +9,7 @@ import { classifyError } from './errors.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
+import { readFeed, recordAgentEvent } from './repo/agentEvents.js'
 import { emittedLinks } from './repo/linkClicks.js'
 import { readSpendFailClosed, recordSpend } from './repo/spend.js'
 import { AmbiguousToolCallError } from './repo/toolCalls.js'
@@ -220,6 +222,14 @@ export async function runTurn(deps: WorkerDeps, turnId: string): Promise<void> {
     // is a real FailReason (src/engine.ts); errors.ts deliberately does not
     // import the engine, so this call site is where the two are pinned together.
     const { reason } = classifyError(err)
+    // The feed she watches, from lesson 5.7. Best effort and written before the
+    // row it describes, because `failTurn` below can itself throw and a feed
+    // that only records the failures the database was healthy enough to record
+    // is a feed that goes quiet exactly when something is wrong.
+    await recordAgentEvent(sql, {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+      kind: 'failed', detail: reason,
+    })
     // The sentence matters as much as the reason. `fail_reason` is for whoever
     // is on call; this is for her, and without it a crashed turn and a hung turn
     // look identical from her side of the screen. It is the same sentence the
@@ -396,6 +406,13 @@ async function failTurnUnlessLinkEmitted(
   // `emitted` for the same reason the catch above reads it: the fallback below
   // is the write rule 6 forbids on a turn that emitted, close or no close.
   if ((await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted) return
+  // One `failed` row on the feed per turn that really ends failed, which is
+  // what routing all five of these exits through one function buys: the event
+  // is written where the decision is taken rather than at each exit.
+  await recordAgentEvent(deps.sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    kind: 'failed', detail: reason,
+  })
   await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
 }
 
@@ -473,6 +490,14 @@ async function continueLater(
   // a closer would land on `turns.spend_usd_micros`, so a turn that continued
   // three times would report a third of its bill.
   await releaseForContinuation(sql, claim, state, turnSpend.total)
+  // Written after the hand-back rather than before it, and this is the one feed
+  // write on this path that is ordered deliberately: `releaseForContinuation` is
+  // fenced, so a superseded worker throws there and never claims on the feed to
+  // have parked a turn another worker now owns.
+  await recordAgentEvent(sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    kind: 'parked', detail: 'handed back for a later invocation',
+  })
   // The row is already durable at 'queued': a failed re-invocation is not her
   // problem, exactly the way tier 2's own invokeAndLog treats a failed
   // deps.invoke (src/handler.ts). Logged and swallowed rather than left to
@@ -514,6 +539,15 @@ async function loop(
       messages: input ? [{ role: 'user', content: [{ type: 'text', text: input.message }] }] : [],
     }
     progress.state = state
+  } else {
+    // A claim that arrived carrying a transcript: this turn ran before, was
+    // handed back or reaped, and is being picked up where it stopped. It is the
+    // other half of the `parked` row above, and the two together are what makes
+    // a turn that took three invocations readable as one story on the feed.
+    await recordAgentEvent(sql, {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+      kind: 'continued', detail: `attempt ${claim.attempts}`,
+    })
   }
 
   for (;;) {
@@ -639,10 +673,30 @@ async function loop(
       // sentence she was never sent. That property is worth a sentence because
       // the obvious alternative, checking on the way out while recording what
       // the model wrote, would leave the two disagreeing for ever.
-      const outbound = step.text ? sanitizeOutbound(step.text) : { ok: true as const, text: '' }
+      //
+      // `redactCurrency` FIRST and `sanitizeOutbound` second (src/channel.ts,
+      // lesson 5.7). The order is not arbitrary: `sanitizeOutbound` may replace
+      // a whole sentence with its solicitation refusal, and a redactor running
+      // after that would be scanning text this repository wrote rather than text
+      // the model wrote, which is the wrong input for it. Nothing about the
+      // redaction can create a URL or a solicitation, so the reverse dependency
+      // does not exist. Every price she is shown reaches her on the card instead
+      // (`renderProposalCard`), which the server builds from what the gates
+      // rehydrated out of course.tool_results.
+      const outbound = step.text
+        ? sanitizeOutbound(redactCurrency(step.text))
+        : { ok: true as const, text: '' }
       if (!outbound.ok) {
         console.error(`turn ${claim.turnId}: outbound message rewritten`, outbound.reasons)
       }
+      // Read once, here, and passed to the one writer of that column on this
+      // path. Scoped to the CONVERSATION and not to this turn, deliberately:
+      // nothing in this branch hands a conversation back from the person who
+      // picked it up, so a later turn that answered her would otherwise quietly
+      // clear the flag and leave a request with a person and a thread that says
+      // it is waiting on her.
+      const escalated = (await readFeed(sql, claim.conversationId, claim.userId))
+        .some((e) => e.kind === 'escalated')
       await completeTurn(sql, claim, {
         // Null, not an empty string, on a blank answer: completeTurn writes a
         // row for anything that is not null, and an empty bubble in her
@@ -650,6 +704,11 @@ async function loop(
         // the same road, so a reply that was nothing but a stripped link is no
         // bubble rather than an empty one.
         state, agentMessage: outbound.text || null, parked: true, spendMicros: turnSpend.total,
+        // The turn ended `done` and no fail reason was written, because nothing
+        // failed: it ran, it decided a person was needed, and it said so. What
+        // changed is who is expected to act next, which is a property of the
+        // conversation and not of the turn.
+        ...(escalated ? { conversationStatus: 'escalated' as const } : {}),
       })
       return
     }
@@ -683,6 +742,16 @@ async function loop(
      * keep moving while it is in flight and not only either side of it.
      */
     let result: unknown
+    // The two feed rows a reader of `course.agent_events` counts against each
+    // other: a `tool_start` with no `tool_done` beside it is the process that
+    // died mid call, and it is the same fact `countSupplierCalls` reads off a
+    // stuck `pending` ledger row (lesson 5.2). Best effort, so neither can take
+    // a turn down, and named by the TOOL rather than by its input, because this
+    // is a feed she may watch and a tool's input is the model's words.
+    await recordAgentEvent(sql, {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+      kind: 'tool_start', detail: step.name,
+    })
     try {
       result = await withHeartbeat(deps, claim, (signal) => step.run(signal))
     } catch (err) {
@@ -696,6 +765,10 @@ async function loop(
       await failTurnUnlessLinkEmitted(deps, claim, state, turnSpend.total, 'ambiguous_tool_call')
       return
     }
+    await recordAgentEvent(sql, {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+      kind: 'tool_done', detail: step.name,
+    })
     await heartbeat(sql, claim)
     // Counted whether the tool ran or was replayed, which is a change from the
     // version that owned the ledger here and only billed the fresh branch. A

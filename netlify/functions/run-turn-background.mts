@@ -1,20 +1,22 @@
+import type postgres from 'postgres'
 import { makeDriver, provenanceFor } from '../../src/agents/driver.js'
 import { cashierRunner } from '../../src/cashier.js'
 import { liveClient } from '../../src/client.js'
 import { TODAY } from '../../src/conversation.js'
-import { connect } from '../../src/db.js'
+import { connect, connectAsWorker, withUser } from '../../src/db.js'
 import { loadEnv } from '../../src/env.js'
 import { constraintsFromNotebook } from '../../src/gates/pipeline.js'
 import { proposalRunner } from '../../src/gates/runner.js'
 import { httpInvoke } from '../../src/invoke.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
+import { runMonitor } from '../../src/monitor.js'
 import { loadNotebook } from '../../src/repo/notebook.js'
 import type { Claim } from '../../src/repo/turns.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
 import {
-  corpusRunner, doorRunner, ledgerRunner, notebookRunner, scoutRunner, scoutStayFrom,
-  supplierRunner, type ToolRunner,
+  cardRunner, corpusRunner, doorRunner, escalationRunner, ledgerRunner, notebookRunner,
+  scoutRunner, scoutStayFrom, supplierRunner, type ToolRunner,
 } from '../../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../../src/worker.js'
 
@@ -45,7 +47,29 @@ export default async (req: Request): Promise<Response> => {
   }
 
   const startedMs = Date.now()
+  /**
+   * TWO pools, and which is which matters more than it looks, because both are
+   * `postgres.Sql` and a later edit that swapped them would type-check.
+   *
+   * `sql` is the OWNER. It runs everything `0017` granted `course_worker`
+   * nothing on: the ledger's `course.tool_calls`, the gates' `course.gate_results`,
+   * `pgSink`'s `course.model_calls` and the ceiling's `course.daily_usage`. It
+   * is also what `runTurn` itself is handed, for the reason `withUser`'s
+   * docstring gives: a turn is up to fourteen minutes of work whose heartbeat
+   * has to be visible to the sweeper WHILE it runs and whose `course.link_clicks`
+   * rows have to be committed before the model is handed the URLs built from
+   * them, and one transaction can give neither.
+   *
+   * `workerSql` is `course_worker`. What runs on it is the work that fits inside
+   * one committed transaction, which today is the per-step notebook read below.
+   * That is less than this lesson's README paragraph would like, and the README
+   * says so rather than this comment claiming otherwise: putting the rest of a
+   * turn's own rows under the role means giving the harness a unit of work
+   * smaller than a turn, and that is module 6's, together with the two tables
+   * the runner chain writes that have no policy at all.
+   */
   const sql = connect(env.DATABASE_URL, 2)
+  const workerSql = connectAsWorker(env.DATABASE_URL, 2)
 
   // ONE pair for the whole invocation, built before anything runs and shared by
   // the searches and by the cashier's re-quote. A cashier re-quoting against a
@@ -57,16 +81,25 @@ export default async (req: Request): Promise<Response> => {
   const client = liveClient()
 
   /**
-   * Eight wrappers, outermost first. The door checks the desk allowlist and
-   * the schema before anything durable happens and fences the answer on the
-   * way back (lesson 5.2); the ledger decides whether the tool runs at all
-   * (lesson 3.4); the notebook records what she stated (lesson 5.2); the scout
-   * runner sends up to three scouts at once under one reservation and joins
-   * their briefs (lesson 5.4); the cashier re-quotes and emits the links
-   * (lesson 4.6); the proposal runner puts a proposal through the gates
-   * (lesson 4.5); the corpus records what a search returned (lesson 4.3); the
-   * supplier runner makes the call. Each layer knows one thing, and the live
-   * adapters get all of it by being handed to the innermost one.
+   * Ten wrappers, outermost first: door, ledger, notebook, scout, card,
+   * escalation, cashier, proposal, corpus, supplier. The door checks the desk
+   * allowlist and the schema before anything durable happens and fences the
+   * answer on the way back (lesson 5.2); the ledger decides whether the tool
+   * runs at all (lesson 3.4); the notebook records what she stated (lesson 5.2);
+   * the scout runner sends up to three scouts at once under one reservation and
+   * joins their briefs (lesson 5.4); the card runner turns "change the hotel"
+   * into the components to keep and one search to make (lesson 5.7); the
+   * escalation runner records that a person is needed, rate limited per day
+   * (lesson 5.7); the cashier re-quotes and emits the links (lesson 4.6); the
+   * proposal runner puts a proposal through the gates (lesson 4.5); the corpus
+   * records what a search returned (lesson 4.3); the supplier runner makes the
+   * call. Each layer knows one thing, and the live adapters get all of it by
+   * being handed to the innermost one.
+   *
+   * The two lesson 5.7 added are both INSIDE the ledger, so a replayed step
+   * neither raises a second escalation nor pays twice for a revision, and the
+   * card runner is outside the proposal runner, because a revision ends in a new
+   * proposal going through the same seven gates the original did.
    *
    * The scout sits INSIDE the ledger, so a replayed `research_destination`
    * replays the briefs rather than paying for three more model calls, and
@@ -96,7 +129,20 @@ export default async (req: Request): Promise<Response> => {
     // The raw notebook is kept as well as the constraints: the gates want the
     // three fields `constraintsFromNotebook` keeps, and a scouting search wants
     // her nights and her party size, which it drops.
-    const nb = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+    // The one read on the worker pool, and the shape every later one takes: one
+    // short transaction that says whose rows it is allowed to see before it asks
+    // for any. `loadNotebook` carries its own `and user_id =` clause as well, so
+    // this is belt and braces by design: the clause is what scopes the query and
+    // the policy is what catches the day somebody writes one without it.
+    //
+    // The cast is postgres.js's own shape and is the reason `withUser` hands
+    // back a `TransactionSql` rather than pretending to hand back a `Sql`: a
+    // transaction handle has `savepoint` and no `begin`, so a repo function that
+    // opens its own transaction cannot be given one, and having to write this
+    // line is the moment to ask whether the work fits in one. `loadNotebook` is
+    // a single select, so it does.
+    const nb = await withUser(workerSql, ctx.userId, (tx) =>
+      loadNotebook(tx as unknown as postgres.Sql, ctx.conversationId, ctx.userId))
     const notebook = constraintsFromNotebook(nb, TODAY)
     const gateCtx = {
       conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
@@ -136,18 +182,24 @@ export default async (req: Request): Promise<Response> => {
             conversationId: claim.conversationId, userId: claim.userId,
             turnId: claim.turnId, limits: DEFAULT_LIMITS, now: Date.now,
           },
-          cashierRunner(
+          cardRunner(
             sql, gateCtx,
-            { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-            proposalRunner(
-              sql,
-              { ...gateCtx, notebook, now: () => new Date() },
-              // The searches ask for the SAME currency the gates expect, off the
-              // same constraints object, so a corpus and the currency gate cannot
-              // disagree by construction. Null until she states a budget, which
-              // supplierRunner reads as TRIP_CURRENCY (lesson 4.5); a stored USD
-              // budget makes both sides USD in one move.
-              corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+            escalationRunner(
+              sql, gateCtx,
+              cashierRunner(
+                sql, gateCtx,
+                { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+                proposalRunner(
+                  sql,
+                  { ...gateCtx, notebook, now: () => new Date() },
+                  // The searches ask for the SAME currency the gates expect, off
+                  // the same constraints object, so a corpus and the currency
+                  // gate cannot disagree by construction. Null until she states a
+                  // budget, which supplierRunner reads as TRIP_CURRENCY (lesson
+                  // 4.5); a stored USD budget makes both sides USD in one move.
+                  corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+                ),
+              ),
             ),
           ),
         ),
@@ -203,6 +255,19 @@ export default async (req: Request): Promise<Response> => {
         decision.turnId,
       )
       console.log(`turn ${decision.turnId}: finished in ${Date.now() - startedMs} ms`)
+      // The monitor, after the turn is closed and never before it (lesson 5.7).
+      // It reads what the turn did and alarms into the log; it can fail no turn,
+      // which is a rule `runMonitor` keeps by swallowing everything, including
+      // this read. Its own model call is on the cheap seat and is not metered
+      // against her ceilings, because it is ours rather than hers, which is a
+      // gap named in README.md rather than left to be discovered in a bill.
+      const [row] = await sql<{ conversation_id: string; user_id: string }[]>`
+        select conversation_id, user_id from course.turns where id = ${decision.turnId}`
+      if (row) {
+        await runMonitor({ sql, client, now: Date.now }, {
+          userId: row.user_id, conversationId: row.conversation_id, turnId: decision.turnId,
+        })
+      }
     } catch (err) {
       // Every classified failure is already recorded on the row by runTurn's
       // own catch before it re-throws; this catch exists only so THIS
@@ -216,7 +281,7 @@ export default async (req: Request): Promise<Response> => {
       console.error(`turn ${decision.turnId} failed`, err)
     }
   } finally {
-    await sql.end({ timeout: 5 })
+    await Promise.all([sql.end({ timeout: 5 }), workerSql.end({ timeout: 5 })])
   }
 
   return new Response('ok', { status: 200 })

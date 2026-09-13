@@ -3,6 +3,7 @@ import 'dotenv/config'
 import { config } from 'dotenv'
 import { makeDriver, provenanceFor } from '../src/agents/driver.js'
 import { cashierRunner } from '../src/cashier.js'
+import { acceptCard, cardForProposal } from '../src/channel.js'
 import { liveClient } from '../src/client.js'
 import { TODAY } from '../src/conversation.js'
 import { connect } from '../src/db.js'
@@ -19,8 +20,8 @@ import { estimateMicros } from '../src/repo/reservation.js'
 import { SEATS } from '../src/seats.js'
 import { liveSuppliers } from '../src/supplier/live.js'
 import {
-  corpusRunner, doorRunner, notebookRunner, scoutRunner, scoutStayFrom, supplierRunner,
-  type ToolRunner,
+  cardRunner, corpusRunner, doorRunner, escalationRunner, notebookRunner, scoutRunner,
+  scoutStayFrom, supplierRunner, type ToolRunner,
 } from '../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../src/worker.js'
 
@@ -55,10 +56,12 @@ try {
      * minus the ledger: one process, no crash to resume from, and nothing here
      * replays a tool call.
      *
-     * Seven wrappers here and eight on tier 3, and the one missing is the
+     * Nine wrappers here and ten on tier 3, and the one missing is the
      * ledger. The scout runner (lesson 5.4) sits directly inside the notebook
      * on both, which on tier 3 also puts it inside the ledger so a replayed
-     * fan-out replays the briefs; here there is nothing to replay from.
+     * fan-out replays the briefs; here there is nothing to replay from. The card
+     * and escalation runners (lesson 5.7) sit between the scout and the cashier
+     * on both, in that order.
      *
      * `hand_off_to_booking` is the one tool in this chain the missing ledger
      * would matter for, and it is left out anyway. On tier 3 the ledger is what
@@ -103,16 +106,22 @@ try {
             conversationId, userId: DEMO_USER, turnId,
             limits: DEFAULT_LIMITS, now: Date.now,
           },
-          cashierRunner(
+          cardRunner(
             sql, gateCtx,
-            { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-            proposalRunner(
-              sql,
-              { ...gateCtx, notebook, now: () => new Date() },
-              // The searches ask for the SAME currency the gates expect, off the
-              // same constraints object, so a corpus and the currency gate cannot
-              // disagree by construction.
-              corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+            escalationRunner(
+              sql, gateCtx,
+              cashierRunner(
+                sql, gateCtx,
+                { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+                proposalRunner(
+                  sql,
+                  { ...gateCtx, notebook, now: () => new Date() },
+                  // The searches ask for the SAME currency the gates expect, off
+                  // the same constraints object, so a corpus and the currency
+                  // gate cannot disagree by construction.
+                  corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+                ),
+              ),
             ),
           ),
         ),
@@ -154,6 +163,47 @@ try {
       select content from course.messages
        where turn_id = ${turnId} and role = 'agent' order by seq desc limit 1`
     console.log(reply?.content ?? '(no reply was written)')
+
+    // The card, and the accept button behind it (lesson 5.7). The prose above
+    // carries no amount at all, because `src/worker.ts` runs `redactCurrency`
+    // over it before anything reaches course.messages; every price below was
+    // read back out of course.tool_results by the gates. That pair is the
+    // lesson, and printing them one after the other is the only way to see it.
+    const [pending] = await sql<{ id: string }[]>`
+      select id from course.proposals
+       where conversation_id = ${conversationId} and decision is null
+       order by seq desc limit 1`
+    if (pending) {
+      const card = await cardForProposal(sql, {
+        proposalId: pending.id, conversationId, currency: null,
+      })
+      if (card) {
+        console.log(`\n== the offer ${'='.repeat(52)}`)
+        for (const c of card.components) {
+          console.log(`  ${c.slot.padEnd(9)} ${c.name.padEnd(38)} ${c.price.padStart(9)}   [change]`)
+        }
+        console.log(`  ${'-'.repeat(64)}`)
+        console.log(`  ${'total'.padEnd(48)} ${card.total.padStart(9)}`)
+        console.log(`  ${card.footer}`)
+        console.log('  [accept]')
+
+        // The click. One function, `acceptCard`, and it is the only production
+        // caller `decideProposal` has: the terminal here, the demo's sixth
+        // scenario and whatever browser eventually exists all take this path.
+        const accepted = await acceptCard(sql, {
+          proposalId: pending.id, conversationId, userId: DEMO_USER, turnId,
+          suppliers, limits: DEFAULT_LIMITS, now: new Date(),
+        })
+        if (accepted.ok) {
+          console.log(`\n  accepted. verified ${accepted.verified}, `
+            + `${accepted.links.length} booking link(s):`)
+          for (const l of accepted.links) console.log(`    ${l.url}`)
+        } else {
+          console.log(`\n  the cashier refused: ${accepted.refusal.kind}, `
+            + `${accepted.refusal.detail}`)
+        }
+      }
+    }
 
     // What this module added, read back off the rows rather than asserted: which
     // desk the classifier chose, which seat every call was billed on, and the

@@ -40,10 +40,14 @@ describe('desks', () => {
     expect(toolsForDesk('front')).toEqual([])
     expect(DESK_TOOLS.front).toEqual([])
   })
-  it('lets the planning desk write the notebook, ask, scout, search and propose, and nothing else', () => {
+  it('lets the planning desk write the notebook, ask, scout, search, propose, revise and escalate', () => {
+    // The last two are lesson 5.7's: one line of a card changed, and a request
+    // handed to a person. Both are `door: 'code'`, and both are on the planning
+    // desk only, because the front desk publishes no tools at all.
     expect((toolsForDesk('planning') as { name: string }[]).map((t) => t.name))
       .toEqual(['update_requirements', 'ask_user', 'research_destination', 'search_flights',
-                'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
+                'search_hotels', 'propose_itinerary', 'hand_off_to_booking',
+                'revise_component', 'escalate_to_human'])
   })
   it('seats the front desk on Haiku and the planning desk on Opus', () => {
     expect(loadDesk('front').seat.model).toBe('claude-haiku-4-5-20251001')
@@ -139,6 +143,10 @@ describe('desks', () => {
    * to make impossible. Lesson 5.2 moved the registry inside the harness and
    * added two tools to this desk, and lesson 5.4 added `research_destination`
    * and `scoutRunner` with it; a chain that loses a wrapper fails here first.
+   * Lesson 5.7 added `revise_component` and `escalate_to_human` and their two
+   * wrappers, and this case is where forgetting either of them would have
+   * surfaced: a card with a change button that answers "Unknown tool
+   * revise_component" is worse than a card with no change button.
    */
   it('wires a runner for every tool the planning desk sends into every driver', () => {
     const wrappers: Record<string, string> = {
@@ -146,6 +154,8 @@ describe('desks', () => {
       research_destination: 'scoutRunner',
       propose_itinerary: 'proposalRunner',
       hand_off_to_booking: 'cashierRunner',
+      revise_component: 'cardRunner',
+      escalate_to_human: 'escalationRunner',
     }
     /**
      * `ask_user` is answered by the DRIVER and never by the chain: it is a
@@ -163,7 +173,8 @@ describe('desks', () => {
     const needed = DESK_TOOLS.planning
       .filter((tool) => !tool.startsWith('search_') && !answeredByTheDriver.includes(tool))
       .map((tool) => wrappers[tool] ?? `NO WRAPPER NAMED FOR ${tool}`)
-    expect(needed).toEqual(['notebookRunner', 'scoutRunner', 'proposalRunner', 'cashierRunner'])
+    expect(needed).toEqual(['notebookRunner', 'scoutRunner', 'proposalRunner', 'cashierRunner',
+                            'cardRunner', 'escalationRunner'])
     expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'])
     for (const file of drivers()) {
       const source = readFileSync(path.join(REPO_ROOT, file), 'utf8')

@@ -11,7 +11,7 @@ import { costMicros } from '../pricing.js'
 import type { Provenance } from '../notebook.js'
 import { readDeskDecision, writeDesk } from '../repo/conversations.js'
 import { readUserMemory, renderMemory } from '../repo/memory.js'
-import { pgSink } from '../repo/model-calls.js'
+import { capturePolicyFor, pgSink } from '../repo/model-calls.js'
 import { loadNotebook, renderNotebook } from '../repo/notebook.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { SEATS, type SeatName } from '../seats.js'
@@ -223,12 +223,42 @@ export function makeDriver(deps: DriverDeps): Agent {
     // both look like "write a row after the call": a row that describes what
     // happened may be lost, a row that decides what may happen next may not.
     //
+    //
+    // The capture, from lesson 5.7. `capturePolicyFor` is asked here rather than
+    // left to `pgSink` to infer, because the policy is a fact about the SEAT and
+    // this is the only place that knows both the seat and the bytes. The
+    // redaction is not done here and is deliberately `pgSink`'s: a redaction a
+    // caller applies is a redaction the next caller forgets.
+    //
+    // `userPrompt` is the last thing said to the model on this call and not the
+    // whole transcript. The transcript is already durable in
+    // `course.turns.state`, and copying it into a column on every step would
+    // store one conversation a quadratic number of times.
+    const systemPrompt = args.system
+    const userPrompt = textOfBlocks(ctx.state.messages.at(-1)?.content ?? [])
     await pgSink(sql, {
       userId: ctx.userId, conversationId: ctx.conversationId, turnId: ctx.turnId,
     })({
       seat: seatName, seatConfig: seat, promptVersion: desk.promptVersion,
       modelRequested: seat.model, modelReturned: result.model,
       usage: result.usage, costMicros: actual, latencyMs: result.latencyMs,
+      requestId: result.requestId,
+      capturePolicy: capturePolicyFor(
+        seatName,
+        Buffer.byteLength(systemPrompt, 'utf8'),
+        Buffer.byteLength(userPrompt, 'utf8'),
+      ),
+      systemPrompt, userPrompt,
+      // Read off the seat by the same rule `buildRequest` applies when it
+      // assembles the request: a seat with an effort setting is an Opus 5 seat
+      // and gets adaptive thinking, a seat without one is Haiku and gets
+      // neither. SPEC section 7 names a silently changed provider DEFAULT as a
+      // drift vector, so what we ASKED for belongs in the row.
+      thinkingMode: seat.effort !== null ? 'adaptive' : null,
+      response: result.kind === 'refused'
+        ? { stop_reason: 'refusal',
+            stop_details: { category: result.category, explanation: result.explanation } }
+        : { stop_reason: result.stopReason, content: result.content },
     })
 
     if (result.kind === 'refused') {
@@ -570,6 +600,22 @@ export async function selectDesk(deps: DriverDeps, ctx: AgentContext): Promise<D
     seat: 'front_desk', seatConfig: SEATS.front_desk, promptVersion: routing.promptVersion,
     modelRequested: SEATS.front_desk.model, modelReturned: SEATS.front_desk.model,
     usage: routing.usage, costMicros: routing.costMicros, latencyMs: routing.latencyMs,
+    // The half of lesson 5.7's capture this call can honestly fill. `front_desk`
+    // is always `full` (capturePolicyFor), and what is captured is the text the
+    // routing decision was made from, which is what anybody debugging a misroute
+    // reads. The other three columns stay null on this row rather than carrying
+    // an invention: `classifyDesk` returns a `Routing` (src/classify.ts), so its
+    // own system prompt, the response body and the request id never leave that
+    // function. Its prompt is versioned on the row already, through
+    // `routing.promptVersion`. Giving it the other three means having it hand
+    // back a `ModelResult`, which is a change to the one call in this module
+    // that a fence cannot cancel either, and both belong to the same later
+    // lesson rather than to this one. README.md carries it.
+    capturePolicy: 'full',
+    userPrompt: text,
+    // Haiku takes no thinking setting, and `buildRequest` sends none for a seat
+    // with no effort. Null here says that rather than leaving it unsaid.
+    thinkingMode: null,
   })
   return { kind: 'desk', desk: routing.desk, costMicros: routing.costMicros }
 }

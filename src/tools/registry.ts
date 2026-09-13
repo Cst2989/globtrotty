@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ProposalRefsSchema } from '../gates/rehydrateGate.js'
+import { ProposalRefsSchema, SLOT_NAMES } from '../gates/rehydrateGate.js'
 
 export type Desk = 'front' | 'planning'
 
@@ -93,6 +93,38 @@ const UpdateRequirements = z.strictObject({
     .describe('The fields she has stated, by name. Never invent a value she did not state.'),
 })
 
+/**
+ * One line of a card she is looking at, changed. `slot` is `SLOT_NAMES`, the
+ * same vocabulary `ProposalRefsSchema` publishes and `checkSlots` enforces, so
+ * a revision cannot name a component a proposal could never have had.
+ *
+ * `instruction` is her words and is bounded at 300 characters, like `ask_user`'s
+ * questions: it goes back into the model's own context, and a tool input with no
+ * ceiling is an input a long supplier payload can be copied into.
+ */
+const ReviseComponent = z.strictObject({
+  proposalId: z.string().describe('The proposal she is looking at'),
+  slot: z.enum(SLOT_NAMES).describe('Which component of it she wants changed'),
+  instruction: z.string().min(1).max(300)
+    .describe('What she asked for, in her words. Never a price and never a source id.'),
+})
+
+/**
+ * Fixed format, and every field is an id or a member of an enum. There is no
+ * free text here and that is the design: an escalation is read by a person who
+ * is deciding whether to act, and a model-written summary of why a person is
+ * needed is a model persuading a person. The turn's own transcript is what they
+ * read; this row is what routes it.
+ *
+ * Rate limited per user per day, in the handler, because an escalation is a
+ * person's time and a model in a loop can spend a great deal of it.
+ */
+const EscalateToHuman = z.strictObject({
+  reason: z.enum(['outside_scope', 'supplier_dispute', 'safety', 'she_asked'])
+    .describe('Why a person is needed. One of exactly these four.'),
+  proposalId: z.string().nullable().describe('The proposal this is about, or null'),
+})
+
 const ResearchDestination = z.strictObject({
   cities: z.array(z.string().min(1).max(60)).min(1).max(3)
     .describe('Up to three cities to look at in parallel'),
@@ -149,6 +181,17 @@ export const TOOLS: Record<string, ToolDef> = {
       + 'proposal id and nothing else: the server re-checks every price, builds every link '
       + 'itself, and refuses if anything moved or could not be confirmed.',
   },
+  revise_component: {
+    name: 'revise_component', door: 'code', schema: ReviseComponent,
+    description: 'She asked to change one part of a proposal she is looking at. Search again for '
+      + 'that slot only, keep every other component as it is, and propose the whole trip again.',
+  },
+  escalate_to_human: {
+    name: 'escalate_to_human', door: 'code', schema: EscalateToHuman,
+    description: 'Hand this request to a person at the agency. Use it when the request is outside '
+      + 'what you can do, when she asks for a person, or when a supplier dispute or a safety '
+      + 'matter needs one. Say so plainly to her afterwards and propose nothing further.',
+  },
 }
 
 /**
@@ -159,7 +202,8 @@ export const TOOLS: Record<string, ToolDef> = {
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
   planning: ['update_requirements', 'ask_user', 'research_destination', 'search_flights',
-             'search_hotels', 'propose_itinerary', 'hand_off_to_booking'],
+             'search_hotels', 'propose_itinerary', 'hand_off_to_booking',
+             'revise_component', 'escalate_to_human'],
 }
 
 /**
