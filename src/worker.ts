@@ -95,6 +95,13 @@ export type AgentStep =
        * agent, which have no assistant turn to echo, are unaffected.
        */
       assistantContent?: ContentBlock[]
+      /**
+       * Micros the tool debited ITSELF during run() — a reviewer call inside
+       * propose_itinerary. Read after run() resolves and added to the turn
+       * total; never passed to recordSpend. Same rule as recordedMicros, one
+       * step later in time because the amount is not known before run().
+       */
+      spent?: { micros: bigint }
     }
 
 export type Agent = (ctx: AgentContext) => Promise<AgentStep>
@@ -378,6 +385,7 @@ async function loop(
       // recording this tool call's result as authoritative.
       await heartbeat(sql, claim)
       await finishToolCall(sql, claim.turnId, step.callId, result)
+      if (step.spent !== undefined) turnSpend.total += step.spent.micros
       await heartbeat(sql, claim)
       await recordSpend(sql, {
         userId: claim.userId, conversationId: claim.conversationId,

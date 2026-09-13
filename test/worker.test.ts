@@ -309,6 +309,52 @@ describeDb('runTurn end to end', () => {
   })
 
   /**
+   * `step.spent` (src/agents/proposalPath.ts, Task 5) is a THIRD kind of micros
+   * on a tool step: not owed by the worker (`costMicros`) and not debited before
+   * the step started (`recordedMicros`), but debited by the tool's OWN run() —
+   * a reviewer call inside propose_itinerary — partway through, so the amount
+   * is only known once run() resolves. `loop()` must fold it into the turn
+   * total exactly once, and it must never reach `recordSpend`: the tool's
+   * reviewer call already reserved/reconciled it against the conversation
+   * ledger itself.
+   */
+  it('adds a tool step\'s self-debited spent.micros to the turn total, once, without recordSpend', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql)
+      let handedOut = false
+      const spent = { micros: 0n }
+      const agent: Agent = async () => {
+        if (handedOut) {
+          return { kind: 'message' as const, text: 'done', costMicros: 0n }
+        }
+        handedOut = true
+        return {
+          kind: 'tool' as const, callId: 'toolu_spent', name: 'propose_itinerary',
+          run: async () => {
+            spent.micros += 700n     // the tool's own self-debited reviewer call
+            return 'ok'
+          },
+          costMicros: 5_000n,        // the supplier/gate side: the worker still owes it
+          recordedMicros: 40_000n,   // the driver's own model call: already debited
+          spent,
+        }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      const [turn] = await sql<TurnRow[]>`
+        select spend_usd_micros from turns where id = ${r.turnId}`
+      const [conv] = await sql<ConversationRow[]>`
+        select spend_usd_micros from conversations where id = ${r.conversationId}`
+      // costMicros (5_000n) + recordedMicros (40_000n) + spent.micros (700n).
+      expect(BigInt(turn!.spend_usd_micros)).toBe(5_000n + 40_000n + 700n)
+      // ...but recordSpend only ever sees costMicros (5_000n + the message
+      // step's 0n): the 700n never crosses it, because the tool already
+      // reserved/reconciled that itself.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(5_000n)
+    })
+  })
+
+  /**
    * Defect 4. `loop()` appended the tool RESULT to the transcript but never the
    * assistant turn that ASKED for the tool. A `tool_result` block with no
    * matching `tool_use` is a 400 from the provider on the very next request, so

@@ -31,6 +31,18 @@ const toolResponse = (name: string, input: unknown) => ({
   stop_reason: 'tool_use', model: 'claude-opus-5', _request_id: 'req_2', usage,
 })
 
+// The reviewer's own usage (test/reviewer.test.ts): 40 output tokens, not the
+// driver's 50 above — reviewOffer prices on THIS response, and 1000*5 + 40*25
+// is exactly the 6_000n asserted below.
+const reviewerUsage = {
+  input_tokens: 1000, cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0, output_tokens: 40,
+}
+const verdictResponse = (v: unknown) => ({
+  content: [{ type: 'text', text: JSON.stringify(v) }], stop_reason: 'end_turn',
+  model: 'claude-opus-5', _request_id: 'req_r', usage: reviewerUsage,
+})
+
 type Seeded = { userId: string; conversationId: string; turnId: string }
 
 describeDb('driver', () => {
@@ -523,17 +535,26 @@ describeDb('driver', () => {
       await recordResults(sql, {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params, items,
       })
-      const create = vi.fn().mockResolvedValue(toolResponse('propose_itinerary',
-        { refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' }] }))
+      const create = vi.fn()
+        .mockResolvedValueOnce(toolResponse('propose_itinerary',
+          { refs: [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'outbound' }] }))
+        .mockResolvedValueOnce(verdictResponse({ approved: true, issues: [] }))
       const step = await makeDriver(deps(sql, create))(ctx(s))
       if (step.kind !== 'tool') throw new Error('unreachable')
       const out = String(await step.run())
-      expect(out).toMatch(/accepted/i)
+      expect(out).toMatch(/approved/i)
       expect(out).toContain(items[0]!.sourceId)
+      expect(out).toContain('proposal_id')
       const rows = await sql`
         select gate, passed from gate_results where conversation_id = ${s.conversationId}`
       expect(rows.length).toBeGreaterThan(0)
       expect(rows.some((r) => r.gate === 'provenance' && r.passed === true)).toBe(true)
+      const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
+      expect(proposals).toHaveLength(1)
+      expect(step.spent!.micros).toBe(6_000n)
+      const calls = await sql`
+        select seat from model_calls where conversation_id = ${s.conversationId} order by created_at`
+      expect(calls.map((r) => r.seat)).toEqual(['driver', 'reviewer'])
     })
   })
 
