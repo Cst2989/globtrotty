@@ -124,6 +124,12 @@ export interface Supplier {
   readonly capabilities: SupplierCapabilities
   search(params: SearchParams, signal?: AbortSignal): Promise<SupplierItem[]>
   quote(sourceId: string, params: SearchParams, signal?: AbortSignal): Promise<QuoteOutcome>
+  /**
+   * Server-built, host-checked, tracking-ref-embedded booking link for one
+   * item. See `src/supplier/urls.ts` for the shared checks and why Kiwi and
+   * SearchApi apply different host rules.
+   */
+  bookingUrl(item: SupplierItem, trackingRef: string): string
 }
 
 /**

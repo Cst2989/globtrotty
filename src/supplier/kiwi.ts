@@ -4,6 +4,7 @@ import {
   type Supplier, type SupplierItem, type SupplierCapabilities, type SearchParams,
   type FlightSearch, type QuoteOutcome, type LegSummary,
 } from './types.js'
+import { withTracking, isKiwiHost, BookingUrlError } from './urls.js'
 
 const ENDPOINT = 'https://mcp.kiwi.com'
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -192,6 +193,11 @@ export class KiwiSupplier implements Supplier {
     }
     const found = items.find((i) => i.sourceId === sourceId)
     return found ? { status: 'ok', item: found } : { status: 'gone' }
+  }
+
+  bookingUrl(item: SupplierItem, trackingRef: string): string {
+    if (item.bookingUrl === null) throw new BookingUrlError('kiwi item carries no deep link')
+    return withTracking(item.bookingUrl, trackingRef, isKiwiHost)
   }
 
   private async call(p: FlightSearch, signal?: AbortSignal): Promise<string> {
