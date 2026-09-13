@@ -39,7 +39,7 @@ const OPUS = 'claude-opus-5'
 const HAIKU = 'claude-haiku-4-5-20251001'
 
 export const SEATS: Record<SeatName, Seat> = {
-  driver:     seat(OPUS,  'high', 16_000, 'driver@1'),
+  driver:     seat(OPUS,  'high', 16_000, 'driver@2'),
   reviewer:   seat(OPUS,  'high', 8_000,  'reviewer@1'),
   front_desk: seat(HAIKU, null,   1_024,  'front_desk@1'),
   scout:      seat(HAIKU, null,   2_048,  'scout@1'),

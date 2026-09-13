@@ -92,7 +92,7 @@ describeDb('driver', () => {
       expect(row!.seat).toBe('driver')
       expect(row!.capture_policy).toBe('full')   // the driver is never sampled out
       expect(row!.thinking_mode).toBe('adaptive')
-      expect(row!.prompt_version).toBe('driver@1')
+      expect(row!.prompt_version).toBe('driver@2')
       expect(BigInt(row!.cost_micros as string)).toBe(step.recordedMicros!)
     })
   })
