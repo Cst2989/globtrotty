@@ -63,8 +63,9 @@ export type AgentContext = {
  * `course.conversations` and `course.daily_usage` yet? A fake agent
  * (`echoAgent`, and the tests) meters itself and writes nowhere, so the
  * harness records it through `recordSpend`. Tier 3's driver bills every model
- * call to both ledgers through `ledgerSink` (lesson 2.6) as it makes it, so it
- * reports what it spent and sets this flag, and the harness counts the money
+ * call to both ledgers itself, through `reserve` before dispatch and
+ * `reconcile` after it answers (lesson 5.1), so it reports what it spent and
+ * sets this flag, and the harness counts the money
  * for the turn without charging the conversation for it twice. That driver
  * reported `0n` instead until lesson 3.7's whole-branch review: the two
  * ledgers stayed right and `turns.spend_usd_micros` read as free for every
@@ -117,17 +118,18 @@ export type AgentStep =
    * the way `decideNext`'s own `continue_later` is, not recorded as `done`
    * with an empty reply.
    *
-   * This is a RESTART, not a resume, for as long as one agent step is the
-   * whole of `turn()`: the harness's own `state.messages` holds only the one
-   * seeded user line, carries none of the driver's internal notebook or
-   * conversation, and the re-invoked driver calls `turn()` again from
-   * scratch. `classify`, `extract` and every tool step it already paid for
-   * are paid for again, up to `MAX_ATTEMPTS` times for one press, bounded
-   * only by the conversation ceiling. Strictly better than recording the
+   * This was a RESTART, not a resume, while one agent step was the whole of
+   * `turn()`: `state.messages` held only the one seeded user line, so the
+   * re-invoked driver called `turn()` again from scratch and paid for
+   * `classify`, `extract` and every tool step a second time, up to
+   * `MAX_ATTEMPTS` times for one press, bounded only by the conversation
+   * ceiling. Strictly better than recording the
    * turn `done` with a blank reply, which is what a review caught this
-   * lesson doing before this type existed; module 5, which moves the
-   * driver's own steps inside the harness, is where a continuation resumes
-   * instead of restarting.
+   * lesson doing before this type existed. Lesson 5.1 moved the driver's
+   * steps inside the harness, so a hand-back now RESUMES from
+   * `course.turns.state` and no production agent returns this kind any more.
+   * It stays for an agent with its own inner loop, where a continuation is
+   * still a restart.
    *
    * It carries a cost like every other step, because a restart is not free:
    * whatever the driver spent before its own budget ran out has to reach
