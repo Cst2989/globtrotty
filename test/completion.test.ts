@@ -4,7 +4,7 @@ import { withTestDb, describeDb } from './helpers/db.js'
 import { claimTurn, heartbeat, completeTurn, failTurn, FencedError } from '../src/repo/turns.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
-const EMPTY = { step: 0, messages: [], reviewRounds: 0 }
+const EMPTY = { step: 0, messages: [] }
 
 async function seed(sql: postgres.Sql) {
   const [c] = await sql`insert into conversations (user_id) values (${USER}) returning *`

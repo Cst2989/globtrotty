@@ -12,7 +12,7 @@ const LIMITS = {
 }
 
 const base = (over: Partial<DecideInput> = {}): DecideInput => ({
-  state: { step: 0, messages: [], reviewRounds: 0 },
+  state: { step: 0, messages: [] },
   spend: { conversationMicros: 0n, dailyMicros: 0n, globalMicros: 0n },
   limits: LIMITS,
   nowMs: 1_000,
@@ -38,7 +38,7 @@ describe('decideNext', () => {
   })
 
   it('stops at the step cap', () => {
-    const d = decideNext(base({ state: { step: 24, messages: [], reviewRounds: 0 } }))
+    const d = decideNext(base({ state: { step: 24, messages: [] } }))
     expect(d).toEqual({ kind: 'stop', reason: 'step_cap' })
   })
 
@@ -65,12 +65,12 @@ describe('decideNext', () => {
   })
 
   it('stops on the step cap even when the deadline has also passed', () => {
-    const d = decideNext(base({ state: { step: 24, messages: [], reviewRounds: 0 }, nowMs: 550_000, deadlineMs: 600_000, estStepMs: 60_000 }))
+    const d = decideNext(base({ state: { step: 24, messages: [] }, nowMs: 550_000, deadlineMs: 600_000, estStepMs: 60_000 }))
     expect(d).toEqual({ kind: 'stop', reason: 'step_cap' })
   })
 
   it('stops on the daily ceiling even when the step cap is also reached', () => {
-    const d = decideNext(base({ spend: { conversationMicros: 10n, dailyMicros: 15_000_000n, globalMicros: 0n }, state: { step: 24, messages: [], reviewRounds: 0 } }))
+    const d = decideNext(base({ spend: { conversationMicros: 10n, dailyMicros: 15_000_000n, globalMicros: 0n }, state: { step: 24, messages: [] } }))
     expect(d).toEqual({ kind: 'stop', reason: 'limit_reached' })
   })
 
@@ -116,7 +116,7 @@ describe('decideNext: the global ceiling', () => {
 
   it('stops on the global ceiling even when the step cap is also reached', () => {
     const d = decideNext(base({
-      spend: accountOnly(50_000_000n), state: { step: 24, messages: [], reviewRounds: 0 },
+      spend: accountOnly(50_000_000n), state: { step: 24, messages: [] },
     }))
     expect(d).toEqual({ kind: 'stop', reason: 'limit_reached' })   // not 'step_cap'
   })
@@ -255,7 +255,7 @@ describe('firstCeilingReached', () => {
 describe('TurnState transcript blocks', () => {
   it('carries a tool_use block with its id and structured input intact', () => {
     const state: TurnState = {
-      step: 1, reviewRounds: 0,
+      step: 1,
       messages: [
         { role: 'user', content: [{ type: 'text', text: 'find me flights' }] },
         { role: 'assistant', content: [

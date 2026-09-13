@@ -119,7 +119,7 @@ const EST_STEP_MS = 60_000
 // model calls, parallel workers, a 60s Retry-After sleep — keeps refreshing
 // heartbeat_at faster than the sweeper's staleness window can close on it.
 const HEARTBEAT_INTERVAL_MS = 25_000
-const EMPTY: TurnState = { step: 0, messages: [], reviewRounds: 0 }
+const EMPTY: TurnState = { step: 0, messages: [] }
 
 /** Proves the harness without a model: echoes the last user message back. */
 export const echoAgent: Agent = async ({ state }) => {

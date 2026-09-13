@@ -56,10 +56,10 @@ describeDb('claimTurn', () => {
       await sql`update turns set heartbeat_at = now() - interval '5 minutes' where id = ${t.id}`
       const second = (await claimTurn(sql, t.id))!
 
-      await saveTurnState(sql, second, { step: 3, messages: [], reviewRounds: 0 })
+      await saveTurnState(sql, second, { step: 3, messages: [] })
 
       await expect(
-        saveTurnState(sql, first, { step: 1, messages: [], reviewRounds: 0 }),
+        saveTurnState(sql, first, { step: 1, messages: [] }),
       ).rejects.toThrow(FencedError)
 
       const [row] = await sql`select state from turns where id = ${t.id}`
@@ -78,7 +78,7 @@ describeDb('releaseForContinuation', () => {
       const t = await seedTurn(sql)
       const claim = (await claimTurn(sql, t.id))!
 
-      await releaseForContinuation(sql, claim, { step: 1, messages: [], reviewRounds: 0 })
+      await releaseForContinuation(sql, claim, { step: 1, messages: [] })
 
       const [row] = await sql`select status, heartbeat_at from turns where id = ${t.id}`
       expect(row!.status).toBe('queued')
@@ -86,7 +86,7 @@ describeDb('releaseForContinuation', () => {
       const second = await claimTurn(sql, t.id)
       expect(second).not.toBeNull()
       expect(second?.attempts).toBe(2)
-      expect(second?.state).toEqual({ step: 1, messages: [], reviewRounds: 0 })
+      expect(second?.state).toEqual({ step: 1, messages: [] })
     })
   })
 
@@ -98,7 +98,7 @@ describeDb('releaseForContinuation', () => {
       await claimTurn(sql, t.id)   // a second worker supersedes the first
 
       await expect(
-        releaseForContinuation(sql, first, { step: 9, messages: [], reviewRounds: 0 }),
+        releaseForContinuation(sql, first, { step: 9, messages: [] }),
       ).rejects.toThrow(FencedError)
     })
   })

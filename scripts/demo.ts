@@ -162,7 +162,7 @@ async function liveDriverScenario(apiKey: string) {
 
   step('calling the real driver (one live API call)...')
   const result = await driver({
-    state: { step: 0, reviewRounds: 0,
+    state: { step: 0,
               messages: [{ role: 'user', content: [{ type: 'text', text: message }] }] },
     conversationId: convId, userId: DEMO_USER, turnId,
   })
@@ -260,7 +260,6 @@ async function main() {
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'search-0',
                                  content: '{"offers":[{"id":"KIWI-1"}]}' }] },
     ],
-    reviewRounds: 0,
   }
   await saveTurnState(sql, claim, partial)
   console.log(`   ${c.yellow('✱')} ${c.yellow('the process dies here — no completeTurn, no failTurn')}`)
@@ -308,7 +307,7 @@ async function main() {
 
   step('worker A, still alive and unaware, tries to save its state...')
   try {
-    await saveTurnState(sql, workerA, { step: 99, messages: [], reviewRounds: 0 })
+    await saveTurnState(sql, workerA, { step: 99, messages: [] })
     console.log(`   ${c.red('✗')} ${c.red('worker A wrote — the fencing token failed')}`)
   } catch (e) {
     if (e instanceof FencedError) ok(`rejected: ${e.name} — worker A is superseded and writes nothing`)

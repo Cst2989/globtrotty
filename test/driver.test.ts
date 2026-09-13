@@ -44,7 +44,7 @@ describeDb('driver', () => {
   }
   const ctx = (s: Seeded) => ({
     state: {
-      step: 0, reviewRounds: 0,
+      step: 0,
       messages: [{ role: 'user' as const,
                    content: [{ type: 'text' as const, text: 'a week in Faro' }] }],
     },
@@ -399,7 +399,7 @@ describeDb('driver', () => {
       // and hand it to the money gate.
       const tainted = {
         state: {
-          step: 1, reviewRounds: 0,
+          step: 1,
           messages: [
             { role: 'user' as const,
               content: [{ type: 'text' as const, text: 'a week in Faro, direct flights only' }] },

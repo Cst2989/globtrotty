@@ -27,7 +27,7 @@ export type ContentBlock = TextBlock | ToolUseBlock | ThinkingBlock | ToolResult
 
 export type LoopMessage = { role: 'user' | 'assistant'; content: ContentBlock[] }
 
-export type TurnState = { step: number; messages: LoopMessage[]; reviewRounds: number }
+export type TurnState = { step: number; messages: LoopMessage[] }
 
 /**
  * Every terminal state a turn can be recorded in. Mirrored exactly by the
