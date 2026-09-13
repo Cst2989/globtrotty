@@ -15,7 +15,8 @@ import { recordModelCall } from '../repo/modelCalls.js'
 import { recordGateResults } from '../repo/gateResults.js'
 import { renderNotebook } from '../repo/notebook.js'
 import { formatMoney, type Money } from '../money.js'
-import { sanitizeSourceId } from '../sanitize.js'
+import { maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
+import { fenceResult } from '../tools/validate.js'
 import type { RehydratedItem } from '../gates/types.js'
 import type { Notebook } from '../notebook.js'
 
@@ -36,7 +37,19 @@ export const REVIEW_SCHEMA: Record<string, unknown> = {
 }
 
 export type ReviewResult =
-  | { kind: 'verdict'; verdict: ReviewVerdict; costMicros: bigint }
+  | {
+      kind: 'verdict'; verdict: ReviewVerdict
+      /**
+       * ALREADY DEBITED, via this call's own `reserve`/`reconcile` — the
+       * opposite of `AgentStep.costMicros` (`src/worker.ts`), whose doc
+       * comment on `makeDriver` (`src/agents/driver.ts`, "Who charges for
+       * the model call") names the same hazard: a caller that also passes
+       * this to `recordSpend` bills the identical increment a second time.
+       * There is nothing left for a caller to charge; this field exists so
+       * the caller can report the real cost, not so it can spend it again.
+       */
+      costMicros: bigint
+    }
   | { kind: 'skipped_limit'; costMicros: 0n }
 
 export type ReviewDeps = { sql: postgres.Sql; transport: Transport; limits: Limits; now: () => number }
@@ -44,21 +57,44 @@ export type ReviewDeps = { sql: postgres.Sql; transport: Transport; limits: Limi
 /**
  * The offer as the reviewer reads it. Prices are the CORPUS's (rehydrated), so
  * showing them is not a leak; each carries its age because a stale price is a
- * reviewable fault. Ids are sanitised: a supplier id is untrusted text.
+ * reviewable fault.
+ *
+ * Every supplier-written string is masked with `maskUntrustedText` before it
+ * is interpolated — `item.name` (`SearchApiSupplier` sets it straight from
+ * the third-party payload, `src/supplier/searchapi.ts`), each flight number,
+ * the flown airports, the departure times, and the hotel dates. `ref.slot`
+ * is NOT masked: it comes from `ItemRef`'s zod enum (`SLOT_KINDS`,
+ * `src/gates/rehydrateGate.ts`), not from a supplier, so there is nothing
+ * untrusted in it.
+ *
+ * The rendered lines — but not the "Server total" line below, which this
+ * repo computed — are wrapped in the same untrusted-data fence every other
+ * supplier/tool result crosses (`fenceResult`, `src/tools/validate.ts`): a
+ * masked supplier name cannot contain the fence's own delimiters or a raw
+ * newline, but fencing is the belt to masking's suspenders, and it is what
+ * marks the whole block's PROVENANCE as unambiguous to the reviewer model,
+ * exactly as it does for the driver.
  */
 export function renderOfferForReview(items: RehydratedItem[], total: Money, now: Date): string {
   const lines = items.map(({ ref, item }) => {
     const ageMin = Math.max(0, Math.round((now.getTime() - item.fetchedAt.getTime()) / 60_000))
     const d = item.detail
+    const name = maskUntrustedText(item.name)
     const what = d.kind === 'flight'
-      ? `${d.outbound.from}→${d.outbound.to} ${d.outbound.departureLocal} flights ${d.outbound.flightNumbers.join('+')}`
-        + (d.inbound ? `, back ${d.inbound.departureLocal} flights ${d.inbound.flightNumbers.join('+')}` : '')
+      ? `${maskUntrustedText(d.outbound.from)}→${maskUntrustedText(d.outbound.to)} `
+        + `${maskUntrustedText(d.outbound.departureLocal)} flights `
+        + `${d.outbound.flightNumbers.map(maskUntrustedText).join('+')}`
+        + (d.inbound
+          ? `, back ${maskUntrustedText(d.inbound.departureLocal)} flights `
+            + `${d.inbound.flightNumbers.map(maskUntrustedText).join('+')}`
+          : '')
         + `, ${d.outbound.stops} stop(s)`
-      : `${d.checkIn} to ${d.checkOut}, ${d.nights} night(s)`
-    return `- ${ref.slot}: ${sanitizeSourceId(item.sourceId)} — ${item.name} — ${what} — `
+      : `${maskUntrustedText(d.checkIn)} to ${maskUntrustedText(d.checkOut)}, ${d.nights} night(s)`
+    return `- ${ref.slot}: ${sanitizeSourceId(item.sourceId)} — ${name} — ${what} — `
          + `${formatMoney(item.price)} (${item.priceBasis}, fetched ${ageMin} min ago)`
   })
-  return `## The offer\n\n${lines.join('\n')}\n\nServer total: ${formatMoney(total)}`
+  return `## The offer\n\n${fenceResult('offer', 'api', lines.join('\n'))}\n\n`
+       + `Server total: ${formatMoney(total)}`
 }
 
 /**
@@ -121,7 +157,7 @@ export async function reviewOffer(
     conversationId: ctx.conversationId, turnId: ctx.turnId, proposalId: null, round: args.round,
     results: [verdict.approved
       ? { gate: 'reviewer', passed: true, detail: null, sourceIds: [] }
-      : { gate: 'reviewer', passed: false, detail: verdict.issues.join(' '), sourceIds: [] }],
+      : { gate: 'reviewer', passed: false, detail: verdict.issues.join('; '), sourceIds: [] }],
   })
   return { kind: 'verdict', verdict, costMicros: actual }
 }
@@ -136,6 +172,9 @@ function parseVerdict(result: ModelResult): ReviewVerdict {
   if (!parsed.success) return { approved: false, issues: ['The reviewer\'s verdict did not match the expected shape.'] }
   if (parsed.data.approved && parsed.data.issues.length > 0) {
     return { approved: false, issues: ['The reviewer approved while listing issues; treated as a rejection: ' + parsed.data.issues.join(' ')] }
+  }
+  if (!parsed.data.approved && parsed.data.issues.length === 0) {
+    return { approved: false, issues: ['The reviewer rejected the offer without saying why.'] }
   }
   return parsed.data
 }
