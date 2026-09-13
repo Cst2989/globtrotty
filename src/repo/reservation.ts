@@ -41,6 +41,26 @@ export function estimateMicros(seat: Seat, inputTokens: number): bigint {
 }
 
 /**
+ * The bound for a whole fan-out, taken once, before any of its calls is made.
+ *
+ * `estimateMicros` bounds one call, and `n` copies of a per-call check is not a
+ * bound on `n` calls: three calls dispatched together each read a counter the
+ * other two have not moved yet, so a conversation with room for two admits all
+ * three and the ceiling is crossed by a whole call. Reserving `n` times the
+ * per-call bound in ONE debit is what makes the check see the whole batch.
+ *
+ * Multiplied in bigint rather than in the number that feeds `estimateMicros`,
+ * so the rounding-up happens per call. `Math.ceil(x) * n` and `Math.ceil(x * n)`
+ * differ by up to `n - 1` micros, which is nothing, and the first is the one
+ * that is a bound on `n` separately-rounded calls rather than on a hypothetical
+ * single call of `n` times the size.
+ */
+export function estimateBatchMicros(seat: Seat, inputTokens: number, n: number): bigint {
+  if (n < 1) throw new Error(`estimateBatchMicros: n must be at least 1, got ${n}`)
+  return estimateMicros(seat, inputTokens) * BigInt(n)
+}
+
+/**
  * Debits the reservation and returns the NEW conversation total, plus the day
  * and the new daily total the reservation landed on. The caller's ceiling check
  * must compare against the values RETURNED here: reading either counter before

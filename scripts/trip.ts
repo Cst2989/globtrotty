@@ -18,7 +18,9 @@ import { loadNotebook, renderNotebook } from '../src/repo/notebook.js'
 import { estimateMicros } from '../src/repo/reservation.js'
 import { SEATS } from '../src/seats.js'
 import { liveSuppliers } from '../src/supplier/live.js'
-import { corpusRunner, doorRunner, notebookRunner, supplierRunner, type ToolRunner } from '../src/tools.js'
+import {
+  corpusRunner, doorRunner, notebookRunner, scoutRunner, supplierRunner, type ToolRunner,
+} from '../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../src/worker.js'
 
 config({ path: '.env.local', override: false })
@@ -51,6 +53,11 @@ try {
      * The same chain tier 3 composes (netlify/functions/run-turn-background.mts),
      * minus the ledger: one process, no crash to resume from, and nothing here
      * replays a tool call.
+     *
+     * Seven wrappers here and eight on tier 3, and the one missing is the
+     * ledger. The scout runner (lesson 5.4) sits directly inside the notebook
+     * on both, which on tier 3 also puts it inside the ledger so a replayed
+     * fan-out replays the briefs; here there is nothing to replay from.
      *
      * `hand_off_to_booking` is the one tool in this chain the missing ledger
      * would matter for, and it is left out anyway. On tier 3 the ledger is what
@@ -85,16 +92,23 @@ try {
           source: () => provenanceFor(ctx),
           now: () => new Date(),
         },
-        cashierRunner(
-          sql, gateCtx,
-          { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-          proposalRunner(
-            sql,
-            { ...gateCtx, notebook, now: () => new Date() },
-            // The searches ask for the SAME currency the gates expect, off the
-            // same constraints object, so a corpus and the currency gate cannot
-            // disagree by construction.
-            corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+        scoutRunner(
+          sql,
+          {
+            client, conversationId, userId: DEMO_USER, turnId,
+            limits: DEFAULT_LIMITS, now: Date.now,
+          },
+          cashierRunner(
+            sql, gateCtx,
+            { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+            proposalRunner(
+              sql,
+              { ...gateCtx, notebook, now: () => new Date() },
+              // The searches ask for the SAME currency the gates expect, off the
+              // same constraints object, so a corpus and the currency gate cannot
+              // disagree by construction.
+              corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+            ),
           ),
         ),
       ))

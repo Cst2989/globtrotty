@@ -93,8 +93,20 @@ export function withSuffix(messages: LoopMessage[], suffix: string | undefined):
  *  - an assistant prefill. Returns 400 on Opus 5, which is why `withSuffix`
  *    opens a new user turn rather than extending a trailing assistant one.
  *  - `temperature`, anywhere in this codebase.
+ *  - `thinking`, on a seat with no effort setting. Haiku 4.5 answers
+ *    `400 invalid_request_error: adaptive thinking is not supported on this
+ *    model`, so a request that carries it can never succeed on that seat.
  * `effort` lives INSIDE `output_config`, never at the top level, and is omitted
  * rather than nulled for a seat that has none.
+ *
+ * Effort and adaptive thinking are sent together, off the one field, because
+ * they are the same capability on this branch: a seat with an effort setting is
+ * an Opus 5 seat, which takes both, and a seat with none is a Haiku 4.5 seat,
+ * which takes neither. Until lesson 5.3 the only seat that reached this
+ * assembler was the driver's, so the unconditional `thinking` above worked by
+ * coincidence; 5.3 sent a front-desk step through here on `SEATS.front_desk`
+ * and 5.4 sends a scout through it on `SEATS.scout`, and both are Haiku. The
+ * 400 is what `test/scout.test.ts`'s recording ran into.
  */
 export function buildRequest(args: CallArgs): Record<string, unknown> {
   const { seat, system, messages, tools } = args
@@ -103,10 +115,12 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
     max_tokens: seat.maxTokens,
     system,
     messages: withSuffix(messages, args.suffix),
-    thinking: { type: 'adaptive' },
   }
   if (tools.length > 0) req.tools = tools
-  if (seat.effort !== null) req.output_config = { effort: seat.effort }
+  if (seat.effort !== null) {
+    req.thinking = { type: 'adaptive' }
+    req.output_config = { effort: seat.effort }
+  }
   return req
 }
 

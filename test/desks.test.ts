@@ -40,10 +40,10 @@ describe('desks', () => {
     expect(toolsForDesk('front')).toEqual([])
     expect(DESK_TOOLS.front).toEqual([])
   })
-  it('lets the planning desk write the notebook, ask, search and propose, and nothing else', () => {
+  it('lets the planning desk write the notebook, ask, scout, search and propose, and nothing else', () => {
     expect((toolsForDesk('planning') as { name: string }[]).map((t) => t.name))
-      .toEqual(['update_requirements', 'ask_user', 'search_flights', 'search_hotels',
-                'propose_itinerary', 'hand_off_to_booking'])
+      .toEqual(['update_requirements', 'ask_user', 'research_destination', 'search_flights',
+                'search_hotels', 'propose_itinerary', 'hand_off_to_booking'])
   })
   it('seats the front desk on Haiku and the planning desk on Opus', () => {
     expect(loadDesk('front').seat.model).toBe('claude-haiku-4-5-20251001')
@@ -137,11 +137,13 @@ describe('desks', () => {
    * guard that still only looked for `proposalRunner` would have watched the
    * new tool go out unanswered, which is the exact regression this case exists
    * to make impossible. Lesson 5.2 moved the registry inside the harness and
-   * added two tools to this desk; a chain that loses a wrapper fails here first.
+   * added two tools to this desk, and lesson 5.4 added `research_destination`
+   * and `scoutRunner` with it; a chain that loses a wrapper fails here first.
    */
   it('wires a runner for every tool the planning desk sends into every driver', () => {
     const wrappers: Record<string, string> = {
       update_requirements: 'notebookRunner',
+      research_destination: 'scoutRunner',
       propose_itinerary: 'proposalRunner',
       hand_off_to_booking: 'cashierRunner',
     }
@@ -161,7 +163,7 @@ describe('desks', () => {
     const needed = DESK_TOOLS.planning
       .filter((tool) => !tool.startsWith('search_') && !answeredByTheDriver.includes(tool))
       .map((tool) => wrappers[tool] ?? `NO WRAPPER NAMED FOR ${tool}`)
-    expect(needed).toEqual(['notebookRunner', 'proposalRunner', 'cashierRunner'])
+    expect(needed).toEqual(['notebookRunner', 'scoutRunner', 'proposalRunner', 'cashierRunner'])
     expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'])
     for (const file of drivers()) {
       const source = readFileSync(path.join(REPO_ROOT, file), 'utf8')

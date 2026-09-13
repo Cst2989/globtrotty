@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
-import { estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
+import { estimateBatchMicros, estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
 import { SEATS } from '../src/seats.js'
 import { costMicros, PRICES } from '../src/pricing.js'
 import { describeDb, withTestDb } from './helpers/db.js'
@@ -60,6 +60,18 @@ describe('the bound, before any call is made', () => {
     // nothing at all.
     expect(estimateMicros(SEATS.cheap, 7)).toBe(BigInt(Math.ceil(exact)))
     expect(estimateMicros(SEATS.cheap, 7)).toBeGreaterThan(BigInt(Math.trunc(exact)))
+  })
+
+  it('bounds a batch at n times the per-call bound', () => {
+    expect(estimateBatchMicros(SEATS.scout, 4_000, 3))
+      .toBe(estimateMicros(SEATS.scout, 4_000) * 3n)
+  })
+
+  it('refuses a batch of nothing rather than reserving zero', () => {
+    // A caller that computed n from an empty list would otherwise debit nothing
+    // and dispatch nothing, which is harmless, and would also debit nothing and
+    // dispatch three, which is not, once a later caller computes n differently.
+    expect(() => estimateBatchMicros(SEATS.scout, 4_000, 0)).toThrow(/at least 1/)
   })
 })
 

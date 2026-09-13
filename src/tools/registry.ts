@@ -93,6 +93,13 @@ const UpdateRequirements = z.strictObject({
     .describe('The fields she has stated, by name. Never invent a value she did not state.'),
 })
 
+const ResearchDestination = z.strictObject({
+  cities: z.array(z.string().min(1).max(60)).min(1).max(3)
+    .describe('Up to three cities to look at in parallel'),
+  question: z.string().min(1).max(300)
+    .describe('One question, asked of every city, answered in prose and never with a price'),
+})
+
 /**
  * Every tool the product owns, keyed by name, with what stands behind each.
  *
@@ -130,6 +137,12 @@ export const TOOLS: Record<string, ToolDef> = {
       + 'from its own record of the search and will reject a proposal that carries any of them. '
       + 'The quantity is always 1 and one sourceId may appear only once in a proposal.',
   },
+  research_destination: {
+    name: 'research_destination', door: 'worker', schema: ResearchDestination,
+    description: 'Send a scout to up to three cities at once with one question. Each comes back '
+      + 'with a short brief in prose, never a price and never a source id. Use this before '
+      + 'searching, to decide which city to search.',
+  },
   hand_off_to_booking: {
     name: 'hand_off_to_booking', door: 'code', schema: HandOffInput,
     description: 'Hand her over to the supplier to book a proposal she has accepted. Send the '
@@ -145,8 +158,8 @@ export const TOOLS: Record<string, ToolDef> = {
  */
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
-  planning: ['update_requirements', 'ask_user', 'search_flights', 'search_hotels',
-             'propose_itinerary', 'hand_off_to_booking'],
+  planning: ['update_requirements', 'ask_user', 'research_destination', 'search_flights',
+             'search_hotels', 'propose_itinerary', 'hand_off_to_booking'],
 }
 
 /**

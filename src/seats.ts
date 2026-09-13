@@ -63,6 +63,13 @@ export const SEATS = {
    * `test/conversation.test.ts` still replays.
    */
   front_desk: seat(HAIKU, null, 1_024),
+  /**
+   * A worker that reads one city's search results and hands back prose. Haiku,
+   * because the job is summarising and not deciding, and 2048 tokens because a
+   * brief that runs longer than that is a brief the driver has to read in full
+   * anyway, which is the cost this seat exists to avoid.
+   */
+  scout: seat(HAIKU, null, 2_048),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS

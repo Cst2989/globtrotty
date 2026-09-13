@@ -166,6 +166,52 @@ is still what `test/conversation.test.ts` and the recorded fixtures from modules
 1 and 2 replay; it is the one-process path those lessons built and it is not the
 production one. Module 6 retires it, because its evals drive the driver.
 
+From lesson 5.4 the agency has staff. `research_destination` sends up to three
+scouts at once, each on the Haiku seat with no tools and no way to reach the
+traveller, each reading one city's results and handing back a few hundred words
+of prose with no price and no source id in them. The driver reads three briefs
+instead of three supplier payloads, and it re-reads the briefs rather than the
+payloads on every remaining step of the turn, which is where most of the saving
+is.
+
+One reservation covers the batch, taken before the first call leaves. A per-call
+check is not a bound on a fan-out: three calls dispatched together each read a
+counter the other two have not moved, so a conversation with room for two used
+to admit all three and cross its ceiling by a whole call. Each reply is
+reconciled on its own as it lands, so a small brief returns its refund without
+waiting for its slowest sibling.
+
+The batch comes back inside one fence, with a plain heading per city inside it.
+`research_destination` stands behind a `worker` door, so `doorRunner` wraps the
+whole result, and one wrapper is enough because the escape runs over the entire
+payload: a brief that repeats the closing delimiter has it escaped along with
+everything else and cannot end the fence around its two siblings. Fencing each
+brief separately would be worse rather than better, because the outer escape
+would eat the inner delimiters and hand the driver three broken fences. The
+delimiter is still a fixed string here, which is the shape lesson 5.5 attacks.
+
+Scout call ids are the parent tool call's id with `-scout0`, `-scout1` and
+`-scout2` on the end, and they are identifiers rather than ledger keys. A
+fan-out writes three rows to `course.model_calls`, one per city on the scout
+seat, and exactly one row to `course.tool_calls`, the parent
+`research_destination` call's, because `ledgerRunner` wraps the whole fan-out
+from outside and stays that table's only writer. Three writers on
+`(turn_id, call_id)` is the arrangement where the second reads the first's
+insert back as `pending`, reports an ambiguous call, and ends a turn that was
+fine, and a scout has no external side effect a ledger row would help anyone
+replay. The ids ride on each returned brief, so a log line and the driver's own
+result can both say which city answered.
+
+A scout seat is the first Haiku seat to reach `buildRequest`, and it found a
+request the assembler had been sending since lesson 5.1: `thinking: {type:
+'adaptive'}`, which Haiku 4.5 refuses with `400 adaptive thinking is not
+supported on this model`. Adaptive thinking now rides with the effort setting,
+so a seat that takes no effort is sent neither, and `test/request-shape.test.ts`
+pins both halves. The front desk (lesson 5.3) runs on a Haiku seat through the
+same assembler, so that path was answering 400 on every live FAQ turn until
+this lesson; no test caught it because every test in the suite replays a fixture
+or a fake and the fixture matcher compares the model string and nothing else.
+
 The attempt count is the sharper half of that same story, and it is history
 now rather than an open cost: before lesson 3.6, a requeue advanced
 `attempts`, and the worker re-invoked for the reissued turn advanced it again

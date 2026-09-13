@@ -13,7 +13,8 @@ import type { Claim } from '../../src/repo/turns.js'
 import { liveSuppliers } from '../../src/supplier/live.js'
 import { authorize } from '../../src/tier3.js'
 import {
-  corpusRunner, doorRunner, ledgerRunner, notebookRunner, supplierRunner, type ToolRunner,
+  corpusRunner, doorRunner, ledgerRunner, notebookRunner, scoutRunner, supplierRunner,
+  type ToolRunner,
 } from '../../src/tools.js'
 import { runTurn, type Agent, type AgentContext } from '../../src/worker.js'
 
@@ -56,15 +57,22 @@ export default async (req: Request): Promise<Response> => {
   const client = liveClient()
 
   /**
-   * Seven wrappers, outermost first. The door checks the desk allowlist and
+   * Eight wrappers, outermost first. The door checks the desk allowlist and
    * the schema before anything durable happens and fences the answer on the
    * way back (lesson 5.2); the ledger decides whether the tool runs at all
-   * (lesson 3.4); the notebook records what she stated (lesson 5.2); the
-   * cashier re-quotes and emits the links (lesson 4.6); the proposal runner
-   * puts a proposal through the gates (lesson 4.5); the corpus records what a
-   * search returned (lesson 4.3); the supplier runner makes the call. Each
-   * layer knows one thing, and the live adapters get all of it by being handed
-   * to the innermost one.
+   * (lesson 3.4); the notebook records what she stated (lesson 5.2); the scout
+   * runner sends up to three scouts at once under one reservation and joins
+   * their briefs (lesson 5.4); the cashier re-quotes and emits the links
+   * (lesson 4.6); the proposal runner puts a proposal through the gates
+   * (lesson 4.5); the corpus records what a search returned (lesson 4.3); the
+   * supplier runner makes the call. Each layer knows one thing, and the live
+   * adapters get all of it by being handed to the innermost one.
+   *
+   * The scout sits INSIDE the ledger, so a replayed `research_destination`
+   * replays the briefs rather than paying for three more model calls, and
+   * inside the notebook because the ordering between those two is arbitrary:
+   * neither reads what the other writes, so one order is picked and written
+   * down here rather than left to whoever edits this file next.
    *
    * Built per agent step rather than once before `runTurn`, because two of these
    * wrappers fence their writes on a full `Claim` and a claim's `attempts` is
@@ -113,18 +121,25 @@ export default async (req: Request): Promise<Response> => {
           source: () => provenanceFor(ctx),
           now: () => new Date(),
         },
-        cashierRunner(
-          sql, gateCtx,
-          { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
-          proposalRunner(
-            sql,
-            { ...gateCtx, notebook, now: () => new Date() },
-            // The searches ask for the SAME currency the gates expect, off the
-            // same constraints object, so a corpus and the currency gate cannot
-            // disagree by construction. Null until she states a budget, which
-            // supplierRunner reads as TRIP_CURRENCY (lesson 4.5); a stored USD
-            // budget makes both sides USD in one move.
-            corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+        scoutRunner(
+          sql,
+          {
+            client, conversationId: claim.conversationId, userId: claim.userId,
+            turnId: claim.turnId, limits: DEFAULT_LIMITS, now: Date.now,
+          },
+          cashierRunner(
+            sql, gateCtx,
+            { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
+            proposalRunner(
+              sql,
+              { ...gateCtx, notebook, now: () => new Date() },
+              // The searches ask for the SAME currency the gates expect, off the
+              // same constraints object, so a corpus and the currency gate cannot
+              // disagree by construction. Null until she states a budget, which
+              // supplierRunner reads as TRIP_CURRENCY (lesson 4.5); a stored USD
+              // budget makes both sides USD in one move.
+              corpusRunner(sql, claim, supplierRunner(suppliers, notebook.currency)),
+            ),
           ),
         ),
       ),

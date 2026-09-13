@@ -76,6 +76,17 @@ describe('the request we actually send', () => {
     expect(buildRequest({ ...base, tools: toolsForDesk('planning') })).toHaveProperty('tools')
   })
 
+  it('omits thinking entirely for a seat with no effort', () => {
+    // Haiku 4.5 answers `400 invalid_request_error: adaptive thinking is not
+    // supported on this model`, so this is not a tidiness rule: a scout call
+    // (lesson 5.4) and a front-desk step (lesson 5.3) both run on a Haiku seat
+    // through this assembler, and both fail every time with the key present if
+    // `thinking` rides along. The driver's own case above pins the other half.
+    const req = buildRequest({ ...base, seat: SEATS.scout })
+    expect(req).not.toHaveProperty('thinking')
+    expect(req).not.toHaveProperty('output_config')
+  })
+
   it('takes max_tokens from the seat', () => {
     expect(buildRequest(base).max_tokens).toBe(16_000)
     expect(buildRequest({ ...base, seat: SEATS.cheap }).max_tokens).toBe(1_024)

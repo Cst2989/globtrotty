@@ -34,6 +34,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-1 | The driver in the harness | npm run migrate, then npm test (test/request-shape.test.ts, test/driver.test.ts, test/resume.test.ts) |
 | lesson-5-2 | Tools are doors | npm run migrate, then npm test (test/registry.test.ts, test/doors.test.ts, test/notebook-repo.test.ts) |
 | lesson-5-3 | The front desk and the planning desk | npm run migrate, then npm test (test/desk-routing.test.ts, test/sentinels.test.ts, test/desks.test.ts) |
+| lesson-5-4 | Staff | npm run migrate, then npm test (test/scout.test.ts) |
 
 ## How this branch was built
 
@@ -107,6 +108,14 @@ The port is main's; the arithmetic is lesson 1.4's, expression for expression. A
 test in `test/supplier-mock.test.ts` pins all twelve amounts that fixture
 depends on, across all four of the searches it drove, so the day somebody tidies
 the hash the failure names the hash and not a provenance check three files away.
+
+**One fixture, recorded on purpose, and the reason written down.** Module 4
+recorded nothing and module 5 records exactly one reply: a scout's brief, in
+`test/fixtures/model/scout-faro.json`. Everything else in this module is
+hand-written in `test/model/fake.ts` or is a pure assertion over an assembled
+request. The brief is recorded because the claim being tested is that a REAL
+model's prose is untrusted text, and a brief we wrote ourselves would be
+untrusted text from a trusted author, which proves nothing about the fence.
 
 **The check that was green for three modules.** `test/provenance-v0.test.ts`
 passed at every tag from lesson 1.4 and it does not do what its name says: it

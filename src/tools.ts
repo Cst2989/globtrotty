@@ -1,5 +1,8 @@
 import type postgres from 'postgres'
 import type { z } from 'zod'
+import { BatchNotReservedError, runScouts } from './agents/scout.js'
+import type { ModelClient } from './client.js'
+import type { Limits } from './engine.js'
 import { formatMoney } from './money.js'
 import { beginToolCall, finishToolCall, AmbiguousToolCallError } from './repo/toolCalls.js'
 import { applyRequirementsPatch, renderNotebook } from './repo/notebook.js'
@@ -464,5 +467,60 @@ export function notebookRunner(
       : `Refused: ${rejected.join(', ')}. Do not re-send a refused key; ask her instead. `
         + 'The notebook now reads:'
     return { content: `${head}\n\n${renderNotebook(next)}`.trimEnd(), isError: false }
+  }
+}
+
+/** Whose turn these scouts belong to, and the client they call on. */
+export type ScoutContext = {
+  client: ModelClient
+  conversationId: string
+  userId: string
+  turnId: string
+  limits: Limits
+  now: () => number
+}
+
+/**
+ * The `research_destination` link of the chain, inside the ledger so a replayed
+ * fan-out replays the briefs rather than paying for three more calls, and
+ * outside nothing else, because a scout writes to no table of its own.
+ *
+ * Returns the briefs joined with a plain heading per city and NOT fenced here.
+ * `doorRunner`, the outermost wrapper, puts one fence around the whole result
+ * because `research_destination` stands behind a `worker` door, and one fence is
+ * enough: `escapeFence` runs over the entire payload, so a brief that contains
+ * the closing delimiter has it escaped along with everything else and cannot end
+ * the wrapper around its two siblings. Three nested fences would be worse than
+ * one, not better, because the outer escape would eat the inner delimiters and
+ * hand the model three broken fences instead of one good one.
+ */
+export function scoutRunner(sql: postgres.Sql, ctx: ScoutContext, inner: ToolRunner): ToolRunner {
+  return async (name, input, callId, signal) => {
+    if (name !== 'research_destination') return inner(name, input, callId, signal)
+    const { cities, question } = input as { cities: string[]; question: string }
+    let results
+    try {
+      results = await runScouts(
+        { sql, client: ctx.client, conversationId: ctx.conversationId, userId: ctx.userId,
+          turnId: ctx.turnId, callId, limits: ctx.limits, now: ctx.now },
+        cities.map((city) => ({ city, question, results: '' })),
+      )
+    } catch (err) {
+      // A batch that could not be reserved is `limit_reached` and nothing new:
+      // it comes back as a tool result the model can act on, exactly as a gate
+      // rejection does, because a model that cannot afford three scouts can
+      // still search one city itself with the step it has left.
+      if (!(err instanceof BatchNotReservedError)) throw err
+      return {
+        content: `No scouts were sent: the ${err.ceiling} spending limit has no room for `
+          + `${cities.length} of them, and none was dispatched. Search one city yourself, or `
+          + 'ask her which one she wants.',
+        isError: true,
+      }
+    }
+    return {
+      content: results.map((r) => `### ${r.city}\n\n${r.brief}`).join('\n\n'),
+      isError: false,
+    }
   }
 }

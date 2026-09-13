@@ -75,6 +75,26 @@ describe('the registry', () => {
     expect([...SUPPLIER_DOORS].sort()).toEqual(api.sort())
   })
 
+  it('puts a scout behind a worker door, not a code one', () => {
+    // A scout is a model of ours reading text a supplier wrote, so its brief is a
+    // paraphrase of something untrusted and is fenced exactly like the listing it
+    // paraphrased. `code` would mean "our own words", and the words are only half
+    // ours.
+    expect(TOOLS.research_destination!.door).toBe('worker')
+    expect(fenceResult('research_destination', 'worker', 'a brief'))
+      .toContain('trust="untrusted"')
+  })
+
+  it('caps the fan-out in the schema rather than in the handler', () => {
+    // Three, published, so the model does not ask for twelve and get a rejection
+    // it could have avoided. The reservation is n times the per-call bound, so an
+    // unbounded n is an unbounded debit.
+    const wide = TOOLS.research_destination!.schema.safeParse({
+      cities: ['a', 'b', 'c', 'd'], question: 'q',
+    })
+    expect(wide.success).toBe(false)
+  })
+
   it('does not advertise revise_component yet', () => {
     // Lesson 5.7's tool. Named here so that adding it early, which is easy and
     // tempting once the card exists, fails a test rather than quietly changing
