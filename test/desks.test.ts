@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadDesk, renderPrompt } from '../src/desks.js'
@@ -7,17 +7,31 @@ import { DESK_TOOLS, toolsForDesk } from '../src/tools/registry.js'
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
 /**
- * Every file that drives a desk, found rather than listed: it calls `turn()`
- * and hands it a runner, which is what makes it a path a reader can run. A
- * third driver added tomorrow is found by the same walk.
+ * The two files a reader can run that compose a runner chain and drive a desk.
+ *
+ * LISTED, and then checked. Until this fix the list was walked out of `scripts`
+ * and `netlify/functions` by grepping each file for `turn(`, which stopped being
+ * true of the deployed driver at lesson 5.1: `netlify/functions/run-turn-background.mts`
+ * runs `runTurn` over `makeDriver` and matches that pattern at two lines only,
+ * both of them inside docstrings describing what `turn()` USED TO do. A guard
+ * that finds its subject through prose stops finding it the day someone tidies a
+ * sentence, and it stops SILENTLY, still green, with the deployed chain no
+ * longer looked at.
+ *
+ * So the discovery below is a check rather than a search: each file has to
+ * contain the composition call itself, `doorRunner(`, which is the outermost
+ * wrapper of both chains (src/tools.ts) and the one line neither driver can lose
+ * while still putting a tool through the desk allowlist. A file that stops
+ * composing a chain drops out of this list and fails the equality below by name,
+ * which is the loud failure the walk could not produce.
  */
+const DRIVER_FILES = ['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'] as const
+
 function drivers(): string[] {
-  return ['scripts', 'netlify/functions'].flatMap((dir) =>
-    readdirSync(path.join(REPO_ROOT, dir))
-      .map((name) => `${dir}/${name}`)
-      .filter((file) => /\.(ts|mts|cts)$/.test(file))
-      .filter((file) => /\bturn\(/.test(readFileSync(path.join(REPO_ROOT, file), 'utf8'))),
-  ).sort()
+  return DRIVER_FILES
+    .filter((file) => /\bdoorRunner\(/.test(readFileSync(path.join(REPO_ROOT, file), 'utf8')))
+    .slice()
+    .sort()
 }
 
 describe('desks', () => {
@@ -49,9 +63,11 @@ describe('desks', () => {
   })
 
   /**
-   * The tool list above is what BOTH drivers send, because both call `turn()`,
-   * which builds its tools from the desk (src/conversation.ts). So a driver
-   * whose runner chain has no `proposalRunner` in it advertises
+   * The tool list above is what BOTH drivers send: `scripts/trip.ts` through
+   * `turn()`, which builds its tools from the desk (src/conversation.ts), and
+   * `netlify/functions/run-turn-background.mts` through `makeDriver`, which
+   * builds them from the same `toolsForDesk('planning')` (src/agents/driver.ts).
+   * So a driver whose runner chain has no `proposalRunner` in it advertises
    * `propose_itinerary` to the model, is asked for it, and answers "Unknown
    * tool propose_itinerary" from `supplierRunner`, the innermost link. No gate
    * runs, no `course.gate_results` row is written, and the model goes back to

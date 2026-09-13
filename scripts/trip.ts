@@ -60,12 +60,17 @@ try {
     const claim = await claimTurn(sql, turnId)
     if (!claim) throw new Error(`trip: turn ${turnId} is owned by another worker`)
     // Her constraints through the one mapper, exactly as tier 3 derives them,
-    // and from the row this conversation stores from lesson 5.2. It is empty on
-    // the FIRST press of a fresh conversation, because nothing has written to it
-    // yet; a second press, or an `update_requirements` call on this one, gives
-    // the budget and dates gates something to judge. Read once here rather than
-    // per step, because this path runs the whole of `turn()` in one go and the
-    // chain is composed before it starts; tier 3 reads it per agent step.
+    // and from the row this conversation stores from lesson 5.2. On THIS script
+    // that row is always empty, and saying so is the honest version: the insert
+    // above mints a fresh conversation on every invocation, nothing has written
+    // to its notebook yet, and this read happens before `turn()` starts, so an
+    // `update_requirements` call inside the turn lands after the gates already
+    // took their copy. The script takes her message as its only argument, so
+    // there is no second press against the same conversation to fill it either.
+    // The budget and dates gates therefore record `not evaluated` on this path,
+    // exactly as they did at lesson 5.1; tier 3 reads the notebook per agent
+    // step and does judge them, and `npm run demo` shows the verdict with no key
+    // by writing a notebook itself. Lesson 5.3 puts this script on the driver.
     const ctx = { conversationId, userId: DEMO_USER, turnId }
     const notebook = constraintsFromNotebook(
       await loadNotebook(sql, conversationId, DEMO_USER), TODAY)

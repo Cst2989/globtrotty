@@ -94,8 +94,12 @@ export async function applyRequirementsPatch(
         `applyRequirementsPatch: conversation ${args.conversationId} not found for this user`,
       )
     }
+    // `args.patch` goes in as the `unknown` it is: `applyRequirements`
+    // (src/notebook.ts) parses it against `PatchSchema` and coerces the budget
+    // through `money()` before anything here can reach `toStored`, which is what
+    // keeps a value the model invented out of this column.
     const { next, rejected } = applyRequirements(
-      fromStored(row.requirements), args.patch as never, args.source, args.at,
+      fromStored(row.requirements), args.patch, args.source, args.at,
     )
     const written = await tx`
       update course.conversations

@@ -1,5 +1,5 @@
-import type { Requirements } from './extract.js'
-import { compareMoney, formatMoney, type Money } from './money.js'
+import { z } from 'zod'
+import { compareMoney, formatMoney, money, type Money } from './money.js'
 
 /** Who wrote a field: she did, we inferred it, or a tool returned it. */
 export type Provenance = 'user' | 'inferred' | 'tool'
@@ -26,7 +26,52 @@ export function emptyNotebook(): Notebook {
   return { budget: null, destination: null, originCity: null, nights: null, month: null, partySize: null, nearBeach: null, needsCrib: null }
 }
 
-type Patch = Partial<{ [K in keyof Requirements]: NonNullable<Requirements[K]> }>
+/**
+ * What a budget looks like on the WIRE, which is not what it looks like in
+ * memory. The tool description tells the model to send `{minor, currency}` and
+ * the model sends whatever JSON it composed, so `minor` arrives as a string
+ * ("150000"), as a number (150000), or, from `src/conversation.ts`'s extraction
+ * path, as the bigint of a Money this process built itself. `money()` below
+ * decides which of those is a budget and which is not.
+ */
+const MoneyIn = z.object({
+  minor: z.union([z.string(), z.number(), z.bigint()]),
+  currency: z.string(),
+})
+
+/**
+ * The shape of a patch, enforced rather than described, and the reason it is
+ * here rather than in the published tool schema (src/tools/registry.ts).
+ *
+ * The registry publishes `patch` as a free record on purpose: the API's JSON
+ * schema is what the MODEL reads, and a per-field schema there would still be
+ * advice. This is the check, it runs on the way into the one function that
+ * writes the notebook, and it therefore covers every caller, the extraction path
+ * in `src/conversation.ts` included.
+ *
+ * `strictObject`, so an invented key is refused rather than written: the column
+ * is jsonb and keeps whatever it is given, and `renderNotebook`
+ * (src/repo/notebook.ts) refuses to PRINT a key the current shape does not
+ * declare but cannot unwrite one. Every string is bounded for the same reason
+ * the whole notebook is: it is rendered into the model's context on every step
+ * of every later turn, so an unbounded value under a real key is untrusted text
+ * riding in the suffix forever, and a runaway one is megabytes of jsonb read on
+ * every step.
+ */
+const PatchSchema = z.strictObject({
+  budget: MoneyIn.optional(),
+  destination: z.string().min(1).max(120).optional(),
+  originCity: z.string().min(1).max(120).optional(),
+  nights: z.int().min(1).max(60).optional(),
+  month: z.string().min(1).max(40).optional(),
+  partySize: z.object({
+    adults: z.int().min(1).max(9),
+    children: z.int().min(0).max(9),
+    infants: z.int().min(0).max(9),
+  }).optional(),
+  nearBeach: z.boolean().optional(),
+  needsCrib: z.boolean().optional(),
+})
 
 function relaxes(field: (typeof CONSTRAINT_FIELDS)[number], current: Notebook, next: unknown): boolean {
   const existing = current[field]
@@ -58,14 +103,61 @@ function relaxes(field: (typeof CONSTRAINT_FIELDS)[number], current: Notebook, n
  * `update_requirements` answers the model, and a model told "recorded" after a
  * silent refusal re-sends the same value next step. Naming the keys that were
  * refused lets it ask her instead.
+ *
+ * ## Why `patch` is `unknown`
+ *
+ * Because it is. It is a JSON object a model composed, published to it as a free
+ * record (src/tools/registry.ts), handed through `validateToolCall` untouched
+ * and into `applyRequirementsPatch` (src/repo/notebook.ts), which writes it into
+ * a jsonb column every later turn reads. Typing the parameter as the shape we
+ * WANT would have made the compiler agree with us about a value nothing had
+ * checked. `PatchSchema` is what makes the shape true, and it runs here, before
+ * the value can reach `toStored`.
+ *
+ * A patch that fails the schema is refused WHOLESALE rather than field by field:
+ * a patch that is partly invented is a patch there is no reason to trust the
+ * rest of, and `rejected` still names every offending key, so the model is told
+ * what to fix rather than left to guess. Nothing throws on any input, because a
+ * throw here kills a turn the model could have corrected in one step.
  */
 export function applyRequirements(
-  current: Notebook, patch: Patch, source: Provenance, at: string,
+  current: Notebook, patch: unknown, source: Provenance, at: string,
 ): { next: Notebook; rejected: string[] } {
+  const parsed = PatchSchema.safeParse(patch)
+  if (!parsed.success) {
+    // zod reports an unrecognised key on `issue.keys` with an empty path, and a
+    // bad value for a known field on `issue.path`.
+    const refused: string[] = []
+    for (const issue of parsed.error.issues) {
+      if (issue.code === 'unrecognized_keys') refused.push(...issue.keys)
+      else refused.push(String(issue.path[0] ?? 'unknown'))
+    }
+    return { next: current, rejected: [...new Set(refused)] }
+  }
+
   const next: Notebook = { ...current }
   const rejected: string[] = []
-  for (const [key, value] of Object.entries(patch) as [keyof Notebook, unknown][]) {
-    if (value === undefined || value === null) continue
+  for (const [key, raw] of Object.entries(parsed.data) as [keyof Notebook, unknown][]) {
+    if (raw === undefined || raw === null) continue
+    let value = raw
+    if (key === 'budget') {
+      const wire = raw as z.infer<typeof MoneyIn>
+      try {
+        // `money()` throws on an unknown currency code and on minor units that
+        // are not a whole number, and BOTH are reachable without an adversary:
+        // a model that reasons in whole euros writes 1500 as `1.5e3`, and
+        // `BigInt('1.5e3')` throws. Stored verbatim that value passes
+        // `renderNotebook` and then fails `fromStored` on every subsequent read,
+        // so `loadNotebook` throws at the top of every driver step and the
+        // conversation is dead on every retry until someone edits the row.
+        // Attacker-controlled input, an injected listing or a tool result, must
+        // be rejected here and never allowed to crash a turn or outlive one.
+        value = money(BigInt(wire.minor), wire.currency)
+      } catch {
+        rejected.push(key)
+        continue
+      }
+    }
     const existing = current[key]
     if (existing && existing.source === 'user' && source !== 'user') { rejected.push(key); continue }
     // Any source that is not hers, and not only 'tool'. Widened at lesson 5.2,

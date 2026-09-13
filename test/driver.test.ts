@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import type { Message } from '@anthropic-ai/sdk/resources/messages'
 import type postgres from 'postgres'
 import { makeDriver } from '../src/agents/driver.js'
+import type { ModelClient } from '../src/client.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
-import { ledgerRunner, mockRunner } from '../src/tools.js'
+import { money } from '../src/money.js'
+import { applyRequirementsPatch } from '../src/repo/notebook.js'
+import { ledgerRunner, mockRunner, type ToolRunner } from '../src/tools.js'
 import { runTurn, type Agent } from '../src/worker.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { apiError } from './helpers/errors.js'
@@ -12,6 +16,45 @@ import { claimOf, workerDeps } from './helpers/worker.js'
 const USER = randomUUID()
 
 const HER_MESSAGE = 'Portugal in September for 1500 euros'
+
+/**
+ * A runner that stands in for the whole chain and counts how often it was
+ * reached. Every case below that is about something the DRIVER answers by itself
+ * asserts this counter stayed at zero: "the driver handled it" and "the driver
+ * fell through to the chain" are otherwise indistinguishable from the outside.
+ */
+function countingRunner(): { run: ToolRunner; calls: () => number } {
+  let calls = 0
+  return {
+    run: async () => {
+      calls += 1
+      return { content: 'the chain ran', isError: false }
+    },
+    calls: () => calls,
+  }
+}
+
+/**
+ * A client that keeps the request `buildRequest` assembled, which is the only
+ * way to assert what actually went on the wire. `fakeClient` drops its argument.
+ */
+function recordingClient(replies: Message[]): ModelClient & { sent: Record<string, unknown>[] } {
+  const sent: Record<string, unknown>[] = []
+  return {
+    sent,
+    async create(params: unknown) {
+      sent.push(params as Record<string, unknown>)
+      return replies[Math.min(sent.length - 1, replies.length - 1)]!
+    },
+  } as unknown as ModelClient & { sent: Record<string, unknown>[] }
+}
+
+/** Every text block of the LAST user turn of a request, joined. */
+function lastUserText(request: Record<string, unknown>): string {
+  const messages = request.messages as { role: string; content: { type: string; text?: string }[] }[]
+  const last = [...messages].reverse().find((m) => m.role === 'user')!
+  return last.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')
+}
 
 async function seededTurn(sql: postgres.Sql, text = HER_MESSAGE) {
   const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
@@ -293,6 +336,181 @@ describeDb('one invocation of the driver is one model call', () => {
       expect(rows[0]!.call_id).toBe('s0-b0')
       expect(rows[0]!.status).toBe('done')
       expect(executions).toBe(1)
+    })
+  })
+})
+
+/**
+ * The three branches the driver answers WITHOUT the runner chain, none of which
+ * had a test at lesson-5-2, and the one piece of the request the driver alone
+ * assembles.
+ *
+ * They are worth pinning together because they share a failure mode: each one is
+ * a `return` inside `makeDriver` that a later lesson can drop, reorder or fall
+ * through, and the whole suite stays green while the behaviour changes. Lesson
+ * 5.3 rewrites this function for desk selection.
+ */
+describeDb('what the driver answers by itself', () => {
+  it('ends the turn on her question when the model asks one, and runs no tool', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seededTurn(sql)
+      const questions = ['Which airport do you fly from?', 'How many nights?']
+      const client = fakeClient([toolUseMessage('ask_user', { questions })])
+      const chain = countingRunner()
+      const agent = makeDriver({
+        sql, client, run: chain.run, limits: DEFAULT_LIMITS, now: Date.now,
+      })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      // Terminal: ONE model call, and the chain was never reached. `ask_user` is
+      // answered by her, so a driver that let it fall through to `deps.run`
+      // would send it into the runner chain, which has no wrapper for it, and
+      // the model would be told its question was an unknown tool.
+      expect(client.calls).toBe(1)
+      expect(chain.calls()).toBe(0)
+
+      const [msg] = await sql<{ content: string }[]>`
+        select content from course.messages
+         where turn_id = ${turnId} and role = 'agent'`
+      expect(msg!.content).toBe(questions.join('\n\n'))
+      const [turn] = await sql<{ status: string; fail_reason: string | null }[]>`
+        select status, fail_reason from course.turns where id = ${turnId}`
+      // A parked turn is `done` with no fail reason: nothing failed, she is
+      // simply the next one to speak.
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBe(null)
+      const [conv] = await sql<{ status: string }[]>`
+        select status from course.conversations where id = ${conversationId}`
+      expect(conv!.status).toBe('awaiting_user')
+      const calls = await sql`select 1 from course.tool_calls where turn_id = ${turnId}`
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  it('refuses a malformed ask_user as a tool result rather than writing it to her', async () => {
+    await withTestDb(async (sql) => {
+      const { turnId } = await seededTurn(sql)
+      const client = fakeClient([
+        // What the registry's `AskUser` schema refuses: objects rather than
+        // strings. `questions.join('\n\n')` on this array is the string
+        // "[object Object]", and until this fix that string was the turn's reply
+        // and went into `course.messages`, which is her thread.
+        toolUseMessage('ask_user', { questions: [{ q: 'Which airport?' }, { q: 'How many nights?' }] }),
+        textMessage('Which airport do you fly from?'),
+      ])
+      const chain = countingRunner()
+      const agent = makeDriver({
+        sql, client, run: chain.run, limits: DEFAULT_LIMITS, now: Date.now,
+      })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      const messages = await sql<{ content: string }[]>`
+        select content from course.messages where turn_id = ${turnId} and role = 'agent'`
+      expect(messages).toHaveLength(1)
+      expect(messages[0]!.content).toBe('Which airport do you fly from?')
+      expect(messages[0]!.content).not.toContain('[object Object]')
+
+      // The refusal went back as a tool result the model could act on, and it
+      // did: its next reply is a question in prose. `validateToolCall` wrote the
+      // sentence, which is the same door every other input goes through.
+      const [row] = await sql<{ state: { messages: { content: { type: string; content?: string }[] }[] } }[]>`
+        select state from course.turns where id = ${turnId}`
+      const results = row!.state.messages
+        .flatMap((m) => m.content)
+        .filter((b) => b.type === 'tool_result')
+      expect(results).toHaveLength(1)
+      expect(results[0]!.content).toContain('Invalid input for "ask_user"')
+      // Ephemeral by design, exactly like the supplier-budget refusal below: the
+      // driver answers it without calling `deps.run`, so `ledgerRunner` never
+      // sees it and no row is written for a call that never ran.
+      expect(chain.calls()).toBe(0)
+      const calls = await sql`select 1 from course.tool_calls where turn_id = ${turnId}`
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  it('refuses a search once the turn has spent its supplier budget, and writes no row for it', async () => {
+    await withTestDb(async (sql) => {
+      const { turnId } = await seededTurn(sql)
+      // One search already recorded against this turn, which is the whole budget
+      // under the limits below. `countSupplierCalls` reads `course.tool_calls`,
+      // the ledger's own table, so this is the state a turn that has really
+      // searched once is in.
+      await sql`
+        insert into course.tool_calls (turn_id, call_id, name, status)
+        values (${turnId}, 's0-b0', 'search_hotels', 'done')`
+      const client = fakeClient([
+        toolUseMessage('search_hotels',
+          { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
+        textMessage('Here is what I already have for Faro.'),
+      ])
+      const chain = countingRunner()
+      const agent = makeDriver({
+        sql,
+        client,
+        run: chain.run,
+        limits: { ...DEFAULT_LIMITS, maxSupplierCallsPerTurn: 1 },
+        now: Date.now,
+      })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      // The supplier was not called, and the model was told why in a sentence it
+      // can act on rather than by a failed turn: an unmet supplier budget is not
+      // a fail reason and the model has steps left to propose from what it has.
+      expect(chain.calls()).toBe(0)
+      const [turn] = await sql<{ status: string; fail_reason: string | null }[]>`
+        select status, fail_reason from course.turns where id = ${turnId}`
+      expect(turn!.status).toBe('done')
+      expect(turn!.fail_reason).toBe(null)
+
+      const [row] = await sql<{ state: { messages: { content: { type: string; content?: string; is_error?: boolean }[] }[] } }[]>`
+        select state from course.turns where id = ${turnId}`
+      const results = row!.state.messages
+        .flatMap((m) => m.content)
+        .filter((b) => b.type === 'tool_result')
+      expect(results).toHaveLength(1)
+      expect(results[0]!.content).toContain('No more searches will run')
+      expect(results[0]!.is_error).toBe(true)
+
+      // STILL one row, the seeded one. The refusal never reaches `deps.run`, so
+      // `ledgerRunner`, the only writer of this table, never sees it. That is
+      // deliberate: a refusal that wrote a row would count itself against
+      // `countSupplierCalls` on the next step, so a refused search would consume
+      // the quota it was refused for.
+      const rows = await sql<{ call_id: string }[]>`
+        select call_id from course.tool_calls where turn_id = ${turnId}`
+      expect(rows.map((r) => r.call_id)).toEqual(['s0-b0'])
+    })
+  })
+
+  it('sends the stored notebook as the request suffix, after the transcript and not in the prompt', async () => {
+    await withTestDb(async (sql) => {
+      const { conversationId, turnId } = await seededTurn(sql)
+      await applyRequirementsPatch(sql, {
+        conversationId, userId: USER, source: 'user', at: '2026-08-29T10:00:00Z',
+        patch: { budget: money(150_000n, 'EUR'), destination: 'Portugal' },
+      })
+      const client = recordingClient([textMessage('Three stays near the beach in Faro.')])
+      const agent = makeDriver({
+        sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+      })
+      await runTurn(workerDeps(sql, { agent }), turnId)
+
+      expect(client.sent).toHaveLength(1)
+      const request = client.sent[0]!
+      // In the TRANSCRIPT, on the last user turn, which is where `withSuffix`
+      // puts it (src/model/client.ts) and therefore after any cache breakpoint
+      // lesson 5.6 places. In the system prompt it would invalidate the cached
+      // prefix the moment she stated a fact.
+      const suffix = lastUserText(request)
+      expect(suffix).toContain('## The notebook, as recorded')
+      expect(suffix).toContain('Portugal')
+      expect(suffix).toContain('EUR')
+      expect(suffix).toContain('(user)')
+      expect(String(request.system)).not.toContain('The notebook, as recorded')
+      // And it really is the suffix rather than a second user turn: the
+      // transcript is her one message, with the notebook appended to it.
+      expect((request.messages as unknown[]).length).toBe(1)
     })
   })
 })

@@ -14,6 +14,7 @@ import { SEATS } from '../seats.js'
 import type { ToolRunner } from '../tools.js'
 import { TOOLS, toolsForDesk } from '../tools/registry.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
+import { validateToolCall } from '../tools/validate.js'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 
 export type DriverDeps = {
@@ -263,24 +264,9 @@ export function makeDriver(deps: DriverDeps): Agent {
      */
     const callId = `s${ctx.state.step}-b${blockIndex}`
 
-    if (toolUse.name === 'ask_user') {
-      // Terminal by construction: the answer comes from her, not from a tool. It
-      // is a `message` step rather than a new kind of step, because a question to
-      // her IS the turn's reply: `completeTurn` writes it to course.messages and
-      // parks the conversation on `awaiting_user`, which is what a parked turn
-      // already meant. No fail reason is added for it, because nothing failed.
-      const { questions } = (toolUse.input as { questions?: string[] } | null) ?? {}
-      if (Array.isArray(questions) && questions.length > 0) {
-        return {
-          kind: 'message', text: questions.join('\n\n'),
-          costMicros: actual, alreadyRecorded: true,
-        }
-      }
-    }
-
-    // `assistantContent` is computed above and is the same on both branches:
-    // the model asked for this call either way, and the transcript has to carry
-    // the ask before it carries the answer or the next request is a 400.
+    // `assistantContent` is computed above and is the same on every branch
+    // below: the model asked for this call either way, and the transcript has to
+    // carry the ask before it carries the answer or the next request is a 400.
     const step = {
       kind: 'tool' as const,
       /**
@@ -299,15 +285,68 @@ export function makeDriver(deps: DriverDeps): Agent {
       alreadyRecorded: true,
     }
 
+    if (toolUse.name === 'ask_user') {
+      /**
+       * The one tool the chain never answers, so the one input `doorRunner`
+       * never sees: this branch returns before `deps.run` is called. The
+       * allowlist and the schema therefore have to run HERE, or `ask_user` is
+       * the single published tool whose input reaches something durable
+       * unchecked, which is the contract this lesson is named after.
+       *
+       * What was unchecked: `questions.join('\n\n')` on an array of objects is
+       * the string "[object Object]", and this branch's reply is written to
+       * `course.messages` by `completeTurn`, which is her thread. `AskUser`
+       * (src/tools/registry.ts) caps it at three questions of 300 characters and
+       * requires strings, and none of that was enforced on the one path that
+       * writes to her.
+       */
+      const check = validateToolCall('planning', 'ask_user', toolUse.input)
+      if (check.ok) {
+        // Terminal by construction: the answer comes from her, not from a tool.
+        // It is a `message` step rather than a new kind of step, because a
+        // question to her IS the turn's reply: `completeTurn` writes it to
+        // course.messages and parks the conversation on `awaiting_user`, which
+        // is what a parked turn already meant. No fail reason is added for it,
+        // because nothing failed.
+        const { questions } = check.input as { questions: string[] }
+        return {
+          kind: 'message', text: questions.join('\n\n'),
+          costMicros: actual, alreadyRecorded: true,
+        }
+      }
+      // The same shape as the budget refusal below, and for the same reason: a
+      // sentence the model can correct itself from in the step it has left,
+      // rather than a fail reason for something nothing failed at.
+      return { ...step, run: async () => ({ content: check.content, isError: true }) }
+    }
+
     const def = TOOLS[toolUse.name]
     if (def?.door === 'api') {
       const budget = await assertSupplierBudget(sql, ctx.turnId, limits.maxSupplierCallsPerTurn)
       if (!budget.ok) {
-        // A refusal the model can act on, travelling the same durable path a
-        // result does, so course.tool_calls records that the attempt happened.
-        // Deliberately still a tool step and not a `fail`: an unmet supplier
-        // budget is not a fail reason, and the model has steps left in which to
-        // propose from what it already has.
+        /**
+         * A refusal the model can act on, and one that leaves NO trace in
+         * `course.tool_calls`.
+         *
+         * This `run` never calls `deps.run`, so the chain, and with it
+         * `ledgerRunner`, the only writer of that table (src/tools.ts), is
+         * bypassed: no `pending` row, no `done` row, nothing durable at all. The
+         * refusal lives for exactly one step, as the `tool_result` block the
+         * harness appends to the transcript, and dies with the turn.
+         *
+         * That is the right behaviour rather than an oversight. A row here would
+         * be counted by `countSupplierCalls` on the very next step, so a refused
+         * search would consume the quota it was refused for, and SPEC section 8
+         * says a refusal does not consume quota. What it costs is a real and
+         * small thing an operator should know: `select * from course.tool_calls
+         * where turn_id = ...` shows the searches that RAN and not the ones this
+         * turn was refused, so a turn that asked ten times and was refused four
+         * reads there as six.
+         *
+         * Deliberately still a tool step and not a `fail`: an unmet supplier
+         * budget is not a fail reason, and the model has steps left in which to
+         * propose from what it already has.
+         */
         return {
           ...step,
           run: async () => ({

@@ -435,11 +435,19 @@ export type NotebookContext = {
  * replayed call does not apply the patch twice, and every other name falls
  * through to `inner` so this layer knows exactly one thing.
  *
- * The rejection is not a failure. `applyRequirements` refuses two different
- * ways: an unrecognised key is dropped and a refused constraint is named, so
- * neither "recorded" nor "nothing was recorded" is true in general, and the
- * rendered notebook underneath is the authoritative answer to what landed. That
- * is why it is always sent rather than only on success.
+ * The rejection is not a failure. `applyRequirements` (src/notebook.ts) refuses
+ * three different ways: a patch that fails `PatchSchema` is refused wholesale, a
+ * budget `money()` cannot read is refused on its own, and a constraint a
+ * non-user patch would relax is refused on its own, so neither "recorded" nor
+ * "nothing was recorded" is true in general, and the rendered notebook
+ * underneath is the authoritative answer to what landed. That is why it is
+ * always sent rather than only on success.
+ *
+ * All three come back as a tool RESULT naming the keys, never as a throw. A
+ * throw out of this layer would escape `ledgerRunner` above it, which has
+ * already written the `pending` row, and leave that row behind for a person to
+ * clear for a call that can never complete, which is the failure `doorRunner`
+ * was introduced to end.
  */
 export function notebookRunner(
   sql: postgres.Sql, ctx: NotebookContext, inner: ToolRunner,

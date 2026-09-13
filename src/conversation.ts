@@ -7,7 +7,7 @@ import { extract } from './extract.js'
 import { DEFAULT_LIMITS } from './limits.js'
 import { limitReachedMessage } from './limit-message.js'
 import { addUsage, readSpendOrLimitReached, toolLoop, type LoopResult } from './loop.js'
-import { applyRequirements, emptyNotebook, notebookForPrompt, type Notebook } from './notebook.js'
+import { applyRequirements, emptyNotebook, type Notebook } from './notebook.js'
 import type { ModelCallSink } from './repo/model-calls.js'
 import type { ToolRunner } from './tools.js'
 import { toolsForDesk } from './tools/registry.js'
@@ -147,11 +147,17 @@ export async function turn(
   const { next: notebook } = applyRequirements(
     conversation.notebook, patch, 'user', new Date().toISOString())
   const desk = loadDesk('planning')
-  const system = renderPrompt(desk, {
-    today: TODAY,
-    requirements: notebookForPrompt(notebook),
-    dropped: extracted.dropped.length ? extracted.dropped.join(', ') : 'none',
-  })
+  // `{{today}}` and nothing else. The planning prompt lost `{{requirements}}`
+  // and `{{dropped}}` at lesson 5.2, when the notebook moved into the request's
+  // suffix, and `renderPrompt` ignores a var no slot names, so the two that were
+  // left here filled nothing: `notebookForPrompt` was called, `dropped` was
+  // joined, and both strings were thrown away. What it costs on THIS path is
+  // named in README.md: `turn()` has no suffix to put the notebook in, so the
+  // planning desk plans from her message alone until lesson 5.3 puts `npm run
+  // trip` on the driver. `extracted.dropped` is still computed by `extract`,
+  // which is where the recorded fixtures assert it (test/extract.test.ts); it is
+  // simply not something this prompt has anywhere to say.
+  const system = renderPrompt(desk, { today: TODAY })
   const result = await toolLoop({
     seat: desk.seat,
     system,

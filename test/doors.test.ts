@@ -9,7 +9,9 @@ import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
-import { corpusRunner, doorRunner, ledgerRunner, mockRunner, supplierRunner } from '../src/tools.js'
+import {
+  corpusRunner, doorRunner, ledgerRunner, mockRunner, notebookRunner, supplierRunner,
+} from '../src/tools.js'
 import { assertSupplierBudget, countSupplierCalls } from '../src/tools/supplierBudget.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
@@ -194,6 +196,42 @@ describeDb('the door in front of the ledger', () => {
       const [row] = await sql<{ result: { content: string } }[]>`
         select result from course.tool_calls where turn_id = ${claim.turnId} and call_id = 'toolu_02'`
       expect(row!.result.content).not.toContain('trust="untrusted"')
+    })
+  })
+})
+
+describeDb('a patch the model made up', () => {
+  it('refuses a bare number through the chain, and leaves no pending row behind', async () => {
+    await withTestDb(async (sql) => {
+      const claim = await claimedTurn(sql)
+      // The deployed chain for this tool, in the order tier 3 composes it
+      // (netlify/functions/run-turn-background.mts): the door, then the ledger,
+      // then the notebook.
+      const run = doorRunner('planning', ledgerRunner(sql, claim, notebookRunner(
+        sql,
+        {
+          conversationId: claim.conversationId, userId: USER,
+          source: () => 'user', now: () => new Date(AT),
+        },
+        mockRunner(),
+      )))
+      // `{minor, currency}` is what the tool description asks for; a bare number
+      // is what a model sends when it reads "budget" and thinks in whole euros.
+      const out = await run('update_requirements', { patch: { budget: 500 } }, 'toolu_np', undefined)
+
+      // A refusal the model can act on, naming the key, and not a throw. At
+      // lesson-5-2 this was a TypeError raised inside `sql.begin` on
+      // `undefined.toString()`, which escaped `notebookRunner`, `ledgerRunner`
+      // and `doorRunner` alike and failed the turn.
+      expect(out.content).toContain('Refused: budget')
+      const [row] = await sql<{ status: string }[]>`
+        select status from course.tool_calls
+         where turn_id = ${claim.turnId} and call_id = 'toolu_np'`
+      // `done`, not `pending`. The orphaned pending row is the exact failure
+      // `doorRunner` was introduced to end (src/tools.ts), and a throw out of
+      // the notebook layer put one back.
+      expect(row!.status).toBe('done')
+      expect((await loadNotebook(sql, claim.conversationId, USER)).budget).toBeNull()
     })
   })
 })

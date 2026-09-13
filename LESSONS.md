@@ -62,6 +62,18 @@ source that is not hers, because the harness stamps `'user'` or `'inferred'` and
 never `'tool'`: a guard naming one of the three would have gone on defending
 nothing while the module claimed it did.
 
+**A schema the model reads is not a check.** `update_requirements` published
+`patch` as a free record, which is the right thing to publish, and nothing
+validated what came back. The model does not have to be adversarial for that to
+end a conversation: told to send `{minor, currency}`, a model reasoning in whole
+euros writes `1.5e3`, which survives the write and then throws in `BigInt` on
+every later read, so the notebook cannot be loaded and every future turn on that
+conversation dies before the model is called. The published schema is what the
+model reads; the check is a separate schema, on the way into the one function
+that writes, and it refuses a patch by answering the model rather than by
+throwing, because a throw past a wrapper that has already written the `pending`
+row leaves a row for a person to clear.
+
 **Evidence, not assertions.** "I added a test that discriminates" is worth
 roughly nothing between two agents. A pasted failing output is worth a great
 deal. Every fix round in both modules ends with a command and its output.

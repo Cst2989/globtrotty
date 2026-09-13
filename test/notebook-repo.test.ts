@@ -111,6 +111,24 @@ describeDb('the notebook, stored', () => {
     })
   })
 
+  it('never bricks a conversation with a budget nothing can read back', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await conversation(sql)
+      const out = await applyRequirementsPatch(sql, {
+        conversationId, userId: USER, at: AT, source: 'user',
+        patch: { budget: { minor: '1.5e3', currency: 'EUR' } },
+      })
+      expect(out.rejected).toEqual(['budget'])
+      // The read-back IS the case. Stored verbatim, `1.5e3` survives the write
+      // and `renderNotebook` prints it, and then `fromStored`'s
+      // `BigInt('1.5e3')` throws on every later read: `loadNotebook` is the
+      // first line of every driver step (src/agents/driver.ts) and of tier 3's
+      // chain, so the conversation would fail before the model was called, on
+      // every retry, until someone edited the row by hand.
+      expect((await loadNotebook(sql, conversationId, USER)).budget).toBeNull()
+    })
+  })
+
   it('reads under a lock, so two writers cannot both compare against the old value', async () => {
     await withRealDb(async (sql, userId) => {
       const [c] = await sql`insert into course.conversations (user_id) values (${userId}) returning id`
