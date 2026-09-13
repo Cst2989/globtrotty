@@ -480,7 +480,7 @@ async function execute(
       return escalate({ sql, notifier: deps.notifier, now: deps.now }, ctx, input as { reason: EscalationReason; proposalId?: string })
     case 'research_destination': {
       const { city } = input as { city: string }
-      return researchDestination({ sql, transport: deps.transport, limits: deps.limits, now: deps.now }, ctx, spent, city)
+      return researchDestination({ sql, transport: deps.transport, limits: deps.limits, now: deps.now }, ctx, spent, city, notebook)
     }
     default:
       // Unreachable: validateToolCall already refused anything not in

@@ -813,6 +813,27 @@ describeDb('driver', () => {
       expect(BigInt(mc!.cost_micros as string)).toBe(12_000n)
     })
   })
+
+  it('counts research_destination against the same per-turn supplier budget, though it is a worker-door tool', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '29')
+      for (let i = 0; i < DEFAULT_LIMITS.maxSupplierCallsPerTurn; i++) {
+        await sql`insert into tool_calls (turn_id, call_id, name, status)
+                  values (${s.turnId}, ${'pre' + i}, 'explore_flights', 'done')`
+      }
+      const create = vi.fn().mockResolvedValue(toolResponse('research_destination', { city: 'Faro' }))
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      expect(step.kind).toBe('tool')
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const result = String(await step.run())
+      expect(result).toMatch(/budget|limit|searches/i)
+      expect(result).toContain(String(DEFAULT_LIMITS.maxSupplierCallsPerTurn))
+      // The budget gate fires before execute() ever calls the scout, so the
+      // shared transport sees only the driver's own call — never a second one
+      // for the scout's Haiku request.
+      expect(create).toHaveBeenCalledTimes(1)
+    })
+  })
 })
 
 /**

@@ -86,6 +86,13 @@ describe('provenance is assigned by the harness, never by the model', () => {
       .toEqual(Object.keys(VALID_INPUT).filter((n) => codeDoorNames.has(n)).sort())
   })
 
+  it('names only real tools in VALID_INPUT — no stale or typo’d key', () => {
+    // The filter above would silently hide a VALID_INPUT key that matches no
+    // tool at all (a rename, a typo) — it would just never appear on either
+    // side of that equality. This is the check that actually catches one.
+    expect(Object.keys(VALID_INPUT).every((n) => n in TOOLS)).toBe(true)
+  })
+
   const PROVENANCE_FIELDS = ['source', 'stated_by', 'price', 'currency', 'fetchedAt', 'url']
 
   for (const tool of codeDoorTools) {

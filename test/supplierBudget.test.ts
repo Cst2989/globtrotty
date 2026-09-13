@@ -77,7 +77,10 @@ describe('SUPPLIER_DOORS tracks the registry\'s api-door tools, plus known non-a
   // so an api-door tool added without a corresponding SUPPLIER_DOORS entry
   // still fails this test instead of being mistaken for another deliberate
   // exception.
-  const NON_API_SUPPLIER_TOOLS = ['hand_off_to_booking']
+  // `research_destination` is a `worker`-door tool (its result is a scout's
+  // prose, not ours) that still reaches a metered third party — the model
+  // provider's own web-search server tool — so it belongs here too.
+  const NON_API_SUPPLIER_TOOLS = ['hand_off_to_booking', 'research_destination']
 
   it('lists exactly the tools registered with door: "api", plus the named exceptions — no more, no fewer', () => {
     // SUPPLIER_DOORS is maintained BY HAND, deliberately separate from TOOLS'
