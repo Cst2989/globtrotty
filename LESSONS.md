@@ -39,6 +39,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the canary |
 | lesson-5-7 | What she sees | npm run migrate, then npm test (test/channel.test.ts, test/isolation.test.ts, test/capture.test.ts, test/monitor.test.ts), then npm run trip for the offer card |
 | lesson-6-1 | Why snapshot tests lie | npm test (test/eval-snapshot.test.ts, test/grade.test.ts, test/scorecard.test.ts), then npm run evals for the first scorecard, which exits 1 because one of its two worlds is graded red on purpose |
+| lesson-6-2 | The gates are already evals | npm run migrate, then npm test (test/eval-replay.test.ts, test/gate-metrics.test.ts), then npm run evals for the card with its gate rows |
 
 ## How this branch was built
 
@@ -229,6 +230,13 @@ called it on a supplier's NAME as well, where it would have printed "Beachfront
 apartment, Faro, 7 nights" on her card as one unreadable word. Two strings that
 both come from a supplier are not therefore the same kind of string, and the card
 cleans them differently for reasons written at the function that does it.
+
+**A replay against the live state is not a replay.** The gates and the evals
+share one implementation, which is the strongest guarantee in this repository,
+and it held only until the notebook was allowed to move underneath it. One
+column written at save time is the whole fix, and it could not have been added
+later: the prior notebook states were overwritten in place and no history of
+them exists anywhere in this schema.
 
 ## Hand-offs
 

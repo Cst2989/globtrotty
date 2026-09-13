@@ -62,8 +62,10 @@ describeDb('what the gates can judge at lesson-5-1', () => {
       await recordResults(sql, claim, { params, items })
 
       // The same mapper both live drivers use, over the same empty notebook they
-      // both build, because nothing on this branch stores one.
-      const notebook = constraintsFromNotebook(emptyNotebook(), '2026-08-29')
+      // both build, because nothing on this branch stores one. Named, because
+      // `proposalRunner` takes the raw notebook as well from lesson 6.2.
+      const raw = emptyNotebook()
+      const notebook = constraintsFromNotebook(raw, '2026-08-29')
       expect(notebook.budget).toBeNull()
       expect(notebook.window).toBeNull()
 
@@ -74,7 +76,7 @@ describeDb('what the gates can judge at lesson-5-1', () => {
         // refuses a price quoted in the future as firmly as a stale one, so a
         // 2026-08-29 gate clock would report the freshness gate rather than the
         // two this demonstration is about.
-        { conversationId, userId: USER, turnId: claim.turnId, notebook, now: () => new Date() },
+        { conversationId, userId: USER, turnId: claim.turnId, notebook, snapshot: raw, now: () => new Date() },
         corpusRunner(sql, claim, supplierRunner(mockSuppliers(), 'EUR')),
       )
       await run('propose_itinerary',
@@ -114,8 +116,8 @@ describeDb('what the gates can judge from lesson 5.2', () => {
       }
       const items = await mockSuppliers().hotel.search(params)
       await recordResults(sql, claim, { params, items })
-      const notebook = constraintsFromNotebook(
-        await loadNotebook(sql, conversationId, USER), '2026-08-29')
+      const hers = await loadNotebook(sql, conversationId, USER)
+      const notebook = constraintsFromNotebook(hers, '2026-08-29')
       // The two fields the opening demonstration read back as null.
       expect(notebook.budget!.minor).toBe(20_000n)
       expect(notebook.window).not.toBeNull()
@@ -126,7 +128,7 @@ describeDb('what the gates can judge from lesson 5.2', () => {
         // refuses a price quoted in the future as firmly as a stale one, so a
         // 2026-08-29 gate clock would report the freshness gate rather than the
         // two this demonstration is about.
-        { conversationId, userId: USER, turnId: claim.turnId, notebook, now: () => new Date() },
+        { conversationId, userId: USER, turnId: claim.turnId, notebook, snapshot: hers, now: () => new Date() },
         corpusRunner(sql, claim, supplierRunner(mockSuppliers(), 'EUR')),
       )
       await run('propose_itinerary',

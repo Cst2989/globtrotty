@@ -7,6 +7,7 @@ import type { ItemRef } from '../src/gates/types.js'
 import { submitMessage } from '../src/handler.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { compareMoney, CurrencyMismatchError, money, sumMoney, type Money } from '../src/money.js'
+import { emptyNotebook, toStored } from '../src/notebook.js'
 import { decideProposal, recordProposal } from '../src/repo/proposals.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { claimTurn, type Claim } from '../src/repo/turns.js'
@@ -150,7 +151,11 @@ describeDb('handOffToBooking', () => {
     const items = await suppliers.hotel.search(search)
     await recordResults(sql, claim, { params: search, items })
     const refs: ItemRef[] = [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'stay' }]
-    const proposalId = await recordProposal(sql, { conversationId, userId: USER, turnId, refs })
+    // The row is here for the cashier's precondition, so its snapshot is not
+    // what these cases are about, and `recordProposal` refuses a missing one.
+    const proposalId = await recordProposal(sql, {
+      conversationId, userId: USER, turnId, refs, requirementsSnapshot: toStored(emptyNotebook()),
+    })
     if (over.decision !== null) {
       await decideProposal(sql, {
         proposalId, conversationId, decision: over.decision ?? 'accept',
@@ -402,7 +407,11 @@ describeDb('handOffToBooking', () => {
       const items = await suppliers.flight.search(search)
       await recordResults(sql, claim, { params: search, items })
       const refs: ItemRef[] = [{ sourceId: items[0]!.sourceId, quantity: 1, slot: 'flight' }]
-      const proposalId = await recordProposal(sql, { conversationId, userId: USER, turnId, refs })
+      // Here for the cashier's precondition, so the snapshot is not what this
+      // case is about, and `recordProposal` refuses a missing one.
+      const proposalId = await recordProposal(sql, {
+        conversationId, userId: USER, turnId, refs, requirementsSnapshot: toStored(emptyNotebook()),
+      })
       await decideProposal(sql, { proposalId, conversationId, decision: 'accept', at: DECIDED_AT })
 
       // A supplier that returns the same id at the same price with a different
@@ -610,6 +619,9 @@ describeDb('handOffToBooking', () => {
       // refusal is cheaper than "Reduce of empty array".
       const proposalId = await recordProposal(sql, {
         conversationId: claim.conversationId, userId: USER, turnId: claim.turnId, refs: [],
+        // Here for the cashier's precondition, so the snapshot is not what
+        // this case is about, and `recordProposal` refuses a missing one.
+        requirementsSnapshot: toStored(emptyNotebook()),
       })
       await decideProposal(sql, {
         proposalId, conversationId: claim.conversationId, decision: 'accept', at: DECIDED_AT,

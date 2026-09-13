@@ -193,3 +193,55 @@ export function notebookForPrompt(notebook: Notebook): string {
     .map(([key, field]) => `${key}: ${describeValue((field as { value: unknown }).value)} (${(field as { source: string }).source})`)
   return lines.length ? lines.join('\n') : 'nothing yet'
 }
+
+/**
+ * The notebook as jsonb, and back. Two columns hold this shape:
+ * `course.conversations.requirements` (migration 0015) and, from lesson 6.2,
+ * `course.proposals.requirements_snapshot` (migration 0018). One serialiser for
+ * both, kept here beside the `Notebook` it converts rather than beside either
+ * reader, because a second serialiser written next to the second column is how
+ * the two come to disagree about what a stored budget looks like.
+ *
+ * ## Why it is not a bare `update ... set requirements = $1`
+ *
+ * `Money.minor` is a bigint and `JSON.stringify` throws on a bigint, which is
+ * what postgres.js's `sql.json` calls. So the budget field is stored with
+ * `minor` as a decimal string and rebuilt through `money()` on the way out,
+ * which also re-validates the currency code against a notebook an older version
+ * of this code could have written. `Money`'s brand is a symbol key, so
+ * `JSON.stringify` drops it and `money()` restores it at no cost.
+ */
+type StoredField = { value: unknown; source: Provenance; at: string } | null
+
+/** The notebook on its way into a jsonb column. */
+export function toStored(nb: Notebook): Record<string, unknown> {
+  const budget: StoredField = nb.budget === null ? null : {
+    value: { minor: nb.budget.value.minor.toString(), currency: nb.budget.value.currency },
+    source: nb.budget.source, at: nb.budget.at,
+  }
+  return { ...nb, budget }
+}
+
+/**
+ * The inverse, and the ONE reader of both columns. `loadProposal`
+ * (src/repo/proposals.ts) reads a snapshot out of course.proposals and
+ * `loadNotebook` (src/repo/notebook.ts) reads the live notebook out of
+ * course.conversations, and a gate replayed through a second parser would be
+ * judging a different notebook from the one production judged.
+ */
+export function fromStored(raw: unknown): Notebook {
+  const base = emptyNotebook()
+  if (raw === null || typeof raw !== 'object') return base
+  const r = raw as Record<string, unknown>
+  const out: Notebook = { ...base, ...(r as Partial<Notebook>) }
+  const b = r.budget as
+    { value?: { minor?: unknown; currency?: unknown }; source?: unknown; at?: unknown } | null
+  out.budget =
+    b && b.value && typeof b.value.currency === 'string' && b.value.minor !== undefined
+      ? {
+          value: money(BigInt(String(b.value.minor)), b.value.currency),
+          source: b.source as Provenance, at: String(b.at),
+        }
+      : null
+  return out
+}

@@ -151,6 +151,20 @@ describeDb('the constraints and the types', () => {
     })
   })
 
+  it('carries the notebook a proposal was judged against, and lets it be null', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`
+      // Null is legal on purpose: every row written before migration 0018 has
+      // one, because the notebook states those rows were judged against were
+      // overwritten in place and are gone.
+      const [p] = await sql`
+        insert into course.proposals (conversation_id, user_id, refs)
+        values (${c!.id}, ${USER}, ${sql.json([] as never)})
+        returning requirements_snapshot`
+      expect(p!.requirements_snapshot).toBeNull()
+    })
+  })
+
   it('refuses a seat nobody declared', async () => {
     await withTestDb(async (sql) => {
       const [c] = await sql`insert into course.conversations (user_id) values (${USER}) returning id`

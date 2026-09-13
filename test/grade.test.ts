@@ -1,6 +1,7 @@
 import { gradeOutput, gradeTrajectory, NOT_YET, overBudget, type Trace } from '../src/evals/grade.js'
-import type { RehydratedItem } from '../src/gates/types.js'
-import { money } from '../src/money.js'
+import { checkBudget, checkDates, checkTotals } from '../src/gates/checks.js'
+import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
+import { money, type Money } from '../src/money.js'
 import { mockSuppliers, type MockConfig } from '../src/supplier/mock.js'
 import type { HotelSearch } from '../src/supplier/types.js'
 
@@ -23,6 +24,25 @@ const EXPECTED = {
   currency: 'EUR',
   mustInclude: ['crib'],
   window: { earliest: '2026-09-15', latest: '2026-09-30' },
+}
+
+/** The number the seed-1 Faro week straddles: two stays under it, one over. */
+const BUDGET = money(75_000n, 'EUR')
+
+/**
+ * What `replayGates` (src/evals/replay.ts) hands `gradeOutput`, built here out
+ * of the SAME two checks the pipeline calls rather than out of a literal. A
+ * hand-written outcome would let this file agree with a `detail` string
+ * src/gates/checks.ts no longer produces.
+ */
+const outcomeFor = (items: RehydratedItem[], budget: Money): GateOutcome => {
+  const totals = checkTotals(items, 'EUR')
+  const violations = [
+    ...totals.violations,
+    ...checkBudget(items, totals, budget),
+    ...checkDates(items, EXPECTED.window),
+  ]
+  return violations.length > 0 ? { ok: false, violations } : { ok: true, items, total: totals.total! }
 }
 
 describe('grading the output', () => {
@@ -70,15 +90,42 @@ describe('grading the output', () => {
     expect(check.detail).not.toContain(': .')
   })
 
-  it('reports the budget and the window as unreached rather than as passed', async () => {
-    // The two the gates own. They carry a reason naming lesson 6.2, so a reader
-    // of this tag's scorecard is told what has not been looked at.
+  it('reports the budget and the window as unreached when no proposal was made', async () => {
+    // The two the gates own. A case that never reached a proposal has no gate
+    // verdict to hand in, so both stay null with the reason printed.
     const grade = gradeOutput('A crib is included.', await rehydrated(), EXPECTED)
     for (const name of ['within_budget', 'inside_her_window']) {
       const check = grade.checks.find((c) => c.name === name)!
       expect(check.passed).toBeNull()
       expect(check.detail).toContain(NOT_YET.gates)
     }
+  })
+
+  it('turns both gate-owned checks into verdicts once a replay is handed in', async () => {
+    const items = await rehydrated()
+    const cheapest = items.reduce((a, b) => (a.item.price.minor < b.item.price.minor ? a : b))
+    const grade = gradeOutput('A crib is included.', items, EXPECTED, outcomeFor([cheapest], BUDGET))
+    for (const name of ['within_budget', 'inside_her_window']) {
+      const check = grade.checks.find((c) => c.name === name)!
+      expect(check.passed).toBe(true)
+      expect(check.detail).toBe('The gates approved it.')
+    }
+  })
+
+  it('fails within_budget on a stay that is genuinely over her number', async () => {
+    // The mock's own seed-1 Faro week runs 693, 721 and 840 EUR, so a 750 EUR
+    // budget is one the dearest of the three really does break. The verdict and
+    // the sentence both come out of `checkBudget`, the function production
+    // calls, rather than out of a second budget rule written for the evals.
+    const items = await rehydrated()
+    const dearest = items.reduce((a, b) => (a.item.price.minor > b.item.price.minor ? a : b))
+    const grade = gradeOutput('A crib is included.', items, EXPECTED, outcomeFor([dearest], BUDGET))
+    const budget = grade.checks.find((c) => c.name === 'within_budget')!
+    expect(budget.passed).toBe(false)
+    expect(budget.detail).toBe('This trip totals €840.00, over the €750.00 budget.')
+    // The dates gate had nothing against the same stay, so one failed check
+    // does not drag the other down with it.
+    expect(grade.checks.find((c) => c.name === 'inside_her_window')!.passed).toBe(true)
   })
 })
 

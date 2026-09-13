@@ -60,6 +60,19 @@ export function scorecardOf(
   }
 }
 
+/**
+ * Database-derived rows, appended after the graded ones, in the order given.
+ *
+ * A second card printed underneath the first would be two denominators a reader
+ * has to reconcile, and the gate counts are about the SAME run: they come from
+ * the rows the cases just wrote. Appended rather than merged by name, because
+ * `gate:` rows and check rows are different kinds of thing and a collision
+ * between them would be a name nobody chose.
+ */
+export function withRows(card: Scorecard, rows: ScorecardRow[]): Scorecard {
+  return { ...card, rows: [...card.rows, ...rows] }
+}
+
 export function renderScorecard(card: Scorecard): string {
   const width = Math.max(20, ...card.rows.map((r) => r.name.length))
   const lines = card.rows.map((r) => `  ${r.name.padEnd(width)}  ${rate(r.tally)}`)

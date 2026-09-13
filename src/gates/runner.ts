@@ -1,5 +1,6 @@
 import type postgres from 'postgres'
 import { formatMoney } from '../money.js'
+import { toStored, type Notebook } from '../notebook.js'
 import { recordProposal } from '../repo/proposals.js'
 import { runGates } from './pipeline.js'
 import type { NotebookConstraints } from './notebookConstraints.js'
@@ -22,6 +23,16 @@ export type ProposalContext = {
   userId: string
   turnId: string | null
   notebook: NotebookConstraints
+  /**
+   * The notebook `notebook` above was derived from, unreduced.
+   *
+   * Both are carried rather than deriving one from the other here, because the
+   * derivation takes `today` (constraintsFromNotebook, src/gates/notebookConstraints.ts)
+   * and this link has no business knowing what day it is. The caller already
+   * computed the constraints from a notebook it had in its hand, so it passes
+   * both and nothing is recomputed or guessed.
+   */
+  snapshot: Notebook
   now: () => Date
 }
 
@@ -98,6 +109,10 @@ export function proposalRunner(sql: postgres.Sql, ctx: ProposalContext, inner: T
       userId: ctx.userId,
       turnId: ctx.turnId,
       refs: outcome.items.map((i) => i.ref),
+      // Written at SAVE TIME and from the notebook this run judged against, not
+      // read back later from the conversation. The moment it is read back it is
+      // the live notebook again, which is the whole defect.
+      requirementsSnapshot: toStored(ctx.snapshot),
     })
     return {
       content: JSON.stringify({

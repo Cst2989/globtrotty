@@ -264,8 +264,12 @@ async function main() {
     source: 'user', at: new Date().toISOString(),
     patch: { budget: money(1_000_000n, 'EUR'), month: 'September', nights: 7 },
   })
-  const hers = constraintsFromNotebook(
-    await loadNotebook(sql, booking.conversationId, DEMO_SCRIPT_USER), TODAY)
+  // Named rather than inlined, because `proposalRunner` now takes BOTH the raw
+  // notebook and the three fields the gates read off it (lesson 6.2): the
+  // snapshot is what course.proposals stores, and re-reading it later would be
+  // reading the live notebook again.
+  const hersNotebook = await loadNotebook(sql, booking.conversationId, DEMO_SCRIPT_USER)
+  const hers = constraintsFromNotebook(hersNotebook, TODAY)
   // The chain tier 3 builds (netlify/functions/run-turn-background.mts), minus
   // ledgerRunner: the ledger is scenario 3's subject rather than this one's.
   const run = cashierRunner(
@@ -273,7 +277,7 @@ async function main() {
     { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
     proposalRunner(
       sql,
-      { ...ctx, notebook: hers, now: () => new Date() },
+      { ...ctx, notebook: hers, snapshot: hersNotebook, now: () => new Date() },
       corpusRunner(sql, bookingClaim, supplierRunner(suppliers, hers.currency)),
     ),
   )

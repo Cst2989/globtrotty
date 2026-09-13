@@ -32,11 +32,19 @@ const params: FlightSearch = {
   returnDate: '2026-09-19', flexDays: 0, adults: 2, children: 0, infants: 0,
   cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
 }
-const notebook: NotebookConstraints = {
-  budget: money(1_000_000n, 'EUR'),
-  window: { earliest: '2026-09-01', latest: '2026-09-30' },
-  currency: 'EUR',
+/**
+ * The notebook the constraints below are DERIVED from, rather than a second
+ * hand-written literal beside them. `ProposalContext` carries both from lesson
+ * 6.2, the reduced three fields for the gates and the whole record for
+ * course.proposals.requirements_snapshot, and two literals is how the pair
+ * comes to describe two different travellers.
+ */
+const rawNotebook: Notebook = {
+  ...emptyNotebook(),
+  budget: { value: money(1_000_000n, 'EUR'), source: 'user', at: '2026-08-16T12:00:00.000Z' },
+  month: { value: 'September', source: 'user', at: '2026-08-16T12:00:00.000Z' },
 }
+const notebook: NotebookConstraints = constraintsFromNotebook(rawNotebook, '2026-08-16')
 
 /**
  * A conversation with a claimed, running turn on it.
@@ -657,7 +665,7 @@ describeDb('proposalRunner', () => {
       const { conversationId, items } = await seed(sql, 20)
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook, snapshot: rawNotebook, now: () => NOW },
         async () => ({ content: 'not reached', isError: true }),
       )
       const outcome = await run('propose_itinerary', {
@@ -691,7 +699,7 @@ describeDb('proposalRunner', () => {
       const { conversationId } = await seed(sql, 25)
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook, snapshot: rawNotebook, now: () => NOW },
         async () => ({ content: 'not reached', isError: true }),
       )
       const outcome = await run('propose_itinerary', {
@@ -712,7 +720,7 @@ describeDb('proposalRunner', () => {
       const { conversationId } = await seed(sql, 21)
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook, snapshot: rawNotebook, now: () => NOW },
         async () => ({ content: 'not reached', isError: true }),
       )
       const outcome = await run('propose_itinerary', {
@@ -739,7 +747,7 @@ describeDb('proposalRunner', () => {
       const tight: NotebookConstraints = { ...notebook, budget: money(1n, 'EUR') }
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook: tight, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook: tight, snapshot: rawNotebook, now: () => NOW },
         async () => ({ content: 'not reached', isError: true }),
       )
       const outcome = await run('propose_itinerary', {
@@ -761,7 +769,7 @@ describeDb('proposalRunner', () => {
       const { conversationId } = await seed(sql, 22)
       const run = proposalRunner(
         sql,
-        { conversationId, userId: USER, turnId: null, notebook, now: () => NOW },
+        { conversationId, userId: USER, turnId: null, notebook, snapshot: rawNotebook, now: () => NOW },
         async (name) => ({ content: `inner saw ${name}`, isError: false }),
       )
       expect((await run('search_flights', {}, 's1-b0')).content).toBe('inner saw search_flights')

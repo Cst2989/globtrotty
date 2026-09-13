@@ -913,22 +913,20 @@ have reached no supplier at all. It fails closed and costs her turn work rather
 than money, and the fix is for the driver to ask whether a `done` row already
 exists for this call id before it prices the budget. Owner: module 6.
 
-`supabase/migrations/0012_gate_results.sql` cites "spec §4.3, lesson 6.2". No
-document outside this repository may be cited from code, and `git ls-tree` finds
-no `docs` at any tag here, so a reader has nothing to open. The migration is
-frozen and stays as it is; the reference belongs in the lesson prose. Owner:
-module 6.
+Closed at lesson 6.2: migration 0012's header cites "spec section 4.3, lesson
+6.2", a document outside this repository, and the migration is frozen. What it
+meant is this lesson: a table that recorded only failures could not answer how
+often freshness fired, and `gateMetrics` (src/evals/gateMetrics.ts) is the
+reader that asks. The citation stays in the file, byte for byte, and the answer
+is here rather than in a new migration.
 
-Open at lesson 6.1: `gradeOutput` files two checks and `gradeTrajectory` files
-two as `passed: null`, so four of the eight properties the scorecard names are
-not looked at yet. Each null carries the lesson that reaches it, 6.2 for the
-budget and the travel window and 6.5 for the path, and `npm run evals` prints
-those lines under the card rather than only in the code. This is deliberate
-rather than owed: a scorecard that reported four unbuilt checks as passes would
-be the exact failure lesson 6.1 exists to retire. The runner exits 1 when a
-check is false and 0 when the only unfinished business is a null, so the proof
-command can go red on a real verdict without the four unbuilt checks reddening
-it every time somebody runs it.
+Open at lesson 6.2: `gradeTrajectory` still files two checks as `passed: null`,
+`every_number_has_a_search` and `questions_before_guesses`, because both read a
+transcript this runner does not assemble yet. Lesson 6.5 reads it. The two gate
+checks lesson 6.1 left null are verdicts now, through `replayGates`
+(src/evals/replay.ts). The runner exits 1 when a check is false and 0 when the
+only unfinished business is a null, so the proof command can go red on a real
+verdict without the unbuilt checks reddening it every time somebody runs it.
 
 ## What is next
 

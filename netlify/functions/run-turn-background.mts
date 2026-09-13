@@ -191,7 +191,7 @@ export default async (req: Request): Promise<Response> => {
                 { suppliers, limits: DEFAULT_LIMITS, now: () => new Date() },
                 proposalRunner(
                   sql,
-                  { ...gateCtx, notebook, now: () => new Date() },
+                  { ...gateCtx, notebook, snapshot: nb, now: () => new Date() },
                   // The searches ask for the SAME currency the gates expect, off
                   // the same constraints object, so a corpus and the currency
                   // gate cannot disagree by construction. Null until she states a

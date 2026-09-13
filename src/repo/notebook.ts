@@ -1,48 +1,20 @@
 import type postgres from 'postgres'
-import { formatMoney, money } from '../money.js'
-import { applyRequirements, emptyNotebook, type Notebook, type Provenance } from '../notebook.js'
+import { formatMoney } from '../money.js'
+import {
+  applyRequirements, emptyNotebook, fromStored, toStored, type Notebook, type Provenance,
+} from '../notebook.js'
 import { escapeFence } from '../tools/validate.js'
 
 /**
  * `course.conversations.requirements` arrived in migration 0015 for this module,
  * and this module is its only reader and its only writer.
  *
- * ## Why it is not a bare `update ... set requirements = $1`
- *
- * `Money.minor` is a bigint and `JSON.stringify` throws on a bigint, which is
- * what postgres.js's `sql.json` calls. So the budget field is stored with
- * `minor` as a decimal string and rebuilt through `money()` on the way out,
- * which also re-validates the currency code against a notebook an older version
- * of this code could have written. `Money`'s brand is a symbol key, so
- * `JSON.stringify` drops it and `money()` restores it at no cost.
+ * The jsonb conversion is NOT here. `toStored` and `fromStored` moved to
+ * src/notebook.ts at lesson 6.2, when a second column started holding the same
+ * shape: `course.proposals.requirements_snapshot` (migration 0018) is read by
+ * `loadProposal` (src/repo/proposals.ts), and a converter that lived in one
+ * table's repository would have had to be imported into the other's.
  */
-type StoredField = { value: unknown; source: Provenance; at: string } | null
-
-function toStored(nb: Notebook): Record<string, unknown> {
-  const budget: StoredField = nb.budget === null ? null : {
-    value: { minor: nb.budget.value.minor.toString(), currency: nb.budget.value.currency },
-    source: nb.budget.source, at: nb.budget.at,
-  }
-  return { ...nb, budget }
-}
-
-function fromStored(raw: unknown): Notebook {
-  const base = emptyNotebook()
-  if (raw === null || typeof raw !== 'object') return base
-  const r = raw as Record<string, unknown>
-  const out: Notebook = { ...base, ...(r as Partial<Notebook>) }
-  const b = r.budget as
-    { value?: { minor?: unknown; currency?: unknown }; source?: unknown; at?: unknown } | null
-  out.budget =
-    b && b.value && typeof b.value.currency === 'string' && b.value.minor !== undefined
-      ? {
-          value: money(BigInt(String(b.value.minor)), b.value.currency),
-          source: b.source as Provenance, at: String(b.at),
-        }
-      : null
-  return out
-}
-
 export async function loadNotebook(
   sql: postgres.Sql, conversationId: string, userId: string,
 ): Promise<Notebook> {

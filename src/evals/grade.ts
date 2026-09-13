@@ -1,6 +1,6 @@
 import { compareMoney, formatMoney, type Money } from '../money.js'
 import type { DateWindow } from '../gates/checks.js'
-import type { RehydratedItem } from '../gates/types.js'
+import type { GateOutcome, RehydratedItem } from '../gates/types.js'
 
 /**
  * One graded property, with the evidence that decided it.
@@ -54,7 +54,7 @@ export type TrajectoryExpectation = {
  * notice.
  */
 export const NOT_YET = {
-  gates: 'not evaluated: the gates are reused offline in lesson 6.2',
+  gates: 'not evaluated: this case reached no proposal, so there is no gate verdict to replay',
   path: 'not evaluated: the path is graded in lesson 6.5',
 } as const
 
@@ -64,14 +64,22 @@ export const NOT_YET = {
  * Two of the four checks are answerable with nothing but the items and her own
  * words, so they are answered here. The other two need the gates, which run
  * against the provenance corpus and against a notebook this function is not
- * given, and lesson 6.2 is where they get their verdict. They are recorded as
- * nulls with a reason rather than left out of the list, because a check that is
- * absent from a scorecard cannot be counted, and a denominator that silently
- * shrinks is the failure `casesExpected` and `casesGraded` exist to make
- * visible (src/evals/scorecard.ts).
+ * given. They are recorded as nulls with a reason rather than left out of the
+ * list, because a check that is absent from a scorecard cannot be counted, and
+ * a denominator that silently shrinks is the failure `casesExpected` and
+ * `casesGraded` exist to make visible (src/evals/scorecard.ts).
+ *
+ * `replayed` is optional because a case that never reached a proposal has no
+ * gate verdict to report, and there is nothing for `replayGates`
+ * (src/evals/replay.ts) to run against. When it is absent the two gate-owned
+ * checks stay null with their reason, which is the same three-verdict
+ * discipline course.gate_results uses. When it is there, the verdict is the
+ * gates' own: these are not eval copies of `checkBudget` and `checkDates`, they
+ * are the outcome of the run those two functions decided.
  */
 export function gradeOutput(
   reply: string, items: RehydratedItem[], expected: OutputExpectation,
+  replayed?: GateOutcome,
 ): Grade {
   const lower = reply.toLowerCase()
   const missing = expected.mustInclude.filter((w) => !lower.includes(w.toLowerCase()))
@@ -115,17 +123,31 @@ export function gradeOutput(
       },
       {
         name: 'within_budget',
-        passed: null,
-        detail: expected.budget
-          ? `${NOT_YET.gates} (budget ${formatMoney(expected.budget)})`
-          : `${NOT_YET.gates} (no budget stated)`,
+        passed: replayed === undefined
+          ? null
+          : replayed.ok || !replayed.violations.some((v) => v.gate === 'budget'),
+        detail: replayed === undefined
+          ? expected.budget
+            ? `${NOT_YET.gates} (budget ${formatMoney(expected.budget)})`
+            : `${NOT_YET.gates} (no budget stated)`
+          : replayed.ok
+            ? 'The gates approved it.'
+            : replayed.violations.filter((v) => v.gate === 'budget').map((v) => v.detail).join(' ')
+              || 'No budget violation among the faults recorded.',
       },
       {
         name: 'inside_her_window',
-        passed: null,
-        detail: expected.window
-          ? `${NOT_YET.gates} (${expected.window.earliest} to ${expected.window.latest})`
-          : `${NOT_YET.gates} (no travel window stated)`,
+        passed: replayed === undefined
+          ? null
+          : replayed.ok || !replayed.violations.some((v) => v.gate === 'dates'),
+        detail: replayed === undefined
+          ? expected.window
+            ? `${NOT_YET.gates} (${expected.window.earliest} to ${expected.window.latest})`
+            : `${NOT_YET.gates} (no travel window stated)`
+          : replayed.ok
+            ? 'The gates approved it.'
+            : replayed.violations.filter((v) => v.gate === 'dates').map((v) => v.detail).join(' ')
+              || 'No dates violation among the faults recorded.',
       },
     ],
   }
