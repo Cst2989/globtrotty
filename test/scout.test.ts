@@ -161,4 +161,28 @@ describeDb('scout', () => {
       expect(mc!.user_prompt as string).toContain('## The notebook, as recorded')
     })
   })
+
+  // M8: a web_search_tool_result block whose content is an ERROR object
+  // (not the array of results a successful search returns) must not be a
+  // silent partial failure — the driver has to be told some searches failed.
+  it('appends a trailer naming failed web searches', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, 'a')
+      const withError = {
+        content: [
+          { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: { query: 'Faro' } },
+          { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1',
+            content: { type: 'web_search_tool_result_error', error_code: 'too_many_requests' } },
+          { type: 'server_tool_use', id: 'srvtoolu_2', name: 'web_search', input: { query: 'Faro hotels' } },
+          { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_2', content: [] },
+          { type: 'text', text: 'Faro is the gateway to the Algarve.' },
+        ],
+        stop_reason: 'end_turn', model: 'claude-haiku-4-5-20251001', _request_id: 'req_e', usage: usage(1),
+      }
+      const out = await researchDestination(
+        deps(sql, vi.fn().mockResolvedValue(withError)), s, { micros: 0n }, 'Faro', emptyNotebook(),
+      )
+      expect(out).toContain('[some web searches failed: too_many_requests]')
+    })
+  })
 })

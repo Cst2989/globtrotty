@@ -98,7 +98,12 @@ export async function researchDestination(
   // web-search fee, and SCOUT_SEARCH_RESULT_TOKENS worth of input per search —
   // both multiplied out to the full SCOUT_MAX_SEARCHES the tool allows, because
   // the count actually made is unknowable before dispatch.
-  const perSearchMicros = WEB_SEARCH_MICROS + BigInt(SCOUT_SEARCH_RESULT_TOKENS * p.inMicrosPerToken)
+  // Math.ceil before BigInt: a future price whose inMicrosPerToken is
+  // fractional (every multiplier in costMicros already is) would otherwise
+  // make this product non-integer, and BigInt() throws a RangeError on a
+  // non-integer rather than truncating — see estimateMicros's doc comment
+  // (src/repo/reservation.ts) for the same reasoning applied there.
+  const perSearchMicros = WEB_SEARCH_MICROS + BigInt(Math.ceil(SCOUT_SEARCH_RESULT_TOKENS * p.inMicrosPerToken))
   const reserved = estimateMicros(seat, inputTokens, BigInt(SCOUT_MAX_SEARCHES) * perSearchMicros)
   const { conversationMicros, dailyMicros, day } = await reserve(sql, { userId: ctx.userId, conversationId: ctx.conversationId, micros: reserved })
   const refund = () => reconcile(sql, { userId: ctx.userId, conversationId: ctx.conversationId, reserved, actual: 0n, day })
@@ -122,5 +127,29 @@ export async function researchDestination(
   const text = result.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n').trim()
   if (text.length === 0) return 'No brief: the scout returned nothing. Plan from what you know, or ask her.'
   const { text: cut, cut: wasCut } = cutAtWords(maskControlChars(redactPrices(text)), SCOUT_MAX_WORDS)
-  return wasCut ? `${cut}\n[brief cut at ${SCOUT_MAX_WORDS} words]` : cut
+  const cutTrailer = wasCut ? `\n[brief cut at ${SCOUT_MAX_WORDS} words]` : ''
+  return `${cut}${cutTrailer}${searchErrorTrailer(result.content)}`
+}
+
+/**
+ * M8: a `web_search_tool_result` block whose `content` is an ERROR object
+ * (`{ type: 'web_search_tool_result_error', error_code: ... }`, per the
+ * provider's own shape) rather than the array of results a successful search
+ * returns. `ContentBlock` (src/engine.ts) does not declare this block type —
+ * see `researchDestination`'s doc comment above for why that is safe here —
+ * so this reads it via an unknown-shaped cast rather than a narrowed type.
+ * A silent partial failure (some searches worked, one 429'd) would otherwise
+ * read to the driver as a complete, successful brief with no signal that part
+ * of what informed it never actually ran.
+ */
+function searchErrorTrailer(content: unknown[]): string {
+  const codes = (content as Record<string, unknown>[])
+    .filter((b) => b.type === 'web_search_tool_result')
+    .flatMap((b) => {
+      const c = b.content
+      if (c === null || typeof c !== 'object' || Array.isArray(c)) return []
+      const errorCode = (c as Record<string, unknown>).error_code
+      return typeof errorCode === 'string' ? [errorCode] : []
+    })
+  return codes.length > 0 ? `\n[some web searches failed: ${codes.join(', ')}]` : ''
 }
