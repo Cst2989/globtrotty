@@ -7,7 +7,7 @@ import { submitMessage } from '../src/handler.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../src/repo/notebook.js'
-import { sanitizeSourceId } from '../src/sanitize.js'
+import { sanitizeSourceId, maskIdChars } from '../src/sanitize.js'
 import { estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
 import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -93,7 +93,7 @@ describeDb('driver', () => {
       expect(row!.seat).toBe('driver')
       expect(row!.capture_policy).toBe('full')   // the driver is never sampled out
       expect(row!.thinking_mode).toBe('adaptive')
-      expect(row!.prompt_version).toBe('driver@2')
+      expect(row!.prompt_version).toBe('driver@3')
       expect(BigInt(row!.cost_micros as string)).toBe(step.recordedMicros!)
     })
   })
@@ -585,13 +585,27 @@ describeDb('driver', () => {
       // notice, being part of `suffix`, always lands there (src/model/client.ts's
       // `withSuffix`).
       expect(text).toContain('## Expired results')
-      for (const i of items) expect(text).toContain(sanitizeSourceId(i.sourceId))
+      for (const i of items) expect(text).toContain(maskIdChars(i.sourceId))
     })
   })
 
+  // M10: seeds a FRESH batch, not an empty corpus — a corpus with zero rows
+  // trivially has zero expired ones, which exercises nothing about the
+  // "nothing is stale" branch of listExpiredSourceIds. A batch that is
+  // present and genuinely fresh (fetchedAt now, well inside its ttl) is the
+  // real case this test claims to cover.
   it('omits the expired-results notice entirely when nothing in the corpus is stale', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '31')
+      const freshParams: FlightSearch = {
+        kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
+        returnDate: null, flexDays: 0, adults: 2, children: 0, infants: 0,
+        cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+      }
+      const freshItems = await new MockSupplier({ kind: 'flight' }).search(freshParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: null, params: freshParams, items: freshItems,
+      })
       // A non-empty notebook, so the suffix is non-empty either way — an
       // empty notebook would make the "notice dropped out entirely" case
       // indistinguishable from "the suffix was never appended at all"
