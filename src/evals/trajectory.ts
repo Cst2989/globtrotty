@@ -111,7 +111,7 @@ function wholeUnits(raw: string): number | null {
  * opposite.
  *
  * The marker set is `src/channel.ts`'s, imported and not copied. A second list
- * had already drifted six currencies short of the redactor's, and the drift is
+ * had already drifted eight currencies short of the redactor's, and the drift is
  * not cosmetic: `redactCurrency` decides what may reach prose at all, so a
  * marker it knows and this does not is an amount that leaves the denominator
  * without anybody being told. A price in pounds read `0/0`, filed as not
@@ -172,7 +172,7 @@ export function quotedAmountsIn(text: string): QuotedAmount[] {
  * model asked for and the agency never made, and counting it would report work
  * nobody did. So these are the calls that were EXECUTED, not the calls that were
  * EMITTED, and the difference is not small: the three shipped recordings carry
- * 59, 107 and 140 `tool_use` blocks and the harness ran 22, 50 and 68 of them.
+ * 68, 60 and 80 `tool_use` blocks and the harness ran 35, 36 and 45 of them.
  * The executed count is the one this trace carries because it is the one that
  * spends money and supplier quota, and the emitted count is the one a prompt
  * change would move. `with ordinality` rather than a bare `limit 1`, so "first"

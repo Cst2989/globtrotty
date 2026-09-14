@@ -194,7 +194,7 @@ export function gradeOutput(
  * blocks the model EMITTED. The driver answers the first `tool_use` block of a
  * response and drops its siblings (src/agents/driver.ts), so an emitted count
  * would charge the desk for work nobody did: across the three shipped
- * recordings that is 59, 107 and 140 emitted against 22, 50 and 68 run. The
+ * recordings that is 68, 60 and 80 emitted against 35, 36 and 45 run. The
  * executed number is the one that spends money and supplier quota, which is what
  * a range around the size of the job is about. A desk that asks for three
  * searches at once and gets one is a fact about the PROMPT, and it belongs to
@@ -202,7 +202,7 @@ export function gradeOutput(
  *
  * `questions_stayed_few` counts QUESTIONS and not `ask_user` calls. One call
  * carries one to three of them (`AskUser`, src/tools/registry.ts), and the three
- * shipped recordings put 3, 32 and 61 questions behind 1, 11 and 20 calls, so
+ * shipped recordings put 15, 32 and 27 questions behind 5, 11 and 9 calls, so
  * counting calls understated `hotel-only-02` by 2.9 times. `maxQuestionsAsked`
  * on a golden case is a ceiling on what a traveller is made to answer rather
  * than on how many times the desk opened its mouth. The detail prints both,

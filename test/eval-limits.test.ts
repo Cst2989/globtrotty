@@ -20,7 +20,7 @@ describe('the eval budget', () => {
     expect(EVAL_LIMITS.maxSupplierCallsPerTurn).toBe(DEFAULT_LIMITS.maxSupplierCallsPerTurn)
   })
 
-  it('is the only other Limits in the repository', () => {
+  it('keeps both Limits in src/limits.ts and adds no third there', () => {
     // src/limits.ts's own docstring: every tier that enforces a limit imports
     // this rather than redefining the numbers. A third object satisfying Limits
     // somewhere else would be a third opinion about a money ceiling.

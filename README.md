@@ -956,9 +956,11 @@ a time with the recording that makes it replayable.
 
 Also open at lesson 6.3, and found by the eval rather than by reading the code:
 the planning desk spends most of its steps writing the notebook. Every one of
-the three cases fails `call_count_fits_the_job`, at 21, 40 and 52 tool calls
-against ceilings of 10, 4 and 8, and the great majority of those calls are
-`update_requirements` re-sending facts the notebook already holds. The red row
+the three cases fails `call_count_fits_the_job` against ceilings of 10, 4 and 8,
+and the churn behind that failure shows in what the desk emits: 68, 60 and 80
+`tool_use` blocks, of which `update_requirements` re-sending facts the notebook
+already holds is 43 of 68 (63%), 41 of 60 (68%) and 24 of 80 (30%), beaten in
+`no-for-1500-03` by 28 hotel searches. The red row
 is the eval working rather than a threshold set too tight, and closing it is a
 change to the desk prompt and to what the tool result says back, which is a
 lesson of its own. Owner corrected at lesson 6.6: this said the judge in 6.6
@@ -975,10 +977,11 @@ each row is the dates gate's own: `travelWindowFrom`
 every persona says "September 2026" or "October 2026", and the desk records the
 month in her words, so the gate reaches no verdict and the graded check follows
 it honestly rather than inventing one. `within_budget` IS closed at this tag, at
-2/2 over the two cases that proposed. Owner: lesson 6.4, which takes `today` and
-the case's dates. Making her say "October" would close it and would also change
-what the dates gate decides on two cases that currently propose, which is why it
-is not a one-word fix.
+2/2 over the two cases that proposed. Lesson 6.4, which was to take `today` and
+the case's dates, has since landed and did not close it, so the check is still
+three nulls. Owner: a person, or module 7. Making her say "October" would close
+it and would also change what the dates gate decides on two cases that currently
+propose, which is why it is not a one-word fix.
 
 A local Postgres is worth setting up before you run these. `test/eval-run.test.ts`
 drives three whole conversations one database round trip at a time, and against a
@@ -1019,7 +1022,7 @@ database and cleans up nothing, so `--runs 3` leaves nine conversations and thei
 turns, messages, corpus rows, gate results and daily_usage rows instead of three.
 The money is simulated and the ledger is not, because a replayed call is priced
 from the usage in its recording and debited like a real one, so a pass is worth
-more than $2.50 of the $50 cross-user day that `npm run trip` shares. Owner:
+about $2.18 of the $50 cross-user day that `npm run trip` shares. Owner:
 lesson 6.6, where the nightly schedule makes it sixty conversations a night.
 
 The three `pass^k:` rows read 0/3 at this tag, and not because anything is
@@ -1027,22 +1030,25 @@ flaky: `call_count_fits_the_job` fails on all three cases for the reason the
 lesson 6.3 residual above gives, and a case with a failed check did not pass.
 Consistently failing and flaky are different words on this card on purpose.
 
-Closed at lesson 6.5: `gradeTrajectory` files no check as `passed: null` any
-more. Every property the scorecard names now reaches a verdict, or says in its
-own detail line why it could not look, which is a different sentence. That
+Half-closed at lesson 6.5: `loadTrace` assembles the transcript the lesson 6.2
+entry above said no runner built, so `questions_before_guesses` reaches a verdict
+rather than filing `passed: null` for want of one. The null is not gone from the
+card: `every_number_has_a_search` still files it, `0/0` on all three cases, and
+so does `inside_her_window`, each with the detail line that says why it could not
+look. That
 closes the first half of the lesson 6.2 entry above, and it moves two numbers
 that entry and the lesson 6.3 one printed. `loadTrace` (src/evals/trajectory.ts)
 reads the calls off `course.model_calls.response` rather than off the persisted
 transcript, because a valid `ask_user` ends the turn before the transcript is
 appended to and is therefore in no transcript anywhere, and it counts the FIRST
 `tool_use` block of each reply, which is the one the driver answers. So
-`call_count_fits_the_job` now reads 22, 50 and 68 executed calls against
-ceilings of 10, 4 and 8, where the lesson 6.3 entry above recorded 21, 40 and 52
-read a different way, and the three recordings carry 59, 107 and 140 blocks the
-model emitted behind those. `questions_stayed_few` counts QUESTIONS rather than
-`ask_user` calls, at 3, 32 and 61 behind 1, 11 and 20 calls, so
-`portugal-toddler-01` passes it and the other two are red at 2.9 times what the
-old count showed on `hotel-only-02`.
+`call_count_fits_the_job` now reads 35, 36 and 45 executed calls against
+ceilings of 10, 4 and 8, where the lesson 6.3 entry above counted the 68, 60 and
+80 `tool_use` blocks the model emitted, a different reading of the same three
+recordings. `questions_stayed_few` counts QUESTIONS rather than
+`ask_user` calls, at 15, 32 and 27 behind 5, 11 and 9 calls, so all three cases
+are red, `hotel-only-02` at 2.9 times what counting its `ask_user` calls would
+have shown.
 
 Open at lesson 6.5, and found by running the card rather than by reading the
 code: `every_number_has_a_search` reports `0/0` on all three cases, because
@@ -1122,7 +1128,7 @@ the loss. A turn killed between its ending write and `labelTurn` is already
 nothing backfills, and the row can never be written: every number in it was
 derived from rows that the ninety-day window will trim. The table's own header
 says a missing row is a fact and not a gap to paper over, and that is right, but
-a fact needs a reader. `npm run evals` prints `turns labelled 29/29` for an eval
+a fact needs a reader. `npm run evals` prints `turns labelled 26/26` for an eval
 run and production has no equivalent, so the one place the gap would matter most
 is the one place nobody would see it. What it needs is a count of unlabelled
 terminal turns per day beside the other things an operator reads. Owner: module
@@ -1139,7 +1145,7 @@ which is the first module that reads this table for anything.
 Open at lesson 6.6, and found by running the proof command rather than by
 reading the code: an eval run spends the account's day. Every case mints its own
 `randomUUID()` user (src/evals/runner.ts) and commits one `course.daily_usage`
-row for it, so a run of the three cases adds about $2.90 to the one ceiling
+row for it, so a run of the three cases adds about $2.18 to the one ceiling
 `EVAL_LIMITS` deliberately does not touch, the cross-user `globalCeilingMicros`
 of $50 a UTC day. That is the suite finding a real fact about what it costs to
 run, exactly as `src/limits.ts` says it would. What it also does is decide the
@@ -1179,7 +1185,7 @@ person, when there is somewhere to run it.
 
 Open at lesson 6.6, and the reason the rubric reads the way it does: a
 `SupplierItem` carries no prose, so the judge cannot be asked a prose question.
-`render` (src/evals/judge.ts) shows the judge the total and one line per item,
+`renderForJudge` (src/evals/judge.ts) shows the judge the total and one line per item,
 each carrying that item's own `detail`, and `FlightDetail` and `HotelDetail`
 (src/supplier/types.ts) are numbers, dates, codes and coordinates. There is no
 address, no neighbourhood, no description, no amenity list and no cot anywhere
@@ -1190,7 +1196,7 @@ judge that always passes wearing a rubric that looks strict. The rules now name
 `stops`, `selfTransfer`, `totalDurationSeconds`, `departureLocal`, `nights` and
 `rating`, all of which are really there, and `test/judge.test.ts` renders a
 synthetic itinerary per rule and asserts the violating value reaches the wire,
-so every rule can fire on real output of `render` with no model and no key.
+so every rule can fire on real output of `renderForJudge` with no model and no key.
 
 Reachable on the wire is not the same as reachable in the corpus the evals
 actually grade, and the weaker claim is the one that holds. `MockSupplier`
@@ -1200,7 +1206,7 @@ and takes `nights` from the search window, so those two need a search that asks
 for them. The other three cannot be produced at any seed or index, because
 `totalDurationSeconds` is `12600 + i * 600`, departures are 06:00, 10:30, 14:00
 and 18:30 with arrival three hours later, and `rating` is `3 + (i % 3) * 0.5`.
-So four of the six rules are dormant against this branch's world and would not
+So five of the six rules are dormant against this branch's world and would not
 be against a live one, which is worth knowing before anybody reads a judge pass
 rate off the mock corpus and calls it calibration.
 

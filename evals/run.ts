@@ -60,9 +60,9 @@
  * The money is simulated and the ledger is not: every replayed call is priced
  * from the usage in its recording and debited through `reserve` and `reconcile`
  * like a real one, so a pass spends nothing at the provider and still writes
- * real rows against the $50 cross-user day that `npm run trip` shares. Two of
- * the three cases were measured at $0.94 and $1.57, so a pass is worth more than
- * $2.50 of that day and `--runs 3` more than $7.50. Lesson 6.6's nightly
+ * real rows against the $50 cross-user day that `npm run trip` shares. The three
+ * cases were measured at $0.62, $0.57 and $0.99, so a pass is worth about $2.18
+ * of that day and `--runs 3` about $6.53. Lesson 6.6's nightly
  * schedule is sixty conversations a night against the same ceiling.
  *
  * From lesson 6.5 the card reaches a verdict on the PATH as well as on the
@@ -309,10 +309,12 @@ async function main(): Promise<void> {
     if (SECTIONS.includes('trajectory')) {
       const labels = (await Promise.all(evalRuns.map((r) =>
         readTurnLabels(sql, { conversationId: r.conversationId, userId: r.userId })))).flat()
-      // Distinct ids, because `invokeInProcess` (src/evals/conversation.ts) pushes
-      // a turn id once per INVOCATION and a turn handed back for a later one is
-      // invoked twice. The label table holds one row per turn, so a denominator
-      // that counted invocations would report a gap on every continuation.
+      // Distinct ids, defensively. `invokeInProcess` (src/evals/conversation.ts)
+      // records a turn id once per TURN, deduped as it pushes
+      // (`if (!seen.includes(turnId))`), so a turn handed back for a later
+      // invocation does not push a second id. The label table holds one row per
+      // turn, and `new Set` keeps the denominator right even if that dedup
+      // ever slipped.
       const turns = evalRuns.reduce((n, r) => n + new Set(r.turnIds).size, 0)
       const quoted = labels.reduce((n, l) => n + l.pricesQuoted, 0)
       const unbacked = labels.reduce((n, l) => n + l.unbackedPrices, 0)

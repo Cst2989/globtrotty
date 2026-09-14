@@ -112,8 +112,8 @@ describe('what moves between two runs of one case, and what no longer does', () 
     // $15 and there is one eval "user" today, so the nightly suite is capped
     // long before it finishes, and the global ceiling is shared with her.
     // Thirty cents a conversation is a deliberate underestimate, and the
-    // measurement is on this branch: `no-for-1500-03` replays ninety-six model
-    // calls and costs about $1.57, which is five times the number below.
+    // measurement is on this branch: `no-for-1500-03` replays sixty-nine model
+    // calls and costs about $0.99, which is more than three times the number below.
     const nightly = 20 * 3
     const perConversationMicros = 300_000n
     expect(BigInt(nightly) * perConversationMicros).toBeGreaterThan(DEFAULT_LIMITS.dailyCeilingMicros)
@@ -149,7 +149,7 @@ describe("the eval's two clocks", () => {
     // seats use their clock for one thing only, the pair of readings `callModel`
     // subtracts for `latency_ms` (src/model/client.ts), so a pinned one writes a
     // zero: the driver's at src/agents/driver.ts and the scout's at
-    // src/agents/scout.ts, and the three fixtures make 10, 3 and 30 scout calls.
+    // src/agents/scout.ts, and the three fixtures make 15, 0 and 15 scout calls.
     const src = readFileSync(new URL('../src/evals/conversation.ts', import.meta.url), 'utf8')
     // Comment lines stripped, because the docstrings quote the shape this
     // replaced and the assertion is about the code.

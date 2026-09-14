@@ -89,8 +89,9 @@ async function chainFor(
         // only use of its clock is the pair of readings `callModel` subtracts
         // for `latency_ms` (src/agents/scout.ts). The pinned clock wrote a zero
         // into every scout row an eval made, and the three cases on this branch
-        // make 10, 3 and 30 scout calls between them, so it is not a seat the
-        // suite can afford to record wrongly. The scout's stay still comes off
+        // make 15, 0 and 15 scout calls between them, so it is not a seat the
+        // suite can afford to record wrongly for the two that reach it. The
+        // scout's stay still comes off
         // `deps.today`, which is domain time and stays pinned.
         now: elapsed,
       },
@@ -162,9 +163,9 @@ function invokeInProcess(deps: EvalDeps, seen: string[]) {
   return async (turnId: string): Promise<void> => {
     // Recorded ONCE per turn, however many invocations that turn takes. A turn
     // released on the deadline above comes back through this same function with
-    // the same id, and `callsOf` (src/evals/runner.ts) walks these ids to build
-    // the trace: a repeated id would count that turn's tool calls twice and make
-    // `call_count_fits_the_job` a number that moves with the wall clock.
+    // the same id, and `loadTrace` (src/evals/trajectory.ts) walks these ids to
+    // build the trace: a repeated id would count that turn's tool calls twice and
+    // make `call_count_fits_the_job` a number that moves with the wall clock.
     if (!seen.includes(turnId)) seen.push(turnId)
     const clock = invocationClock()
     await runTurn({

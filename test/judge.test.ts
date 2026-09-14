@@ -95,7 +95,7 @@ describe('reading the judge', () => {
     // "advertises a party atmosphere", and a `SupplierItem` carries no address
     // and no description, so three of its four rules could never fire. A rubric
     // whose rules cannot fire is a judge that always passes. The rules name
-    // fields instead, and these are the fields `render` puts on the wire.
+    // fields instead, and these are the fields `renderForJudge` puts on the wire.
     const rubric = loadJudgePrompt().prompt
     for (const field of ['stops', 'selfTransfer', 'totalDurationSeconds', 'departureLocal', 'nights', 'rating']) {
       expect(rubric, `the rubric names ${field}`).toContain(field)
@@ -223,7 +223,7 @@ describe('every fail rule can fire on what the judge is actually shown', () => {
   // fields no `SupplierItem` carries, so the judge could never fail on them and
   // an unread pass rate would have hidden it. Naming real fields is half the
   // fix. The other half is showing that a violating itinerary renders with the
-  // violating value ON THE WIRE, which needs no model and no key: `render` is
+  // violating value ON THE WIRE, which needs no model and no key: `renderForJudge` is
   // the whole of what the judge sees, so a property it does not print is a
   // property no rubric can decide.
   const cases: { rule: string; field: string; payload: GateOutcome; shows: string }[] = [

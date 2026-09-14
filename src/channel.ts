@@ -51,8 +51,8 @@ export function redactCurrency(delta: string): string {
  *
  * ONE list, exported, because there were nearly two. Lesson 6.5's amount scanner
  * (`quotedAmountsIn`, src/evals/trajectory.ts) needs the same set to read prices
- * back OUT of prose, and it shipped with a shorter hand-written copy that knew
- * six markers fewer than this one. The consequence was not a cosmetic drift: an
+ * back OUT of prose, and it shipped with a shorter hand-written copy that covered
+ * eight currencies fewer than this one. The consequence was not a cosmetic drift: an
  * amount this redactor would have removed but that scanner could not see is an
  * amount that silently leaves the scorecard's denominator, which is the exact
  * failure that check exists to make impossible. So the set lives here, where the

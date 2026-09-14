@@ -53,7 +53,6 @@ export type CaseResult = {
 export const MAX_EVAL_TURNS = 15
 
 /**
-/**
  * Whether she has refused the same thing twice.
  *
  * Exported for `test/sim-user.test.ts`, which is where the rule and the array it

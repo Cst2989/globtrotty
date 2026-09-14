@@ -170,8 +170,8 @@ export class JudgeCappedError extends Error {
  * one. The other three cannot be produced at any seed or index, because
  * `totalDurationSeconds` is `12600 + i * 600`, departures are 06:00, 10:30,
  * 14:00 and 18:30 with arrival three hours later, and `rating` is
- * `3 + (i % 3) * 0.5`. So the evals grade against a world where one rule fires
- * and four are dormant, which a live corpus would not be. It is exported for
+ * `3 + (i % 3) * 0.5`. So the evals grade against a world where one of the six
+ * rules fires and five are dormant, which a live corpus would not be. It is exported for
  * that test rather than kept private, because a rule nothing can demonstrate
  * firing is the defect this function's rewrite was for.
  */
