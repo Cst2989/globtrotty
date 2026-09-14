@@ -30,7 +30,7 @@ export type ScheduleEntry = {
  * case the section exists to catch, where the provider moves the weights under
  * a stable alias and nobody schedules anything. Its own suggested rewrite is to
  * make this a SCHEDULE and not an event, and to alarm on the SCORE moving
- * rather than on a version string changing, which is what lesson 5.6's canary
+ * rather than on a version string changing, which is what lesson 5.6's drift canary
  * could not do with one prompt at one seat. This table is that rewrite.
  *
  * It is deliberately not a release canary. A release canary compares a change

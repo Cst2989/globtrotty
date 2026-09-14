@@ -130,7 +130,7 @@ export function renderSeatReport(
  *
  * Counting this corpus is not training it. Nothing here calls a fine-tuning
  * API, moves a weight or writes a model file; the whole function is a `select
- * count(*)`, and the decision it feeds — reconsider, or do not fine-tune — is a
+ * count(*)`, and the decision it feeds, reconsider or do not fine-tune, is a
  * person's, made with a number in front of them rather than a model this course
  * shipped.
  */

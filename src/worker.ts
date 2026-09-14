@@ -711,7 +711,7 @@ async function loop(
       await spend(deps, claim, turnSpend, step)
       // The last thing between the model and her screen (src/sanitize.ts, lesson
       // 5.5). Applied here rather than inside the driver so that EVERY agent,
-      // including one a later module writes, goes through it: a check the agent
+      // including one added after this course ends, goes through it: a check the agent
       // applies to itself is a check the next agent forgets. `ask_user`'s
       // questions arrive here too, because the driver returns them as a
       // `message` step rather than as a kind of their own.

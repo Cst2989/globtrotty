@@ -49,6 +49,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-7-3 | The inversion bug | npm run migrate, then npm test (test/similarity.test.ts), then npm run evals |
 | lesson-7-4 | Examples and memory | npm test (test/difficulty.test.ts, test/examples.test.ts, test/inferred.test.ts), then npm run evals |
 | lesson-7-5 | Calibration and canaries | npm test (test/release.test.ts, test/calibration.test.ts), then npm run evals |
+| lesson-7-6 | The cadence | npm test (test/cadence.test.ts, test/seat-report.test.ts, test/worst.test.ts), then npm run demo and npm run evals for the seat report |
 
 ## How this branch was built
 
@@ -354,6 +355,25 @@ the only thing either of them has in common with the other, which is that
 neither has one: the release canary's rollback is a commit and the drift
 canary has nothing to roll back.
 
+**A rhythm with no command is a rhythm that happened once.** Two of the three
+product rhythms have a command (`npm run worst`, `npm run examples`) and the
+third is a decision a person makes with a count in front of them.
+test/cadence.test.ts fails if any named command stops existing, which is the
+difference between a cadence and a paragraph about cadence.
+
+**We hired eight seats, measured them, and the report is the last thing this
+branch prints.** `npm run evals` ends on cost and calls per seat with a per-turn
+figure, beside the gates' own verdicts. SPEC asked for that query on its first
+page. It took forty-six lessons to be able to run it honestly, and most of that
+was not the query.
+
+Forty-six tags, one review each, and this is the last one this course writes.
+What is not closed above is named in README's residual pass with an owner who
+is a person, the product, or the reader, because there is no module 8 to leave
+it to. Whether `course` merges into `main` is the author's decision and outside
+this project's scope (COURSE SPEC section 4.2), so this file does not recommend
+one.
+
 ## Hand-offs
 
 Closed at lesson 3.5: the `queued` turn with no message that two presses of one
@@ -404,9 +424,11 @@ nothing in production wrote `proposals.decision`, and the accept action on the
 card writes it now. A requeued turn that proposes again gets a new proposal id,
 which `unique (proposal_id, item_id)` does not cover. Closing it means deciding
 what a requeue owes a turn that has already handed off, which is a harness
-question rather than a channel one. Owner: module 6, which also owns the one
-turn the sweeper's crash arm can leave alive-looking, for the same reason 4.6
-handed these two over together.
+question rather than a channel one. Owner corrected at lesson 6.6 and again at
+lesson 7.6: it is a person's, alongside the one turn the sweeper's crash arm
+can leave alive-looking, for the same reason 4.6 handed these two over
+together. README.md's residual pass carries the current text; this entry is
+the hand-off's own history and is left as it read at the time.
 
 Open at lesson 5.3: `classifyDesk` (src/classify.ts) takes no `AbortSignal`.
 `callAndRecord` accepts one and the routing call passes none, so the first model

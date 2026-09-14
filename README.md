@@ -443,8 +443,8 @@ branch before `completeTurn`, and the hand-off sentence `completeIfLinkEmitted`
 rebuilds from `course.link_clicks` after a link went out. The only other writer
 of a message is `failTurn`, and every sentence that reaches it is built here out
 of our own strings rather than composed by a model. The check sits in the worker
-rather than inside the driver, so an agent a later module writes gets it without
-asking.
+rather than inside the driver, so an agent added after this course ends gets it
+without asking.
 
 It strips any URL that is not one the cashier itself built, an image above all,
 because a markdown image is a request her browser makes with no tool call
@@ -751,7 +751,11 @@ with no tool call in it" path lesson 5.5 closes. The complete answer is equality
 against the links actually emitted for the turn, which changes
 `sanitizeOutbound`'s signature and has nothing to compare against on the
 `ask_user` path, since that path emits no links. It is a design change rather
-than an edit, which is why it is owned rather than fixed. Owner: module 6.
+than an edit, which is why it is owned rather than fixed. Owner: a person,
+changing `sanitizeOutbound`'s signature to compare against the links `emittedLinks`
+actually emitted for the turn. Module 7 read `course.link_clicks` and never wrote
+`sanitizeOutbound`'s caller, so it left this design change for whoever next
+touches the outbound check.
 
 Unicode homoglyphs of the fence delimiter, and an already-escaped payload, both
 pass through `escapeFence` unchanged. Neither is a breakout: a homoglyph is not
@@ -783,8 +787,10 @@ an owner nobody corrected is worse than no owner: it was reassigned to module 6
 on the reasoning that module 6 is the first module with a reason to re-run a
 proposal. Module 6 re-runs the GATES over a stored proposal (`replayGates`,
 src/evals/replay.ts) and never re-runs a turn, so it never reaches either path
-and has nothing to prove there. Owner: a person, or the module that next changes
-the requeue path.
+and has nothing to prove there. Owner: a person, deciding what a requeue owes a
+turn that has already handed off, whenever the requeue path is next the one
+being changed. There is no module 8 to inherit this, so it stays a person's
+rather than a module's.
 
 The sweeper's crash arm can leave exactly one turn alive-looking: one that
 handed off twice in two currencies, which `handOffMessage` cannot total
@@ -793,8 +799,9 @@ failure is logged and the row is left for the next walk rather than marked
 failed, which rule 6 forbids. The cashier refuses a second hand-off today, so
 nothing in production can build such a turn. Owner corrected at lesson 6.6,
 alongside the requeue paths it was handed over with: module 6 built an eval
-suite and touched neither the sweeper nor the hand-off. Owner: a person, or the
-module that next changes the sweeper's crash arm.
+suite and touched neither the sweeper nor the hand-off. Owner: a person, whenever
+the sweeper's crash arm is next the thing being changed. There is no module 8 to
+hand this to, so it stays a person's.
 
 The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
@@ -812,7 +819,10 @@ Lesson 5.7 did not close it either, and it now has a second reason to be closed
 in one go: `classifyDesk` returns a `Routing`, so the routing call's row carries
 the text the decision was made from and no response body and no request id, and
 both the signal and the capture want the same change, which is that function
-handing back a `ModelResult`. Owner: module 6.
+handing back a `ModelResult`. Owner: a person, threading the signal through
+`classifyDesk` and making that call return a `ModelResult`, the same change
+lesson 5.6 threaded through every other `costMicros` call site. Module 7 added
+no call site of its own to `classifyDesk`, so it never had to touch this one.
 
 `turns.spend_usd_micros` can over-report the routing call, in two ways, and
 neither touches a ceiling. A step-0 retry that finds the decision
@@ -825,7 +835,13 @@ the routing cost. Both add micros the ceilings never saw, because a driver step
 carries `alreadyRecorded: true` and `recordSpend` is never reached, so the
 conversation and daily counters hold exactly what `reconcile` settled. Telling a
 routing row from an answer row needs a column `course.model_calls` does not
-have, which is why this is owned rather than patched. Owner: module 6.
+have, which is why this is owned rather than patched. Owner: a person, adding
+the column that would tell a routing row from an answer row. `src/loop/seats.ts`
+(lesson 7.6) reads `cost_micros` grouped by `seat`, which already separates a
+routing call from an answer call by the column that exists today; it is a
+different question from this one, which is about what a single column,
+`turns.spend_usd_micros`, over-reports, and the seat report neither reads nor
+writes that column.
 
 `course.conversations.requirements` has one writer, `applyRequirementsPatch`,
 and one tool behind it. Both paths now read it once per agent step, which is the
@@ -843,17 +859,23 @@ key every other child table here carries is not available. The one writer
 compares them in code and refuses a mismatch (`src/cashier.ts`). Lesson 5.7 was
 expected to add a second writer and did not: `acceptCard` is a second CALLER of
 `handOffToBooking`, which is still the only thing that writes this table, so the
-in-code comparison still covers every row. Owner: module 6, in the migration
-that next touches this table; 0013 is frozen, and the fix needs
-`unique (id, user_id)` on `course.proposals` first.
+in-code comparison still covers every row. Owner: a person, in whichever
+migration next touches this table; 0013 is frozen. `0021` (module 7) does add a
+column to `course.proposals`, for a narrower reason (the refs shape at save
+time) that had no call for `unique (id, user_id)`, and the fix here needs that
+constraint first.
 
 `gate_results.proposal_id` is always null and `round` is always zero. `runGates`
 accepts both and no caller in `src`, `scripts` or `netlify` supplies either,
 because `proposalRunner` records the proposal AFTER the gates return. So
 `gate_results_by_proposal` indexes a column nothing writes, and 0012's own
 column comment, which says a non-first round carries a proposal id, describes a
-run this branch cannot produce. Owner: module 5, when a rejected proposal is
-re-run and rounds start to mean something.
+run this branch cannot produce. Owner: a person, when a rejected proposal is
+re-run in PRODUCTION and rounds start to mean something. `replayGates` and
+`replayGatesOnce` (src/evals/replay.ts) already pass round 1 and round 2 with a
+proposal id, but only for a stored replay lesson 6.4 built and lesson 6.6's
+judge section calls; no caller in `src`, `scripts` or `netlify` re-runs gates
+against a live turn, which is the case this residual is about.
 
 `recordResults` assigns `seq` from a `jsonb_to_recordset` scan with no `order
 by`, so it relies on Postgres emitting a single array's elements in array order.
@@ -915,7 +937,10 @@ fitted. It fails in the safe direction and the alternative is a migration, so it
 is accepted rather than closed. Lesson 5.7 did not close it: the one migration
 that lesson is allowed went on the capture columns, the feed and the role, and
 adding a column to `course.tool_calls` to price a row correctly is a change to
-the ledger rather than to the channel. Owner: module 6.
+the ledger rather than to the channel. Owner: a person, adding the column that
+would price the row against what it really asked for. Module 7's two migrations
+(`0020`, `0021`) touch `course.conversions` and `course.proposals`, neither of
+which is `course.tool_calls`, so the column this needs is still unadded.
 
 A resumed turn is charged twice for a `research_destination` it already ran, and
 can be refused a fan-out the ledger would have replayed for free.
@@ -927,7 +952,9 @@ and a three-city fan-out costs three, which puts `used` at four, and the resume
 computes four plus three against a cap of six and refuses a replay that would
 have reached no supplier at all. It fails closed and costs her turn work rather
 than money, and the fix is for the driver to ask whether a `done` row already
-exists for this call id before it prices the budget. Owner: module 6.
+exists for this call id before it prices the budget. Owner: a person, changing
+the driver's resume path. Module 7 added no driver code and never touched
+`assertSupplierBudget`.
 
 Closed at lesson 6.2: migration 0012's header cites a spec section and this
 lesson by number, a document outside this repository, and the migration is
@@ -974,8 +1001,10 @@ lesson of its own. Owner corrected at lesson 6.6: this said the judge in 6.6
 would be able to say whether a shorter path answered her as well, and it cannot.
 `SEATS.reviewer` judges ONE property, family fit, over an itinerary the gates
 approved, and it is shown the rehydrated items rather than the path that reached
-them. Answering this needs a second rubric over a trace. Owner: a person, or the
-module that next edits the planning desk's prompt.
+them. Answering this needs a second rubric over a trace. Owner: a person, whoever
+next edits the planning desk's prompt. Module 7's own prompt edit (lesson 7.4)
+did not build that second rubric either, and there is no module 8 to leave it
+to, so it is a person's from here.
 
 Open at lesson 6.3, and carried over from 6.2: `inside_her_window` is a verdict
 on no case at all. The card reads `0/0 (n/a, 3 not evaluated)`, and the reason on
@@ -986,9 +1015,12 @@ month in her words, so the gate reaches no verdict and the graded check follows
 it honestly rather than inventing one. `within_budget` IS closed at this tag, at
 2/2 over the two cases that proposed. Lesson 6.4, which was to take `today` and
 the case's dates, has since landed and did not close it, so the check is still
-three nulls. Owner: a person, or module 7. Making her say "October" would close
-it and would also change what the dates gate decides on two cases that currently
-propose, which is why it is not a one-word fix.
+three nulls. Owner: a person. Module 7 ends without closing it: none of its
+tasks edit `evals/golden-trips.json`'s three personas or the dates gate, and
+`inside_her_window` still reads `0/0 (n/a, 3 not evaluated)` on lesson 7.6's own
+run of the card, unchanged. Making her say "October" would close it and would
+also change what the dates gate decides on two cases that currently propose,
+which is why it is not a one-word fix and not a fix this module's tasks reached.
 
 A local Postgres is worth setting up before you run these. `test/eval-run.test.ts`
 drives three whole conversations one database round trip at a time, and against a
@@ -1117,8 +1149,11 @@ backed with anything other than that one tool, a fact out of
 `course.user_memory` for instance, reads as an invention.
 
 The honest next step for all of it is deriving the claim from the tools the desk
-published rather than from a list of sentences. Owner: a person, or module 7 if
-its examples work wants the same derivation.
+published rather than from a list of sentences. Owner: a person. Module 7's
+examples work (`selectExamples`, `difficultyOf`, src/loop/examples.ts and
+src/loop/difficulty.ts) grades difficulty off `deriveScore`'s observations,
+survival scores and judge agreement, never off a claim in prose, so it never
+needed this derivation and did not build it.
 
 Also open at lesson 6.5: the trace depends on a capture policy. `loadTrace` can
 only read a model call the ledger captured, and `capturePolicyFor`
@@ -1138,16 +1173,30 @@ says a missing row is a fact and not a gap to paper over, and that is right, but
 a fact needs a reader. `npm run evals` prints `turns labelled 26/26` for an eval
 run and production has no equivalent, so the one place the gap would matter most
 is the one place nobody would see it. What it needs is a count of unlabelled
-terminal turns per day beside the other things an operator reads. Owner: module
-7, which is the first module to read this table for anything.
+terminal turns per day beside the other things an operator reads. Owner: a
+person, building that count. Module 7 does read this table now: `npm run
+evals`'s `turns labelled` line (lesson 6.5's own, carried forward) and lesson
+7.6's `src/loop/worst.ts`, the weekly operator read this module adds, are both
+readers, but `worstConversations` scores rejections, capped turns and
+escalations, and deliberately not unlabelled turns, which is a different
+question this residual is still asking. There is no module 8 to ask it of.
 
 `src/worker.ts` imports `labelTurn` from `src/evals/`, which is the harness
 depending on a directory named for the suite that reads it. The dependency is
 the right way round in substance, because the counters have to be extracted
 where a turn ENDS and the eval only reads them back, and it is the wrong way
 round in the file tree. Moving the counting into `src/repo/turnLabels.ts` and
-leaving the grading in `src/evals/` is the shape that says so. Owner: module 7,
-which is the first module that reads this table for anything.
+leaving the grading in `src/evals/` is the shape that says so. Owner: a person,
+moving it. Module 7 reads `course.turn_labels` (this lesson's `fineTuneCorpus`,
+`src/loop/seats.ts`, and lesson 6.5's own `turns labelled` line) and did not
+move it: `loadTrace`, `Trace` and `TraceCall` (src/evals/trajectory.ts), which
+`countersOf` and `labelTurn` both need, are the same trace `provenanceRate`,
+`questionsBeforeGuesses` and `announcedButNeverCalled` grade from, so moving the
+counting alone would either duplicate the trace reader or move the grading
+functions with it. That is a real refactor across every one of `src/evals/`'s
+graders, not a one-file move, and this closing lesson's own tasks touch none of
+those graders, so it stays a defect named rather than one fixed under a tag
+that also has to hold six other changes steady.
 
 Open at lesson 6.6, and found by running the proof command rather than by
 reading the code: an eval run spends the account's day. Every case mints its own
@@ -1181,8 +1230,12 @@ rows written before that cleanup landed, the leavings of `npm run demo` and
 `npm run trip`, and whatever a reader runs by hand, so a day's total stays a
 number no test controls and every case that reads a ceiling has to say so. The
 judge pass adds one more to that list, because it mints a conversation of its
-own per run and does not sweep it. Owner: a person, or module 7 if it runs the
-nightly schedule.
+own per run and does not sweep it. Owner: a person, if and when they run the
+nightly schedule. Module 7 ends without wiring `evals/schedule.ts`'s cron
+expressions to anywhere a scheduler can reach (the residual right below this one
+says so), so nobody has run the nightly schedule on this branch yet either, and
+the sweep this paragraph is missing has never been exercised outside a person
+running `--schedule nightly` by hand.
 
 Open at lesson 6.6: the schedule in `evals/schedule.ts` carries cron expressions
 and nothing reads them. `netlify/functions/sweep.mts` is the precedent for a
