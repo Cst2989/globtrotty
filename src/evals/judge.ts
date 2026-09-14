@@ -103,9 +103,16 @@ export type JudgeDeps = {
  * ceilings would then be applied to her conversation rather than to the eval.
  * Every eval conversation on this branch mints its own `randomUUID()` user for
  * exactly that reason (src/limits.ts), and the judge pass is one more of them.
+ *
  * What is given up by that choice is the link from a judge row back to the
- * proposal it judged, which `course.model_calls` has no column for: the mapping
- * lives on the scorecard, in the `proposalId` each `Labelled` carries.
+ * proposal it judged, and nothing durable replaces it. `course.model_calls` has
+ * no proposal column, and the `proposalId` each `Labelled` carries is in memory
+ * for the length of one run and is written nowhere: the card prints
+ * `judge agreement a/b of N decided proposals` and names no proposal, and a
+ * proposal whose verdict could not be read is dropped from the list entirely,
+ * so even the positional correspondence between those rows and those ids is not
+ * safe to lean on. Asking afterwards which proposal a given judge row was about
+ * needs a column nothing writes.
  */
 export function judgeContext(run: { userId: string; conversationId: string }): TurnContext {
   return { userId: run.userId, conversationId: run.conversationId, turnId: null }
@@ -151,8 +158,24 @@ export class JudgeCappedError extends Error {
  * mode an unread rate hides best, so the rules were rewritten against the
  * fields above. A fifth field is a change to the supplier types and to what
  * `course.tool_results` stores, and README.md carries it as a residual.
+ *
+ * Reachable in the payload is not the same as reachable in THIS branch's
+ * corpus, and the weaker claim is the one that holds. `test/judge.test.ts`
+ * renders a synthetic itinerary per rule and asserts the violating field is on
+ * the wire, so every rule can fire on real output of this function. What
+ * `MockSupplier` (src/supplier/mock.ts) can actually produce is narrower: its
+ * third flight of any search carries `stops: 2`, its `selfTransfer` is true
+ * only when the search asked for it, and its `nights` follows the search
+ * window, so a one-night search would trip that rule and no golden case makes
+ * one. The other three cannot be produced at any seed or index, because
+ * `totalDurationSeconds` is `12600 + i * 600`, departures are 06:00, 10:30,
+ * 14:00 and 18:30 with arrival three hours later, and `rating` is
+ * `3 + (i % 3) * 0.5`. So the evals grade against a world where one rule fires
+ * and four are dormant, which a live corpus would not be. It is exported for
+ * that test rather than kept private, because a rule nothing can demonstrate
+ * firing is the defect this function's rewrite was for.
  */
-function render(outcome: GateOutcome): string {
+export function renderForJudge(outcome: GateOutcome): string {
   if (!outcome.ok) return ''
   const lines = outcome.items.map((i) =>
     `${i.ref.slot}: ${i.item.name} (${i.item.supplier}, ${formatMoney(i.lineTotal)})`
@@ -194,7 +217,7 @@ export async function runJudge(deps: JudgeDeps, outcome: GateOutcome): Promise<V
   const { prompt, promptVersion } = loadJudgePrompt()
   const args: CallArgs = {
     seat: SEATS.reviewer, system: prompt, tools: [],
-    messages: [{ role: 'user', content: [{ type: 'text', text: render(outcome) }] }],
+    messages: [{ role: 'user', content: [{ type: 'text', text: renderForJudge(outcome) }] }],
   }
 
   const reserved = estimateMicros(SEATS.reviewer, estimateInputTokens(args))

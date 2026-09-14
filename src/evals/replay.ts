@@ -147,18 +147,16 @@ export async function replayGates(
  * short-circuits on provenance and writes fewer rows: the older row for a gate
  * this run never reached would survive and be read as this run's. Narrowing to
  * the rows above the highest `seq` seen before the write would close it, and it
- * is not done here because nothing replays one proposal twice in one mode, so
- * the guard would be untested code standing in for a case no caller produces.
+ * is not done here.
  *
- * The sentence above used to end by saying that nothing replays one proposal
- * twice in one mode, so the `seq` narrowing would be untested code standing in
- * for a case no caller produces. Lesson 6.6's nightly judge is that caller, and
- * `replayGatesOnce` below is how it is kept from being one: it reads these rows
- * first and runs the gates only when there are none, so a cron that judges the
- * same hundred proposals every night writes one round-1 row set per proposal
- * ever rather than one per night. The narrowing is still not done, and it is
- * still the thing that would close the hole for a caller that genuinely wants
- * to replay twice.
+ * What keeps that safe is that no caller replays one proposal twice in one
+ * mode. Lesson 6.6's nightly judge would have been the first: a cron that
+ * grades the newest hundred decided proposals every night replays each of them
+ * in snapshot mode every night. `replayGatesOnce` below is what stops it being
+ * one, by reading these rows first and running the gates only when there are
+ * none, so that cron writes one round-1 row set per proposal ever rather than
+ * one per night. The `seq` narrowing is still what a caller that genuinely
+ * wants to replay twice in one mode would need first.
  *
  * `recordGateResults` only accepts a `GateName`, so the filter below can never
  * drop a row today. It is here because the column is text, and `gateMetrics`

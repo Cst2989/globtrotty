@@ -6,17 +6,19 @@ import { SENTINELS } from '../scripts/sentinels.js'
 import type { Limits } from '../src/engine.js'
 import {
   AGREEMENT_FLOOR, JudgeCappedError, judgeAgreement, judgeContext, loadJudgePrompt,
-  parseVerdict, runJudge, type Labelled,
+  parseVerdict, renderForJudge, runJudge, type Labelled,
 } from '../src/evals/judge.js'
 import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
 import { EVAL_LIMITS } from '../src/limits.js'
-import { sumMoney } from '../src/money.js'
+import { money, sumMoney } from '../src/money.js'
 import { emptyNotebook } from '../src/notebook.js'
 import { costMicros } from '../src/pricing.js'
 import { decideProposal, decidedProposals, recordProposal } from '../src/repo/proposals.js'
 import { SEATS } from '../src/seats.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
-import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
+import type {
+  FlightDetail, FlightSearch, HotelDetail, HotelSearch, LegSummary,
+} from '../src/supplier/types.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { fakeClient, textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
@@ -172,6 +174,127 @@ async function approvedOutcome(): Promise<GateOutcome> {
   ]
   return { ok: true, items, total: sumMoney(items.map((i) => i.lineTotal)) }
 }
+
+/** One leg, compliant, with whatever the case under test needs changed on it. */
+const leg = (over: Partial<LegSummary> = {}): LegSummary => ({
+  from: 'LGW', to: 'FAO',
+  departureLocal: '2026-09-19T09:00:00', arrivalLocal: '2026-09-19T12:00:00',
+  stops: 0, route: ['LGW', 'FAO'], cabinClass: 'Economy',
+  carriers: ['TP'], flightNumbers: ['TP100'], ...over,
+})
+
+const flightLine = (over: Partial<FlightDetail> = {}): RehydratedItem => ({
+  ref: { sourceId: 'flight-synthetic', quantity: 1, slot: 'flight' },
+  item: {
+    sourceId: 'flight-synthetic', supplier: 'mock', kind: 'flight',
+    name: 'TAP LGW to FAO', price: money(32_100n, 'EUR'), priceBasis: 'total',
+    fetchedAt: new Date('2026-08-29T10:00:00Z'), ttlSeconds: 900, bookingUrl: null,
+    detail: {
+      kind: 'flight', outbound: leg(), inbound: leg({ from: 'FAO', to: 'LGW' }),
+      baggage: { personalItem: 2, cabinBag: 1, checkedBag: 1 },
+      totalDurationSeconds: 12_600, selfTransfer: false, ...over,
+    } satisfies FlightDetail,
+  },
+  lineTotal: money(32_100n, 'EUR'),
+})
+
+const stayLine = (over: Partial<HotelDetail> = {}): RehydratedItem => ({
+  ref: { sourceId: 'hotel-synthetic', quantity: 1, slot: 'stay' },
+  item: {
+    sourceId: 'hotel-synthetic', supplier: 'mock', kind: 'hotel',
+    name: 'Quinta da Ria, Faro', price: money(69_300n, 'EUR'), priceBasis: 'total',
+    fetchedAt: new Date('2026-08-29T10:00:00Z'), ttlSeconds: 900, bookingUrl: null,
+    detail: {
+      kind: 'hotel', checkIn: '2026-09-19', checkOut: '2026-09-26', nights: 7,
+      rating: 4, coordinates: { lat: 37.02, lon: -7.93 }, offerSource: 'mock.example', ...over,
+    } satisfies HotelDetail,
+  },
+  lineTotal: money(69_300n, 'EUR'),
+})
+
+const itinerary = (...items: RehydratedItem[]): GateOutcome =>
+  ({ ok: true, items, total: sumMoney(items.map((i) => i.lineTotal)) })
+
+/** Nothing on it trips a rule, so it is what every violating payload is read against. */
+const compliant = () => itinerary(flightLine(), stayLine())
+
+describe('every fail rule can fire on what the judge is actually shown', () => {
+  // The finding this answers is that three of the first draft's four rules read
+  // fields no `SupplierItem` carries, so the judge could never fail on them and
+  // an unread pass rate would have hidden it. Naming real fields is half the
+  // fix. The other half is showing that a violating itinerary renders with the
+  // violating value ON THE WIRE, which needs no model and no key: `render` is
+  // the whole of what the judge sees, so a property it does not print is a
+  // property no rubric can decide.
+  const cases: { rule: string; field: string; payload: GateOutcome; shows: string }[] = [
+    {
+      rule: 'more than one connection outbound', field: 'stops',
+      payload: itinerary(flightLine({ outbound: leg({ stops: 2, route: ['LGW', 'MAD', 'BCN', 'FAO'] }) }), stayLine()),
+      shows: '"stops":2',
+    },
+    {
+      rule: 'more than one connection inbound', field: 'stops',
+      payload: itinerary(flightLine({ inbound: leg({ from: 'FAO', to: 'LGW', stops: 3 }) }), stayLine()),
+      shows: '"stops":3',
+    },
+    {
+      rule: 'a self transfer', field: 'selfTransfer',
+      payload: itinerary(flightLine({ selfTransfer: true }), stayLine()),
+      shows: '"selfTransfer":true',
+    },
+    {
+      rule: 'a journey over fourteen hours', field: 'totalDurationSeconds',
+      payload: itinerary(flightLine({ totalDurationSeconds: 54_000 }), stayLine()),
+      shows: '"totalDurationSeconds":54000',
+    },
+    {
+      rule: 'a departure before six in the morning', field: 'departureLocal',
+      payload: itinerary(flightLine({ outbound: leg({ departureLocal: '2026-09-19T05:15:00' }) }), stayLine()),
+      shows: '"departureLocal":"2026-09-19T05:15:00"',
+    },
+    {
+      rule: 'an arrival after ten at night', field: 'arrivalLocal',
+      payload: itinerary(flightLine({ outbound: leg({ arrivalLocal: '2026-09-19T23:40:00' }) }), stayLine()),
+      shows: '"arrivalLocal":"2026-09-19T23:40:00"',
+    },
+    {
+      rule: 'a stay shorter than two nights', field: 'nights',
+      payload: itinerary(flightLine(), stayLine({ nights: 1, checkOut: '2026-09-20' })),
+      shows: '"nights":1',
+    },
+    {
+      rule: 'a stay rated below three', field: 'rating',
+      payload: itinerary(flightLine(), stayLine({ rating: 2 })),
+      shows: '"rating":2',
+    },
+  ]
+
+  for (const c of cases) {
+    it(`puts ${c.rule} on the wire, where the rubric reads it`, () => {
+      const rendered = renderForJudge(c.payload)
+      expect(rendered).toContain(c.shows)
+      // The rule that reads it is in the rubric, so the pair is a rule that can
+      // fire rather than a field that happens to be printed.
+      expect(loadJudgePrompt().prompt).toContain(c.field)
+      // And the compliant itinerary does not carry it, so the assertion above
+      // discriminates rather than matching anything this function prints.
+      expect(renderForJudge(compliant())).not.toContain(c.shows)
+    })
+  }
+
+  it('shows the judge the total and one line per item, and nothing else', () => {
+    const rendered = renderForJudge(compliant())
+    expect(rendered.split('\n')).toHaveLength(3)
+    expect(rendered.split('\n')[0]).toBe('total \u20ac1,014.00')
+    expect(rendered).toContain('flight: TAP LGW to FAO (mock, \u20ac321.00) {')
+    expect(rendered).toContain('stay: Quinta da Ria, Faro (mock, \u20ac693.00) {')
+  })
+
+  it('renders a refused outcome as nothing at all, because there is no question to ask', () => {
+    expect(renderForJudge({ ok: false, violations: [{ gate: 'budget', detail: 'over', sourceIds: [] }] }))
+      .toBe('')
+  })
+})
 
 /**
  * `EVAL_LIMITS` with the cross-user global ceiling lifted above what the

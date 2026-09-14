@@ -1188,11 +1188,26 @@ motorway and one advertising a party atmosphere, and three of its four rules
 could therefore never fire on any payload this branch can produce, which is a
 judge that always passes wearing a rubric that looks strict. The rules now name
 `stops`, `selfTransfer`, `totalDurationSeconds`, `departureLocal`, `nights` and
-`rating`, all of which are really there. What that costs is the half of family
-fit a traveller would actually ask about, the street and the noise and the cot,
-and buying it back means a supplier adapter that captures a listing's text and a
-`course.tool_results` corpus that stores it. Owner: a person, with a supplier
-whose API returns a description.
+`rating`, all of which are really there, and `test/judge.test.ts` renders a
+synthetic itinerary per rule and asserts the violating value reaches the wire,
+so every rule can fire on real output of `render` with no model and no key.
+
+Reachable on the wire is not the same as reachable in the corpus the evals
+actually grade, and the weaker claim is the one that holds. `MockSupplier`
+(src/supplier/mock.ts) gives its third flight of any search `stops: 2`, so the
+connection rule fires. It sets `selfTransfer` only when the search asked for it
+and takes `nights` from the search window, so those two need a search that asks
+for them. The other three cannot be produced at any seed or index, because
+`totalDurationSeconds` is `12600 + i * 600`, departures are 06:00, 10:30, 14:00
+and 18:30 with arrival three hours later, and `rating` is `3 + (i % 3) * 0.5`.
+So four of the six rules are dormant against this branch's world and would not
+be against a live one, which is worth knowing before anybody reads a judge pass
+rate off the mock corpus and calls it calibration.
+
+What the rewrite costs is the half of family fit a traveller would actually ask
+about, the street and the noise and the cot, and buying it back means a supplier
+adapter that captures a listing's text and a `course.tool_results` corpus that
+stores it. Owner: a person, with a supplier whose API returns a description.
 
 Open at lesson 6.6: the judge runs on `SEATS.reviewer`, Haiku, which is a
 different model and a different configuration from the `SEATS.driver` Opus it
