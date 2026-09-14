@@ -12,6 +12,9 @@ const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 // this stays right if the prompts move.
 const DESK_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'desks')
 
+/** The committed examples file this branch assembles onto the planning prompt. */
+const EXAMPLES_FILE = path.join(DESK_DIR, 'examples', 'planning.md')
+
 /**
  * The two files a reader can run that compose the product's driver and drive a
  * desk.
@@ -221,6 +224,32 @@ describe('desks', () => {
     for (const field of fields) {
       expect(prompt, `the planning desk prompt never names the notebook field ${field}`)
         .toContain(`\`${field}\``)
+    }
+  })
+
+  it('hashes the examples with the prompt, so a refresh moves the version', () => {
+    const version = loadDesk('planning').promptVersion
+    const examples = readFileSync(EXAMPLES_FILE, 'utf8')
+    try {
+      writeFileSync(EXAMPLES_FILE, `${examples}\n- flight mock-flight-99\n`)
+      expect(loadDesk('planning').promptVersion).not.toBe(version)
+    } finally {
+      writeFileSync(EXAMPLES_FILE, examples)
+    }
+    expect(loadDesk('planning').promptVersion).toBe(version)
+  })
+
+  it('does not move the version when only the provenance comment changes', () => {
+    const version = loadDesk('planning').promptVersion
+    const examples = readFileSync(EXAMPLES_FILE, 'utf8')
+    try {
+      writeFileSync(EXAMPLES_FILE, examples.replace(/generated at .*/, 'generated at later'))
+      // An edit to a comment is not a new prompt, which is the property
+      // src/classify.ts argues a prompt version should have and the reason the
+      // stripper runs before the hash.
+      expect(loadDesk('planning').promptVersion).toBe(version)
+    } finally {
+      writeFileSync(EXAMPLES_FILE, examples)
     }
   })
 })

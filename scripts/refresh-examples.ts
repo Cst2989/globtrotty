@@ -19,7 +19,17 @@ import { connect } from '../src/db.js'
 import { renderExamples, selectExamples } from '../src/loop/examples.js'
 import type { Difficulty } from '../src/loop/difficulty.js'
 
-config({ path: '.env.local', override: false })
+// `quiet: true` is not in the brief's draft of this script and is added here for
+// a reason discovered running it rather than invented: dotenv 17 writes a
+// promotional "tip" line to STDOUT on `config()`, same as every other script's
+// `import 'dotenv/config'` does, and every other caller of this pattern only
+// ever prints to a terminal, where a stray line is cosmetic. This script's whole
+// job is `npm run examples -- <id> > src/desks/examples/planning.md`, so that
+// line would land inside the committed prompt file, outside the provenance
+// comment, and would ship to the model as an instruction nobody wrote. Silenced
+// here and nowhere else, because this is the one caller where stdout is not a
+// terminal.
+config({ path: '.env.local', override: false, quiet: true })
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL is not set. Copy .env.example to .env.local and fill it in.')
   process.exit(1)

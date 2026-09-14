@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SEATS, type Seat } from './seats.js'
@@ -92,9 +92,47 @@ export function loadPrompt(
   return { prompt, promptVersion: promptVersion(prompt) }
 }
 
+const EXAMPLES_DIR = path.join(DIR, 'examples')
+
+/**
+ * The examples file for a desk, comment-stripped, or the empty string when
+ * there is none.
+ *
+ * A missing file is not an error. The front desk has no examples and never
+ * will, because it publishes no tools and an example of a booked itinerary is
+ * not something an FAQ answer can act on, and a fresh checkout of this
+ * repository has no planning examples either until somebody runs the refresh
+ * and commits its output.
+ *
+ * Read through the same comment stripper the desk file goes through, so the
+ * provenance block never reaches the model and never enters the hash.
+ */
+function loadExamples(name: Desk): string {
+  const file = path.join(EXAMPLES_DIR, `${name}.md`)
+  if (!existsSync(file)) return ''
+  return withoutComments(readFileSync(file, 'utf8')).trim()
+}
+
+/**
+ * The desk prompt with its examples assembled onto the end, versioned over the
+ * ASSEMBLED bytes.
+ *
+ * Assembled here rather than rendered into a `{{slot}}`, and the difference is
+ * the whole reason this function changed. `renderPrompt` fills slots AFTER
+ * `promptVersion` has hashed the file, so an example set delivered through a
+ * slot would change what the model reads and leave
+ * course.model_calls.prompt_version identical. Every measurement in module 7
+ * that compares two prompt versions would then be comparing one.
+ *
+ * The examples go last, after the instructions, because the prefix is what the
+ * cache breakpoints are placed against (lesson 5.6) and the part that changes
+ * monthly belongs behind the part that changes rarely.
+ */
 export function loadDesk(name: Desk): LoadedDesk {
-  const loaded = loadPrompt(path.join(DIR, `${name}-desk.md`), `<!-- desk: ${name} -->`)
-  return { name, seat: DESK_SEATS[name], ...loaded }
+  const base = loadPrompt(path.join(DIR, `${name}-desk.md`), `<!-- desk: ${name} -->`)
+  const examples = loadExamples(name)
+  const prompt = examples === '' ? base.prompt : `${base.prompt}\n\n${examples}`
+  return { name, seat: DESK_SEATS[name], prompt, promptVersion: promptVersion(prompt) }
 }
 
 /** Fills {{name}} slots; a slot with no value is an error, because a half-filled prompt reads as an instruction. */
