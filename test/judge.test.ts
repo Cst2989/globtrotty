@@ -1,15 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
+import type { Message } from '@anthropic-ai/sdk/resources/messages'
+import type postgres from 'postgres'
 import { SENTINELS } from '../scripts/sentinels.js'
+import type { Limits } from '../src/engine.js'
 import {
-  AGREEMENT_FLOOR, judgeAgreement, loadJudgePrompt, parseVerdict, runJudge, type Labelled,
+  AGREEMENT_FLOOR, JudgeCappedError, judgeAgreement, judgeContext, loadJudgePrompt,
+  parseVerdict, runJudge, type Labelled,
 } from '../src/evals/judge.js'
 import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
+import { EVAL_LIMITS } from '../src/limits.js'
 import { sumMoney } from '../src/money.js'
+import { emptyNotebook } from '../src/notebook.js'
+import { costMicros } from '../src/pricing.js'
+import { decideProposal, decidedProposals, recordProposal } from '../src/repo/proposals.js'
 import { SEATS } from '../src/seats.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
 import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
 import { describeDb, withTestDb } from './helpers/db.js'
+import { fakeClient, textMessage } from './model/fake.js'
 import { replayClient } from './model/replay.js'
 
 describe('reading the judge', () => {
@@ -31,9 +40,34 @@ describe('reading the judge', () => {
     expect(parseVerdict('{"verdict":"pass"}')).toBeNull()
   })
 
+  it('leaves prose around a fence unread, which is the strip\'s real scope', () => {
+    // The docstring used to read as though any markdown-shaped reply parsed.
+    // These two are the commonest such replies and neither does: the strip
+    // removes a fence that opens the trimmed text and one that closes it, and a
+    // sentence on either side defeats both. The direction is safe, because
+    // unread is dropped from the numerator and the denominator rather than
+    // counted as a fail, and the case is here so the docstring cannot drift
+    // back to claiming otherwise.
+    expect(parseVerdict('Sure.\n```json\n{"verdict":"pass","reason":"Fine."}\n```')).toBeNull()
+    expect(parseVerdict('```json\n{"verdict":"pass","reason":"Fine."}\n```\nHope that helps.')).toBeNull()
+  })
+
+  it('drops a reason longer than the rubric asks for, and the rubric asks for it', () => {
+    // The schema bounds `reason` at 300 characters. A bound only the parser
+    // knows about is a bound the model cannot keep, so the rubric states it.
+    expect(parseVerdict(`{"verdict":"pass","reason":"${'a'.repeat(300)}"}`)!.reason).toHaveLength(300)
+    expect(parseVerdict(`{"verdict":"pass","reason":"${'a'.repeat(301)}"}`)).toBeNull()
+    expect(loadJudgePrompt().prompt).toContain('300 characters')
+  })
+
   it('runs on a seat that is not the seat it grades', () => {
     expect(SEATS.reviewer.model).not.toBe(SEATS.driver.model)
     expect(SEATS.reviewer.modelConfigId).not.toBe(SEATS.driver.modelConfigId)
+    // And it shares a config id with the other Haiku seats, which the seat's own
+    // docstring states rather than leaving a reader to discover. `group by
+    // model_config_id` cannot separate a judge call from a classification, so
+    // `group by seat` is what has to, and that is the argument for the name.
+    expect(SEATS.reviewer.modelConfigId).toBe(SEATS.cheap.modelConfigId)
   })
 
   it('loads its rubric from a file, versioned by the bytes it sends', () => {
@@ -51,6 +85,21 @@ describe('reading the judge', () => {
     // judge useless, and a sentinel renamed in one place cannot be missed here.
     for (const s of SENTINELS) {
       expect(s.pattern.test(loaded.prompt), `the judge prompt sends ${s.name}`).toBe(false)
+    }
+  })
+
+  it('names only fail rules the rendered payload can decide', () => {
+    // The first draft failed a stay "beside a motorway" and one that
+    // "advertises a party atmosphere", and a `SupplierItem` carries no address
+    // and no description, so three of its four rules could never fire. A rubric
+    // whose rules cannot fire is a judge that always passes. The rules name
+    // fields instead, and these are the fields `render` puts on the wire.
+    const rubric = loadJudgePrompt().prompt
+    for (const field of ['stops', 'selfTransfer', 'totalDurationSeconds', 'departureLocal', 'nights', 'rating']) {
+      expect(rubric, `the rubric names ${field}`).toContain(field)
+    }
+    for (const absent of ['motorway', 'nightclub', 'atmosphere', 'crib']) {
+      expect(rubric, `the rubric no longer judges a ${absent}`).not.toContain(absent)
     }
   })
 })
@@ -125,6 +174,202 @@ async function approvedOutcome(): Promise<GateOutcome> {
 }
 
 /**
+ * `EVAL_LIMITS` with the cross-user global ceiling lifted above what the
+ * account has already spent today.
+ *
+ * The same reason `dailyOnly` gives in test/handler.test.ts: the global ceiling
+ * is cross-user and per UTC day and `whichCeiling` (src/engine.ts) checks it
+ * first, so without this a judge case would report `account` on a database with
+ * enough eval runs behind it and pass on an empty one. Read from today's ACTUAL
+ * total inside the transaction rather than set to a large constant, because
+ * deleting rows this test does not own to force a clean slate is what the
+ * sibling case in that file says never to do.
+ */
+async function judgeLimits(sql: postgres.Sql, over: Partial<Limits> = {}): Promise<Limits> {
+  const [row] = await sql<{ total: string }[]>`
+    select coalesce(sum(cost_micros), 0)::text as total
+      from course.daily_usage where day = (now() at time zone 'utc')::date`
+  return {
+    ...EVAL_LIMITS,
+    // Today's total plus the eval day's own ceiling, which is four dollars of
+    // headroom against a reservation of a few thousand micros.
+    globalCeilingMicros: BigInt(row!.total) + EVAL_LIMITS.dailyCeilingMicros,
+    ...over,
+  }
+}
+
+/** The one reply shape a judge is asked for, hand-written. No key, no recording, no network. */
+const verdictReply = (verdict: 'pass' | 'fail', reason: string) =>
+  textMessage(JSON.stringify({ verdict, reason }),
+    // `_request_id` is the SDK's own out-of-band field and is not on `Message`,
+    // which is why `callModel` reads it through a cast too.
+    { _request_id: 'req_judge' } as unknown as Partial<Message>)
+
+describeDb('the judge, billed and recorded', () => {
+  it('writes a reviewer row that names no turn, and settles its own reservation', async () => {
+    await withTestDb(async (sql) => {
+      const userId = randomUUID()
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      const client = fakeClient([verdictReply('pass', 'Direct flights and seven nights.')])
+      const verdict = await runJudge(
+        {
+          sql, client, ctx: judgeContext({ userId, conversationId: c!.id }),
+          limits: await judgeLimits(sql), now: Date.now,
+        },
+        await approvedOutcome(),
+      )
+      expect(verdict).toEqual({ verdict: 'pass', reason: 'Direct flights and seven nights.' })
+
+      const [row] = await sql<{
+        seat: string; model_config_id: string; turn_id: string | null
+        conversation_id: string; cost_micros: string; request_id: string | null
+      }[]>`select seat, model_config_id, turn_id, conversation_id, cost_micros, request_id
+             from course.model_calls where user_id = ${userId}`
+      expect(row!.seat).toBe('reviewer')
+      expect(row!.model_config_id).toBe(SEATS.reviewer.modelConfigId)
+      // The shipped shape, pinned. `evals/run.ts` builds this context through
+      // the same `judgeContext`, so the row production writes is the row this
+      // case reads. A turn id here would add an offline grader's bill to what
+      // her turn is recorded as having cost, because `turnSpendMicros`
+      // (src/repo/spend.ts) sums a turn's calls with no seat filter.
+      expect(row!.turn_id).toBeNull()
+      expect(row!.conversation_id).toBe(c!.id)
+      // The provider's own id for the call, which a support conversation about
+      // one has nothing to quote without.
+      expect(row!.request_id).toBe('req_judge')
+
+      // The ledger settled to what the call really cost rather than to what was
+      // reserved for it, through `reserve` and `reconcile` and no fifth writer.
+      const expected = costMicros(SEATS.reviewer.model,
+        { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, '5m')
+      expect(BigInt(row!.cost_micros)).toBe(expected)
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from course.conversations where id = ${c!.id}`
+      expect(BigInt(conv!.spend_usd_micros)).toBe(expected)
+      const [day] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from course.daily_usage
+         where user_id = ${userId} and day = (now() at time zone 'utc')::date`
+      expect(BigInt(day!.cost_micros)).toBe(expected)
+    })
+  })
+
+  it('stops the pass at a ceiling, without calling the model and without keeping the debit', async () => {
+    await withTestDb(async (sql) => {
+      const userId = randomUUID()
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      // Queued with nothing: `fakeClient` throws when a call it was not given a
+      // reply for is made, so this case fails loudly if the ceiling is checked
+      // after the model rather than before it.
+      const client = fakeClient([])
+      const deps = {
+        sql, client, ctx: judgeContext({ userId, conversationId: c!.id }),
+        limits: await judgeLimits(sql, { conversationCeilingMicros: 1n }), now: Date.now,
+      }
+      await expect(runJudge(deps, await approvedOutcome())).rejects.toThrow(JudgeCappedError)
+      expect(client.calls).toBe(0)
+      // Refunded, so a capped pass leaves nothing reserved against the
+      // conversation it was about to bill. A stranded reservation fails closed,
+      // which is safe and is still a number nobody can explain later.
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from course.conversations where id = ${c!.id}`
+      expect(BigInt(conv!.spend_usd_micros)).toBe(0n)
+      const rows = await sql`select seat from course.model_calls where user_id = ${userId}`
+      expect(rows).toHaveLength(0)
+    })
+  })
+
+  it('judges nothing the gates refused, and bills nothing for it', async () => {
+    await withTestDb(async (sql) => {
+      const userId = randomUUID()
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      const client = fakeClient([])
+      const verdict = await runJudge(
+        {
+          sql, client, ctx: judgeContext({ userId, conversationId: c!.id }),
+          limits: await judgeLimits(sql), now: Date.now,
+        },
+        { ok: false, violations: [{ gate: 'budget', detail: 'over the budget', sourceIds: [] }] },
+      )
+      expect(verdict).toBeNull()
+      expect(client.calls).toBe(0)
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from course.conversations where id = ${c!.id}`
+      expect(BigInt(conv!.spend_usd_micros)).toBe(0n)
+    })
+  })
+})
+
+describeDb('her decided proposals', () => {
+  /** One proposal on its own conversation, optionally answered. */
+  const proposalFor = async (
+    sql: postgres.Sql, userId: string, conversationId: string, decision?: 'accept' | 'reject',
+  ): Promise<string> => {
+    const id = await recordProposal(sql, {
+      conversationId, userId, turnId: null,
+      refs: [{ sourceId: `src-${randomUUID()}`, quantity: 1, slot: 'stay' }],
+      requirementsSnapshot: emptyNotebook(),
+    })
+    if (decision) await decideProposal(sql, { proposalId: id, conversationId, decision })
+    return id
+  }
+
+  it('returns the answered ones newest first and leaves the unanswered one out', async () => {
+    await withTestDb(async (sql) => {
+      const userId = randomUUID()
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      const older = await proposalFor(sql, userId, c!.id, 'accept')
+      const newer = await proposalFor(sql, userId, c!.id, 'reject')
+      const undecided = await proposalFor(sql, userId, c!.id)
+
+      const rows = await decidedProposals(sql, { limit: 100 })
+      const ids = rows.map((p) => p.id)
+      // An undecided proposal is not a label: she has not answered it, and
+      // counting silence as either answer is how a calibration set comes to
+      // disagree with the person it was built from.
+      expect(ids).not.toContain(undecided)
+      // Newest first, by `seq` and never by `created_at`: two rows written
+      // inside one millisecond order arbitrarily by a timestamp, so the hundred
+      // a limit takes would be a different hundred on a re-run.
+      expect(ids.indexOf(newer)).toBeLessThan(ids.indexOf(older))
+      expect(rows.find((p) => p.id === newer)!.decision).toBe('reject')
+      expect(rows.find((p) => p.id === older)!.decidedAt).toBeInstanceOf(Date)
+    })
+  })
+
+  it('scopes to one traveller when it is asked to', async () => {
+    await withTestDb(async (sql) => {
+      const mine = randomUUID()
+      const theirs = randomUUID()
+      const [a] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${mine}) returning id`
+      const [b] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${theirs}) returning id`
+      const ours = await proposalFor(sql, mine, a!.id, 'accept')
+      const other = await proposalFor(sql, theirs, b!.id, 'accept')
+
+      const rows = await decidedProposals(sql, { userId: mine })
+      expect(rows.map((p) => p.id)).toEqual([ours])
+      expect(rows.map((p) => p.id)).not.toContain(other)
+    })
+  })
+
+  it('takes the limit it is given, so a nightly pass cannot grow without one', async () => {
+    await withTestDb(async (sql) => {
+      const userId = randomUUID()
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
+      await proposalFor(sql, userId, c!.id, 'accept')
+      await proposalFor(sql, userId, c!.id, 'accept')
+      expect(await decidedProposals(sql, { userId, limit: 1 })).toHaveLength(1)
+    })
+  })
+})
+
+/**
  * The recording this case replays, which is not in the tree at this commit.
  *
  * It is gated rather than assumed, and gated the way `describeDb`
@@ -138,14 +383,18 @@ async function approvedOutcome(): Promise<GateOutcome> {
  * `RECORD_MODEL=1` opens the gate, because a gate that skipped the one case
  * that writes the fixture would be a gate nobody could ever close: that is the
  * mode `replayClient` records in, and it needs to reach the call.
+ *
+ * What it adds over the two cases above, which drive the same function with a
+ * hand-written reply, is the only thing a recording can add: that a real model
+ * asked this rubric this question answered in a shape `parseVerdict` can read.
  */
 const FIXTURE = new URL('./fixtures/model/judge-family-fit.json', import.meta.url)
 const hasJudgeFixture = existsSync(FIXTURE) || process.env.RECORD_MODEL === '1'
 if (!hasJudgeFixture) {
   console.warn(
     'No test/fixtures/model/judge-family-fit.json: skipping the replayed judge. Record it with '
-  + 'RECORD_MODEL=1 and ANTHROPIC_API_KEY set. The judge\'s parse, its rubric and its agreement '
-  + 'arithmetic are covered above and need no recording.',
+  + 'RECORD_MODEL=1 and ANTHROPIC_API_KEY set. The judge\'s parse, its rubric, its ledger and its '
+  + 'agreement arithmetic are covered above and need no recording.',
   )
 }
 const describeReplayedJudge = hasJudgeFixture ? describeDb : describe.skip
@@ -158,10 +407,14 @@ describeReplayedJudge('the judge, replayed', () => {
   it('returns a verdict and a reason, and prices its own call', async () => {
     await withTestDb(async (sql) => {
       const userId = randomUUID()
-      const [c] = await sql`insert into course.conversations (user_id) values (${userId}) returning id`
+      const [c] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${userId}) returning id`
       const client = replayClient('judge-family-fit')
       const verdict = await runJudge(
-        { sql, client, ctx: { userId, conversationId: c!.id as string, turnId: null }, now: Date.now },
+        {
+          sql, client, ctx: judgeContext({ userId, conversationId: c!.id }),
+          limits: await judgeLimits(sql), now: Date.now,
+        },
         await approvedOutcome(),
       )
       expect(verdict).not.toBeNull()

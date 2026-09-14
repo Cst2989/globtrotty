@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { liveClient } from '../src/client.js'
-import { runJudge } from '../src/evals/judge.js'
+import { judgeContext, runJudge } from '../src/evals/judge.js'
+import { EVAL_LIMITS } from '../src/limits.js'
 import type { GateOutcome, RehydratedItem } from '../src/gates/types.js'
 import { sumMoney } from '../src/money.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
@@ -41,13 +42,31 @@ async function outcomeOf(stayIndex: number, flightIndex: number): Promise<GateOu
 }
 
 /**
- * The live flag AND a database, because `runJudge` writes a `course.model_calls`
- * row and a Tier C file that goes red for a missing DATABASE_URL is a file that
- * reports a failure where it means a skip. `describeDb` (test/helpers/db.ts)
- * prints the reason for the second half at module scope and `describeLiveModel`
- * (test/helpers/live.ts) prints the reason for the first, so both skips are
- * already written down somewhere a reader can find them.
+ * The live flag AND a database, because `runJudge` reserves against a
+ * conversation and writes a `course.model_calls` row, and a Tier C file that
+ * goes red for a missing DATABASE_URL is a file reporting a failure where it
+ * means a skip.
+ *
+ * Both halves print their reason, and the second half prints its own rather
+ * than relying on `describeLiveModel`. That helper (test/helpers/live.ts) warns
+ * only when `LIVE_MODEL=1` is set WITHOUT a key. On the default run, where the
+ * flag is unset, it is `describe.skip` and says nothing at all. An earlier
+ * version of this comment claimed both reasons were already written down
+ * somewhere a reader could find them, and on the run every reader actually
+ * performs that was false, in the one file of this lesson whose whole subject is
+ * that a suite which verified nothing must not read like a suite that verified.
+ * So the line below is written at module scope, once, and only in the case it
+ * describes, which is the house pattern `describeDb` and `describeLiveSearchApi`
+ * both follow.
  */
+const hasModelFlag = process.env.LIVE_MODEL === '1'
+if (!hasModelFlag) {
+  console.warn(
+    'LIVE_MODEL is not set: skipping the live judge. These two cases are the only ones in the '
+  + 'suite that call a model for real, and they cost money. Set LIVE_MODEL=1 with '
+  + 'ANTHROPIC_API_KEY and DATABASE_URL to run them.',
+  )
+}
 const describeLiveJudge = DB_URL ? describeLiveModel : describe.skip
 
 describeLiveJudge('the judge on a real model', () => {
@@ -57,13 +76,16 @@ describeLiveJudge('the judge on a real model', () => {
       const userId = randomUUID()
       const [c] = await sql`insert into course.conversations (user_id) values (${userId}) returning id`
       const verdict = await runJudge(
-        { sql, client: liveClient(), ctx: { userId, conversationId: c!.id as string, turnId: null }, now: Date.now },
+        { sql, client: liveClient(), ctx: judgeContext({ userId, conversationId: c!.id as string }),
+          limits: EVAL_LIMITS, now: Date.now },
         await outcomeOf(1, 2),
       )
-      // A property and never the wording: the rubric names a fail rule this
-      // itinerary breaks, and the reason has to name it.
+      // A property and never the wording: the one fail rule this itinerary
+      // breaks is the connection rule, `stops: 2` in each direction against a
+      // limit of one, and the reason has to name it in one of the words the
+      // rubric or the payload gives it.
       expect(verdict!.verdict).toBe('fail')
-      expect(verdict!.reason.toLowerCase()).toMatch(/connection|stop|night|atmosphere/)
+      expect(verdict!.reason.toLowerCase()).toMatch(/connection|stop|change|leg/)
     })
   }, 120_000)
 
@@ -77,7 +99,8 @@ describeLiveJudge('the judge on a real model', () => {
       // judge from what it was shown is a property it passes on, so a fail here
       // is the judge inventing a fault rather than finding one.
       const verdict = await runJudge(
-        { sql, client: liveClient(), ctx: { userId, conversationId: c!.id as string, turnId: null }, now: Date.now },
+        { sql, client: liveClient(), ctx: judgeContext({ userId, conversationId: c!.id as string }),
+          limits: EVAL_LIMITS, now: Date.now },
         await outcomeOf(2, 0),
       )
       expect(verdict!.verdict).toBe('pass')

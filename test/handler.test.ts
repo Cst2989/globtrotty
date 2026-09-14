@@ -27,7 +27,8 @@ const deps = (
  * already spent today, for the two cases below that are about HER daily
  * ceiling and about the message she gets for it.
  *
- * `whyCapped` (src/engine.ts) checks the GLOBAL ceiling first, and that ceiling
+ * `whichCeiling` (src/engine.ts) checks the GLOBAL ceiling first, and so does
+ * `exceedsAnyCeiling` beside it, and that ceiling
  * is cross-user and per UTC day, so those cases' verdict was decided by rows
  * they do not own. `npm run evals` commits one `course.daily_usage` row per
  * case under a randomUUID user that nothing reads again, so a day with enough

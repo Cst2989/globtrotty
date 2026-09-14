@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { REPLAY_ROUNDS, replayGates } from '../src/evals/replay.js'
+import { REPLAY_ROUNDS, replayGates, replayGatesOnce } from '../src/evals/replay.js'
 import { checkBudget, checkTotals } from '../src/gates/checks.js'
 import { constraintsFromNotebook } from '../src/gates/notebookConstraints.js'
 import { proposalRunner } from '../src/gates/runner.js'
@@ -102,6 +102,79 @@ describeDb('replaying a gate against the notebook it was judged with', () => {
       // Nothing production wrote was touched: the count of round 0 rows is
       // still one per gate, whatever the replays did.
       expect(rows.filter((r) => r.round === 0)).toHaveLength(GATE_NAMES.length)
+    })
+  })
+
+  it('runs the gates once for a caller that comes back every night', async () => {
+    await withTestDb(async (sql) => {
+      const submitted = await submitMessage(handlerDeps(sql), {
+        userId: USER, conversationId: null, message: 'A week in Faro.', idempotencyKey: randomUUID(),
+      })
+      const conversationId = submitted.conversationId
+      const claim = await claimTurn(sql, submitted.turnId!)
+      const items = await mockSuppliers({ hotel: { now: () => NOW } }).hotel.search(STAY)
+      await recordResults(sql, claim!, { params: STAY, items })
+      const cheapest = items.reduce((a, b) => (a.price.minor < b.price.minor ? a : b))
+      const refs = [{ sourceId: cheapest.sourceId, quantity: 1, slot: 'stay' }]
+      await applyRequirementsPatch(sql, {
+        conversationId, userId: USER, at: '2026-08-25T09:00:00Z', source: 'user',
+        patch: { budget: { minor: '75000', currency: 'EUR' }, month: 'September', nights: 7 },
+      })
+      const nb = await loadNotebook(sql, conversationId, USER)
+      const run = proposalRunner(
+        sql,
+        {
+          conversationId, userId: USER, turnId: claim!.turnId,
+          notebook: constraintsFromNotebook(nb, TODAY_ISO), snapshot: nb, now: () => NOW,
+        },
+        async () => ({ content: 'not reached', isError: true }),
+      )
+      const approved = await run('propose_itinerary', { refs }, 's0-b0')
+      const proposalId = (JSON.parse(approved.content) as { proposalId: string }).proposalId
+
+      const countRows = async () => (await sql<{ n: number }[]>`
+        select count(*)::int as n from course.gate_results
+         where proposal_id = ${proposalId} and round = ${REPLAY_ROUNDS.snapshot}`)[0]!.n
+
+      // The first night runs the gates, because there is nothing recorded to
+      // read. Every night after it reads what that one wrote.
+      expect(await countRows()).toBe(0)
+      const first = await replayGatesOnce(sql, {
+        proposalId, conversationId, userId: USER, now: NOW, today: TODAY_ISO,
+      })
+      const afterFirst = await countRows()
+      expect(afterFirst).toBeGreaterThan(0)
+      const second = await replayGatesOnce(sql, {
+        proposalId, conversationId, userId: USER, now: NOW, today: TODAY_ISO,
+      })
+      const third = await replayGatesOnce(sql, {
+        proposalId, conversationId, userId: USER, now: NOW, today: TODAY_ISO,
+      })
+      // The whole point: a cron that comes back nightly adds no rows after the
+      // first pass. `recordGateResults` is a plain insert, so `replayGates`
+      // called three times would have written three row sets against a real
+      // proposal and left `readGateVerdicts`' latest-wins reasoning resting on
+      // a premise that stopped being true on the second night.
+      expect(await countRows()).toBe(afterFirst)
+
+      // And what the later passes hand back is the same answer, rebuilt from
+      // the rows and the corpus rather than from a second run of the gates.
+      expect(second.outcome.ok).toBe(true)
+      expect(third.verdicts).toEqual(first.verdicts)
+      if (first.outcome.ok && second.outcome.ok) {
+        expect(second.outcome.total).toEqual(first.outcome.total)
+        expect(second.outcome.items.map((i) => i.item.sourceId))
+          .toEqual(first.outcome.items.map((i) => i.item.sourceId))
+      }
+
+      // `replayGates` is still the function a lesson calls when a fresh verdict
+      // IS the point, and it still writes: 6.2's demonstration is one proposal
+      // replayed against two notebooks, and a reader that skipped the second
+      // run would have nothing to compare.
+      await replayGates(sql, {
+        proposalId, conversationId, userId: USER, now: NOW, today: TODAY_ISO,
+      })
+      expect(await countRows()).toBeGreaterThan(afterFirst)
     })
   })
 

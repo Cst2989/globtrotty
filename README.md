@@ -1139,27 +1139,60 @@ which is the first module that reads this table for anything.
 Open at lesson 6.6, and found by running the proof command rather than by
 reading the code: an eval run spends the account's day. Every case mints its own
 `randomUUID()` user (src/evals/runner.ts) and commits one `course.daily_usage`
-row for it, so a run of the three cases writes three rows nothing ever reads
-again and adds about $2.90 to the one ceiling `EVAL_LIMITS` deliberately does
-not touch, the cross-user `globalCeilingMicros` of $50 a UTC day. That is the
-suite finding a real fact about what it costs to run, exactly as
-`src/limits.ts` says it would. What it also does is decide the verdict of tests
-that have nothing to do with it: `whyCapped` (src/engine.ts) checks the global
-ceiling first, so with enough eval runs behind it a case about HER daily ceiling
-gets the ACCOUNT message and `npm test` goes red for a reason no diff explains.
-The two cases in `test/handler.test.ts` that read the message now lift the
-global ceiling above today's actual total, the way the global-ceiling case
-beside them already offsets from it, so they test the ceiling they name. The
-rows themselves are still there and still accumulate. Closing that needs either
-an eval user the suite cleans up after, which costs the per-run isolation
-`EVAL_LIMITS` was chosen for, or a ceiling that can tell a graded conversation
-from hers. Owner: a person, or module 7 if it runs the nightly schedule.
+row for it, so a run of the three cases adds about $2.90 to the one ceiling
+`EVAL_LIMITS` deliberately does not touch, the cross-user `globalCeilingMicros`
+of $50 a UTC day. That is the suite finding a real fact about what it costs to
+run, exactly as `src/limits.ts` says it would. What it also does is decide the
+verdict of tests that have nothing to do with it: `whichCeiling` (src/engine.ts)
+checks the global ceiling first, and `exceedsAnyCeiling` beside it takes the
+same order, so with enough of a day's spend behind it a case about HER daily
+ceiling gets the ACCOUNT message and `npm test` goes red for a reason no diff
+explains.
+
+What closes it for those tests is what they now do, and it holds whatever else
+is in the table: the two cases in `test/handler.test.ts` that read the message,
+and the judge cases in `test/judge.test.ts`, read today's ACTUAL total inside
+their transaction and lift the global ceiling above it, the way the
+global-ceiling case beside them already offsets from it, so each tests the
+ceiling it names. None of them deletes a row it does not own, which the sibling
+case in that file explains at length.
+
+What is deliberately NOT claimed here is that those rows pile up for ever, and
+an earlier draft of this paragraph did claim it. Lesson 6.3's own fix round
+gives `evals/run.ts` a `deleteRunRows` that deletes everything a run wrote by
+the ids that run minted, `course.daily_usage` included, so wherever that is in
+the branch a run sweeps its own rows and the accumulation stops. The arithmetic
+above is unchanged either way, because it is about what one run SPENDS while it
+is running, which is what the ceilings see. What no run sweeps is the rest: the
+rows written before that cleanup landed, the leavings of `npm run demo` and
+`npm run trip`, and whatever a reader runs by hand, so a day's total stays a
+number no test controls and every case that reads a ceiling has to say so. The
+judge pass adds one more to that list, because it mints a conversation of its
+own per run and does not sweep it. Owner: a person, or module 7 if it runs the
+nightly schedule.
 
 Open at lesson 6.6: the schedule in `evals/schedule.ts` carries cron expressions
 and nothing reads them. `netlify/functions/sweep.mts` is the precedent for a
 scheduled function here, and the eval suite needs a database and several
 minutes, so wiring it is a deployment decision rather than a code one. Owner: a
 person, when there is somewhere to run it.
+
+Open at lesson 6.6, and the reason the rubric reads the way it does: a
+`SupplierItem` carries no prose, so the judge cannot be asked a prose question.
+`render` (src/evals/judge.ts) shows the judge the total and one line per item,
+each carrying that item's own `detail`, and `FlightDetail` and `HotelDetail`
+(src/supplier/types.ts) are numbers, dates, codes and coordinates. There is no
+address, no neighbourhood, no description, no amenity list and no cot anywhere
+in the corpus. The first draft of `family-fit.md` failed a stay beside a
+motorway and one advertising a party atmosphere, and three of its four rules
+could therefore never fire on any payload this branch can produce, which is a
+judge that always passes wearing a rubric that looks strict. The rules now name
+`stops`, `selfTransfer`, `totalDurationSeconds`, `departureLocal`, `nights` and
+`rating`, all of which are really there. What that costs is the half of family
+fit a traveller would actually ask about, the street and the noise and the cot,
+and buying it back means a supplier adapter that captures a listing's text and a
+`course.tool_results` corpus that stores it. Owner: a person, with a supplier
+whose API returns a description.
 
 Open at lesson 6.6: the judge runs on `SEATS.reviewer`, Haiku, which is a
 different model and a different configuration from the `SEATS.driver` Opus it

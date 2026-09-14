@@ -284,6 +284,9 @@ refuses to call it deployable under eighty percent, and an empty calibration set
 does not meet the floor either, because zero of zero is a calibration nobody
 performed. The arithmetic is pinned over a hand-written table rather than over a
 recording, for the reason a recorded verdict pins the parser and nothing else.
+The judge itself reserves and reconciles like any other conversation, under the
+eval ceilings rather than hers, so the night it runs is bounded by the same four
+functions that bound a turn and there is no fifth writer of the ledger.
 
 **The instrument was never the missing half; the trigger was.** Lesson 5.6's
 canary pins one prompt at one seat and fires when somebody runs it. What catches

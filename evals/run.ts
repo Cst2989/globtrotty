@@ -85,6 +85,15 @@
  * `--runs` stays and overrides the schedule's own count, so a reader can ask for
  * three runs of the per-PR selection without editing the table.
  *
+ * The judge section bills like any other eval conversation and is bounded like
+ * one. It mints a `randomUUID()` user and a conversation of its own, and
+ * `runJudge` reserves and reconciles against it under `EVAL_LIMITS`, so the
+ * conversation, daily and global ceilings all see a nightly pass and a pass that
+ * reaches one stops rather than spending past it. It also replays the gates at
+ * most once per proposal, through `replayGatesOnce`, because a cron that came
+ * back every night would otherwise write a fresh round-1 `course.gate_results`
+ * row set per proposal per night.
+ *
  * `replayClient` comes from `test/`, which is the one place this runner reaches
  * into that directory. It is the branch's only keyless model client and a copy
  * under `src/` would be two clients to keep in step, so `tsconfig.json` compiles
@@ -99,6 +108,7 @@
  * test harness to roll it back. The gate numbers are read BEFORE the delete,
  * because they are read out of the rows this run wrote.
  */
+import { randomUUID } from 'node:crypto'
 import 'dotenv/config'
 import { config } from 'dotenv'
 import type postgres from 'postgres'
@@ -107,8 +117,10 @@ import { connect } from '../src/db.js'
 import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
 import { gateMetrics, gateRows } from '../src/evals/gateMetrics.js'
 import type { Grade } from '../src/evals/grade.js'
-import { AGREEMENT_FLOOR, judgeAgreement, runJudge, type Labelled } from '../src/evals/judge.js'
-import { replayGates } from '../src/evals/replay.js'
+import {
+  AGREEMENT_FLOOR, judgeAgreement, judgeContext, JudgeCappedError, runJudge, type Labelled,
+} from '../src/evals/judge.js'
+import { replayGatesOnce } from '../src/evals/replay.js'
 import { runCase } from '../src/evals/runner.js'
 import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
 import { decidedProposals } from '../src/repo/proposals.js'
@@ -117,7 +129,7 @@ import { makeSimulatedUser } from '../src/evals/sim-user.js'
 import { casePassed, evalNow, passAtK, passAtKRows, EVAL_TODAY, RECORDED_WORLD_SEED } from '../src/evals/variance.js'
 import { EVAL_LIMITS } from '../src/limits.js'
 import { replayClient } from '../test/model/replay.js'
-import { SCHEDULE, selectionFor, type ScheduleName } from './schedule.js'
+import { SCHEDULE, sectionsFor, selectionFor, type ScheduleName } from './schedule.js'
 
 // The guard is scripts/demo.ts's, word for word: two scripts giving different
 // advice about the same missing variable is how a reader learns to ignore both.
@@ -127,9 +139,26 @@ if (!process.env.DATABASE_URL) {
   process.exit(1)
 }
 
-/** The value after a flag, or undefined. Read off argv rather than through a flag library: there are two. */
-const flag = (name: string): string | undefined =>
-  process.argv.find((_, i) => process.argv[i - 1] === name)
+/**
+ * The value after a flag, or undefined when the flag is absent. Read off argv
+ * rather than through a flag library, because there are two of them.
+ *
+ * A flag present with NOTHING after it exits 1 rather than reading as absent.
+ * `npm run evals -- --schedule` is somebody asking for a schedule and not
+ * saying which, and silently running the default under it is the same defect
+ * the unknown-name guard below refuses: a card printed under a selection and a
+ * run count its operator did not choose.
+ */
+const flag = (name: string): string | undefined => {
+  const at = process.argv.indexOf(name)
+  if (at === -1) return undefined
+  const value = process.argv[at + 1]
+  if (value === undefined || value.startsWith('--')) {
+    console.error(`${name} needs a value after it.`)
+    process.exit(1)
+  }
+  return value
+}
 
 /**
  * `npm run evals -- --schedule nightly`. The per-PR entry by default, because
@@ -195,11 +224,12 @@ async function deleteRunRows(sql: postgres.Sql, userIds: string[]): Promise<void
     console.error(`the eval run could not delete its own rows: ${String(err)}`)
   }
 }
+const SECTIONS = sectionsFor(SCHEDULED)
 
 async function main(): Promise<void> {
   const cases = selectionFor(SCHEDULED.name, loadGoldenCases())
   console.log(`schedule ${SCHEDULED.name}: ${cases.length} cases, ${RUNS} run(s) each, `
-    + `judge ${SCHEDULED.judge ? 'on' : 'off'}`)
+    + `sections ${SECTIONS.length > 0 ? SECTIONS.join(' and ') : 'none'}`)
   const graded: { caseId: string; grades: Grade[] }[] = []
   const evalUsers: string[] = []
   // One entry per run that finished, carrying the three things the rate section
@@ -276,7 +306,7 @@ async function main(): Promise<void> {
     // number. `turns labelled` short of `turns` is a finding and not a rounding:
     // it names turns whose write did not happen, and `labelTurn`
     // (src/evals/trajectory.ts) logged each one with its id on the way past.
-    if (SCHEDULED.trajectory) {
+    if (SECTIONS.includes('trajectory')) {
       const labels = (await Promise.all(evalRuns.map((r) =>
         readTurnLabels(sql, { conversationId: r.conversationId, userId: r.userId })))).flat()
       // Distinct ids, because `invokeInProcess` (src/evals/conversation.ts) pushes
@@ -295,25 +325,39 @@ async function main(): Promise<void> {
     // ones this run produced, because the number being computed is agreement
     // with her and a proposal nobody answered is not a label. The gates are
     // replayed first so the judge is shown the server's own rehydrated items
-    // and never the model's prose about them, and a replay that cannot reach a
-    // verdict is a proposal this loop drops rather than one it guesses at.
+    // and never the model's prose about them, and through `replayGatesOnce`
+    // rather than `replayGates`, so a cron that judges the same hundred
+    // proposals every night writes one round-1 gate row set per proposal ever
+    // rather than one per night.
     //
     // `liveClient` and not `replayClient`: there is one judge fixture and a
     // hundred proposals, so this section is the part of the card that costs
     // money. That is why `per-pr` turns it off and why the default run is
     // keyless.
-    if (SCHEDULED.judge) {
+    if (SECTIONS.includes('judge')) {
+      // An eval conversation of its own, minted here, for the reason every
+      // other eval conversation on this branch mints one (src/limits.ts): this
+      // is what `runJudge` reserves and reconciles against, so billing it to
+      // the conversation that produced the proposal would move HER spend for a
+      // call she did not make and would apply EVAL_LIMITS' tighter ceilings to
+      // her conversation. `judgeContext` (src/evals/judge.ts) is where that
+      // rule is written down, and its turn id is null because the judge runs
+      // outside any turn.
+      const judgeUserId = randomUUID()
+      const [jc] = await sql<{ id: string }[]>`
+        insert into course.conversations (user_id) values (${judgeUserId}) returning id`
+      const ctx = judgeContext({ userId: judgeUserId, conversationId: jc!.id })
       const decided = await decidedProposals(sql, { limit: 100 })
       const client = liveClient()
       const labelled: Labelled[] = []
       for (const p of decided) {
         try {
-          const replayed = await replayGates(sql, {
+          const replayed = await replayGatesOnce(sql, {
             proposalId: p.id, conversationId: p.conversationId, userId: p.userId,
             now: evalNow(), today: EVAL_TODAY,
           })
           const verdict = await runJudge(
-            { sql, client, ctx: { userId: p.userId, conversationId: p.conversationId, turnId: p.turnId }, now: Date.now },
+            { sql, client, ctx, limits: EVAL_LIMITS, now: Date.now },
             replayed.outcome,
           )
           // A verdict that could not be read is not a disagreement. It is dropped
@@ -325,6 +369,14 @@ async function main(): Promise<void> {
           // proposal the rubric's first paragraph says it has no question about.
           if (verdict) labelled.push({ proposalId: p.id, decision: p.decision!, verdict: verdict.verdict })
         } catch (err) {
+          // A reached ceiling ends the pass. It is the one error here that says
+          // nothing about this proposal and everything about the run, and
+          // carrying on would reserve, refuse and refund once for every
+          // proposal left in the list.
+          if (err instanceof JudgeCappedError) {
+            console.error(`${err.message} ${labelled.length} of ${decided.length} proposals were judged.`)
+            break
+          }
           // Named on the way past and counted out of the numerator only, the
           // same shape the case loop above uses. A proposal written before
           // migration 0018 carries no requirements snapshot and `replayGates`

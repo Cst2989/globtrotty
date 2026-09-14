@@ -50,7 +50,11 @@ export const DEFAULT_LIMITS: Limits = {
  * day, so raising it for the evals would raise it for her: the one ceiling that
  * stops this system spending unbounded money in a day would have been loosened
  * by a test suite. It still bounds the whole night, and a suite that trips it
- * has found a real fact about what it costs to run.
+ * has found a real fact about what it costs to run. That now includes lesson
+ * 6.6's judge, which is not a conversation anybody talks to and reserves like
+ * one anyway: `runJudge` (src/evals/judge.ts) reserves and reconciles against a
+ * conversation the judge pass mints for itself, under this object, so all three
+ * ceilings see it and there is still no fifth writer of the ledger.
  *
  * The conversation ceiling is tighter than production's rather than looser,
  * because an eval case that spends more than a real conversation is an eval

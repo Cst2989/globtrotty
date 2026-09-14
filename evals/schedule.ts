@@ -6,9 +6,18 @@ export type ScheduleEntry = {
   name: ScheduleName
   /** The cron expression, or null for the one that runs on an event rather than a clock. */
   cron: string | null
+  /** `'all'`, or a ceiling on how many are taken: fewer cases than that is the whole list. */
   cases: 'all' | number
   runs: number
   judge: boolean
+  /**
+   * Whether the card carries the two path rates, `turns labelled` and
+   * `prices with a search`. No shipped entry turns it off, and the field is
+   * published rather than assumed so a per-PR run that wanted the gates and the
+   * answer without the label reads is an edit to this table. `sectionsFor`
+   * below is where the switch is read, so the off path is exercised by a test
+   * over a synthetic entry rather than only by an `if` in a script.
+   */
   trajectory: boolean
   why: string
 }
@@ -37,7 +46,8 @@ export type ScheduleEntry = {
 export const SCHEDULE: Record<ScheduleName, ScheduleEntry> = {
   'per-pr': {
     name: 'per-pr', cron: null, cases: 5, runs: 1, judge: false, trajectory: true,
-    why: 'Minutes and cents, on every push. Five cases once each, the gates and the path, no judge: '
+    why: 'Minutes and cents, on every push. At most five cases once each, which today is every case '
+      + 'this branch has, plus the gates and the path, and no judge: '
       + 'a judge call per pull request buys a number nobody reads and a bill everybody sees.',
   },
   nightly: {
@@ -64,4 +74,21 @@ export const SCHEDULE: Record<ScheduleName, ScheduleEntry> = {
 export function selectionFor(name: ScheduleName, all: GoldenCase[]): GoldenCase[] {
   const entry = SCHEDULE[name]
   return entry.cases === 'all' ? all : all.slice(0, entry.cases)
+}
+
+/**
+ * The sections a run prints, as one decision rather than as two `if`s in the
+ * runner.
+ *
+ * `evals/run.ts` is a script, so nothing can call the guards inside it, and a
+ * flag no test can read is a seam nobody knows still works. Reading them here
+ * means a synthetic entry with `trajectory: false` is a case rather than a
+ * claim, which matters because no entry in the table above turns either flag
+ * off and the off paths would otherwise never have run anywhere.
+ */
+export function sectionsFor(entry: ScheduleEntry): ('trajectory' | 'judge')[] {
+  return [
+    ...(entry.trajectory ? ['trajectory' as const] : []),
+    ...(entry.judge ? ['judge' as const] : []),
+  ]
 }

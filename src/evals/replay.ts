@@ -1,9 +1,11 @@
 import type postgres from 'postgres'
 import { constraintsFromNotebook } from '../gates/notebookConstraints.js'
 import { runGates } from '../gates/pipeline.js'
-import { GATE_NAMES, type GateName, type GateOutcome } from '../gates/types.js'
+import { GATE_NAMES, type GateName, type GateOutcome, type Violation } from '../gates/types.js'
 import { loadNotebook } from '../repo/notebook.js'
-import { loadProposal } from '../repo/proposals.js'
+import { rehydrateRefs } from '../gates/rehydrateGate.js'
+import { sumMoney } from '../money.js'
+import { loadProposal, type Proposal } from '../repo/proposals.js'
 
 /**
  * One gate's recorded verdict, in the three values `course.gate_results` holds:
@@ -130,7 +132,7 @@ export async function replayGates(
     proposalId: args.proposalId,
     round,
   })
-  return { outcome, verdicts: await verdictsFor(sql, args.proposalId, round), against }
+  return { outcome, verdicts: await readGateVerdicts(sql, args.proposalId, round), against }
 }
 
 /**
@@ -148,11 +150,21 @@ export async function replayGates(
  * is not done here because nothing replays one proposal twice in one mode, so
  * the guard would be untested code standing in for a case no caller produces.
  *
+ * The sentence above used to end by saying that nothing replays one proposal
+ * twice in one mode, so the `seq` narrowing would be untested code standing in
+ * for a case no caller produces. Lesson 6.6's nightly judge is that caller, and
+ * `replayGatesOnce` below is how it is kept from being one: it reads these rows
+ * first and runs the gates only when there are none, so a cron that judges the
+ * same hundred proposals every night writes one round-1 row set per proposal
+ * ever rather than one per night. The narrowing is still not done, and it is
+ * still the thing that would close the hole for a caller that genuinely wants
+ * to replay twice.
+ *
  * `recordGateResults` only accepts a `GateName`, so the filter below can never
  * drop a row today. It is here because the column is text, and `gateMetrics`
  * carries the same guard for the same reason.
  */
-async function verdictsFor(
+export async function readGateVerdicts(
   sql: postgres.Sql, proposalId: string, round: number,
 ): Promise<GateVerdicts> {
   const rows = await sql<{ gate: string; passed: boolean | null; detail: string | null }[]>`
@@ -166,4 +178,86 @@ async function verdictsFor(
     verdicts[row.gate as GateName] = { passed: row.passed, detail: row.detail }
   }
   return verdicts
+}
+
+/**
+ * The outcome to judge, with the gates run AT MOST ONCE per proposal per mode.
+ *
+ * `replayGates` above writes a `course.gate_results` row set on every call, and
+ * `recordGateResults` is a plain insert with no upsert. One nightly caller that
+ * grades the newest hundred decided proposals is therefore one hundred fresh
+ * row sets a night, for ever, against real proposals, and the LATEST-wins
+ * reasoning `readGateVerdicts` rests on would stop being safe on the second
+ * night: a run that short-circuits on provenance writes fewer rows than the
+ * night before, and the older row for a gate it never reached would be read as
+ * this run's.
+ *
+ * So this reads first. When rows exist at that round the gates are not run
+ * again: the verdicts come out of the table, and the items are rehydrated
+ * read-only out of `course.tool_results`, which is the same corpus read
+ * `runGates` would have made and the only part of it the judge needs.
+ *
+ * It is NOT a cache and must not be used where a fresh verdict is the point.
+ * Lesson 6.2's demonstration calls `replayGates` directly for that reason: the
+ * whole of that lesson is one proposal replayed against two different
+ * notebooks, and a reader that skipped the second run would have nothing to
+ * compare.
+ */
+export async function replayGatesOnce(
+  sql: postgres.Sql,
+  args: {
+    proposalId: string; conversationId: string; userId: string
+    now: Date; today: string; against?: 'snapshot' | 'live'
+  },
+): Promise<ReplayResult> {
+  const against = args.against ?? 'snapshot'
+  const recorded = await readGateVerdicts(sql, args.proposalId, REPLAY_ROUNDS[against])
+  if (Object.keys(recorded).length === 0) return await replayGates(sql, { ...args, against })
+
+  const proposal = await loadProposal(sql, args.proposalId, args.conversationId)
+  if (!proposal) {
+    throw new Error(`replayGatesOnce: no proposal ${args.proposalId} in conversation ${args.conversationId}`)
+  }
+  if (proposal.userId !== args.userId) {
+    throw new Error(
+      `replayGatesOnce: proposal ${args.proposalId} was judged for a different user than the one this `
+      + 'replay names. Pass the id the proposal belongs to, or read it off the proposal row.',
+    )
+  }
+  return { outcome: await recordedOutcome(sql, proposal, recorded), verdicts: recorded, against }
+}
+
+/**
+ * The outcome the recorded rows already decided, rebuilt without writing one.
+ *
+ * A recorded `false` is a refusal and is returned as one, carrying the detail
+ * the gate itself wrote rather than a sentence invented here. Only then are the
+ * items read, because there is no point rehydrating a corpus for a proposal
+ * nothing will judge.
+ *
+ * A round that recorded no `false` is treated as an approval even when it
+ * recorded fewer rows than there are gates, which is the one thing this shares
+ * with `runGates`: a short-circuited run writes rows for the gates that spoke,
+ * and every gate that spoke was satisfied. `sumMoney` is what totals the items,
+ * and it refuses to add two currencies, so a set the currency gate would have
+ * rejected throws here rather than producing a total nobody should read.
+ */
+async function recordedOutcome(
+  sql: postgres.Sql, proposal: Proposal, verdicts: GateVerdicts,
+): Promise<GateOutcome> {
+  const refused: Violation[] = (Object.entries(verdicts) as [GateName, GateVerdict][])
+    .filter(([, v]) => v.passed === false)
+    .map(([gate, v]) => ({
+      gate,
+      detail: v.detail ?? `The ${gate} gate is recorded as failed with no detail.`,
+      sourceIds: [],
+    }))
+  if (refused.length > 0) return { ok: false, violations: refused }
+  const hydrated = await rehydrateRefs(sql, proposal.conversationId, proposal.refs)
+  if (!hydrated.ok) return { ok: false, violations: hydrated.violations }
+  return {
+    ok: true,
+    items: hydrated.items,
+    total: sumMoney(hydrated.items.map((i) => i.lineTotal)),
+  }
 }

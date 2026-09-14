@@ -135,8 +135,31 @@ export const SEATS = {
    *
    * 1,024 tokens, the cheap seat's number, because the reply is a verdict and
    * one sentence. `VerdictSchema` (src/evals/judge.ts) bounds the sentence at
-   * 300 characters, and the ceiling here is what makes a paragraph hard rather
-   * than what makes it impossible.
+   * 300 characters, the rubric file states that bound to the model, and the
+   * ceiling here is what makes a paragraph hard rather than what makes it
+   * impossible.
+   *
+   * Being the cheap seat's number exactly is a real cost and it is taken with
+   * open eyes. `modelConfigId` is model plus effort plus maxTokens, so this
+   * seat's is `claude-haiku-4-5-20251001/noeffort/1024`, the same string
+   * `cheap` and `front_desk` carry, and `group by model_config_id` therefore
+   * cannot tell a judge call from a classification or a routing call. That is
+   * the anchor lesson 5.6's canary is pinned against, so the drift question
+   * "did this configuration's behaviour move" cannot be asked about the judge
+   * alone. `group by seat` can separate them, which is the whole argument for
+   * giving this seat its own name, and `seatNameOf` matches on the seat
+   * object's identity rather than on its model, so nothing mislabels a row.
+   * Closing it properly means a different ceiling or a config id that carries
+   * the seat, and the second is a change every existing row's id would have to
+   * survive.
+   *
+   * Two migration comments still route this seat to module 5:
+   * `0012_gate_results.sql` ("'reviewer', which needs a model and arrives in
+   * module 5") and `0013_proposals_and_link_clicks.sql` ("the reviewer seat is
+   * module 5"). Both are stale and both are correctly untouched, because a
+   * landed migration is frozen: the branch's rule is that a migration file is
+   * never edited after it has run somewhere. They are named here so the sweep
+   * that corrected the four `src/` comments does not read as complete.
    */
   reviewer: seat(HAIKU, null, 1_024),
 } as const satisfies Record<string, Seat>
