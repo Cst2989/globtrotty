@@ -1245,6 +1245,27 @@ writes the fixture and leaves the case green on every run after it. Then
 its cost in `course.model_calls.cost_micros`. Owner: a person, with a funded
 key.
 
+Open at lesson 7.1: `course.link_clicks.clicked_at` still has no writer, and
+this lesson decided not to add one. A click-through rate is buildable today and
+answers the wrong question: it measures the attractiveness of a link rather than
+the quality of a trip, and a product that ships it will optimise for the first.
+The column stays because a later product may have a reason to record a click
+that is not a success metric, and test/writers.test.ts fails if anything starts
+writing it without that reason being written down first. Owner: the product,
+whenever it has a use for a click that is not a KPI.
+
+Open at lesson 7.1, inherited: the affiliate id in every booking link is
+`globetrotty-course`, a placeholder and not an account (src/cashier.ts). The
+conversion feed a real network sends is keyed on the sub-id inside that
+placeholder's URL, so it is the one line a reader changes to run this loop
+against a real network, and course.conversions is the table those reports land
+on unchanged. Owner: a person, with an affiliate account.
+
+Open at lesson 7.1: course.conversions joins course.link_clicks and
+course.agent_events on the list of append-only tables with no retention policy
+(main's backlog row 3b.1). Nothing reaps any of the three. Owner: a person, when
+there is a retention policy to implement.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

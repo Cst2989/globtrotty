@@ -44,6 +44,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-4 | Pinning variance | npm run migrate, then npm test (test/variance.test.ts, test/eval-limits.test.ts), then npm run evals -- --runs 3 for pass^k over three pinned runs |
 | lesson-6-5 | Trajectory grading | npm run migrate, then npm test (test/trajectory.test.ts, test/turn-labels.test.ts), then npm run evals for rates with denominators |
 | lesson-6-6 | The judge | npm run migrate, then npm test (test/judge.test.ts, test/eval-schedule.test.ts; test/judge.live.test.ts reports SKIPPED without LIVE_MODEL=1), then npm run evals |
+| lesson-7-1 | The signal we already collect | npm run migrate, then npm test (test/conversions.test.ts, test/writers.test.ts, test/signals.test.ts) |
 
 ## How this branch was built
 
@@ -301,6 +302,19 @@ configuration and by `model_config_id`. That is as far as one provider's key
 reaches: the finding the rule comes from is about the FAMILY, and README.md
 carries the rest of it as a residual rather than as a claim this branch can
 make.
+
+**A click is not a conversion.** The cashier minted the tracking ref before it
+built the URL at lesson 4.6, and this lesson created the table those refs land
+on before there was a single row to put in it, because the join key is the one
+thing that cannot be added later. What it deliberately did not build is the
+number that was already available: `clicked_at` measures whether a link looked
+worth opening.
+
+**Enumerate every writer of a table before designing one.** LL3 section 21:
+two duplicate writers shipped in one plan, both invisible to every test, because
+no test exercised the seam. test/writers.test.ts is that test, as a grep over
+src/, and it is four lines of assertion for a defect class that has cost more
+than any other on this branch.
 
 ## Hand-offs
 
