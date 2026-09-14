@@ -1,7 +1,11 @@
 import { compareMoney, formatMoney, type Money } from '../money.js'
 import type { DateWindow } from '../gates/checks.js'
 import type { GateName, RehydratedItem } from '../gates/types.js'
+import type { SupplierItem } from '../supplier/types.js'
 import type { GateVerdicts } from './replay.js'
+import {
+  announcedButNeverCalled, provenanceRate, questionsBeforeGuesses, type Trace,
+} from './trajectory.js'
 
 /**
  * One graded property, with the evidence that decided it.
@@ -19,17 +23,12 @@ export type Check = { name: string; passed: boolean | null; detail: string }
 
 export type Grade = { checks: Check[] }
 
-/** One tool call the agency made, named and identified. */
-export type TraceCall = { name: string; callId: string }
-
 /**
- * What one run of one case left behind, as much of it as lesson 6.1 can see.
- * Lesson 6.5 moves this type into src/evals/trajectory.ts and gives it the turn
- * id, the source ids and the amounts a reply quoted, because those are what the
- * two deferred trajectory checks below read, and none of those three fields is
- * on this type yet.
+ * `Trace` and `TraceCall` live in src/evals/trajectory.ts from lesson 6.5, and
+ * this file imports the type rather than re-exporting it. One definition rather
+ * than two, and the M5 precedent is `Desk`: two types with one name in two
+ * modules is how the two come to mean different things.
  */
-export type Trace = { calls: TraceCall[]; replies: string[] }
 
 export type OutputExpectation = {
   budget: Money | null
@@ -45,18 +44,20 @@ export type TrajectoryExpectation = {
 }
 
 /**
- * Why a check is null at this tag, and which lesson makes it a verdict.
+ * Why a check is null, as a constant rather than as a sentence at the call site.
  *
- * Written as constants rather than as sentences at the call sites for the same
- * reason NOT_EVALUATED is (src/gates/pipeline.ts): two nulls that read
+ * The reason NOT_EVALUATED is one (src/gates/pipeline.ts): two nulls that read
  * differently are two nulls nobody can group, and a scorecard's whole job is
- * grouping. Each string names the lesson that removes it, so a reader who runs
- * `npm run evals` at this tag is told what is missing rather than left to
- * notice.
+ * grouping.
+ *
+ * One key, and it held two until this lesson. `path` said the path is graded in
+ * lesson 6.5, and lesson 6.5 grades it, so the constant is gone rather than
+ * kept as a sentence about a version of this file that no longer exists. What
+ * is left is not a deferral at all: a case that reached no proposal has no gate
+ * verdict to replay, which is a fact about the run and not about the repository.
  */
 export const NOT_YET = {
   gates: 'not evaluated: this case reached no proposal, so there is no gate verdict to replay',
-  path: 'not evaluated: the path is graded in lesson 6.5',
 } as const
 
 /**
@@ -168,28 +169,89 @@ export function gradeOutput(
  *
  * A hotel lookup that took fourteen frontier turns and a whole trip that took
  * four are both wrong, in opposite directions, so the call count is checked
- * against a RANGE and never against a ceiling. The other two properties this
- * module owes, every quoted number having a search behind it and questions
- * arriving before guesses, need the transcript and the corpus, and lesson 6.5
- * is where they get read.
+ * against a RANGE and never against a ceiling.
+ *
+ * `priced` is the conversation's own corpus, rehydrated by the caller out of
+ * `course.tool_results`, and it is the third argument because the other two
+ * cannot answer the question it answers: a number in a sentence is right or
+ * invented depending on what the agency actually looked up, and only the corpus
+ * knows. The checks themselves live in src/evals/trajectory.ts, beside the
+ * reader that assembles the trace, so a property and the rows it is read from
+ * are one file rather than two.
+ *
+ * A third check joins the two lesson 6.1 wrote. `announced_work_was_done` is
+ * the one fault in this module that a reply cannot betray: two identical
+ * sentences, one true and one invented, are told apart by their traces and by
+ * nothing else.
+ *
+ * ## What the two counted checks count, now that the trace can tell
+ *
+ * Both were written at lesson 6.1 against a trace that could answer neither
+ * question precisely, and lesson 6.5's `loadTrace` can, so both say which
+ * quantity they grade rather than leaving a reader to assume.
+ *
+ * `call_count_fits_the_job` counts the calls the harness EXECUTED and not the
+ * blocks the model EMITTED. The driver answers the first `tool_use` block of a
+ * response and drops its siblings (src/agents/driver.ts), so an emitted count
+ * would charge the desk for work nobody did: across the three shipped
+ * recordings that is 59, 107 and 140 emitted against 22, 50 and 68 run. The
+ * executed number is the one that spends money and supplier quota, which is what
+ * a range around the size of the job is about. A desk that asks for three
+ * searches at once and gets one is a fact about the PROMPT, and it belongs to
+ * the lesson that shortens the path rather than to this row.
+ *
+ * `questions_stayed_few` counts QUESTIONS and not `ask_user` calls. One call
+ * carries one to three of them (`AskUser`, src/tools/registry.ts), and the three
+ * shipped recordings put 3, 32 and 61 questions behind 1, 11 and 20 calls, so
+ * counting calls understated `hotel-only-02` by three times. `maxQuestionsAsked`
+ * on a golden case is a ceiling on what a traveller is made to answer rather
+ * than on how many times the desk opened its mouth. The detail prints both,
+ * because a desk that asked nine things in three calls and one that asked nine
+ * in nine are the same row and not the same behaviour.
  */
-export function gradeTrajectory(trace: Trace, expected: TrajectoryExpectation): Grade {
+export function gradeTrajectory(
+  trace: Trace, expected: TrajectoryExpectation, priced: Map<string, SupplierItem>,
+): Grade {
   const frontier = trace.calls.length
-  const asked = trace.calls.filter((c) => c.name === 'ask_user').length
+  const asked = trace.calls.reduce((n, c) => n + c.questions, 0)
+  const askCalls = trace.calls.filter((c) => c.name === 'ask_user').length
+  const provenance = provenanceRate(trace, priced)
+  const askedFirst = questionsBeforeGuesses(trace)
+  const announced = announcedButNeverCalled(trace)
   return {
     checks: [
       {
         name: 'call_count_fits_the_job',
         passed: frontier >= expected.minFrontierCalls && frontier <= expected.maxFrontierCalls,
-        detail: `${frontier} tool calls, expected ${expected.minFrontierCalls} to ${expected.maxFrontierCalls}.`,
+        detail: `${frontier} tool calls ran, expected ${expected.minFrontierCalls} to ${expected.maxFrontierCalls}.`,
       },
       {
         name: 'questions_stayed_few',
         passed: asked <= expected.maxQuestionsAsked,
-        detail: `${asked} questions asked, at most ${expected.maxQuestionsAsked} expected.`,
+        detail: `${asked} questions asked in ${askCalls} calls, at most ${expected.maxQuestionsAsked} expected.`,
       },
-      { name: 'every_number_has_a_search', passed: null, detail: NOT_YET.path },
-      { name: 'questions_before_guesses', passed: null, detail: NOT_YET.path },
+      {
+        name: 'every_number_has_a_search',
+        // Null when there was nothing to look at. A reply with no amounts in it
+        // has not proved its provenance, it has said nothing about money, and
+        // reporting that as a pass is how a denominator quietly shrinks.
+        passed: provenance.denominator === 0 ? null : provenance.numerator === provenance.denominator,
+        detail: `${provenance.numerator}/${provenance.denominator} quoted amounts appear in the corpus.`,
+      },
+      {
+        name: 'questions_before_guesses',
+        passed: askedFirst,
+        detail: askedFirst
+          ? 'No supplier search ran before the first question.'
+          : 'A supplier search ran before anything was asked.',
+      },
+      {
+        name: 'announced_work_was_done',
+        passed: announced.length === 0,
+        detail: announced.length === 0
+          ? 'No reply claimed work with no call behind it.'
+          : `${announced.length} reply or replies claimed an entry-rules check with no research_destination call.`,
+      },
     ],
   }
 }

@@ -1,4 +1,5 @@
-import { gradeOutput, gradeTrajectory, NOT_YET, overBudget, type Trace } from '../src/evals/grade.js'
+import { gradeOutput, gradeTrajectory, NOT_YET, overBudget } from '../src/evals/grade.js'
+import type { Trace } from '../src/evals/trajectory.js'
 import type { GateVerdicts } from '../src/evals/replay.js'
 import { checkBudget, checkDates, checkTotals } from '../src/gates/checks.js'
 import { NOT_EVALUATED } from '../src/gates/pipeline.js'
@@ -196,22 +197,29 @@ describe('grading the output', () => {
 })
 
 describe('grading the path', () => {
-  const trace = (names: string[]): Trace => ({
-    calls: names.map((name, i) => ({ name, callId: `s${i}-b0` })),
-    replies: [],
+  const trace = (names: string[], over: Partial<Trace> = {}): Trace => ({
+    turnIds: ['t1'],
+    calls: names.map((name, i) => ({
+      name, callId: `s${i}-b0`, turnId: 't1', seq: i,
+      // One question per `ask_user` call here, which is the arity a helper can
+      // state honestly. The three-questions-in-one-call case is the production
+      // shape and the reason `questions` is a field at all.
+      questions: name === 'ask_user' ? 1 : 0,
+    })),
+    replies: [], sourceIds: new Set(), quoted: [], ...over,
   })
 
   it('fails a hotel lookup that took fourteen frontier turns', () => {
     const grade = gradeTrajectory(trace(Array(14).fill('search_hotels')), {
       minFrontierCalls: 1, maxFrontierCalls: 3, maxQuestionsAsked: 2,
-    })
+    }, new Map())
     expect(grade.checks.find((c) => c.name === 'call_count_fits_the_job')!.passed).toBe(false)
   })
 
   it('fails a whole trip that took one call, which is the same fault inverted', () => {
     const grade = gradeTrajectory(trace(['search_hotels']), {
       minFrontierCalls: 4, maxFrontierCalls: 10, maxQuestionsAsked: 3,
-    })
+    }, new Map())
     const check = grade.checks.find((c) => c.name === 'call_count_fits_the_job')!
     expect(check.passed).toBe(false)
     expect(check.detail).toContain('expected 4 to 10')
@@ -221,18 +229,49 @@ describe('grading the path', () => {
     const grade = gradeTrajectory(
       trace(['ask_user', 'ask_user', 'ask_user', 'ask_user', 'search_flights']),
       { minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3 },
+      new Map(),
     )
     expect(grade.checks.find((c) => c.name === 'questions_stayed_few')!.passed).toBe(false)
     expect(grade.checks.find((c) => c.name === 'call_count_fits_the_job')!.passed).toBe(true)
   })
 
-  it('reports the two properties lesson 6.5 has not built as unreached', () => {
-    const grade = gradeTrajectory(trace(['search_flights']), {
+  /**
+   * The pair lesson 6.1 filed as `passed: null` with a sentence naming this
+   * lesson. They are verdicts now, and the empty corpus here is the honest
+   * worst case: a search ran, a number reached her, and nothing the agency
+   * looked up backs it.
+   */
+  it('reaches a verdict on the two properties lesson 6.1 filed as null', () => {
+    const grade = gradeTrajectory(trace(['search_flights'], { quoted: [412] }), {
       minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3,
-    })
-    for (const name of ['every_number_has_a_search', 'questions_before_guesses']) {
-      expect(grade.checks.find((c) => c.name === name)!.passed).toBeNull()
-    }
+    }, new Map())
+    const numbers = grade.checks.find((c) => c.name === 'every_number_has_a_search')!
+    expect(numbers.passed).toBe(false)
+    expect(numbers.detail).toBe('0/1 quoted amounts appear in the corpus.')
+    const asked = grade.checks.find((c) => c.name === 'questions_before_guesses')!
+    expect(asked.passed).toBe(false)
+    expect(asked.detail).toBe('A supplier search ran before anything was asked.')
+  })
+
+  it('still reports a reply with no amounts as unreached rather than as clean', () => {
+    const grade = gradeTrajectory(trace(['ask_user']), {
+      minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3,
+    }, new Map())
+    // Nothing to look at is not the same answer as nothing wrong, which is the
+    // reason `Check.passed` has three values at all.
+    expect(grade.checks.find((c) => c.name === 'every_number_has_a_search')!.passed).toBeNull()
+    // And a turn that asked and searched nothing guessed nothing.
+    expect(grade.checks.find((c) => c.name === 'questions_before_guesses')!.passed).toBe(true)
+  })
+
+  it('tells two identical sentences apart by the calls behind them', () => {
+    const said = ['I checked the entry rules for Portugal and an EU passport is enough.']
+    const expected = { minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3 }
+    const invented = gradeTrajectory(trace(['search_hotels'], { replies: said }), expected, new Map())
+    expect(invented.checks.find((c) => c.name === 'announced_work_was_done')!.passed).toBe(false)
+    const honest = gradeTrajectory(
+      trace(['research_destination'], { replies: said }), expected, new Map())
+    expect(honest.checks.find((c) => c.name === 'announced_work_was_done')!.passed).toBe(true)
   })
 })
 

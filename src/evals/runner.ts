@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import type { ModelClient } from '../client.js'
 import type { Limits } from '../engine.js'
+import { rehydrate } from '../repo/toolResults.js'
 import { mockSuppliers } from '../supplier/mock.js'
 import type { GoldenCase, Persona } from './cases.js'
 import { latestProposal, sendReply, startEvalConversation, type EvalConversation, type EvalDeps } from './conversation.js'
-import { gradeOutput, gradeTrajectory, type Grade, type Trace, type TraceCall } from './grade.js'
+import { gradeOutput, gradeTrajectory, type Grade } from './grade.js'
 import { replayGates } from './replay.js'
 import type { SimUser } from './sim-user.js'
+import { loadTrace, type Trace } from './trajectory.js'
 
 export type CaseDeps = {
   sql: postgres.Sql
@@ -51,60 +53,6 @@ export type CaseResult = {
 export const MAX_EVAL_TURNS = 15
 
 /**
- * Every tool the frontier model asked for, read off the rows that record what it
- * answered.
- *
- * The source is `course.model_calls.response`, and the two obvious alternatives
- * are both blind to the same tool, which is the one the trajectory checks exist
- * to count.
- *
- * - `course.tool_calls` is written only by `ledgerRunner` (src/tools.ts), and
- *   this chain drops it exactly as `scripts/trip.ts` does, so it holds nothing
- *   at all for an eval run.
- * - `course.turns.state` is the transcript, and a VALID `ask_user` never reaches
- *   it. The driver returns `{ kind: 'message' }` for one (src/agents/driver.ts),
- *   and `src/worker.ts`'s message branch completes the turn and returns BEFORE
- *   the transcript append at the bottom of its loop, saying so in its own
- *   comment. What the transcript therefore holds is every `ask_user` the SCHEMA
- *   REFUSED and none of the ones that were asked, which does not read as zero,
- *   it reads as a plausible small integer that looks like a verdict. The first
- *   round of this lesson shipped exactly that: eleven questions counted as one.
- *
- * `pgSink` writes `response: { stop_reason, content }` from the driver on every
- * call it makes, before the driver has looked at what the model asked for
- * (src/agents/driver.ts), so every `tool_use` block is there whatever happened
- * to it afterwards: executed, refused by the schema, or refused by the supplier
- * budget. Scoped to `seat = 'driver'` because that is the frontier model this
- * check is about: the front desk publishes no tools and a scout answers in
- * prose.
- *
- * `callId` is the provider's own id off the block rather than the ledger's
- * positional key, because this trace identifies a call inside itself and has no
- * ledger row to join to. Lesson 6.5 replaces the whole of this with `loadTrace`,
- * which reads the corpus beside the calls.
- */
-async function callsOf(sql: postgres.Sql, turnIds: string[]): Promise<TraceCall[]> {
-  if (turnIds.length === 0) return []
-  // Ordered by `seq`, the identity column every reader of this table sorts by,
-  // and never by created_at: every row of one transaction shares that value.
-  const rows = await sql<{ response: { content?: unknown } | null }[]>`
-    select response from course.model_calls
-     where turn_id = any(${turnIds}) and seat = 'driver'
-     order by seq`
-  const calls: TraceCall[] = []
-  for (const row of rows) {
-    const content = row.response?.content
-    if (!Array.isArray(content)) continue
-    for (const block of content as { type?: string; name?: string; id?: string }[]) {
-      if (block.type === 'tool_use' && block.name) {
-        calls.push({ name: block.name, callId: block.id ?? '' })
-      }
-    }
-  }
-  return calls
-}
-
-
 /**
  * Whether she has refused the same thing twice.
  *
@@ -172,13 +120,30 @@ export async function runCase(deps: CaseDeps, kase: GoldenCase): Promise<CaseRes
     if (saidNoTwice(her.refused)) break
   }
 
-  // The trace lesson 6.1 defined, assembled from what this run wrote. Lesson
-  // 6.5 replaces this block with `loadTrace`, which reads the corpus and the
-  // model calls as well and is what the two unreached trajectory checks need.
-  const trace: Trace = {
-    calls: await callsOf(deps.sql, convo.turnIds),
-    replies: convo.replies,
-  }
+  // The trace, read from the rows this run wrote rather than assembled here.
+  // `loadTrace` (src/evals/trajectory.ts) takes the calls off the model's own
+  // replies in course.model_calls, the replies off course.messages and the
+  // corpus off course.tool_results, and the whole of why it reads the model
+  // calls rather than the transcript is written at that function: a valid
+  // `ask_user` ends the turn before the transcript is appended to, so the
+  // transcript holds every question the schema REJECTED and no question the
+  // agency actually asked.
+  const trace: Trace = await loadTrace(deps.sql, {
+    conversationId: convo.conversationId, userId, turnIds: convo.turnIds,
+  })
+  // Read once for the whole conversation, because provenance is a property of
+  // the conversation: a price quoted in the fourth turn is backed by a search
+  // made in the first.
+  const priced = await rehydrate(deps.sql, convo.conversationId, [...trace.sourceIds])
+
+  // Nothing here writes a label row, and that is the point rather than an
+  // omission. This case drove the REAL worker in process (`invokeInProcess`,
+  // src/evals/conversation.ts, calls `runTurn`), and `runTurn` writes one row at
+  // each of its two terminal exits, so every turn this case produced is already
+  // labelled by the code production runs. A second write here would be a second
+  // caller claiming to own the turn's end, which is exactly what the primary key
+  // on course.turn_labels refuses. `evals/run.ts` READS the rows back and prints
+  // the count against the turn count, so a write that failed shows as a gap.
 
   // The WHOLE ReplayResult is kept, not its `outcome`. `gradeOutput` reads
   // `verdicts` and nothing else (src/evals/grade.ts, lesson 6.2's fix round),
@@ -205,7 +170,7 @@ export async function runCase(deps: CaseDeps, kase: GoldenCase): Promise<CaseRes
         minFrontierCalls: kase.expect.minFrontierCalls,
         maxFrontierCalls: kase.expect.maxFrontierCalls,
         maxQuestionsAsked: kase.expect.maxQuestionsAsked,
-      }),
+      }, priced),
     ],
   }
 }

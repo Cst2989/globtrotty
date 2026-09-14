@@ -54,9 +54,9 @@
  *
  * ## What a run leaves behind
  *
- * This script connects to the reader's real DATABASE_URL and cleans up nothing,
- * so one pass leaves three conversations with their turns, messages, corpus
- * rows, gate results and daily_usage rows, and `--runs 3` leaves nine of each.
+ * This script connects to the reader's real DATABASE_URL, and `deleteRunRows`
+ * below removes everything a pass wrote, daily_usage included, once the card
+ * is printed. DURING a run the rows are real.
  * The money is simulated and the ledger is not: every replayed call is priced
  * from the usage in its recording and debited through `reserve` and `reconcile`
  * like a real one, so a pass spends nothing at the provider and still writes
@@ -64,6 +64,13 @@
  * the three cases were measured at $0.94 and $1.57, so a pass is worth more than
  * $2.50 of that day and `--runs 3` more than $7.50. Lesson 6.6's nightly
  * schedule is sixty conversations a night against the same ceiling.
+ *
+ * From lesson 6.5 the card reaches a verdict on the PATH as well as on the
+ * answer. `every_number_has_a_search`, `questions_before_guesses` and
+ * `announced_work_was_done` are read off the rows the system already wrote, and
+ * the two lines under the card are rates with their denominators: how many of
+ * this run's turns carry a label row in `course.turn_labels`, and how many of
+ * the amounts the agency put in prose match a price its own corpus holds.
  *
  * `replayClient` comes from `test/`, which is the one place this runner reaches
  * into that directory. It is the branch's only keyless model client and a copy
@@ -88,6 +95,7 @@ import { gateMetrics, gateRows } from '../src/evals/gateMetrics.js'
 import type { Grade } from '../src/evals/grade.js'
 import { runCase } from '../src/evals/runner.js'
 import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
+import { readTurnLabels } from '../src/repo/turnLabels.js'
 import { makeSimulatedUser } from '../src/evals/sim-user.js'
 import { casePassed, evalNow, passAtK, passAtKRows, EVAL_TODAY, RECORDED_WORLD_SEED } from '../src/evals/variance.js'
 import { EVAL_LIMITS } from '../src/limits.js'
@@ -149,6 +157,10 @@ async function main(): Promise<void> {
   const cases = loadGoldenCases()
   const graded: { caseId: string; grades: Grade[] }[] = []
   const evalUsers: string[] = []
+  // One entry per run that finished, carrying the three things the rate section
+  // below needs. A run that threw adds nothing, so the turn count is the turns
+  // of the runs that produced any, which is the denominator those rates mean.
+  const evalRuns: { conversationId: string; userId: string; turnIds: string[] }[] = []
   const runs = new Map<string, boolean[]>()
   const sql = connect(process.env.DATABASE_URL!, 2)
   try {
@@ -179,6 +191,10 @@ async function main(): Promise<void> {
           // throws into the same catch, so a drifted run is a case that did not
           // complete rather than a card printed over an unfinished recording.
           client.done()
+          evalRuns.push({
+            conversationId: result.conversationId, userId: result.userId,
+            turnIds: result.trace.turnIds,
+          })
           // Suffixed only when there is more than one run, because `scorecardOf`
           // counts one entry per graded case and three runs of one case are
           // three graded cases. At the default the id is the golden file's own,
@@ -209,6 +225,23 @@ async function main(): Promise<void> {
     for (const flaky of k.filter((r) => r.flaky)) {
       console.log(`  flaky: ${flaky.caseId} passed ${flaky.passes} of ${flaky.k} runs`)
     }
+    // Rates over the whole run, each with the denominator that produced it. The
+    // turn count comes from the conversations and the label count from the
+    // table, so a label write that failed shows as a gap rather than as a better
+    // number. `turns labelled` short of `turns` is a finding and not a rounding:
+    // it names turns whose write did not happen, and `labelTurn`
+    // (src/evals/trajectory.ts) logged each one with its id on the way past.
+    const labels = (await Promise.all(evalRuns.map((r) =>
+      readTurnLabels(sql, { conversationId: r.conversationId, userId: r.userId })))).flat()
+    // Distinct ids, because `invokeInProcess` (src/evals/conversation.ts) pushes
+    // a turn id once per INVOCATION and a turn handed back for a later one is
+    // invoked twice. The label table holds one row per turn, so a denominator
+    // that counted invocations would report a gap on every continuation.
+    const turns = evalRuns.reduce((n, r) => n + new Set(r.turnIds).size, 0)
+    const quoted = labels.reduce((n, l) => n + l.pricesQuoted, 0)
+    const unbacked = labels.reduce((n, l) => n + l.unbackedPrices, 0)
+    console.log(`  turns labelled       ${labels.length}/${turns}`)
+    console.log(`  prices with a search ${quoted - unbacked}/${quoted}`)
     await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })

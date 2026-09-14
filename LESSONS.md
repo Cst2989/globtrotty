@@ -42,6 +42,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-2 | The gates are already evals | npm run migrate, then npm test (test/eval-replay.test.ts, test/gate-metrics.test.ts), then npm run evals for the card with its gate rows |
 | lesson-6-3 | Golden trips and the simulated traveller | npm run migrate, then npm test (test/golden-cases.test.ts, test/sim-user.test.ts, and test/eval-run.test.ts, which takes about four minutes against a remote database and seconds against a local one), then npm run evals for three cases driven end to end |
 | lesson-6-4 | Pinning variance | npm run migrate, then npm test (test/variance.test.ts, test/eval-limits.test.ts), then npm run evals -- --runs 3 for pass^k over three pinned runs |
+| lesson-6-5 | Trajectory grading | npm run migrate, then npm test (test/trajectory.test.ts, test/turn-labels.test.ts), then npm run evals for rates with denominators |
 
 ## How this branch was built
 

@@ -1016,6 +1016,59 @@ flaky: `call_count_fits_the_job` fails on all three cases for the reason the
 lesson 6.3 residual above gives, and a case with a failed check did not pass.
 Consistently failing and flaky are different words on this card on purpose.
 
+Closed at lesson 6.5: `gradeTrajectory` files no check as `passed: null` any
+more. Every property the scorecard names now reaches a verdict, or says in its
+own detail line why it could not look, which is a different sentence. That
+closes the first half of the lesson 6.2 entry above, and it moves two numbers
+that entry and the lesson 6.3 one printed. `loadTrace` (src/evals/trajectory.ts)
+reads the calls off `course.model_calls.response` rather than off the persisted
+transcript, because a valid `ask_user` ends the turn before the transcript is
+appended to and is therefore in no transcript anywhere, and it counts the FIRST
+`tool_use` block of each reply, which is the one the driver answers. So
+`call_count_fits_the_job` now reads 22, 50 and 68 executed calls against
+ceilings of 10, 4 and 8, where the lesson 6.3 entry above recorded 21, 40 and 52
+read a different way, and the three recordings carry 59, 107 and 140 blocks the
+model emitted behind those. `questions_stayed_few` counts QUESTIONS rather than
+`ask_user` calls, at 3, 32 and 61 behind 1, 11 and 20 calls, so
+`portugal-toddler-01` passes it and the other two are red at three times what
+the old count showed.
+
+Open at lesson 6.5, and found by running the card rather than by reading the
+code: `every_number_has_a_search` reports `0/0` on all three cases, because
+there is not one amount in any reply for it to look at. `redactCurrency`
+(src/channel.ts, lesson 5.7) replaces every currency-shaped token in the model's
+prose before it reaches `course.messages`, so the only amounts that ever reach
+her thread in figures are the card's, which is a structure and not prose, and
+the booking hand-off sentence `completeIfLinkEmitted` builds from
+`course.link_clicks`. None of the three golden cases books anything, so none of
+them puts a number where this check can see it. The check is right to say it
+could not look, and what it is waiting for is a case that reaches a booking
+link. Owner: a person, with the recording that case needs.
+
+Also open at lesson 6.5: `announcedButNeverCalled` matches one class of claim,
+the entry-requirements one. The class is larger than that regex: "I compared
+three neighbourhoods for you" is the same fault about a different subject, and a
+pattern per claim does not scale. The honest next step is deriving the claim from
+the tools the desk published rather than from a list of sentences. Owner: a
+person, or module 7 if its examples work wants the same derivation.
+
+Also open at lesson 6.5: the trace depends on a capture policy. `loadTrace` can
+only read a model call the ledger captured, and `capturePolicyFor`
+(src/repo/model-calls.ts) holds the driver seat at `full` today, so it reads
+everything. A sampler on that seat, which that function's own comment says is
+possible, would silently shorten every trace and every counter derived from one,
+and nothing in this module would notice. What that needs is the per-call arity
+recorded beside the spend rather than inferred from a captured body. Owner:
+whoever adds the sampler.
+
+`src/worker.ts` imports `labelTurn` from `src/evals/`, which is the harness
+depending on a directory named for the suite that reads it. The dependency is
+the right way round in substance, because the counters have to be extracted
+where a turn ENDS and the eval only reads them back, and it is the wrong way
+round in the file tree. Moving the counting into `src/repo/turnLabels.ts` and
+leaving the grading in `src/evals/` is the shape that says so. Owner: module 7,
+which is the first module that reads this table for anything.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

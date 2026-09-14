@@ -6,6 +6,7 @@ import {
   type ContentBlock, type FailReason, type Limits, type ToolResultBlock, type TurnState,
 } from './engine.js'
 import { classifyError } from './errors.js'
+import { labelTurn } from './evals/trajectory.js'
 import { TURN_FAILED_MESSAGE } from './failure-message.js'
 import { limitReachedMessage } from './limit-message.js'
 import { readSpendOrLimitReached } from './loop.js'
@@ -409,19 +410,30 @@ async function failTurnUnlessLinkEmitted(
 ): Promise<void> {
   // `emitted` for the same reason the catch above reads it: the fallback below
   // is the write rule 6 forbids on a turn that emitted, close or no close.
-  if ((await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted) return
-  await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
-  // AFTER the write it describes, and that ordering is the whole of what keeps
-  // one turn to one `failed` row. `failTurn` can throw: a fenced one means
-  // another worker owns the turn and this one must write nothing at all, and any
-  // other throw propagates out of `loop` into `runTurn`'s catch, which files the
-  // row itself. Writing here first would have produced two rows for one ending
-  // in the second case and a row from a superseded worker in the first.
-  // Routing all five of `loop`'s failing exits through this one function is what
-  // makes that a single place rather than five.
-  await recordAgentEvent(deps.sql, {
-    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
-    kind: 'failed', detail: reason,
+  const emitted = (await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted
+  if (!emitted) {
+    await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
+    // AFTER the write it describes, and that ordering is the whole of what keeps
+    // one turn to one `failed` row. `failTurn` can throw: a fenced one means
+    // another worker owns the turn and this one must write nothing at all, and any
+    // other throw propagates out of `loop` into `runTurn`'s catch, which files the
+    // row itself. Writing here first would have produced two rows for one ending
+    // in the second case and a row from a superseded worker in the first.
+    // Routing all five of `loop`'s failing exits through this one function is what
+    // makes that a single place rather than five.
+    await recordAgentEvent(deps.sql, {
+      conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+      kind: 'failed', detail: reason,
+    })
+  }
+  // One of the two terminal exits that label the turn (lesson 6.5). The early
+  // return this replaced would have skipped it, and a turn that ended on a live
+  // booking link is exactly the turn anybody later asks the counters about, so
+  // both endings this function can reach write the row and the five failing
+  // exits of `loop` inherit it from here. Last, because the label counts the
+  // reply and whichever branch above is what wrote it.
+  await labelTurn(deps.sql, {
+    turnId: claim.turnId, conversationId: claim.conversationId, userId: claim.userId,
   })
 }
 
@@ -727,6 +739,28 @@ async function loop(
         // changed is who is expected to act next, which is a property of the
         // conversation and not of the turn.
         ...(escalated ? { conversationStatus: 'escalated' as const } : {}),
+      })
+      /**
+       * The other terminal exit, and the whole reason the label write lives in
+       * the harness rather than in the eval that reads the rows back.
+       *
+       * `course.model_calls`, `course.messages` and `course.tool_results` answer
+       * every question `TurnCounters` asks for ninety days and then stop, so a
+       * counter that is not extracted at the moment a turn finishes is a counter
+       * nobody can ever compute again (migration 0019 carries the argument).
+       * Production turns are the ones that matter for that: an eval run can be
+       * run again and a Tuesday in March cannot.
+       *
+       * AFTER `completeTurn`, never before, because the reply is half of what is
+       * counted and `completeTurn` is what writes it to `course.messages`.
+       *
+       * Best effort inside `labelTurn` itself, which logs the turn id and
+       * returns: a label write that failed must not lose a turn that succeeded,
+       * and a turn with no row is honestly distinguishable from a turn whose
+       * counters are zero.
+       */
+      await labelTurn(sql, {
+        turnId: claim.turnId, conversationId: claim.conversationId, userId: claim.userId,
       })
       return
     }

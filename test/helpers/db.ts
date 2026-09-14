@@ -87,6 +87,10 @@ export async function withRealDb<T>(fn: (sql: postgres.Sql, userId: string) => P
     // `on delete set null` (migration 0017): a feed row would survive the turn
     // that wrote it and outlive the test that made it.
     await sql`delete from course.agent_events where user_id = ${userId}`
+    // Above the turns delete for the ordinary reason: course.turn_labels.turn_id
+    // cascades from course.turns, so the row would go either way, and a child
+    // deleted by its own user id is a child this function can account for.
+    await sql`delete from course.turn_labels where user_id = ${userId}`
     await sql`delete from course.messages where user_id = ${userId}`
     await sql`delete from course.turns where user_id = ${userId}`
     await sql`delete from course.conversations where user_id = ${userId}`
