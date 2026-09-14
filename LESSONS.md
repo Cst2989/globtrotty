@@ -47,6 +47,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-7-1 | The signal we already collect | npm run migrate, then npm test (test/conversions.test.ts, test/writers.test.ts, test/signals.test.ts) |
 | lesson-7-2 | Three requirements | npm test (test/derive.test.ts), then npm run typecheck |
 | lesson-7-3 | The inversion bug | npm run migrate, then npm test (test/similarity.test.ts), then npm run evals |
+| lesson-7-4 | Examples and memory | npm test (test/difficulty.test.ts, test/examples.test.ts, test/inferred.test.ts), then npm run evals |
 
 ## How this branch was built
 

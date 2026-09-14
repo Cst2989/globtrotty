@@ -1274,6 +1274,16 @@ denominator is a measurement nobody made, and hiding it would make the card
 better looking and less true. Owner: a person, with an affiliate account and
 the feed lesson 7.1's `recordConversion` takes.
 
+Open at lesson 7.4: the planning desk was edited with a hypothesis about the
+call-count residual and the eval score did not move, because the three driver
+recordings replay the prompt they were recorded against and test/model/replay.ts
+matches on `model` alone. Closing it needs the three cases re-recorded against
+the edited prompt, which is a key and roughly five dollars, and it is the moment
+to decide whether the re-record lands in seedFor(caseId)'s world and closes the
+RECORDED_WORLD_SEED residual with it. Until then the edit is shipped and
+unmeasured, which is stated here rather than implied by a green card. Owner: a
+person with a key.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.
