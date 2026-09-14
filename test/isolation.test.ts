@@ -148,6 +148,18 @@ describeDb('two travellers, one worker', () => {
     })
   })
 
+  it('cannot reach course.conversions at all', async () => {
+    // A fifth ungranted table, and one case rather than a fifth slot in the
+    // `it.each` above: 0020's own closing comment promises exactly one case
+    // here, which is what makes that paragraph checkable rather than merely
+    // stated. No worker path reads or writes this table; a conversion arrives
+    // on a reported feed, outside any turn, through the owner connection.
+    await withRealDb(async (sql, hers) => {
+      await expect(withUser(sql, hers, (tx) => tx`select 1 from course.conversions limit 1`))
+        .rejects.toThrow(/permission denied/i)
+    })
+  })
+
   it('lets the worker read source facts, which belong to nobody', async () => {
     // The one table that IS granted and carries no policy, and the reason is the
     // table's own: it carries no user column, so there is no traveller in it to

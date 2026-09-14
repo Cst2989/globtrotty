@@ -1,50 +1,111 @@
 import { randomUUID } from 'node:crypto'
-import { describeDb, withTestDb } from './helpers/db.js'
+import {
+  conversionsFor, normalizeTrackingRef, recordConversion, UnattributableConversionError,
+} from '../src/repo/conversions.js'
+import { recordLinkClicks } from '../src/repo/linkClicks.js'
+import { bookingUrl } from '../src/cashier.js'
+import { money } from '../src/money.js'
+import { describeDb, withRealDb } from './helpers/db.js'
 
-const USER = randomUUID()
+const REF = randomUUID()
 
-describeDb('which proposals became bookings, at lesson-6-6', () => {
-  it('has no table to ask', async () => {
-    await withTestDb(async (sql) => {
-      const tables = await sql<{ table_name: string }[]>`
-        select table_name from information_schema.tables where table_schema = 'course'`
-      // P4 rests the whole loop on bookings.proposal_id. There is no bookings
-      // table on this branch and there never will be: this product hands off,
-      // so the row that says a trip happened is written by somebody else and
-      // reported back to us. The only join key we own is the sub-id the cashier
-      // minted before it built the URL, and the table it lands on does not exist.
-      expect(tables.map((t) => t.table_name)).not.toContain('bookings')
-      expect(tables.map((t) => t.table_name)).not.toContain('conversions')
+/** One accepted proposal with one emitted link, which is the state a conversion arrives into. */
+async function emittedLink(
+  sql: Parameters<typeof recordLinkClicks>[0], userId: string,
+): Promise<{ conversationId: string; proposalId: string }> {
+  const [conversation] = await sql<{ id: string }[]>`
+    insert into course.conversations (user_id) values (${userId}) returning id`
+  const [proposal] = await sql<{ id: string }[]>`
+    insert into course.proposals (conversation_id, user_id, refs, requirements_snapshot)
+    values (${conversation!.id}, ${userId},
+            ${sql.json([{ sourceId: 'mock-hotel-1', quantity: 1, slot: 'stay' }] as never)},
+            ${sql.json({} as never)})
+    returning id`
+  await recordLinkClicks(sql, {
+    proposalId: proposal!.id, turnId: null, userId, verified: true, quotedAt: new Date(),
+    links: [{
+      id: REF, sourceId: 'mock-hotel-1', supplier: 'mock', trackingRef: REF,
+      url: bookingUrl('mock', 'mock-hotel-1', REF), quoted: money(120_000n, 'EUR'),
+    }],
+  })
+  return { conversationId: conversation!.id, proposalId: proposal!.id }
+}
+
+describe('a ref a network mangled', () => {
+  it('survives a lowercasing and a trim', () => {
+    expect(normalizeTrackingRef(`  ${REF.toUpperCase()}  `)).toBe(REF)
+  })
+
+  it('does not survive a truncation, and is not resolved by prefix', () => {
+    expect(normalizeTrackingRef(REF.slice(0, 30))).toBeNull()
+  })
+})
+
+describeDb('a conversion reported against a link we emitted', () => {
+  it('is refused when the ref was truncated, before any query runs', async () => {
+    await withRealDb(async (sql, userId) => {
+      await emittedLink(sql, userId)
+      await expect(recordConversion(sql, {
+        trackingRef: REF.slice(0, 30), supplier: 'mock', bookedAt: new Date(),
+        amountMinor: 118_000n, currency: 'EUR', commissionMinor: 8_260n, reportedAt: new Date(),
+      })).rejects.toThrow(UnattributableConversionError)
     })
   })
 
-  it('has one column that measures a click, and nothing writes it', async () => {
-    await withTestDb(async (sql) => {
-      const columns = await sql<{ column_name: string }[]>`
-        select column_name from information_schema.columns
-         where table_schema = 'course' and table_name = 'link_clicks'`
-      // The column is here, from 0013, and it is the tempting one.
-      expect(columns.map((c) => c.column_name)).toContain('clicked_at')
-      const clicked = await sql<{ n: number }[]>`
-        select count(*)::int as n from course.link_clicks where clicked_at is not null`
-      // And it is empty, in every environment, because no code path anywhere
-      // sets it. Step 4 pins that as a grep rather than as a count.
-      expect(clicked[0]!.n).toBe(0)
+  it('is refused when no link carries the ref, and says which fault it was', async () => {
+    await withRealDb(async (sql) => {
+      await expect(recordConversion(sql, {
+        trackingRef: randomUUID(), supplier: 'mock', bookedAt: new Date(),
+        amountMinor: 118_000n, currency: 'EUR', commissionMinor: 8_260n, reportedAt: new Date(),
+      })).rejects.toThrow(/no link we emitted carries that ref/)
     })
   })
 
-  it('would report a link nobody booked as a success, if we built the rate', async () => {
-    // The rate a link-out product reaches for first, written out in full so the
-    // lesson can refuse a real thing rather than a described one.
-    const clickThroughRate = (emitted: number, clicked: number): string =>
-      `${clicked}/${emitted}`
-    // Three links went out for her Portugal trip. She opened two and booked
-    // none, because the hotel wanted a fourteen night minimum she found on the
-    // supplier's page. This rate calls that a 67% success.
-    expect(clickThroughRate(3, 2)).toBe('2/3')
-    // P4 says it plainly: a link-out product that treats click-through as its
-    // success signal is measuring the attractiveness of a link, not the quality
-    // of a trip. The number is real, it is cheap, and it answers the wrong
-    // question, which is the most expensive kind of number to put on a card.
+  it('is refused when the reported supplier is not the one we sent her to', async () => {
+    await withRealDb(async (sql, userId) => {
+      await emittedLink(sql, userId)
+      await expect(recordConversion(sql, {
+        trackingRef: REF, supplier: 'kiwi', bookedAt: new Date(),
+        amountMinor: 118_000n, currency: 'EUR', commissionMinor: 8_260n, reportedAt: new Date(),
+      })).rejects.toThrow(/we sent her to mock and the report names kiwi/)
+    })
+  })
+
+  it('joins, and takes both ids off the click rather than off the feed', async () => {
+    await withRealDb(async (sql, userId) => {
+      const { conversationId, proposalId } = await emittedLink(sql, userId)
+      await recordConversion(sql, {
+        trackingRef: REF.toUpperCase(), supplier: 'mock', bookedAt: new Date('2026-09-20T00:00:00Z'),
+        amountMinor: 118_000n, currency: 'EUR', commissionMinor: 8_260n,
+        reportedAt: new Date('2026-11-02T00:00:00Z'),
+      })
+      const [row] = await conversionsFor(sql, { userId })
+      expect(row!.conversationId).toBe(conversationId)
+      expect(row!.proposalId).toBe(proposalId)
+      // The number we told her, beside the number the network reported. She was
+      // quoted 1,200.00 EUR and booked at 1,180.00, which is a real gap this
+      // table can now see and nothing on this branch could see before it.
+      expect(row!.quoted).toEqual(money(120_000n, 'EUR'))
+      expect(row!.amount).toEqual(money(118_000n, 'EUR'))
+      expect(row!.commission).toEqual(money(8_260n, 'EUR'))
+    })
+  })
+
+  it('is reported twice by a network and stored once', async () => {
+    await withRealDb(async (sql, userId) => {
+      await emittedLink(sql, userId)
+      const reported = {
+        trackingRef: REF, supplier: 'mock', bookedAt: new Date('2026-09-20T00:00:00Z'),
+        amountMinor: 118_000n, currency: 'EUR', commissionMinor: 8_260n, reportedAt: new Date(),
+      }
+      await recordConversion(sql, reported)
+      // A duplicate report is common and is not a second booking. The unique
+      // constraint on tracking_ref is what makes the second write impossible
+      // rather than idempotent, so every rate derived from this table has a
+      // denominator of trips and not of emails.
+      await expect(recordConversion(sql, reported)).rejects.toThrow()
+      const rows = await conversionsFor(sql, { userId })
+      expect(rows).toHaveLength(1)
+    })
   })
 })
