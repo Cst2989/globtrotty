@@ -43,7 +43,7 @@ describeDb('proposals repo', () => {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, round: 0,
         items: s.outcome.items, total: s.outcome.total, notebook: emptyNotebook(),
         gateOutcome: 'approved', reviewRounds: 1, reviewIssues: [],
-        promptVersion: 'driver@2', modelConfigId: 'x', parentProposalId: null,
+        promptVersion: 'driver@3', modelConfigId: 'x', parentProposalId: null,
       })
       const row = await loadProposal(sql, s.conversationId, id)
       expect(row).not.toBeNull()
@@ -67,7 +67,7 @@ describeDb('proposals repo', () => {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, round: 0,
         items: s.outcome.items, total: s.outcome.total, notebook: emptyNotebook(),
         gateOutcome: 'approved', reviewRounds: 1, reviewIssues: [],
-        promptVersion: 'driver@2', modelConfigId: 'x', parentProposalId: null,
+        promptVersion: 'driver@3', modelConfigId: 'x', parentProposalId: null,
       })
       const [r1] = await sql`select proposal_id from gate_results where turn_id = ${s.turnId} and round = 1`
       expect(r1!.proposal_id).toBeNull()
@@ -84,7 +84,7 @@ describeDb('proposals repo', () => {
         conversationId: a.conversationId, userId: a.userId, turnId: a.turnId, round: 0,
         items: a.outcome.items, total: a.outcome.total, notebook: emptyNotebook(),
         gateOutcome: 'approved', reviewRounds: 1, reviewIssues: [],
-        promptVersion: 'driver@2', modelConfigId: 'x', parentProposalId: null,
+        promptVersion: 'driver@3', modelConfigId: 'x', parentProposalId: null,
       })
       expect(await loadProposal(sql, b.conversationId, id)).toBeNull()
     })
@@ -97,7 +97,7 @@ describeDb('proposals repo', () => {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, round: 0,
         items: s.outcome.items, total: s.outcome.total, notebook: emptyNotebook(),
         gateOutcome: 'approved', reviewRounds: 1, reviewIssues: [],
-        promptVersion: 'driver@2', modelConfigId: 'x', parentProposalId: null,
+        promptVersion: 'driver@3', modelConfigId: 'x', parentProposalId: null,
       })
       await expect(decideProposal(sql, { proposalId: id, conversationId: '00000000-0000-4000-8000-000000000000', decision: 'accept' }))
         .rejects.toThrow(/not found/i)
@@ -135,7 +135,7 @@ describeDb('proposals repo', () => {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, round: 0,
         items: s.outcome.items, total: s.outcome.total, notebook,
         gateOutcome: 'approved', reviewRounds: 1, reviewIssues: [],
-        promptVersion: 'driver@2', modelConfigId: 'x', parentProposalId: null,
+        promptVersion: 'driver@3', modelConfigId: 'x', parentProposalId: null,
       })
       const [row] = await sql`select requirements_snapshot from proposals where id = ${id}`
       const snapshot = row!.requirements_snapshot as { budget: { value: { minor: string; currency: string } } }
