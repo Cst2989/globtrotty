@@ -125,6 +125,7 @@ import { runCase } from '../src/evals/runner.js'
 import { renderScorecard, scorecardOf, withRows, type ScorecardRow } from '../src/evals/scorecard.js'
 import { conversionByPromptVersion } from '../src/loop/calibration.js'
 import { RELEASE } from '../src/loop/release.js'
+import { fineTuneCorpus, renderSeatReport, seatReport, type SeatRow } from '../src/loop/seats.js'
 import { GOLDEN_UNCHANGED_FLOOR, survivalScores } from '../src/loop/similarity.js'
 import { decidedProposals } from '../src/repo/proposals.js'
 import { readTurnLabels } from '../src/repo/turnLabels.js'
@@ -309,9 +310,16 @@ async function main(): Promise<void> {
         else survival.tally.failed += 1
       }
     }
+    // Bound to a name and read twice: once into the card above, once into the
+    // seat report's closing section below. `gateMetrics` reads
+    // `course.gate_results` and is the one reader of that table this branch
+    // has (lesson 6.2); a second call here for the seat report would be the
+    // duplicate-reader defect lesson 7.1 pinned as a grep, in the lesson that
+    // closes the course.
+    const gateResultRows = gateRows(await gateMetrics(sql, { userId: evalUsers }))
     const card = withRows(
       scorecardOf(graded, cases.length * RUNS),
-      [...gateRows(await gateMetrics(sql, { userId: evalUsers })), survival, ...passAtKRows(k)],
+      [...gateResultRows, survival, ...passAtKRows(k)],
     )
     console.log(renderScorecard(card))
     for (const flaky of k.filter((r) => r.flaky)) {
@@ -422,6 +430,36 @@ async function main(): Promise<void> {
       }
     }
     console.log(`  release arm          ${RELEASE.rolloutPercent}% candidate, rollback is a commit`)
+    // SPEC section 1, forty-six lessons later. Every model call this run made,
+    // by seat, with what it cost, beside the gates' own verdicts on the work
+    // those calls produced. This is what "we hired seven architectures,
+    // measured them, and fired three" needs in order to be a decision rather
+    // than a story.
+    //
+    // Scoped to this run's own user ids, like the gate rows are, so the report
+    // is about the three conversations that just ran and not about every row
+    // in the database. `seatReport` READS `cost_micros` and sums it; it is a
+    // fifth reader beside `turnSpendMicros`, never a fifth writer, and `usd()`
+    // is the one place this run formats money, so the ceiling, the money type
+    // and the formatter each stay singular.
+    const seats: SeatRow[] = []
+    for (const userId of evalUsers) seats.push(...await seatReport(sql, { userId }))
+    const merged = [...seats.reduce((acc, row) => {
+      const found = acc.get(row.seat)
+      acc.set(row.seat, found
+        ? { ...found, calls: found.calls + row.calls, turns: found.turns + row.turns,
+            conversations: found.conversations + row.conversations,
+            costMicros: found.costMicros + row.costMicros }
+        : row)
+      return acc
+    }, new Map<string, SeatRow>()).values()].sort((a, b) => Number(b.costMicros - a.costMicros))
+    console.log('')
+    console.log(renderSeatReport(merged, gateResultRows))
+    console.log('')
+    const corpus = await fineTuneCorpus(sql)
+    console.log(`  fine-tune corpus     ${corpus.labelled} labelled routing decisions, `
+      + `${corpus.corrected} corrected, and we need ${corpus.minimum}`)
+    console.log(`  decision             ${corpus.enough ? 'reconsider' : 'do not fine-tune'}`)
     await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })

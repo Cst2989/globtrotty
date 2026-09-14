@@ -656,11 +656,13 @@ has to be visible to the sweeper while it runs, and whose `course.link_clicks`
 rows have to be committed before the model is handed the URLs built from them,
 so a turn wrapped in one transaction would break the crash recovery this whole
 branch is built on. Putting the rest of a turn's own rows under the role means
-giving the harness a unit of work smaller than a turn. Owner: module 6, together
-with the two tables the runner chain writes that have no policy at all, where a
-forgotten `and user_id =` inside `ledgerRunner` or the gate pipeline is still a
-forgotten clause; both are keyed on a turn id the worker already proved it owns,
-which bounds it.
+giving the harness a unit of work smaller than a turn. Owner: a person, extending
+the role to the two tables the runner chain writes that have no policy at all,
+where a forgotten `and user_id =` inside `ledgerRunner` or the gate pipeline is
+still a forgotten clause; both are keyed on a turn id the worker already proved
+it owns, which bounds it. Module 7 built no harness work: it read tables this
+role already covers and wrote none of its own under `course_worker`, so it had
+no occasion to touch this.
 
 `course.daily_usage` and `course.model_calls` carry no policy on purpose, and
 that is the important half: the global daily ceiling sums `cost_micros` across
@@ -689,8 +691,11 @@ nothing. `runScouts` calls `pgSink` with no capture fields, so a scout row's
 `capture_policy`, `system_prompt`, `user_prompt` and `response` are null rather
 than truncated, and the three model calls a fan-out makes are the highest-volume
 calls on the branch with the least recorded about them. The rule is written and
-tested and waiting for a caller. Owner: module 6, whose evals are the first
-reader with a reason to want a scout's prompt back.
+tested and waiting for a caller. Owner: a person, wiring `runScouts`' calls
+through `pgSink`'s capture fields the day something needs a scout's prompt
+back. Module 7's evals read `course.model_calls.response` on the driver seat
+(`loadTrace`, src/evals/trajectory.ts) and never on `scout`, so they are not
+that reader either, and the gap is exactly as it was.
 
 The monitor alarms into a log, because this repository has nowhere to page. It
 runs after the turn is closed, it can fail no turn, and its own model call is not
@@ -703,10 +708,12 @@ anywhere, which is the exact condition `src/repo/spend.ts` calls worse than a
 row that might be refused a moment later. What it can see is bounded by what it
 reads, which is `course.agent_events` and `course.model_calls`: the shape of a
 turn that finished, and not a turn that was killed, and not money that `reserve`
-debited and no `reconcile` gave back. Owner of all four: module 6, where a
-`seat: 'monitor'` observability row through `pgSink` would make the spend
-countable without putting it on her ceilings, and where changing what
-`turnSpendMicros` returns belongs beside the evals that read it.
+debited and no `reconcile` gave back. Owner of all four: a person, giving
+`src/monitor.ts` a `seat: 'monitor'` observability row through `pgSink` so the
+spend is countable without landing on her ceilings, and changing what
+`turnSpendMicros` returns beside whatever eventually reads it. `SEATS.monitor`
+already exists (src/seats.ts) for exactly this row; module 7 calls no model at
+all, so it had no call of its own that could have exercised this write.
 
 What is owed, and where it lives. The browser's half of SPEC section 10 is not
 here, because there is no browser, and `public/index.html` is still a
