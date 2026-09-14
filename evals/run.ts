@@ -131,14 +131,22 @@ async function main(): Promise<void> {
           { sql, client, limits: DEFAULT_LIMITS, simUser: makeSimulatedUser },
           kase,
         )
+        // The id FIRST, and `done()` after it. A drifted fixture is exactly the
+        // case a developer runs over and over, so it is the worst one to leak
+        // rows on, and `done()` below is a throw: anything after it is skipped,
+        // `deleteRunRows` never learns this id, and every conversation, turn,
+        // message, tool result, proposal, gate result and model call this case
+        // committed stays behind on every attempt.
+        evalUsers.push(result.userId)
         // The other half of a replay. `done()` is what reports "N recorded calls
         // were never used", which is how a fixture that has drifted out of step
         // with the code announces itself, and the command this lesson tells a
         // reader to run has to be the one that hears it. It throws into the same
         // catch, so a drifted fixture is a case that did not complete rather
-        // than a card printed over a recording nobody finished.
+        // than a card printed over a recording nobody finished. The case is left
+        // out of `graded` by that throw and stays in `casesExpected`, which is
+        // the denominator doing its job.
         client.done()
-        evalUsers.push(result.userId)
         graded.push({ caseId: result.caseId, grades: result.grades })
       } catch (err) {
         // Counted in casesExpected and not in casesGraded, and named on the way

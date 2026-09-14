@@ -932,7 +932,9 @@ outside `test/eval-replay.test.ts` calls `replayGates`, because the runner
 grades two mock worlds rather than driving a conversation, and a world that
 never proposed anything has no proposal to replay. Lesson 6.3 drives the
 conversation that reaches one, and until then the two checks print not evaluated
-with the reason. The runner exits 1 when a check is false and 0 when the only
+with the reason. It closes `within_budget` and not `inside_her_window`, for a
+reason that belongs to the notebook rather than to the replay, and the lesson 6.3
+entry below says which. The runner exits 1 when a check is false and 0 when the only
 unfinished business is a null, so the proof command can go red on a real verdict
 without the unbuilt checks reddening it every time somebody runs it.
 
@@ -954,6 +956,18 @@ searches. The red rows are the eval working rather than thresholds set too
 tight, and closing them is a change to the desk prompt and to what the tool
 result says back, which is a lesson of its own. Owner: module 6, once the judge
 in 6.6 can say whether a shorter path answered her as well.
+
+Open at lesson 6.3, and carried over from 6.2: `inside_her_window` is a verdict
+on no case at all. The card reads `0/0 (n/a, 3 not evaluated)`, and the reason on
+each row is the dates gate's own: `travelWindowFrom`
+(src/gates/notebookConstraints.ts) resolves a window only from a bare month name,
+every persona says "September 2026" or "October 2026", and the desk records the
+month in her words, so the gate reaches no verdict and the graded check follows
+it honestly rather than inventing one. `within_budget` IS closed at this tag, at
+2/2 over the two cases that proposed. Owner: lesson 6.4, which takes `today` and
+the case's dates. Making her say "October" would close it and would also change
+what the dates gate decides on two cases that currently propose, which is why it
+is not a one-word fix.
 
 A local Postgres is worth setting up before you run these. `test/eval-run.test.ts`
 drives three whole conversations one database round trip at a time, and against a

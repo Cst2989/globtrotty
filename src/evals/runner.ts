@@ -88,8 +88,16 @@ async function callsOf(sql: postgres.Sql, turnIds: string[]): Promise<TraceCall[
 }
 
 
-/** Whether she has refused the same thing twice. */
-function saidNoTwice(refused: readonly string[]): boolean {
+/**
+ * Whether she has refused the same thing twice.
+ *
+ * Exported for `test/sim-user.test.ts`, which is where the rule and the array it
+ * reads are pinned together. It decides when a conversation ends, and the length
+ * of the recording `no-for-1500-03` replays is a function of it, so an untested
+ * one-line predicate is a one-line predicate that silently changes what a fixture
+ * has to contain.
+ */
+export function saidNoTwice(refused: readonly string[]): boolean {
   return new Set(refused).size < refused.length
 }
 
@@ -121,8 +129,11 @@ export async function runCase(deps: CaseDeps, kase: GoldenCase): Promise<CaseRes
     // desk has asked her to shorten a 28-night stay, been told no, asked her to
     // raise her budget, been told no, and asked her to shorten it again. Nothing
     // in the seven further turns it would otherwise run is new, and lesson 6.4
-    // is about what those turns cost. A persona with no `refuses` can never
-    // reach it, so the two cases that converge are unaffected.
+    // is about what those turns cost. The two cases that converge are unaffected
+    // because no desk message in either recording matched a cue, and NOT because
+    // they have nothing to refuse: one of them refuses car hire and travel
+    // insurance and the other refuses flights. A desk that reworded one question
+    // could put either of them under this rule tomorrow.
     if (saidNoTwice(her.refused)) break
   }
 

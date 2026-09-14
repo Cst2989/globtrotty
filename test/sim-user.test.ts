@@ -1,4 +1,5 @@
 import { loadGoldenCases } from '../src/evals/cases.js'
+import { saidNoTwice } from '../src/evals/runner.js'
 import { makeSimulatedUser } from '../src/evals/sim-user.js'
 
 const portugal = loadGoldenCases().find((c) => c.id === 'portugal-toddler-01')!
@@ -74,5 +75,38 @@ describe('the scripted traveller', () => {
     await user.reply('How long?')
     await user.reply('From where?')
     expect(user.turns).toBe(2)
+  })
+
+  it('records what she refused, in order, and nothing she merely answered', async () => {
+    // `runCase` ends a case on this array (`saidNoTwice`, src/evals/runner.ts),
+    // so what it holds decides how long a conversation runs and how long the
+    // recording that replays it has to be.
+    const user = makeSimulatedUser(algarve.persona)
+    await user.reply('How many nights are you staying?')
+    expect(user.refused).toEqual([])
+    await user.reply('Would you consider a shorter stay?')
+    await user.reply('Could you stretch your budget?')
+    await user.reply('And a shorter trip?')
+    expect(user.refused).toEqual(['a shorter trip', 'a higher budget', 'a shorter trip'])
+  })
+})
+
+describe('the rule that ends a case going in circles', () => {
+  it('is false until she refuses the same thing a second time', () => {
+    // Once is a desk checking a constraint it may have misread. Twice is a desk
+    // that has been told and is negotiating anyway, and nothing after it is new.
+    expect(saidNoTwice([])).toBe(false)
+    expect(saidNoTwice(['a higher budget'])).toBe(false)
+    expect(saidNoTwice(['a higher budget', 'a shorter trip'])).toBe(false)
+    expect(saidNoTwice(['a higher budget', 'a shorter trip', 'a higher budget'])).toBe(true)
+  })
+
+  it('cannot be tripped by a traveller who never refuses anything', () => {
+    // The empty array is the LIVE traveller's `refused` for ever (SimUser), and
+    // it is every scripted traveller's until a cue matches, so the rule has to
+    // be inert on it rather than merely happen to be.
+    expect(saidNoTwice([])).toBe(false)
+    const answered = ['a higher budget', 'a shorter trip', 'a different month']
+    expect(saidNoTwice(answered)).toBe(false)
   })
 })
