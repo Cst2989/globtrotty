@@ -47,20 +47,6 @@ export function redactCurrency(delta: string): string {
 }
 
 /**
- * A digit run with a currency marker adjacent to it, in the four arrangements
- * that occur: symbol first, symbol last, code or word first, code or word last.
- *
- * The MARKER is what makes it a price, and that is the whole of the design. A
- * pattern over bare digits would eat "2026", "TP1234" and "07:45", and a
- * redactor that ate the departure date is one somebody turns off, which leaves
- * the amounts in too.
- *
- * The number is `\d[\d.,]*` rather than a strict decimal, so "1,742", "412.00"
- * and the continental "412,50" all match, and a trailing comma or full stop
- * swallowed from ordinary prose costs nothing because it is only swallowed when
- * a currency marker follows it.
- */
-/**
  * Every marker this repository treats as money, and the ISO code each one means.
  *
  * ONE list, exported, because there were nearly two. Lesson 6.5's amount scanner
@@ -104,6 +90,25 @@ export const CURRENCY_WORD = `(?:${MARKERS
 /** A digit run that may carry thousands separators and a decimal mark. */
 export const CURRENCY_AMOUNT = '\\d[\\d.,]*'
 
+/**
+ * A digit run with a currency marker adjacent to it, in the four arrangements
+ * that occur: symbol first, symbol last, code or word first, code or word last.
+ *
+ * The MARKER is what makes it a price, and that is the whole of the design. A
+ * pattern over bare digits would eat "2026", "TP1234" and "07:45", and a
+ * redactor that ate the departure date is one somebody turns off, which leaves
+ * the amounts in too.
+ *
+ * The number is `\d[\d.,]*` rather than a strict decimal, so "1,742", "412.00"
+ * and the continental "412,50" all match, and a trailing comma or full stop
+ * swallowed from ordinary prose costs nothing because it is only swallowed when
+ * a currency marker follows it.
+ *
+ * `src/evals/trajectory.ts` composes the same four arrangements out of the same
+ * three fragments, with the marker CAPTURED rather than only matched, because a
+ * reader that keeps the marker can compare an amount against a corpus priced in
+ * a currency. These four throw the marker away, which is all a redactor needs.
+ */
 const AMOUNT = CURRENCY_AMOUNT
 const CURRENCY_PATTERNS: RegExp[] = [
   new RegExp(`${CURRENCY_SYMBOL}\\s?${AMOUNT}`, 'gi'),

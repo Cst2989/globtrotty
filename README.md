@@ -1065,7 +1065,13 @@ The class is larger than the regex. "I compared three neighbourhoods for you" is
 the same fault about a different subject, and a pattern per claim does not
 scale. The regex also reads only the first person and only the active voice, so
 "the entry rules were checked" and "the agency confirmed your visa" both pass
-unread.
+unread. And it looks for the subject within forty characters of the verb, so a
+claim that arrives late in a long sentence is missed too: "I checked the
+weather, the flights, the hotels and the entry rules for you" is a claim about
+entry rules that this check is quiet on. Widening that window does not come
+free, because the same window is what stops a first-person sentence that merely
+mentions a passport from flagging, and "I checked the hotel availability and
+your passport is not needed" already flags at the current setting.
 
 The regex was also wider than the class, which is the half a review caught. It
 required a claim verb and a subject somewhere in one sentence, in either order,

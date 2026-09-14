@@ -341,12 +341,16 @@ export function questionsBeforeGuesses(trace: Trace): boolean {
  * reads the prose, offline, where a false alarm costs a scorecard row rather
  * than a turn.
  *
- * ## What the pattern requires, and what it used to flag
+ * ## What the pattern requires, and what it reaches
  *
- * Three things in order: the agency naming ITSELF as the one who did the work,
- * a completed claim verb, and the subject within the same sentence. The first
- * version required only a verb and a subject somewhere in the same sentence in
- * either order, and it fired on four sentences that claim nothing:
+ * Three things, in this order: the agency naming ITSELF as the one who did the
+ * work, a completed claim verb, and the subject within FORTY characters after
+ * that verb. The separator is `[^.!?]{0,40}?`, so it stops at a sentence
+ * boundary as well, but forty characters is the binding limit and the full stop
+ * is rarely the thing that ends the search.
+ *
+ * The first version required only a verb and a subject somewhere in one
+ * sentence, in either order, and it fired on four sentences that claim nothing:
  *
  * - "Check the baggage rules and bring your passport" (an instruction to her)
  * - "You asked me to check whether your passport is still valid" (a request
@@ -357,15 +361,26 @@ export function questionsBeforeGuesses(trace: Trace): boolean {
  *
  * A check that flags all four is a check somebody turns off, which is the bar
  * test/trajectory.test.ts already states, and turning it off costs the one
- * fault a reply cannot betray. `(?:i|we)` plus a past-tense verb excludes the
- * imperative and the request, and requiring the verb to PRECEDE the subject
- * excludes a sentence that merely mentions a passport after an unrelated
- * "check". The negation is excluded by the same clause: "I have not checked"
- * does not match "I have checked" or "I checked", because nothing may sit
- * between the pronoun and the verb.
+ * fault a reply cannot betray. What excludes all four is `(?:i|we)` plus the
+ * completed tense, and nothing else: the instruction and the two requests have
+ * no first-person claimant at all, and "I have not checked" fails because
+ * nothing may sit between the pronoun and the verb.
  *
- * What it still cannot do is read a claim in the third person or in the
- * passive, and README.md owns both error directions rather than only this one.
+ * The ordering and the window are NOT what save those four, and being exact
+ * about that matters, because the window cuts in both directions and neither
+ * cut is visible from the regex:
+ *
+ * - A real claim whose subject lands past forty characters is MISSED. "I
+ *   checked the weather, the flights, the hotels and the entry rules for you"
+ *   is a claim about entry rules and this pattern is quiet on it.
+ * - A first-person sentence that merely MENTIONS the subject inside the window
+ *   still fires. "I checked the hotel availability and your passport is not
+ *   needed" claims no passport check and this pattern flags it.
+ *
+ * Widening the window trades the second fault up and the first down, and no
+ * setting of it has neither. What the pattern cannot do at any setting is read
+ * a claim in the third person or in the passive. README.md lists all of these
+ * together rather than only the direction in which the class is larger.
  */
 export const ENTRY_CLAIM =
   /\b(?:i|we)(?:'ve|\s+have)?\s+(?:checked|confirmed|verified|looked\s+up)\b[^.!?]{0,40}?\b(?:visa|entry\s+(?:rules|requirements)|passport)\b/i

@@ -433,15 +433,26 @@ async function failTurnUnlessLinkEmitted(
   // exits of `loop` inherit it from here. Last, because the label counts the
   // reply and whichever branch above is what wrote it.
   //
-  // `emitted && !closed` is the one case that writes nothing, and it is a fence
-  // rather than a failure. `completeIfLinkEmitted` never throws: a `completeTurn`
-  // refused because another worker now owns this turn is caught, logged, and
-  // reported as `{ emitted: true, closed: false }`, so without this guard a
-  // superseded worker would carry on and insert the label row for a turn it lost.
-  // The winner would then lose `turn_labels_pkey` and log
-  // "turn labels not written", which is a sentence `evals/run.ts` reads as a turn
-  // missing from `turns labelled` when the row is in fact there. The loser writing
-  // nothing keeps that log line meaning exactly one thing.
+  // `emitted && !closed` is the one case that writes nothing, and it covers
+  // EVERY close that did not land rather than a fence alone.
+  // `completeIfLinkEmitted` never throws, and its try wraps `handOffMessage` and
+  // `sanitizeOutbound` as well as the close itself, so whatever any of the three
+  // raises is caught, logged, and reported as `{ emitted: true, closed: false }`.
+  //
+  // A fence is one of those causes and the one this guard was written for: a
+  // `completeTurn` refused because another worker now owns the turn arrives
+  // here, and without the guard the loser would insert the label row for a turn
+  // it lost, the winner would then lose `turn_labels_pkey`, and the winner's log
+  // would read "turn labels not written" for a row that exists, which is a
+  // sentence `evals/run.ts` reads as a turn missing from `turns labelled`.
+  //
+  // The other causes are not fences, and what they cost is worth naming rather
+  // than leaving inside the word "fence". A `handOffMessage` that cannot total
+  // two currencies is this worker's own failure on a turn it still owns, and
+  // skipping is still right, because counters over an ending nobody finished
+  // would be a label row for a turn with no settled shape. But nothing logs the
+  // skip. That turn joins the permanently unlabelled gap README.md owns under
+  // lesson 6.5, without even the "turn labels not written" line to find it by.
   if (emitted && !closed) return
   await labelTurn(deps.sql, {
     turnId: claim.turnId, conversationId: claim.conversationId, userId: claim.userId,
