@@ -361,7 +361,7 @@ third is a decision a person makes with a count in front of them.
 test/cadence.test.ts fails if any named command stops existing, which is the
 difference between a cadence and a paragraph about cadence.
 
-**We hired eight seats, measured them, and the report is the last thing this
+**We hired seven seats, measured them, and the report is the last thing this
 branch prints.** `npm run evals` ends on cost and calls per seat with a per-turn
 figure, beside the gates' own verdicts. SPEC asked for that query on its first
 page. It took forty-six lessons to be able to run it honestly, and most of that
