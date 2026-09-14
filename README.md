@@ -1284,6 +1284,19 @@ RECORDED_WORLD_SEED residual with it. Until then the edit is shipped and
 unmeasured, which is stated here rather than implied by a green card. Owner: a
 person with a key.
 
+Open at lesson 7.5: the release canary has never split real traffic, and cannot
+on this branch. `assignVariant` is proven at both boundaries and proven stable
+under a resume, `loadDesk` serves two distinguishable prompt versions, and
+`conversionByPromptVersion` joins the arms to bookings. What is missing is
+traffic and bookings: RELEASE.rolloutPercent ships at 0, the eval suite runs
+three conversations, and course.conversions has no production writer. Judging a
+prompt edit by conversion needs enough conversations that a difference in
+conversion is larger than the noise in it, which is hundreds of conversations
+per arm and not three, and it needs an affiliate feed to report the bookings.
+The honest state is therefore: the machine is built, tested and wired into the
+one path that has a conversation id, and it has produced no measurement. Owner:
+a person, with traffic and an affiliate account.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.
