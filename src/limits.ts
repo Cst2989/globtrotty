@@ -23,3 +23,55 @@ export const DEFAULT_LIMITS: Limits = {
   maxSteps: 12,                            // lesson 1.5's first guess, kept until a measurement replaces it
   maxSupplierCallsPerTurn: 6,              // two searches for flights, two for stays, two corrections
 }
+
+/**
+ * The ceilings an eval run works under, which are not the ceilings production
+ * works under.
+ *
+ * P3's nightly suite is twenty cases run three times, sixty conversations in
+ * one night, and this branch carries three of those cases so far
+ * (evals/golden-trips.json). Under DEFAULT_LIMITS those sixty conversations
+ * would share one user's $15 day, the suite would stop somewhere in the middle
+ * and stop somewhere else the next night, and a pass^k number computed over
+ * whichever cases ran before the cap is a number nobody can read.
+ *
+ * Each eval conversation runs under its own randomUUID() user id
+ * (src/evals/runner.ts), so the per-user daily ceiling below bounds ONE run of
+ * one case rather than the night. That is a deliberate difference from main's
+ * plan 3c, which mints one fixed OPS_USER_ID so its drift monitor spends the
+ * whole night against a single reserved ops bucket. Minting a fresh id per run
+ * costs the course exactly that bound and buys what an eval needs more: no
+ * case can exhaust another's budget, and the gate rows on the card are that
+ * case's own. The global ceiling is then the only real bound on a night, which
+ * is the intent here rather than an oversight about the mechanism the product
+ * uses.
+ *
+ * globalCeilingMicros is DELIBERATELY UNCHANGED. It is cross-user and per UTC
+ * day, so raising it for the evals would raise it for her: the one ceiling that
+ * stops this system spending unbounded money in a day would have been loosened
+ * by a test suite. It still bounds the whole night, and a suite that trips it
+ * has found a real fact about what it costs to run.
+ *
+ * The conversation ceiling is tighter than production's rather than looser,
+ * because an eval case that spends more than a real conversation is an eval
+ * case that has stopped resembling the thing it measures. It is not as tight as
+ * it can be made: the longest case on this branch, `no-for-1500-03`, spends
+ * about $1.57 across its ninety-six model calls, and a ceiling of $2 stopped it
+ * two model calls short of the end of its own recording, which is a suite
+ * measuring its budget rather than its agency. Half of production's leaves room
+ * for a case that runs half again as long and still refuses one that has
+ * doubled.
+ *
+ * There is no fifth writer of the ledger here and no second definition of any
+ * number. An eval conversation reserves and reconciles through `reserve` and
+ * `reconcile` (src/repo/reservation.ts) like every other conversation, and this
+ * object changes what those functions compare against rather than who moves the
+ * money.
+ */
+export const EVAL_LIMITS: Limits = {
+  conversationCeilingMicros: 4_000_000n,   // $4, half of production's, per eval conversation
+  dailyCeilingMicros: 4_000_000n,          // $4, and each eval run has its own user id, so this is per run
+  globalCeilingMicros: DEFAULT_LIMITS.globalCeilingMicros,  // unchanged, and cross-user on purpose
+  maxSteps: DEFAULT_LIMITS.maxSteps,
+  maxSupplierCallsPerTurn: DEFAULT_LIMITS.maxSupplierCallsPerTurn,
+}

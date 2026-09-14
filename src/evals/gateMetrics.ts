@@ -25,9 +25,17 @@ export type GateMetric = {
  * is the question migration 0012's own header says the table was created for,
  * and until this lesson nothing asked it.
  *
- * Scoped to one user id, because an eval run mints its own and a global count
- * would sum the reader's own trips, the demo script's rows and every eval run
- * since the database was created into one meaningless number.
+ * Scoped to the user ids it is given, because an eval run mints its own and a
+ * global count would sum the reader's own trips, the demo script's rows and
+ * every eval run since the database was created into one meaningless number.
+ *
+ * One id or several, and several is the normal case from lesson 6.4. A run is
+ * one conversation per case per repetition and `runCase` mints a fresh user id
+ * for each of them (src/evals/runner.ts), so "how often did the budget gate
+ * fail on this run" is one number over every id the run used. Summing the
+ * per-id answers afterwards would have given the same number and would have
+ * given it by hand, one addition per gate name, in a caller that has to
+ * remember that a gate name it cannot place must survive the addition.
  *
  * ## Which rows count, and why the replays do not
  *
@@ -61,12 +69,12 @@ export type GateMetric = {
  * this file cannot place and somebody should look.
  */
 export async function gateMetrics(
-  sql: postgres.Sql, args: { userId: string },
+  sql: postgres.Sql, args: { userId: string | string[] },
 ): Promise<GateMetric[]> {
   const rows = await sql<{ gate: string; passed: boolean | null; n: number }[]>`
     select gate, passed, count(*)::int as n
       from course.gate_results
-     where user_id = ${args.userId}
+     where user_id = any(${[args.userId].flat()})
        and round = 0
        and proposal_id is null
      group by gate, passed`

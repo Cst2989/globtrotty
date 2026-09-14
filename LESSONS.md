@@ -41,6 +41,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-1 | Why snapshot tests lie | npm test (test/eval-snapshot.test.ts, test/grade.test.ts, test/scorecard.test.ts), then npm run evals for the first scorecard, which exits 1 because one of its two worlds is graded red on purpose |
 | lesson-6-2 | The gates are already evals | npm run migrate, then npm test (test/eval-replay.test.ts, test/gate-metrics.test.ts), then npm run evals for the card with its gate rows |
 | lesson-6-3 | Golden trips and the simulated traveller | npm run migrate, then npm test (test/golden-cases.test.ts, test/sim-user.test.ts, and test/eval-run.test.ts, which takes about four minutes against a remote database and seconds against a local one), then npm run evals for three cases driven end to end |
+| lesson-6-4 | Pinning variance | npm run migrate, then npm test (test/variance.test.ts, test/eval-limits.test.ts), then npm run evals -- --runs 3 for pass^k over three pinned runs |
 
 ## How this branch was built
 
@@ -231,6 +232,24 @@ called it on a supplier's NAME as well, where it would have printed "Beachfront
 apartment, Faro, 7 nights" on her card as one unreadable word. Two strings that
 both come from a supplier are not therefore the same kind of string, and the card
 cleans them differently for reasons written at the function that does it.
+
+**A ceiling for the tests is not the same object as a ceiling for her.**
+`EVAL_LIMITS` sits beside `DEFAULT_LIMITS` in one file rather than being a set
+of numbers an eval script invents, and the one ceiling it does not touch is the
+cross-user global one, because loosening that for a test suite loosens it for
+production. Every eval conversation still moves money through the same four
+functions, and there is no fifth. The first draft of it was tight enough to stop
+the longest case two model calls short of the end of its own recording, which is
+a suite measuring its budget rather than its agency, so the number in the file is
+the one a measurement chose.
+
+**Two constants holding the same string today are not one constant.**
+`EVAL_TODAY` is the suite's calendar and `TODAY` is the reader's, and they both
+say 2026-08-29. They are separate because they move for unrelated reasons: the
+day a lesson needs a different date in a transcript, every golden case that says
+"the second half of September" would have been silently re-dated by an edit
+nobody connected to the evals, and the suite would have kept passing while
+measuring a different trip.
 
 **A replay against the live state is not a replay.** The gates and the evals
 share one implementation, which is the strongest guarantee in this repository,

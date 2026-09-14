@@ -1,7 +1,8 @@
 import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
 import { runCase } from '../src/evals/runner.js'
 import { makeSimulatedUser } from '../src/evals/sim-user.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
+import { EVAL_TODAY, evalNow, RECORDED_WORLD_SEED } from '../src/evals/variance.js'
+import { EVAL_LIMITS } from '../src/limits.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 import { replayClient } from './model/replay.js'
 
@@ -14,7 +15,14 @@ describeDb('a golden case, driven end to end with nobody typing', () => {
       await withTestDb(async (sql) => {
         const client = replayClient(fixtureFor(kase.id))
         const result = await runCase(
-          { sql, client, limits: DEFAULT_LIMITS, simUser: makeSimulatedUser },
+          {
+            sql, client, limits: EVAL_LIMITS, simUser: makeSimulatedUser,
+            // The recorded world, for the reason written at that constant: the
+            // responses this fixture replays name the source ids of the world
+            // they were recorded in, and the provenance gate is right to refuse
+            // them anywhere else.
+            seed: RECORDED_WORLD_SEED, now: evalNow, today: EVAL_TODAY,
+          },
           kase,
         )
         // Several turns, which is the thing one fixed message could not do.
@@ -58,7 +66,10 @@ describeDb('a golden case, driven end to end with nobody typing', () => {
     await withTestDb(async (sql) => {
       const client = replayClient(fixtureFor(kase.id))
       const result = await runCase(
-        { sql, client, limits: DEFAULT_LIMITS, simUser: makeSimulatedUser },
+        {
+          sql, client, limits: EVAL_LIMITS, simUser: makeSimulatedUser,
+          seed: RECORDED_WORLD_SEED, now: evalNow, today: EVAL_TODAY,
+        },
         kase,
       )
       client.done()
@@ -74,6 +85,24 @@ describeDb('a golden case, driven end to end with nobody typing', () => {
       const named = kase.persona.refuses.map((r) => r.what.toLowerCase())
       expect(refusals.some((m) => named.some((what) => m.content.toLowerCase().includes(what))))
         .toBe(true)
+    })
+  }, 180_000)
+
+  it('gives two pinned runs of one case the same graded result', async () => {
+    await withTestDb(async (sql) => {
+      const kase = loadGoldenCases()[1]!    // hotel-only-02, the shortest case
+      const pinned = {
+        sql, limits: EVAL_LIMITS, simUser: makeSimulatedUser,
+        seed: RECORDED_WORLD_SEED, now: evalNow, today: EVAL_TODAY,
+      }
+      const first = await runCase({ ...pinned, client: replayClient(fixtureFor(kase.id)) }, kase)
+      const second = await runCase({ ...pinned, client: replayClient(fixtureFor(kase.id)) }, kase)
+      // The ids differ on purpose: each run mints its own user and its own
+      // conversation, so the comparison is over what was GRADED and never over
+      // which row it landed in.
+      expect(first.userId).not.toBe(second.userId)
+      expect(second.grades).toEqual(first.grades)
+      expect(second.trace.calls.map((c) => c.name)).toEqual(first.trace.calls.map((c) => c.name))
     })
   }, 180_000)
 })

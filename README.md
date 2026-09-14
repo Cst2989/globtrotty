@@ -984,6 +984,30 @@ one started with an empty notebook and no memory. One paragraph in
 recordings were made against it. Nothing but a multi-turn conversation could
 have found this, because a single-turn trip never reads the notebook back.
 
+Open at lesson 6.4: pass^k measures the model only when the model is the thing
+that moves, and on a replayed run the model does not move at all, so the number
+this suite prints keyless is a check on the harness rather than a measurement of
+the desk. `npm run evals -- --runs 3` prints three runs of each case that agree
+to the tool call, which is the harness reporting that every input is pinned. The
+measurement needs `LIVE_MODEL=1` and a key and costs real money, which is why
+the flag defaults to one run. Owner: whoever runs the nightly schedule lesson
+6.6 writes down.
+
+Also open at lesson 6.4, and the largest bill module 6 carries: the three
+recordings were made before the supplier world was pinned, so they replay in
+MockConfig's default world and not in the world `seedFor` gives their case. The
+model's own `propose_trip` names the source ids it saw when the recording was
+made, and replaying those responses anywhere else fails the provenance gate on
+every proposal, correctly. `evals/run.ts` passes `RECORDED_WORLD_SEED` for that
+reason and `seedFor` is what a case gets the first time it is recorded in a
+world of its own. Until then a live run and a replayed run of one case are two
+different worlds. Owner: a person with a key, re-recording the three.
+
+The three `pass^k:` rows read 0/3 at this tag, and not because anything is
+flaky: `call_count_fits_the_job` fails on all three cases for the reason the
+lesson 6.3 residual above gives, and a case with a failed check did not pass.
+Consistently failing and flaky are different words on this card on purpose.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

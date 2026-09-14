@@ -26,6 +26,17 @@
  * system working, and reddening the run for it would teach a reader that a red
  * gate row is noise.
  *
+ * From lesson 6.4 every input a case has is pinned by this file rather than read
+ * off a module constant: the supplier world comes from the case id (`seedFor`),
+ * the calendar is the suite's own (`EVAL_TODAY`, never `TODAY`), the clock is
+ * fixed (`evalNow`), and the budget is `EVAL_LIMITS` rather than production's.
+ * `--runs 3` then runs every case three times and prints a `pass^k:` row per
+ * case with k as its denominator, so a case that passes twice out of three is
+ * named as flaky rather than averaged into a rate. One run by default, because
+ * k=1 is not a measurement and the per-PR run should not pay for one. On a
+ * replayed run nothing about the model moves, so a flaky line here would be a
+ * finding about this suite rather than about the desk.
+ *
  * `replayClient` comes from `test/`, which is the one place this runner reaches
  * into that directory. It is the branch's only keyless model client and a copy
  * under `src/` would be two clients to keep in step, so `tsconfig.json` compiles
@@ -45,12 +56,13 @@ import { config } from 'dotenv'
 import type postgres from 'postgres'
 import { connect } from '../src/db.js'
 import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
-import { gateMetrics, gateRows, type GateMetric } from '../src/evals/gateMetrics.js'
+import { gateMetrics, gateRows } from '../src/evals/gateMetrics.js'
 import type { Grade } from '../src/evals/grade.js'
 import { runCase } from '../src/evals/runner.js'
-import { makeSimulatedUser } from '../src/evals/sim-user.js'
 import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
+import { makeSimulatedUser } from '../src/evals/sim-user.js'
+import { casePassed, evalNow, passAtK, passAtKRows, EVAL_TODAY, RECORDED_WORLD_SEED } from '../src/evals/variance.js'
+import { EVAL_LIMITS } from '../src/limits.js'
 import { replayClient } from '../test/model/replay.js'
 
 // The guard is scripts/demo.ts's, word for word: two scripts giving different
@@ -62,27 +74,14 @@ if (!process.env.DATABASE_URL) {
 }
 
 /**
- * One run's gate counts, from the per-case counts.
+ * `npm run evals -- --runs 3`. One run by default: pass^k over k=1 is not a
+ * measurement, and the per-PR run is not the place to pay for one.
  *
- * Summed over the cases rather than asked once for all of them, because
- * `gateMetrics` is scoped to ONE user id and `runCase` mints a fresh one per
- * case so that no case's spend can exhaust another's. Added by gate NAME, so a
- * row this file cannot place (`OTHER_GATES`) survives the addition instead of
- * being dropped into whichever position it happened to occupy.
+ * Read off argv rather than through a flag library, because this is the only
+ * flag the script has. A value that is not a number, or is zero, falls back to
+ * one rather than running the suite NaN times.
  */
-function sumMetrics(perCase: GateMetric[][]): GateMetric[] {
-  const byGate = new Map<string, GateMetric>()
-  for (const metrics of perCase) {
-    for (const m of metrics) {
-      const seen = byGate.get(m.gate)
-      if (!seen) { byGate.set(m.gate, { ...m }); continue }
-      seen.passed += m.passed
-      seen.failed += m.failed
-      seen.notEvaluated += m.notEvaluated
-    }
-  }
-  return [...byGate.values()]
-}
+const RUNS = Math.max(1, Math.trunc(Number(process.argv.find((a, i) => process.argv[i - 1] === '--runs') ?? 1)) || 1)
 
 /**
  * Deletes everything this run wrote, by the ids this run minted, children first.
@@ -122,44 +121,61 @@ async function main(): Promise<void> {
   const cases = loadGoldenCases()
   const graded: { caseId: string; grades: Grade[] }[] = []
   const evalUsers: string[] = []
+  const runs = new Map<string, boolean[]>()
   const sql = connect(process.env.DATABASE_URL!, 2)
   try {
     for (const kase of cases) {
-      const client = replayClient(fixtureFor(kase.id))
-      try {
-        const result = await runCase(
-          { sql, client, limits: DEFAULT_LIMITS, simUser: makeSimulatedUser },
-          kase,
-        )
-        // The id FIRST, and `done()` after it. A drifted fixture is exactly the
-        // case a developer runs over and over, so it is the worst one to leak
-        // rows on, and `done()` below is a throw: anything after it is skipped,
-        // `deleteRunRows` never learns this id, and every conversation, turn,
-        // message, tool result, proposal, gate result and model call this case
-        // committed stays behind on every attempt.
-        evalUsers.push(result.userId)
-        // The other half of a replay. `done()` is what reports "N recorded calls
-        // were never used", which is how a fixture that has drifted out of step
-        // with the code announces itself, and the command this lesson tells a
-        // reader to run has to be the one that hears it. It throws into the same
-        // catch, so a drifted fixture is a case that did not complete rather
-        // than a card printed over a recording nobody finished. The case is left
-        // out of `graded` by that throw and stays in `casesExpected`, which is
-        // the denominator doing its job.
-        client.done()
-        graded.push({ caseId: result.caseId, grades: result.grades })
-      } catch (err) {
-        // Counted in casesExpected and not in casesGraded, and named on the way
-        // past. A case that threw is not a case that failed a check, and folding
-        // the two together is how a suite reports 100% over the three cases that
-        // still run.
-        console.error(`case ${kase.id} did not complete: ${String(err)}`)
+      for (let i = 0; i < RUNS; i += 1) {
+        const client = replayClient(fixtureFor(kase.id))
+        try {
+          const result = await runCase(
+            {
+              sql, client,
+              limits: EVAL_LIMITS, simUser: makeSimulatedUser,
+              // Every input this case has, pinned by the caller: one world,
+              // one calendar for the suite, one instant for the gates. The
+              // world is the RECORDED one and not `seedFor(kase.id)`, for the
+              // reason written at that constant: these three cases replay
+              // responses that name the ids of the world they were recorded in.
+              seed: RECORDED_WORLD_SEED, now: evalNow, today: EVAL_TODAY,
+            },
+            kase,
+          )
+          // The id FIRST, and `done()` after it. A drifted fixture is exactly the
+          // case a developer runs over and over, so it is the worst one to leak
+          // rows on, and `done()` below is a throw: anything after it is skipped
+          // and `deleteRunRows` never learns this id.
+          evalUsers.push(result.userId)
+          // The other half of a replay. `done()` reports recorded calls that were
+          // never used, which is how a drifted fixture announces itself, and it
+          // throws into the same catch, so a drifted run is a case that did not
+          // complete rather than a card printed over an unfinished recording.
+          client.done()
+          // Suffixed, because `scorecardOf` counts one entry per graded case and
+          // three runs of one case are three graded cases. The pass^k rows below
+          // are where the three are put back together under one id.
+          graded.push({ caseId: `${result.caseId}#${i}`, grades: result.grades })
+          runs.set(kase.id, [...(runs.get(kase.id) ?? []), casePassed(result)])
+        } catch (err) {
+          // Counted in casesExpected and not in casesGraded, and named on the way
+          // past. A case that threw is not a case that failed a check, and folding
+          // the two together is how a suite reports 100% over the three cases that
+          // still run. It IS a failed run for pass^k: a case that did not finish
+          // did not pass, and leaving the run out would shrink k instead.
+          console.error(`case ${kase.id} run ${i + 1} did not complete: ${String(err)}`)
+          runs.set(kase.id, [...(runs.get(kase.id) ?? []), false])
+        }
       }
     }
-    const perCase: GateMetric[][] = []
-    for (const userId of evalUsers) perCase.push(await gateMetrics(sql, { userId }))
-    const card = withRows(scorecardOf(graded, cases.length), gateRows(sumMetrics(perCase)))
+    const k = [...runs].map(([caseId, passed]) => passAtK({ caseId, passed }))
+    const card = withRows(
+      scorecardOf(graded, cases.length * RUNS),
+      [...gateRows(await gateMetrics(sql, { userId: evalUsers })), ...passAtKRows(k)],
+    )
     console.log(renderScorecard(card))
+    for (const flaky of k.filter((r) => r.flaky)) {
+      console.log(`  flaky: ${flaky.caseId} passed ${flaky.passes} of ${flaky.k} runs`)
+    }
     await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })

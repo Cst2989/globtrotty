@@ -5,6 +5,9 @@ import { recordGateResults } from '../src/repo/gateResults.js'
 import { describeDb, withTestDb } from './helpers/db.js'
 
 const USER = randomUUID()
+// A second id at module scope, like the first, because lesson 6.4's run asks
+// `gateMetrics` for several at once and one of these cases is about that.
+const SECOND_USER = randomUUID()
 
 describeDb('gate-derived metrics', () => {
   it('names every gate, including the ones that produced no rows', async () => {
@@ -112,6 +115,30 @@ describeDb('gate-derived metrics', () => {
       const metrics = await gateMetrics(sql, { userId: USER })
       expect(metrics).toHaveLength(GATE_NAMES.length)
       expect(metrics.some((m) => m.gate === OTHER_GATES)).toBe(false)
+    })
+  })
+
+  it('sums every user id a run used, because a run is several conversations', async () => {
+    await withTestDb(async (sql) => {
+      // What lesson 6.4's runner produces: one user id per case per repetition,
+      // and one number over all of them, because "how often did this gate fire
+      // on this run" is a question about the run and not about an id.
+      const write = async (userId: string, passed: boolean) => {
+        const [c] = await sql`insert into course.conversations (user_id) values (${userId}) returning id`
+        await recordGateResults(sql, {
+          conversationId: c!.id as string, userId, turnId: null, proposalId: null, round: 0,
+          results: [passed
+            ? { gate: 'budget', passed: true, detail: null, sourceIds: [] }
+            : { gate: 'budget', passed: false, detail: 'over', sourceIds: [] }],
+        })
+      }
+      await write(USER, true)
+      await write(SECOND_USER, false)
+      const both = (await gateMetrics(sql, { userId: [USER, SECOND_USER] })).find((m) => m.gate === 'budget')!
+      expect(both).toEqual({ gate: 'budget', passed: 1, failed: 1, notEvaluated: 0 })
+      // And one id is still one id, which is what every other case here passes.
+      const mine = (await gateMetrics(sql, { userId: USER })).find((m) => m.gate === 'budget')!
+      expect(mine).toEqual({ gate: 'budget', passed: 1, failed: 0, notEvaluated: 0 })
     })
   })
 
