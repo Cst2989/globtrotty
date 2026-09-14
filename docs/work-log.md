@@ -1,6 +1,6 @@
 # Work log
 
-Last updated: **2026-09-13**. Written to be picked up cold after a break.
+Last updated: **2026-09-14**. Written to be picked up cold after a break.
 
 ---
 
@@ -13,11 +13,12 @@ Last updated: **2026-09-13**. Written to be picked up cold after a break.
 | Tier 0 | `withHeartbeat` around tool execution; SDK error classifier | Merged |
 | 3 | Model client, seven seats, prompt caching, reserve/reconcile, tool assembly, planning-desk driver | Merged |
 | **Pre-3b clearance** | Migrations 0011–0013; cashier and drift-monitor blockers cleared | Merged 2026-08-30 |
-| 3b | Reviewer seat, `revise_component`, the cashier (`hand_off_to_booking`), `escalate_to_human` | **On branch `feat/plan-3b-gates`, ready to merge** |
-| 3c | Front desk, scouts, drift monitor, CI, `trimForContext`'s price half | **Not started — next** |
-| 4 | Chat UI (Next.js), forced RLS with real policies | Not started |
+| 3b | Reviewer seat, `revise_component`, the cashier (`hand_off_to_booking`), `escalate_to_human` | Merged |
+| 3c | Front desk, scouts, drift monitor, CI, `trimForContext`'s price half | **On branch `feat/plan-3c-seats`, ready to merge; CI unproven until the first PR run** |
+| 4 | Chat UI (Next.js), forced RLS with real policies | **Not started — next** |
 
-**650 tests passing** (9 live external-API tests gated). Typecheck and lint clean. Migrations 0001–0014 applied to the live Supabase project.
+**793 tests passing** (11 live external-API tests gated, including the two new L1 front-desk/scout
+pins). Typecheck and lint clean. Migrations 0001–0015 applied to the live Supabase project.
 
 **The system has made real model calls.** `LIVE_MODEL=1 pnpm demo` runs one driver turn against the live API; the conversation spend delta matched `model_calls.cost_micros` to the micro ($0.030420 both sides).
 
@@ -27,62 +28,67 @@ Last updated: **2026-09-13**. Written to be picked up cold after a break.
 
 ## What the last session did
 
-Built plan 3b — the gates half — on branch `feat/plan-3b-gates`, 12 tasks, each reviewed
+Built plan 3c — the seats half — on branch `feat/plan-3c-seats`, 12 tasks (0–11), each reviewed
 individually plus a whole-branch final review. Full rulings and rationale are in
-`superpowers/2026-09-13-plan-3b-gates-decisions.md`; this is the short version.
+`superpowers/2026-09-13-plan-3c-seats-decisions.md`; this is the short version.
 
-- **Migration 0014** adds `proposals.parent_proposal_id` (revision lineage) and the `escalations`
-  table, with FK indexes the brief's own SQL omitted (added because the repo-wide FK-index
-  invariant test requires them).
-- **`saveProposal`/`loadProposal`/`decideProposal`** (`src/repo/proposals.ts`) — nothing wrote
-  `proposals` before this plan. `saveProposal` serialises the notebook through a new
-  `notebookToStored` export rather than raw `sql.json`, because a budgeted notebook's `bigint`
-  minor units throw on `JSON.stringify`.
-- **The reviewer seat** (`src/agents/reviewer.ts`, `prompts/reviewer.md`) — Opus 5, structured
-  output via a new `outputSchema` on `CallArgs`, the fourth caller of the three money doors. Every
-  supplier-written field it reads is masked (`maskUntrustedText`) and fenced before it reaches the
-  prompt. Round-tripping is derived from `gate_results`, not a new persisted counter —
-  `TurnState.reviewRounds` is removed.
-- **`revise_component`** (`src/tools/revise.ts`) — swap or shift a slot from the corpus, never a
-  new supplier call, through the same gates→reviewer→save path as `propose_itinerary`. Shift now
-  matches the inbound leg as well as the outbound (a review finding). `countPriorProposals` is
-  renamed `countPriorGateRuns` and counts both tool names.
-- **The cashier — `hand_off_to_booking`** (`src/tools/cashier.ts`) — the accept-window check,
-  per-item re-quote and identity/tolerance comparison, server-built tracking URLs
-  (`Supplier.bookingUrl`), and idempotent replay. A review round fixed replay ordering, widened
-  `SUPPLIER_DOORS` so a hand-off counts against the per-turn supplier budget, and masked untrusted
-  text in the reply.
-- **`escalate_to_human`** (`src/tools/escalate.ts`, `src/notify.ts`) — fixed reason enum, 3/day
-  rate limit counted fail-closed, `Notifier` port with a logging adapter, best-effort notify.
-- **Driver prompt `driver@2`** — the three tools' contracts in the model's terms; `DESK_TOOLS`
-  grows to eight names.
-- **Four final-review fixes**, all money- or safety-adjacent: `conversations.status = 'escalated'`
-  is now sticky through `completeTurn`/`failTurn`; `StoredItineraryItem` gained `bookingUrl` so the
-  disclosure path (unverifiable price) can still show a real link; reviewer issue text is masked
-  before it reaches the driver's own transcript; and the reviewer's spend accumulator is folded in
-  a `finally`, so a throw after the reviewer call no longer drops that spend from the turn total.
-- One residual is recorded, not fixed: a crash between the cashier's `link_clicks` commit and
-  `finishToolCall` fails the turn `fenced` rather than the letter of parent spec §5.6 ("after link
-  emission nothing may mark the turn failed") — the links are safe and recoverable by
-  `proposal_id`; the fix would be a harness-wide change to how `ambiguous` resumes are handled, so
-  it is a backlog item, not a fix here.
+- **Migration 0015** sets `conversations.desk` default to `'front'` (existing rows keep
+  `'planning'`), adds `conversations.front_label`, and creates `canary_runs`/`drift_alarms` for the
+  drift monitor.
+- **The front desk** (`src/agents/frontDesk.ts`, `prompts/front_desk.md`) — Haiku, structured
+  output (`label`/`answer`/`title`), routes to planning on any doubt (refusal, truncation, parse
+  failure, a `faq` with no answer, a `new_trip` with no title). A `faq` parks the turn
+  (`awaiting_user`); a `new_trip` (or a fallback) writes the title and desk, then returns a
+  `continue` step so the SAME turn falls straight into the driver — she never waits twice.
+- **`routeAgent`** (`src/agents/route.ts`) reads `conversations.desk` per step and dispatches to
+  the front desk or the driver; the worker's `AgentStep` gains a `continue` variant and a loop
+  branch for it.
+- **Scouts — `research_destination`** (`src/agents/scout.ts`) — one Haiku call with the API's
+  server-side web search (`web_search_20250305`, not the plan's originally-specified
+  `web_search_20260209` — Haiku 4.5 rejects that variant), capped at 3 searches, redacted
+  (`redactPrices`), cut at 300 words (`cutAtWords`), fenced (worker door), charged including a
+  per-search result-token allowance, carrying the traveller's notebook as prompt suffix.
+- **The expired-results notice** (`src/agents/driver.ts`) — the price half of `trimForContext`, as
+  a suffix warning listing stale ids rather than a rewrite of persisted transcript blocks (history
+  edits break caching); the freshness gate still holds the actual guarantee.
+- **The drift monitor** (`src/monitor/drift.ts`, `netlify/functions/drift-monitor.mts`) — a nightly
+  canary (one golden call per seat, fingerprinted and diffed) plus a request-shape diff for the
+  three full-capture seats, charged to a fixed `OPS_USER_ID`, authorised by either a shared secret
+  or Netlify's own scheduled-invocation payload, era-keyed against version bumps, deduped 7 days,
+  and skipping a seat canaried within the last 20 hours.
+- **CI** (`.github/workflows/test.yml`) — the repo's first pipeline: a `postgres:16` service,
+  migrations applied from zero, `LIVE_MODEL=1 LIVE_SUPPLIERS=1 pnpm test` on a PR to `main`.
+- **Two 3b one-liners** (`src/tools/escalate.ts`, `src/sweeper.ts`) from 3b's final review, each
+  with a discriminating test.
+- **Six final-review fixes**, all money- or safety-adjacent: `driver@3` (the prompt file changed
+  under `driver@2`); the shape check keyed to the seat's current era plus 7-day alarm dedupe;
+  `maskControlChars` maps newlines to a space instead of `'?'`; a new `maskIdChars` for
+  supplier-origin ids rendered as an identifier list; `releaseForContinuation` now carries the
+  turn's already-self-debited spend; the monitor skips (rather than re-runs) a seat canaried
+  within 20 hours, for idempotence under at-least-once scheduling.
+- One thing is recorded, not fixed by this plan: **the Anthropic key's credit balance is too low**
+  — every `LIVE_MODEL=1` run fails with a 400 billing error, so the L1 live pins (front desk,
+  scout) are code-complete but unverified live, and CI's live suites cannot succeed on the first
+  PR run until the account is topped up.
 
-**650 tests passing, 9 skipped** (live external-API, unchanged gating) at merge — up from 534/8
-at the last update.
+**793 tests passing, 11 skipped** (live external-API, gated) at merge — up from 650/9 at the last
+update.
 
 ---
 
 ## Next steps, in order
 
-1. **Merge `feat/plan-3b-gates` to `main`.** Reviewed, tested, ready.
-2. **Plan 3c** — front desk (Haiku, structured label, routes to planning on any parse failure),
-   destination scouts (read-only, fenced), the drift monitor (unblocked by migration 0012; still
-   needs a decision on cheap-seat sampling, backlog 2.5), CI (backlog 3.9), and `trimForContext`'s
-   price half (unblocked by the cashier's re-quote path, now built).
-3. **Plan 4** — chat UI, Next.js, forced RLS with real policies. Its route handler calls
+1. **Top up the Anthropic account's credit balance.** Every live call currently 400s with "credit
+   balance is too low" — this blocks the L1 live pins, CI's live suites, and the nightly drift
+   monitor in production alike.
+2. **Add the two repo secrets** (`ANTHROPIC_API_KEY`, `GOOGLE_SEARCH_API`) so CI can run.
+3. **Open the PR for `feat/plan-3c-seats` and merge once green.** Task 10's own acceptance
+   criterion — the workflow running green on the PR that adds it — has not happened yet.
+4. **Plan 4** — chat UI, Next.js, forced RLS with real policies. Its route handler calls
    `decideProposal` from her accept/reject button — the cashier stays unreachable in production
-   until then (backlog 3b.8). Completes spec slice 1.
-4. **Slice 2** — golden trips, simulated user, trajectory checks, calibrated judges (spec §12).
+   until then (backlog 3b.8). Wire `routeAgent` into `run-turn-background.mts`, replacing
+   `echoAgent` (backlog 3c.6). Completes spec slice 1.
+5. **Slice 2** — golden trips, simulated user, trajectory checks, calibrated judges (spec §12).
 
 ---
 
@@ -113,7 +119,7 @@ at the last update.
 
 **`request_shape` must stay `Record<string, unknown>`.** It was `unknown`, which accepted `undefined`; `JSON.stringify(undefined)` then threw inside `recordModelCall`'s own try/catch, **swallowing the error and writing no ledger row at all**. `front_desk` and `reviewer` are both hardwired `capture_policy = 'full'`, so 3b is exactly where this would have bitten.
 
-**The drift canary only runs when a human remembers.** The 9 live tests are correctly gated behind `LIVE_MODEL=1` / `LIVE_SUPPLIERS=1`, but **there is no CI at all** — no `.github/workflows`. `response.model` echoes the alias for aliased models, so string comparison detects nothing and these tests are the only detector. 3c builds a drift monitor on this ground.
+**The drift canary used to only run when a human remembered — RESOLVED by 3c.** The 11 live tests remain gated behind `LIVE_MODEL=1` / `LIVE_SUPPLIERS=1` (`response.model` echoes the alias for aliased models, so string comparison detects nothing and these tests are the CI-side detector), but there is now both a CI pipeline that runs them on every PR (Task 10) and a nightly production-side drift monitor (Task 9, `src/monitor/drift.ts`) that fingerprints and diffs a golden call per seat independently of any human remembering. Neither has actually run live yet — see 3c.17 in the backlog: the Anthropic key's credit balance is too low.
 
 **The DB tests write real rows to the production Supabase project.** CI needs a non-production `DATABASE_URL`.
 
@@ -127,23 +133,30 @@ at the last update.
 
 **One writer per file.** Not "one implementer" — a reviewer authorised to mutate the tree to prove discrimination is a writer too. Three near-miss races across two plans, all survived on subagent discipline rather than process.
 
+**New conversations start at `desk = 'front'`, and the router reads it per step.** `routeAgent` (`src/agents/route.ts`) checks `conversations.desk` at the START of every step, not once per turn — a conversation can move from `'front'` to `'planning'` mid-turn (the front desk's `continue` step) and the very next step's route call sees the new value. Existing (pre-migration-0015) conversations keep `desk = 'planning'` and are never re-triaged.
+
+**Haiku seats send no `thinking` block.** `buildRequest` omits `thinking` entirely when `seat.effort === null` (`front_desk`, `scout`) — sending even an empty/default one 400s, since only Opus/Sonnet seats with a configured `effort` can receive `thinking: { type: 'adaptive' }` at all.
+
+**The driver prompt is `driver@2`. `driver@3`.** Bumped at the final review (F1) because Task 7 added a Scouts section to `driver.md` — a prompt file edit is a version bump, always, and the plan's own Global Constraints froze the version too early. Any future prompt edit is another bump; do not edit a prompt file and reuse its pinned version string anywhere.
+
+**The drift monitor charges `OPS_USER_ID`, on a conversation scoped to the calendar month (`title = 'ops:YYYY-MM'`), and is authorised by EITHER a shared secret OR the scheduler's own payload.** `netlify/functions/drift-monitor.mts` accepts an `x-worker-secret` header (same check as `run-turn-background.mts`) or a request body shaped `{ next_run: "<ISO-8601>" }` — Netlify's own documented scheduled-invocation marker, since a cron trigger cannot attach a custom header. **Never remove the `[functions."drift-monitor"]` `schedule` entry from `netlify.toml`** — the second auth path is safe only because Netlify does not expose scheduled functions over a plain URL ("You can't invoke scheduled functions directly with a URL"); deleting the schedule entry would turn this into an unauthenticated, uncapped-spend endpoint.
+
+**`research_destination` counts against the per-turn supplier budget.** It is in `SUPPLIER_DOORS` alongside `hand_off_to_booking` — one scout call, regardless of how many web searches it makes internally (up to 3), counts as one supplier call.
+
+**`releaseForContinuation` now carries the run's spend.** Fixed at the final review (F5): a turn hitting `continue_later` (reachable on every first turn now that the front desk's `continue` step exists) used to silently drop whatever it had already self-debited mid-turn from `turns.spend_usd_micros`. `runTurn` passes `turnSpend.total` and resets it to `0n` right after — the same micros must never be folded in twice across the re-invocation this triggers.
+
 ---
-
-## What 3c needs
-
-- **Front desk** — Haiku, structured output, fixed label set, **routes to planning on any parse failure**; never guesses, never drops.
-- **Scouts** — read-only tools, no outbound channel, words never prices. Results are fenced on the way back (`worker`/`api` doors).
-- **Drift monitor** — `request_shape` is now recorded, but is NULL on pre-0012 rows *and* on `'truncated'` rows (cheap seats above the byte threshold, since `request_shape` is NULL on those truncated rows by design). §7's drift sentence covers all seats; **decide whether the monitor samples cheap seats**, because there would be nothing to compare against for any cheap-seat call over the truncation threshold.
-- **CI** — needs a non-production `DATABASE_URL`; the DB tests write real rows and today run against the live Supabase project. No `.github/workflows` exists yet at all (backlog 3.9).
-- **`trimForContext`'s price half** — stripping prices past their supplier's `pricePersistence` window needs the re-quote path. That path now exists (plan 3b's cashier); 3c is unblocked to implement this half. Noted in `src/tools/validate.ts`.
 
 ## What 4 needs
 
 - **Its route handler calls `decideProposal`** (`src/repo/proposals.ts`) from her accept/reject button — this is the production caller `hand_off_to_booking`'s precondition needs; until it exists, the cashier is unreachable outside a demo or a test (backlog 3b.8).
+- **Wire `routeAgent` into `run-turn-background.mts`, replacing `echoAgent`.** The front-desk/driver router built in 3c (`src/agents/route.ts`) is the real production agent; the entry point still calls the plan-1 echo stand-in (backlog 3c.6). Needs the same transport/supplier wiring `scripts/demo.ts`'s `liveDriverScenario` already shows the shape of.
+- **The route calls `decideProposal`** for her accept/reject button — same item as above, restated: this is the one missing production caller across both the cashier and the front-desk-routed driver path.
 - **Forced RLS is not just "add policies".** `0003_lockdown.sql` carries a written warning: the global daily ceiling sums `daily_usage.cost_micros` across **all** users. Under a per-user policy that sum silently returns only the caller's rows, reads far below the cap, and **the ceiling stops firing with no error and no failing test.** That sum must stay owner-visible or move to a maintained counter *before* any policy touches that table.
+- **RLS policies must be tested against Supabase, not the CI container.** CI's `postgres:16` service only has the `anon`/`authenticated` roles the migrations assume (backlog 3c.5) — there is no real Supabase project behind it, so plan 4's forced-RLS policies need a Supabase-shaped run (staging project or equivalent) to be proven correct; CI alone will not catch an RLS regression.
 - `gate_results` has no `user_id` — needs an `EXISTS` join to `conversations` under a per-user policy.
 - `netlify.toml` declares `pnpm build` and `.next`; neither exists.
-- **The production entry point still runs `echoAgent`.** Wiring the real driver needs `GOOGLE_SEARCH_API` in `env.ts`, but `loadEnv` is all-or-nothing, so adding it forces `sweep.mts` to require a supplier key. Extend `env.ts` with a supplier-specific *optional* key rather than widening the required list. Backlog Tier 4.
+- **`env.ts` needs `GOOGLE_SEARCH_API`** for `run-turn-background.mts`'s real suppliers, but `loadEnv` is all-or-nothing, so adding it to the required `KEYS` list would force `sweep.mts` and `drift-monitor.mts` — neither of which touches a supplier — to also require it. Extend `env.ts` with a supplier-specific *optional* key rather than widening the required list. Backlog Tier 4.
 
 ## Known debt with a growing cost
 
