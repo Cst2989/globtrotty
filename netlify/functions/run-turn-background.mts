@@ -241,7 +241,7 @@ export default async (req: Request): Promise<Response> => {
     now: Date.now,
     // The course's fixed date, which is what this desk rendered off the module
     // constant before lesson 6.4 made the calendar a dependency. Production
-    // behaviour is unchanged; the eval chain is the one caller that passes
+    // behaviour is unchanged, and the eval chain is the one caller that passes
     // something else (src/evals/conversation.ts).
     today: TODAY,
   })(ctx)

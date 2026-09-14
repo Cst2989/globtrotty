@@ -44,8 +44,17 @@ export type EvalConversation = {
  * Built per agent step, like tier 3's and like the script's, because the
  * notebook is read fresh every step and because `corpusRunner` fences its writes
  * on a claim whose `attempts` only the harness knows.
+ *
+ * `elapsed` is the invocation's WALL clock and reaches exactly one wrapper, the
+ * scout's, because the scout is the one link in this chain that calls a model.
+ * Every other wrapper here takes `deps.now`, which is domain time and pinned:
+ * what the notebook records as the moment she said something, what the cashier
+ * re-quotes against and what the gates age items by are facts about the trip and
+ * not about how long this process has been running.
  */
-async function chainFor(deps: EvalDeps, ctx: AgentContext): Promise<ToolRunner> {
+async function chainFor(
+  deps: EvalDeps, ctx: AgentContext, elapsed: () => number,
+): Promise<ToolRunner> {
   const claim = {
     turnId: ctx.turnId, conversationId: ctx.conversationId, userId: ctx.userId,
     attempts: ctx.attempts, state: ctx.state,
@@ -75,7 +84,15 @@ async function chainFor(deps: EvalDeps, ctx: AgentContext): Promise<ToolRunner> 
       {
         client: deps.client, suppliers: deps.suppliers, stay: scoutStayFrom(nb, deps.today),
         conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId,
-        limits: deps.limits, now: () => deps.now().getTime(),
+        limits: deps.limits,
+        // WALL, like the driver's, and for the identical reason: the scout's
+        // only use of its clock is the pair of readings `callModel` subtracts
+        // for `latency_ms` (src/agents/scout.ts). The pinned clock wrote a zero
+        // into every scout row an eval made, and the three cases on this branch
+        // make 10, 3 and 30 scout calls between them, so it is not a seat the
+        // suite can afford to record wrongly. The scout's stay still comes off
+        // `deps.today`, which is domain time and stays pinned.
+        now: elapsed,
       },
       cardRunner(
         deps.sql, gateCtx,
@@ -117,7 +134,8 @@ const INVOCATION_MS = 120_000
  * is asking how long this process has actually been working: `decideNext` asks
  * whether another step fits in what is left of the invocation (src/worker.ts),
  * `withRetry` asks how much of that is left before it sleeps, and `callModel`
- * subtracts two readings to write `latency_ms`.
+ * subtracts two readings to write `latency_ms` for BOTH seats an eval calls, the
+ * driver's and the scout's.
  *
  * A frozen clock makes all three meaningless rather than strict. `deadlineMs`
  * minus `now` is a constant, so no eval turn can ever hand itself back for a
@@ -167,7 +185,7 @@ function invokeInProcess(deps: EvalDeps, seen: string[]) {
         // and the gate judges another, and the gate fails proposals the desk was
         // right to make.
         today: deps.today,
-        run: await chainFor(deps, ctx),
+        run: await chainFor(deps, ctx, clock.now),
       })(ctx),
     }, turnId)
   }

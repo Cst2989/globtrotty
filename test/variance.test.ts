@@ -84,8 +84,8 @@ describe('what moves between two runs of one case, and what no longer does', () 
     // The coupling `runCase` depends on and nothing asserted until now: the mock
     // stamps `fetchedAt` from the clock it is handed, and the gates age items
     // against `deps.now()`. Drop `now` from either supplier config and the two
-    // clocks are sixteen days apart, `age < 0` on every item, and the freshness
-    // gate refuses a proposal in which nothing is stale.
+    // clocks disagree, `age < 0` on every item, and the freshness gate refuses a
+    // proposal in which nothing is stale.
     const [item] = await mockSuppliers({
       hotel: { seed: RECORDED_WORLD_SEED, now: evalNow },
     }).hotel.search(stay('2026-09-19', '2026-09-26'))
@@ -140,6 +140,26 @@ describe("the eval's two clocks", () => {
     invocationClock().now()
     expect(evalNow().getTime()).toBe(first)
     expect(evalNow().toISOString()).toBe('2026-08-29T10:00:00.000Z')
+  })
+
+  it('hands the wall clock to both seats an eval calls', () => {
+    // The three cases above prove `invocationClock` spends a real budget. They
+    // prove nothing about who is given it, and reverting either seat to the
+    // pinned clock left the whole suite green until this case existed. Both
+    // seats use their clock for one thing only, the pair of readings `callModel`
+    // subtracts for `latency_ms` (src/model/client.ts), so a pinned one writes a
+    // zero: the driver's at src/agents/driver.ts and the scout's at
+    // src/agents/scout.ts, and the three fixtures make 10, 3 and 30 scout calls.
+    const src = readFileSync(new URL('../src/evals/conversation.ts', import.meta.url), 'utf8')
+    // Comment lines stripped, because the docstrings quote the shape this
+    // replaced and the assertion is about the code.
+    const code = src.split('\n').filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line)).join('\n')
+    expect(code).not.toContain('deps.now().getTime()')
+    expect(code).toContain('now: clock.now')
+    expect(code).toContain('chainFor(deps, ctx, clock.now)')
+    // And domain time still reaches the wrappers that record facts about the
+    // trip rather than about how long the process ran.
+    expect(code).toContain('now: deps.now')
   })
 
   it('is what a frozen pair could not do', () => {

@@ -27,7 +27,8 @@
  * gate row is noise.
  *
  * From lesson 6.4 every input a case has is chosen by this file rather than read
- * off a module constant, and three of the four are pinned:
+ * off a module constant. Four of them, and the fourth is pinned to the wrong
+ * thing:
  *
  *  - the calendar is the suite's own, `EVAL_TODAY` and never `TODAY`, and it
  *    reaches the planning desk's `{{today}}` as well as the dates gate, because
@@ -35,8 +36,8 @@
  *  - domain time is fixed at `evalNow()`, which is both the instant the mock
  *    suppliers stamp `fetchedAt` with and the instant the gates age those items
  *    against. Elapsed time is not pinned and cannot be: the invocation deadline
- *    and `latency_ms` measure how long this process really worked
- *    (`invocationClock`, src/evals/conversation.ts);
+ *    and the `latency_ms` of both seats an eval calls measure how long this
+ *    process really worked (`invocationClock`, src/evals/conversation.ts);
  *  - the budget is `EVAL_LIMITS` rather than production's;
  *  - the supplier world is `RECORDED_WORLD_SEED` and NOT `seedFor(kase.id)`.
  *    That one is the lesson's own outstanding bill: these three cases replay
