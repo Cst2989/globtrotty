@@ -944,14 +944,21 @@ is the whole of why three shipped. Owner: a person, growing the file one case at
 a time with the recording that makes it replayable.
 
 Also open at lesson 6.3, and found by the eval rather than by reading the code:
-the planning desk spends most of its steps writing the notebook. Every one of
-the three cases fails `call_count_fits_the_job`, at 21, 40 and 52 tool calls
-against ceilings of 10, 4 and 8, and the great majority of those calls are
-`update_requirements` re-sending facts the notebook already holds. The red row
-is the eval working rather than a threshold set too tight, and closing it is a
-change to the desk prompt and to what the tool result says back, which is a
-lesson of its own. Owner: module 6, once the judge in 6.6 can say whether a
-shorter path answered her as well.
+the planning desk asks too much and writes the notebook too often. Every one of
+the three cases fails both trajectory checks. `call_count_fits_the_job` reads 68,
+60 and 80 tool calls against ceilings of 10, 4 and 8, and `questions_stayed_few`
+reads 7, 11 and 10 questions against ceilings of 3, 2 and 3.
+`update_requirements` is 43 of the 68 (63%) and 41 of the 60 (68%), a majority in
+both, and 24 of the 80 (30%) in the refusal case, where it is beaten by 28 hotel
+searches. The red rows are the eval working rather than thresholds set too
+tight, and closing them is a change to the desk prompt and to what the tool
+result says back, which is a lesson of its own. Owner: module 6, once the judge
+in 6.6 can say whether a shorter path answered her as well.
+
+A local Postgres is worth setting up before you run these. `test/eval-run.test.ts`
+drives three whole conversations one database round trip at a time, and against a
+remote database that is minutes rather than seconds. Nothing in it waits on a
+model: every response is replayed off a recording.
 
 What the first run of these cases found and this lesson DID close: the desk
 could not record a single fact. `update_requirements` publishes `patch` as a

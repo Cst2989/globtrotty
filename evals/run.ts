@@ -30,9 +30,19 @@
  * into that directory. It is the branch's only keyless model client and a copy
  * under `src/` would be two clients to keep in step, so `tsconfig.json` compiles
  * both roots and the import is legal.
+ *
+ * IT WRITES. From lesson 6.3 this command drives three whole conversations
+ * through the real handler and the real worker against a real connection with no
+ * transaction, so it commits conversations, turns, messages, tool results,
+ * proposals, gate results and model calls under three fresh user ids. It deletes
+ * them again at the end, children first, by the ids it minted, which is
+ * `withRealDb`'s pattern (test/helpers/db.ts) applied to a script that has no
+ * test harness to roll it back. The gate numbers are read BEFORE the delete,
+ * because they are read out of the rows this run wrote.
  */
 import 'dotenv/config'
 import { config } from 'dotenv'
+import type postgres from 'postgres'
 import { connect } from '../src/db.js'
 import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
 import { gateMetrics, gateRows, type GateMetric } from '../src/evals/gateMetrics.js'
@@ -74,6 +84,40 @@ function sumMetrics(perCase: GateMetric[][]): GateMetric[] {
   return [...byGate.values()]
 }
 
+/**
+ * Deletes everything this run wrote, by the ids this run minted, children first.
+ *
+ * The order and the reasoning are `withRealDb`'s (test/helpers/db.ts), because
+ * this is the same problem: a real commit with no transaction to roll back.
+ * `course.agent_events.turn_id` is `on delete set null` (migration 0017), so
+ * those rows outlive the turn that wrote them and have to go before it.
+ * `course.source_memory` is deliberately absent rather than forgotten: a fact
+ * about a property belongs to nobody (migration 0016), so there is no user id to
+ * delete it by, and nothing on this path writes one.
+ *
+ * A failure here is logged and swallowed. Some rows left behind are cheaper than
+ * a proof command that reports a scorecard and then exits on a delete, and the
+ * scorecard is already printed by the time this runs.
+ */
+async function deleteRunRows(sql: postgres.Sql, userIds: string[]): Promise<void> {
+  if (userIds.length === 0) return
+  try {
+    await sql`delete from course.model_calls where user_id = any(${userIds})`
+    await sql`delete from course.link_clicks where user_id = any(${userIds})`
+    await sql`delete from course.proposals where user_id = any(${userIds})`
+    await sql`delete from course.gate_results where user_id = any(${userIds})`
+    await sql`delete from course.tool_results where user_id = any(${userIds})`
+    await sql`delete from course.user_memory where user_id = any(${userIds})`
+    await sql`delete from course.agent_events where user_id = any(${userIds})`
+    await sql`delete from course.messages where user_id = any(${userIds})`
+    await sql`delete from course.turns where user_id = any(${userIds})`
+    await sql`delete from course.conversations where user_id = any(${userIds})`
+    await sql`delete from course.daily_usage where user_id = any(${userIds})`
+  } catch (err) {
+    console.error(`the eval run could not delete its own rows: ${String(err)}`)
+  }
+}
+
 async function main(): Promise<void> {
   const cases = loadGoldenCases()
   const graded: { caseId: string; grades: Grade[] }[] = []
@@ -81,14 +125,19 @@ async function main(): Promise<void> {
   const sql = connect(process.env.DATABASE_URL!, 2)
   try {
     for (const kase of cases) {
+      const client = replayClient(fixtureFor(kase.id))
       try {
         const result = await runCase(
-          {
-            sql, client: replayClient(fixtureFor(kase.id)),
-            limits: DEFAULT_LIMITS, simUser: makeSimulatedUser,
-          },
+          { sql, client, limits: DEFAULT_LIMITS, simUser: makeSimulatedUser },
           kase,
         )
+        // The other half of a replay. `done()` is what reports "N recorded calls
+        // were never used", which is how a fixture that has drifted out of step
+        // with the code announces itself, and the command this lesson tells a
+        // reader to run has to be the one that hears it. It throws into the same
+        // catch, so a drifted fixture is a case that did not complete rather
+        // than a card printed over a recording nobody finished.
+        client.done()
         evalUsers.push(result.userId)
         graded.push({ caseId: result.caseId, grades: result.grades })
       } catch (err) {
@@ -103,6 +152,7 @@ async function main(): Promise<void> {
     for (const userId of evalUsers) perCase.push(await gateMetrics(sql, { userId }))
     const card = withRows(scorecardOf(graded, cases.length), gateRows(sumMetrics(perCase)))
     console.log(renderScorecard(card))
+    await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })
   }

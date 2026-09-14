@@ -2,20 +2,45 @@ import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 
 /**
- * Who is typing. `facts` is everything she knows and will say if asked;
+ * One thing she will not agree to, and the phrasings that count as being asked
+ * for it.
+ *
+ * Two fields and not one string, because the first round of recordings proved a
+ * one-string refusal is a refusal that never fires. `refuses: ["a higher
+ * budget"]` matched as a plain substring fired ZERO times across three whole
+ * recorded conversations, because a desk does not write "would you consider a
+ * higher budget", it writes "the cheapest I can find comes to more than you
+ * wanted, shall I keep looking or would you stretch what you are spending". So
+ * `what` is what she says no TO, in her own words, and `cues` are the phrases a
+ * desk actually uses when it is asking for it. A refusal with cues nobody writes
+ * is still a refusal that never fires, which is why `test/eval-run.test.ts`
+ * asserts one fired in the recorded run rather than only in a unit test that
+ * hands the matcher the exact string.
+ */
+export type Refusal = { what: string; cues: string[] }
+
+/**
+ * Who is typing. `facts` is everything she knows and will say if asked, keyed by
+ * the notebook's own field names wherever the notebook has one (src/notebook.ts),
+ * so that a desk echoing her words composes a patch `PatchSchema` accepts.
  * `refuses` is everything she will not agree to however it is put to her, which
- * is what makes the "not for 1,500 in August" case testable at all.
+ * is what makes the "not for 1,500 over four weeks" case testable at all.
  */
 export type Persona = {
   facts: Record<string, string | number | boolean>
   style: string
-  refuses: string[]
+  refuses: Refusal[]
 }
+
+const RefusalSchema = z.strictObject({
+  what: z.string().min(1),
+  cues: z.array(z.string().min(1)).min(1),
+})
 
 const PersonaSchema = z.strictObject({
   facts: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   style: z.string().min(1),
-  refuses: z.array(z.string()),
+  refuses: z.array(RefusalSchema),
 })
 
 export const GoldenCaseSchema = z.strictObject({

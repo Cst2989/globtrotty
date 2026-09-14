@@ -40,7 +40,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-7 | What she sees | npm run migrate, then npm test (test/channel.test.ts, test/isolation.test.ts, test/capture.test.ts, test/monitor.test.ts), then npm run trip for the offer card |
 | lesson-6-1 | Why snapshot tests lie | npm test (test/eval-snapshot.test.ts, test/grade.test.ts, test/scorecard.test.ts), then npm run evals for the first scorecard, which exits 1 because one of its two worlds is graded red on purpose |
 | lesson-6-2 | The gates are already evals | npm run migrate, then npm test (test/eval-replay.test.ts, test/gate-metrics.test.ts), then npm run evals for the card with its gate rows |
-| lesson-6-3 | Golden trips and the simulated traveller | npm run migrate, then npm test (test/golden-cases.test.ts, test/sim-user.test.ts, test/eval-run.test.ts), then npm run evals for three cases driven end to end |
+| lesson-6-3 | Golden trips and the simulated traveller | npm run migrate, then npm test (test/golden-cases.test.ts, test/sim-user.test.ts, and test/eval-run.test.ts, which takes about four minutes against a remote database and seconds against a local one), then npm run evals for three cases driven end to end |
 
 ## How this branch was built
 

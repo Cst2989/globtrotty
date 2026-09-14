@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SENTINELS } from '../scripts/sentinels.js'
 import { loadDesk, promptVersion, renderPrompt } from '../src/desks.js'
+import { emptyNotebook } from '../src/notebook.js'
 import { DESK_TOOLS, toolsForDesk, type Desk } from '../src/tools/registry.js'
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -26,7 +27,17 @@ const DESK_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '
  * filter and fails the equality below by name, which is the loud failure a
  * directory walk could not produce.
  */
-const DRIVER_FILES = ['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'] as const
+const DRIVER_FILES = [
+  'netlify/functions/run-turn-background.mts',
+  'scripts/trip.ts',
+  // Lesson 6.3's third composer. The eval drives the real handler and the
+  // real worker through a chain of its own (`chainFor`,
+  // src/evals/conversation.ts), so a wrapper a later lesson adds to the other
+  // two and not to that one would have the golden cases grading a desk that
+  // answers "Unknown tool" out of `supplierRunner`, and the card would call it
+  // a trajectory failure.
+  'src/evals/conversation.ts',
+] as const
 
 function drivers(): string[] {
   return DRIVER_FILES
@@ -175,13 +186,41 @@ describe('desks', () => {
       .map((tool) => wrappers[tool] ?? `NO WRAPPER NAMED FOR ${tool}`)
     expect(needed).toEqual(['notebookRunner', 'scoutRunner', 'proposalRunner', 'cashierRunner',
                             'cardRunner', 'escalationRunner'])
-    expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts'])
+    expect(drivers()).toEqual(['netlify/functions/run-turn-background.mts', 'scripts/trip.ts',
+                              'src/evals/conversation.ts'])
     for (const file of drivers()) {
       const source = readFileSync(path.join(REPO_ROOT, file), 'utf8')
       for (const wrapper of needed) {
         expect(source, `${file} sends a tool ${wrapper} answers and does not wrap it`)
           .toMatch(new RegExp(`${wrapper}\\(`))
       }
+    }
+  })
+
+  /**
+   * The notebook's field names, pinned between the schema that accepts them and
+   * the prompt that teaches them.
+   *
+   * Lesson 6.3 put the eight names into the planning desk's prompt because
+   * nothing else told the model what they were, and `applyRequirements`
+   * (src/notebook.ts) refuses a patch WHOLE when one key is unrecognised, so a
+   * desk guessing names wrote nothing at all and every turn after the first
+   * started with an empty notebook. That paragraph is now the only place a model
+   * learns the vocabulary, which makes it exactly the kind of list this branch
+   * guards everywhere else it has two readers: `SENTINELS`, `GATE_NAMES`,
+   * `CONVERSATION_STATUSES`, the chain above.
+   *
+   * Derived from `emptyNotebook()` rather than typed out here, so a ninth field
+   * fails this line rather than going unmentioned to the model, which is the
+   * failure mode that cost this lesson three recordings to find.
+   */
+  it('teaches the planning desk every notebook field the schema accepts', () => {
+    const prompt = loadDesk('planning').prompt
+    const fields = Object.keys(emptyNotebook())
+    expect(fields).toHaveLength(8)
+    for (const field of fields) {
+      expect(prompt, `the planning desk prompt never names the notebook field ${field}`)
+        .toContain(`\`${field}\``)
     }
   })
 })

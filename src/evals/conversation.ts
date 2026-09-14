@@ -6,7 +6,7 @@ import type { ModelClient } from '../client.js'
 import type { Limits } from '../engine.js'
 import { constraintsFromNotebook } from '../gates/pipeline.js'
 import { proposalRunner } from '../gates/runner.js'
-import { submitMessage } from '../handler.js'
+import { submitMessage, type SubmitResult } from '../handler.js'
 import { loadNotebook } from '../repo/notebook.js'
 import type { SupplierPair } from '../supplier/types.js'
 import {
@@ -129,6 +129,32 @@ async function repliesFor(deps: EvalDeps, convo: EvalConversation): Promise<stri
   return rows.map((r) => r.content)
 }
 
+/**
+ * Refuses anything but `queued`.
+ *
+ * `submitMessage` answers `'queued' | 'duplicate' | 'limit_reached' | 'busy'`
+ * (src/handler.ts) and three of those four mean NO TURN RAN. Swallowed, they are
+ * worse than a crash: `repliesFor` returns the same list it returned last time,
+ * the traveller answers the same text, the loop burns its fifteen turns, and
+ * `no-for-1500-03` reaches no proposal and passes as "the agency correctly said
+ * no" when what really happened is that a spend ceiling stopped it. Lesson 6.4
+ * is the lesson about meeting ceilings, so this is the wrong place to absorb
+ * one.
+ *
+ * A throw rather than a field on `EvalConversation`, because `evals/run.ts`
+ * already has the machinery for a case that did not complete: it catches, names
+ * the case, and leaves it in `casesExpected` and out of `casesGraded`, so the
+ * denominator carries it and no rate improves by losing it.
+ */
+function mustBeQueued(status: SubmitResult['status'], conversationId: string): void {
+  if (status === 'queued') return
+  throw new Error(
+    `The eval submitted a message to conversation ${conversationId} and got `
+    + `'${status}' rather than 'queued', so no turn ran. A case cannot be graded on `
+    + 'a conversation the handler refused.',
+  )
+}
+
 export async function startEvalConversation(
   deps: EvalDeps, userId: string, firstMessage: string,
 ): Promise<EvalConversation> {
@@ -137,6 +163,7 @@ export async function startEvalConversation(
     { sql: deps.sql, limits: deps.limits, invoke: invokeInProcess(deps, seen) },
     { userId, conversationId: null, message: firstMessage, idempotencyKey: randomUUID() },
   )
+  mustBeQueued(submitted.status, submitted.conversationId)
   const convo = {
     conversationId: submitted.conversationId, userId, turnIds: [...seen], replies: [],
   }
@@ -147,13 +174,14 @@ export async function sendReply(
   deps: EvalDeps, convo: EvalConversation, text: string,
 ): Promise<EvalConversation> {
   const seen: string[] = []
-  await submitMessage(
+  const submitted = await submitMessage(
     { sql: deps.sql, limits: deps.limits, invoke: invokeInProcess(deps, seen) },
     {
       userId: convo.userId, conversationId: convo.conversationId,
       message: text, idempotencyKey: randomUUID(),
     },
   )
+  mustBeQueued(submitted.status, convo.conversationId)
   const next = { ...convo, turnIds: [...convo.turnIds, ...seen] }
   return { ...next, replies: await repliesFor(deps, next) }
 }

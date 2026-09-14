@@ -7,20 +7,34 @@
         "originCity": "Berlin",
         "destination": "Portugal",
         "month": "September 2026",
-        "dates": "any week in the second half of September 2026",
+        "dates": "any week in the second half of September",
         "nights": 7,
-        "adults": 2,
-        "infants": 1,
+        "partySize": "two adults and a toddler of two",
         "budget": "1500 EUR",
-        "budgetCovers": "flights and hotel together",
+        "budgetCovers": "flights and the hotel together",
         "flexibleDates": true,
         "needsCrib": true,
         "nearBeach": true
       },
       "style": "brief, types fast, lowercase",
       "refuses": [
-        "car hire",
-        "travel insurance"
+        {
+          "what": "car hire",
+          "cues": [
+            "car hire",
+            "hire a car",
+            "rental car",
+            "rent a car",
+            "hire car"
+          ]
+        },
+        {
+          "what": "travel insurance",
+          "cues": [
+            "travel insurance",
+            "insurance"
+          ]
+        }
       ]
     },
     "expect": {
@@ -43,8 +57,7 @@
         "month": "September 2026",
         "dates": "19 to 26 September 2026",
         "nights": 7,
-        "adults": 2,
-        "infants": 1,
+        "partySize": "two adults and a toddler of two",
         "budget": "600 EUR",
         "budgetCovers": "the hotel alone",
         "flightsBooked": "we already have our flights to Faro, we only need the hotel",
@@ -53,7 +66,23 @@
       },
       "style": "brief, knows what she wants",
       "refuses": [
-        "booking flights"
+        {
+          "what": "flights",
+          "cues": [
+            "book your flights",
+            "booking flights",
+            "book flights",
+            "add flights",
+            "search for flights",
+            "look for flights",
+            "find you flights",
+            "price flights",
+            "include flights",
+            "flights as well",
+            "flights too",
+            "flights for you"
+          ]
+        }
       ]
     },
     "expect": {
@@ -69,29 +98,81 @@
   },
   {
     "id": "no-for-1500-03",
-    "firstMessage": "Two adults and a toddler, Berlin to the Algarve, the whole of August, beachfront, 1,500 euros all in for flights and hotel.",
+    "firstMessage": "Two adults and a toddler, Berlin to the Algarve, four weeks in October, beachfront, 1,500 euros all in for flights and hotel.",
     "persona": {
       "facts": {
         "originCity": "Berlin",
-        "destination": "Algarve",
-        "month": "August 2026",
-        "dates": "1 to 29 August 2026",
+        "destination": "the Algarve",
+        "month": "October 2026",
+        "dates": "1 to 29 October 2026",
         "nights": 28,
-        "adults": 2,
-        "infants": 1,
+        "partySize": "two adults and a toddler of two",
         "budget": "1500 EUR",
-        "budgetCovers": "flights and hotel together",
+        "budgetCovers": "flights and the hotel together",
         "nearBeach": true
       },
       "style": "firm about the budget",
       "refuses": [
-        "a higher budget",
-        "a different month"
+        {
+          "what": "a higher budget",
+          "cues": [
+            "higher budget",
+            "raise your budget",
+            "raise the budget",
+            "raising your budget",
+            "increase your budget",
+            "increase the budget",
+            "bigger budget",
+            "larger budget",
+            "stretch your budget",
+            "stretch the budget",
+            "more than your budget",
+            "above your budget",
+            "over your budget",
+            "beyond your budget",
+            "budget a little higher",
+            "lift your budget"
+          ]
+        },
+        {
+          "what": "a shorter trip",
+          "cues": [
+            "shorter trip",
+            "fewer nights",
+            "fewer than 28",
+            "shorten the stay",
+            "shorter stay",
+            "cut the trip",
+            "trim the trip",
+            "two weeks instead",
+            "three weeks instead",
+            "shorten your trip",
+            "reduce the nights"
+          ]
+        },
+        {
+          "what": "a different month",
+          "cues": [
+            "different month",
+            "another month",
+            "other months",
+            "outside october",
+            "change the month",
+            "travel in november",
+            "travel in september",
+            "later in the year",
+            "earlier in the year",
+            "shoulder season",
+            "move the dates",
+            "different dates",
+            "shift the dates"
+          ]
+        }
       ]
     },
     "expect": {
       "mustInclude": [
-        "not"
+        "raise the budget"
       ],
       "minFrontierCalls": 1,
       "maxFrontierCalls": 8,
