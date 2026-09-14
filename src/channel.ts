@@ -6,6 +6,7 @@ import { checkTotals } from './gates/checks.js'
 import { rehydrateRefs } from './gates/rehydrateGate.js'
 import type { GateOutcome } from './gates/types.js'
 import { formatMoney } from './money.js'
+import { rememberInferred } from './loop/inferred.js'
 import { emittedForProposal, type EmittedLink } from './repo/linkClicks.js'
 import { decideProposal, loadProposal } from './repo/proposals.js'
 import { sanitizeSourceId } from './sanitize.js'
@@ -365,5 +366,11 @@ export async function acceptCard(
     proposalId: args.proposalId, conversationId: args.conversationId,
     decision: 'accept', at: args.now,
   })
+  // What she changed on the way to yes, written into her memory marked as
+  // inferred, so her next notebook arrives pre-warmed. After the decision and
+  // before the hand-off, because the decision is the thing we learned from and
+  // the hand-off is the thing that cannot be undone: an accept she made is
+  // recorded either way, and `rememberInferred` never throws.
+  await rememberInferred(sql, { conversationId: args.conversationId, userId: args.userId })
   return handOffToBooking(sql, { ...args })
 }

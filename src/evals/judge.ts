@@ -292,12 +292,13 @@ export type Agreement = { agreed: number; total: number; meetsFloor: boolean }
 /**
  * How often the judge and she reached the same answer, with the denominator.
  *
- * Two values and not three. `course.proposals.decision` accepts 'accept' and
- * 'reject' (migration 0013) and nothing else, and the edit P3 calls the richest
- * signal in the system is module 7's subject rather than this lesson's: a third
- * value would be a column added for a reader that does not exist, which is the
- * exact defect 0013's own comment warns about. So `accept` is compared against
- * `pass` and `reject` against `fail`, and the constraint is not widened here.
+ * SPEC section 6 lists her answer as approve, edit or reject, and this function
+ * compares two values because `0013` allows two. Module 7 answered the third:
+ * on this branch an edit is a `revise_component` call against the proposal she
+ * is looking at (src/tools.ts, src/loop/inferred.ts), which is the categorical
+ * signal SPEC section 9 asks for, so the constraint is not widened and this
+ * calibration still compares what she decided against what the judge said.
+ * `accept` is compared against `pass` and `reject` against `fail`.
  *
  * An empty table does not meet the floor. Zero of zero is not agreement, it is
  * a calibration nobody performed, and a judge deployed on the strength of it
