@@ -410,7 +410,7 @@ async function failTurnUnlessLinkEmitted(
 ): Promise<void> {
   // `emitted` for the same reason the catch above reads it: the fallback below
   // is the write rule 6 forbids on a turn that emitted, close or no close.
-  const emitted = (await completeIfLinkEmitted(deps, claim, state, spendMicros)).emitted
+  const { emitted, closed } = await completeIfLinkEmitted(deps, claim, state, spendMicros)
   if (!emitted) {
     await failTurn(deps.sql, claim, reason, spendMicros, agentMessage)
     // AFTER the write it describes, and that ordering is the whole of what keeps
@@ -432,6 +432,17 @@ async function failTurnUnlessLinkEmitted(
   // both endings this function can reach write the row and the five failing
   // exits of `loop` inherit it from here. Last, because the label counts the
   // reply and whichever branch above is what wrote it.
+  //
+  // `emitted && !closed` is the one case that writes nothing, and it is a fence
+  // rather than a failure. `completeIfLinkEmitted` never throws: a `completeTurn`
+  // refused because another worker now owns this turn is caught, logged, and
+  // reported as `{ emitted: true, closed: false }`, so without this guard a
+  // superseded worker would carry on and insert the label row for a turn it lost.
+  // The winner would then lose `turn_labels_pkey` and log
+  // "turn labels not written", which is a sentence `evals/run.ts` reads as a turn
+  // missing from `turns labelled` when the row is in fact there. The loser writing
+  // nothing keeps that log line meaning exactly one thing.
+  if (emitted && !closed) return
   await labelTurn(deps.sql, {
     turnId: claim.turnId, conversationId: claim.conversationId, userId: claim.userId,
   })

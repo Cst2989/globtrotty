@@ -60,10 +60,51 @@ export function redactCurrency(delta: string): string {
  * swallowed from ordinary prose costs nothing because it is only swallowed when
  * a currency marker follows it.
  */
-const CURRENCY_SYMBOL = '[$€£¥]'
-const CURRENCY_WORD =
-  '(?:EUR|USD|GBP|CHF|SEK|NOK|DKK|PLN|CZK|JPY|euros?|dollars?|pounds?)'
-const AMOUNT = '\\d[\\d.,]*'
+/**
+ * Every marker this repository treats as money, and the ISO code each one means.
+ *
+ * ONE list, exported, because there were nearly two. Lesson 6.5's amount scanner
+ * (`quotedAmountsIn`, src/evals/trajectory.ts) needs the same set to read prices
+ * back OUT of prose, and it shipped with a shorter hand-written copy that knew
+ * six markers fewer than this one. The consequence was not a cosmetic drift: an
+ * amount this redactor would have removed but that scanner could not see is an
+ * amount that silently leaves the scorecard's denominator, which is the exact
+ * failure that check exists to make impossible. So the set lives here, where the
+ * stricter of the two readers is, and the other derives from it.
+ *
+ * The value is what a marker MEANS, which is what lets a reader compare an
+ * amount against a corpus priced in a currency rather than against a bare
+ * number. This redactor does not need the value and takes the keys alone.
+ *
+ * Plurals are spelled out rather than written `euros?`, because a map from
+ * marker to meaning cannot hold an optional character in a key. The alternation
+ * below is built longest-first so `EUROS` is tried before `EURO`.
+ */
+export const CURRENCY_MARKERS: Readonly<Record<string, string>> = {
+  $: 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY',
+  EUR: 'EUR', USD: 'USD', GBP: 'GBP', CHF: 'CHF', SEK: 'SEK', NOK: 'NOK',
+  DKK: 'DKK', PLN: 'PLN', CZK: 'CZK', JPY: 'JPY',
+  EURO: 'EUR', EUROS: 'EUR', DOLLAR: 'USD', DOLLARS: 'USD',
+  POUND: 'GBP', POUNDS: 'GBP',
+}
+
+/** What a matched marker means, case folded, for a reader that kept the marker. */
+export function currencyOfMarker(marker: string): string {
+  return CURRENCY_MARKERS[marker.toUpperCase()] ?? CURRENCY_MARKERS[marker] ?? ''
+}
+
+const MARKERS = Object.keys(CURRENCY_MARKERS)
+/** The symbols, as a character class. Every one of them is literal inside one. */
+export const CURRENCY_SYMBOL = `[${MARKERS.filter((m) => !/^[A-Z]+$/.test(m)).join('')}]`
+/** The codes and words, longest first so a prefix never wins over a longer marker. */
+export const CURRENCY_WORD = `(?:${MARKERS
+  .filter((m) => /^[A-Z]+$/.test(m))
+  .sort((a, b) => b.length - a.length || a.localeCompare(b))
+  .join('|')})`
+/** A digit run that may carry thousands separators and a decimal mark. */
+export const CURRENCY_AMOUNT = '\\d[\\d.,]*'
+
+const AMOUNT = CURRENCY_AMOUNT
 const CURRENCY_PATTERNS: RegExp[] = [
   new RegExp(`${CURRENCY_SYMBOL}\\s?${AMOUNT}`, 'gi'),
   new RegExp(`${AMOUNT}\\s?${CURRENCY_SYMBOL}`, 'gi'),

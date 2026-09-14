@@ -203,7 +203,7 @@ export function gradeOutput(
  * `questions_stayed_few` counts QUESTIONS and not `ask_user` calls. One call
  * carries one to three of them (`AskUser`, src/tools/registry.ts), and the three
  * shipped recordings put 3, 32 and 61 questions behind 1, 11 and 20 calls, so
- * counting calls understated `hotel-only-02` by three times. `maxQuestionsAsked`
+ * counting calls understated `hotel-only-02` by 2.9 times. `maxQuestionsAsked`
  * on a golden case is a ceiling on what a traveller is made to answer rather
  * than on how many times the desk opened its mouth. The detail prints both,
  * because a desk that asked nine things in three calls and one that asked nine

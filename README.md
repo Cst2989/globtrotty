@@ -1030,8 +1030,8 @@ ceilings of 10, 4 and 8, where the lesson 6.3 entry above recorded 21, 40 and 52
 read a different way, and the three recordings carry 59, 107 and 140 blocks the
 model emitted behind those. `questions_stayed_few` counts QUESTIONS rather than
 `ask_user` calls, at 3, 32 and 61 behind 1, 11 and 20 calls, so
-`portugal-toddler-01` passes it and the other two are red at three times what
-the old count showed.
+`portugal-toddler-01` passes it and the other two are red at 2.9 times what the
+old count showed on `hotel-only-02`.
 
 Open at lesson 6.5, and found by running the card rather than by reading the
 code: `every_number_has_a_search` reports `0/0` on all three cases, because
@@ -1045,12 +1045,50 @@ them puts a number where this check can see it. The check is right to say it
 could not look, and what it is waiting for is a case that reaches a booking
 link. Owner: a person, with the recording that case needs.
 
-Also open at lesson 6.5: `announcedButNeverCalled` matches one class of claim,
-the entry-requirements one. The class is larger than that regex: "I compared
-three neighbourhoods for you" is the same fault about a different subject, and a
-pattern per claim does not scale. The honest next step is deriving the claim from
-the tools the desk published rather than from a list of sentences. Owner: a
-person, or module 7 if its examples work wants the same derivation.
+Two things about that case are known before it is recorded. Its prices will be
+read by an amount scanner that now shares `src/channel.ts`'s marker set rather
+than a shorter copy of it, so a stay priced in pounds or krona reaches a verdict
+instead of reporting `0/0`, and the scanner keeps the currency beside the
+figure, so a corpus priced in EUR cannot back a number written in dollars. And
+it will grade RED on a sentence that is entirely honest: `handOffMessage`
+(src/cashier.ts) prints the total as well as each link's price, and a sum of two
+items is not any single item's price in the corpus, so the check will call the
+total an invention. That is a property of comparing against item prices rather
+than of the desk, and the fix is for the check to know a total when it sees one.
+Owner: the same person, in the same sitting.
+
+Also open at lesson 6.5, and it is open in BOTH directions:
+`announcedButNeverCalled` matches one class of claim, the entry-requirements
+one, and the regex and the class do not have the same edges.
+
+The class is larger than the regex. "I compared three neighbourhoods for you" is
+the same fault about a different subject, and a pattern per claim does not
+scale. The regex also reads only the first person and only the active voice, so
+"the entry rules were checked" and "the agency confirmed your visa" both pass
+unread.
+
+The regex was also wider than the class, which is the half a review caught. It
+required a claim verb and a subject somewhere in one sentence, in either order,
+so it fired on an instruction ("Check the baggage rules and bring your
+passport"), on a request quoted back ("You asked me to check whether your
+passport is still valid"), on a request for a detail ("Please confirm your
+passport number") and, worst, on the honest denial ("I have not checked the
+entry rules for Portugal yet"), which is the sentence this check exists to
+reward. It now requires the agency to name itself, in a completed tense, before
+the subject, and all four are pinned quiet in test/trajectory.test.ts. A
+narrower pattern misses more, which is the trade this check takes on purpose: a
+row that reddens on an honest denial is a row somebody turns off, and then the
+one fault a reply cannot betray goes unwatched.
+
+The clearing side has two known costs of its own, both pinned rather than
+described: a claim made in turn 1 is excused by a `research_destination` in turn
+6 that had not happened when the sentence was written, and a claim the desk
+backed with anything other than that one tool, a fact out of
+`course.user_memory` for instance, reads as an invention.
+
+The honest next step for all of it is deriving the claim from the tools the desk
+published rather than from a list of sentences. Owner: a person, or module 7 if
+its examples work wants the same derivation.
 
 Also open at lesson 6.5: the trace depends on a capture policy. `loadTrace` can
 only read a model call the ledger captured, and `capturePolicyFor`
@@ -1060,6 +1098,18 @@ possible, would silently shorten every trace and every counter derived from one,
 and nothing in this module would notice. What that needs is the per-call arity
 recorded beside the spend rather than inferred from a captured body. Owner:
 whoever adds the sampler.
+
+Also open at lesson 6.5: a lost label is lost for good, and only the eval counts
+the loss. A turn killed between its ending write and `labelTurn` is already
+`done` or `failed`, so `claimTurn` (src/repo/turns.ts) will never re-claim it,
+nothing backfills, and the row can never be written: every number in it was
+derived from rows that the ninety-day window will trim. The table's own header
+says a missing row is a fact and not a gap to paper over, and that is right, but
+a fact needs a reader. `npm run evals` prints `turns labelled 29/29` for an eval
+run and production has no equivalent, so the one place the gap would matter most
+is the one place nobody would see it. What it needs is a count of unlabelled
+terminal turns per day beside the other things an operator reads. Owner: module
+7, which is the first module to read this table for anything.
 
 `src/worker.ts` imports `labelTurn` from `src/evals/`, which is the harness
 depending on a directory named for the suite that reads it. The dependency is

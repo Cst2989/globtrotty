@@ -242,9 +242,10 @@ describe('grading the path', () => {
    * looked up backs it.
    */
   it('reaches a verdict on the two properties lesson 6.1 filed as null', () => {
-    const grade = gradeTrajectory(trace(['search_flights'], { quoted: [412] }), {
-      minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3,
-    }, new Map())
+    const grade = gradeTrajectory(
+      trace(['search_flights'], { quoted: [{ amount: 412, currency: 'EUR' }] }), {
+        minFrontierCalls: 1, maxFrontierCalls: 10, maxQuestionsAsked: 3,
+      }, new Map())
     const numbers = grade.checks.find((c) => c.name === 'every_number_has_a_search')!
     expect(numbers.passed).toBe(false)
     expect(numbers.detail).toBe('0/1 quoted amounts appear in the corpus.')

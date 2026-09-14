@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   announcedButNeverCalled, countersOf, loadTrace, provenanceRate, questionsBeforeGuesses,
-  type Trace, type TraceCall,
+  quotedAmountsIn, type Trace, type TraceCall,
 } from '../src/evals/trajectory.js'
 import { submitMessage } from '../src/handler.js'
 import { claimTurn } from '../src/repo/turns.js'
@@ -27,8 +27,23 @@ describe('grading the path', () => {
     const items = await mockSuppliers().hotel.search(STAY)
     const priced = new Map(items.map((i) => [i.sourceId, i]))
     const real = Number(items[0]!.price.minor) / 100
-    const out = provenanceRate(trace({ quoted: [real, 412] }), priced)
+    const quoted = [{ amount: real, currency: 'EUR' }, { amount: 412, currency: 'EUR' }]
+    const out = provenanceRate(trace({ quoted }), priced)
     expect(out).toEqual({ numerator: 1, denominator: 2 })
+  })
+
+  it('refuses to back a euro price with a dollar sign in front of it', async () => {
+    const items = await mockSuppliers().hotel.search(STAY)
+    const priced = new Map(items.map((i) => [i.sourceId, i]))
+    const real = Number(items[0]!.price.minor) / 100
+    // The same number, in the wrong currency. This is the retired check's own
+    // defect (test/regressions.test.ts names it: whole-unit numbers compared
+    // with no currency code beside them), and the replacement must not repeat
+    // it inside a docstring that says it does not.
+    expect(provenanceRate(trace({ quoted: [{ amount: real, currency: 'USD' }] }), priced))
+      .toEqual({ numerator: 0, denominator: 1 })
+    expect(provenanceRate(trace({ quoted: [{ amount: real, currency: 'EUR' }] }), priced))
+      .toEqual({ numerator: 1, denominator: 1 })
   })
 
   it('reports a reply with no amounts as unlooked-at rather than as clean', () => {
@@ -59,6 +74,85 @@ describe('grading the path', () => {
     // flagged it would be a check somebody turns off.
     expect(announcedButNeverCalled(trace({ replies: ['Bring your passports to the airport.'] })))
       .toHaveLength(0)
+  })
+
+  it('stays quiet on an instruction, a request, a quoted ask and a denial', () => {
+    // The four sentences the first version of this pattern flagged. Every one
+    // of them claims that nothing was done, or asks for something, and a check
+    // that reddens on the honest denial is worse than no check: it teaches the
+    // desk that saying "I have not checked yet" is what costs it a green row.
+    const quiet = [
+      'Check the baggage rules and bring your passport',
+      'You asked me to check whether your passport is still valid',
+      'I have not checked the entry rules for Portugal yet',
+      'Please confirm your passport number',
+    ]
+    expect(announcedButNeverCalled(trace({ replies: quiet }))).toEqual([])
+  })
+
+  it('still fires on the claim in every voice a desk writes it in', () => {
+    const claims = [
+      "I've checked the visa rules for you.",
+      'We confirmed the entry requirements with the consulate.',
+      'We looked up the visa rules before booking.',
+    ]
+    expect(announcedButNeverCalled(trace({ replies: claims }))).toHaveLength(3)
+  })
+
+  /**
+   * The two costs of clearing a claim with the whole conversation's calls,
+   * pinned rather than described. Both are documented on
+   * `announcedButNeverCalled` and neither is a defect to fix here: closing the
+   * first needs a turn id beside each reply, and closing the second needs the
+   * check to know every tool that could back a sentence.
+   */
+  it('misses a claim made before the call that clears it', () => {
+    const said = ['I checked the entry rules for Portugal and an EU passport is enough.']
+    // The reply is turn 1's and the research call is turn 6's, so the sentence
+    // was an invention at the moment it was written and reads as backed now.
+    const later = { ...call('research_destination', 0), turnId: 't6' }
+    expect(announcedButNeverCalled(trace({ replies: said, calls: [later] }))).toEqual([])
+  })
+
+  it('flags a claim the agency backed with anything but research_destination', () => {
+    const said = ['I checked the entry rules for Portugal and an EU passport is enough.']
+    // One tool clears this check and the desk has others. A fact read back out
+    // of course.user_memory reads here exactly like an invention.
+    expect(announcedButNeverCalled(trace({ replies: said, calls: [call('search_hotels', 0)] })))
+      .toHaveLength(1)
+  })
+})
+
+describe('reading an amount out of prose', () => {
+  it('keeps the currency, so a dollar figure never backs a euro corpus', () => {
+    expect(quotedAmountsIn('It is $412 all in.')).toEqual([{ amount: 412, currency: 'USD' }])
+    expect(quotedAmountsIn('It is 412 euros all in.')).toEqual([{ amount: 412, currency: 'EUR' }])
+  })
+
+  it('reads a marker the redactor knows and the first scanner did not', () => {
+    // `redactCurrency` (src/channel.ts) removes ten codes and four symbols from
+    // the model's prose. A scanner that knew four of them reported a sterling
+    // price as nothing to look at, which is the denominator shrinking in
+    // silence: the failure this check exists to make impossible.
+    expect(quotedAmountsIn('£412 per night')).toEqual([{ amount: 412, currency: 'GBP' }])
+    expect(quotedAmountsIn('1200 SEK per night')).toEqual([{ amount: 1200, currency: 'SEK' }])
+  })
+
+  it('parses both spellings of a decimal mark rather than returning NaN', () => {
+    // "412,50" is the form `redactCurrency`'s own docstring names, and the first
+    // version of this scanner made it NaN, which matches nothing in a corpus and
+    // so counted as an invented price for ever.
+    expect(quotedAmountsIn('412,50 EUR')).toEqual([{ amount: 412.5, currency: 'EUR' }])
+    expect(quotedAmountsIn('412.50 EUR')).toEqual([{ amount: 412.5, currency: 'EUR' }])
+    expect(quotedAmountsIn('1,742 EUR')).toEqual([{ amount: 1742, currency: 'EUR' }])
+    expect(quotedAmountsIn('1.742,50 EUR')).toEqual([{ amount: 1742.5, currency: 'EUR' }])
+    for (const { amount } of quotedAmountsIn('412,50 EUR and 1,742 EUR and 9 GBP')) {
+      expect(Number.isFinite(amount)).toBe(true)
+    }
+  })
+
+  it('reads no amount out of a year, a flight number or a time', () => {
+    expect(quotedAmountsIn('flight TP1234 at 07:45 in 2026')).toEqual([])
   })
 })
 
