@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Variant } from './loop/release.js'
 import { SEATS, type Seat } from './seats.js'
 import { type Desk } from './tools/registry.js'
 
@@ -20,6 +21,8 @@ import { type Desk } from './tools/registry.js'
 export type LoadedDesk = {
   name: Desk
   seat: Seat
+  /** Which arm this prompt was assembled for (src/loop/release.ts), so a caller that records a row can say which without re-deriving it. */
+  variant: Variant
   prompt: string
   /** First twelve hex characters of the prompt's SHA-256: a change to the file changes the version. */
   promptVersion: string
@@ -95,20 +98,29 @@ export function loadPrompt(
 const EXAMPLES_DIR = path.join(DIR, 'examples')
 
 /**
- * The examples file for a desk, comment-stripped, or the empty string when
- * there is none.
+ * The examples file for a desk and an arm.
  *
- * A missing file is not an error. The front desk has no examples and never
- * will, because it publishes no tools and an example of a booked itinerary is
- * not something an FAQ answer can act on, and a fresh checkout of this
- * repository has no planning examples either until somebody runs the refresh
- * and commits its output.
+ * A missing CONTROL file is not an error: a fresh checkout has no selected
+ * examples until somebody runs the refresh and commits its output. A missing
+ * CANDIDATE file IS an error, and the asymmetry is the point. A canary that
+ * quietly served the control prompt to the candidate arm would report no
+ * difference between two arms that were never different, which is the most
+ * expensive possible reading of this instrument: it retires a change that was
+ * never tested.
  *
  * Read through the same comment stripper the desk file goes through, so the
  * provenance block never reaches the model and never enters the hash.
  */
-function loadExamples(name: Desk): string {
-  const file = path.join(EXAMPLES_DIR, `${name}.md`)
+function loadExamples(name: Desk, variant: Variant): string {
+  const file = variant === 'candidate'
+    ? path.join(EXAMPLES_DIR, `${name}-candidate.md`)
+    : path.join(EXAMPLES_DIR, `${name}.md`)
+  if (variant === 'candidate' && !existsSync(file)) {
+    throw new Error(
+      `No candidate examples for the ${name} desk at ${file}. A release canary that falls `
+      + 'back to control reports that a change made no difference when it was never served.',
+    )
+  }
   if (!existsSync(file)) return ''
   return withoutComments(readFileSync(file, 'utf8')).trim()
 }
@@ -128,11 +140,11 @@ function loadExamples(name: Desk): string {
  * cache breakpoints are placed against (lesson 5.6) and the part that changes
  * monthly belongs behind the part that changes rarely.
  */
-export function loadDesk(name: Desk): LoadedDesk {
+export function loadDesk(name: Desk, variant: Variant = 'control'): LoadedDesk {
   const base = loadPrompt(path.join(DIR, `${name}-desk.md`), `<!-- desk: ${name} -->`)
-  const examples = loadExamples(name)
+  const examples = loadExamples(name, variant)
   const prompt = examples === '' ? base.prompt : `${base.prompt}\n\n${examples}`
-  return { name, seat: DESK_SEATS[name], prompt, promptVersion: promptVersion(prompt) }
+  return { name, seat: DESK_SEATS[name], variant, prompt, promptVersion: promptVersion(prompt) }
 }
 
 /** Fills {{name}} slots; a slot with no value is an error, because a half-filled prompt reads as an instruction. */

@@ -44,6 +44,11 @@ export async function handle(
     outcome: result.outcome,
     steps: result.steps,
     desk: result.desk,
+    // Control, and not a call through variantFor (src/loop/release.ts).
+    // newConversation() mints the literal id 'conv-1' and never writes a
+    // conversation row, so every caller of handle() would land in the same
+    // arm anyway, and putting a traffic split on a path with one fixed id
+    // would be a split in name only.
     promptVersion: loadDesk(result.desk).promptVersion,
   }
 }

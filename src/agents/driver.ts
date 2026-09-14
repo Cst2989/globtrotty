@@ -4,6 +4,7 @@ import type { ModelClient } from '../client.js'
 import { loadDesk, renderPrompt } from '../desks.js'
 import { textOfBlocks, whichCeiling, type ContentBlock, type Limits } from '../engine.js'
 import { isUnbilled } from '../errors.js'
+import { variantFor } from '../loop/release.js'
 import { SYSTEM_CACHE_TTL } from '../model/cache.js'
 import { callModel, estimateInputTokens, type CallArgs, type ModelResult } from '../model/client.js'
 import { costMicros } from '../pricing.js'
@@ -90,7 +91,10 @@ export function makeDriver(deps: DriverDeps): Agent {
     const chosen = await selectDesk(deps, ctx)
     if (chosen.kind === 'limit') return limitReachedStep(chosen.reached, 0n)
     const { desk: deskName, costMicros: routingMicros } = chosen
-    const desk = loadDesk(deskName)
+    // Which arm this conversation is in, from its id, so every step of every
+    // turn of this conversation reads the same prompt and a resumed turn reads
+    // the one it started with (src/loop/release.ts).
+    const desk = loadDesk(deskName, variantFor(ctx.conversationId))
     const seat = deskName === 'front' ? SEATS.front_desk : SEATS.driver
     // The row's label follows the seat, and does not stay the literal 'driver'
     // lesson 5.1 wrote when the driver had one desk. `group by seat` over
