@@ -1266,6 +1266,14 @@ course.agent_events on the list of append-only tables with no retention policy
 (main's backlog row 3b.1). Nothing reaps any of the three. Owner: a person, when
 there is a retention policy to implement.
 
+Open at lesson 7.3: `survival:booked_unchanged` on the eval card reads 0/0 on
+every checkout, because course.conversions has no writer outside
+test/conversions.test.ts and a real feed is an affiliate account this branch
+does not have. The row is here rather than absent because a rate with a zero
+denominator is a measurement nobody made, and hiding it would make the card
+better looking and less true. Owner: a person, with an affiliate account and
+the feed lesson 7.1's `recordConversion` takes.
+
 ## What is next
 
 `LESSONS.md` lists every checkpoint tag next to the lesson it belongs to and the proof that lesson is done. Start there if you want to jump ahead or replay a specific lesson.

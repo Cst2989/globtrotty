@@ -2,6 +2,18 @@ import type postgres from 'postgres'
 import type { ItemRef } from '../gates/types.js'
 import { fromStored, toStored, type Notebook } from '../notebook.js'
 
+/**
+ * The shape `recordProposal` writes into `refs` today: {sourceId, quantity, slot}
+ * per item, which is what `ProposalRefsSchema` validates.
+ *
+ * Bumped in the same commit that changes what is written, never in a later one.
+ * A version stamped after the shape moved describes the previous commit's rows,
+ * which is worse than no version: it is a wrong answer that reads like a right
+ * one, and `assertComparableShape` would then wave through exactly the
+ * comparison it exists to refuse.
+ */
+export const REFS_SCHEMA_VERSION = 1
+
 export type Proposal = {
   id: string
   conversationId: string
@@ -19,12 +31,19 @@ export type Proposal = {
   requirementsSnapshot: Notebook | null
   decision: 'accept' | 'reject' | null
   decidedAt: Date | null
+  /**
+   * The shape `refs` was written in. Not optional and never inferred: a row
+   * written before 0021 carries the column's default of 1, which that
+   * migration's comment stands behind.
+   */
+  refsSchemaVersion: number
 }
 
 type Row = {
   id: string; conversation_id: string; user_id: string; turn_id: string | null
   refs: ItemRef[]; requirements_snapshot: unknown
   decision: 'accept' | 'reject' | null; decided_at: Date | null
+  refs_schema_version: number
 }
 
 /**
@@ -54,13 +73,16 @@ export async function recordProposal(
     refs: ItemRef[]; requirementsSnapshot: Notebook
   },
 ): Promise<string> {
-  const [row] = await sql<{ id: string; requirements_snapshot: unknown }[]>`
+  const [row] = await sql<{
+    id: string; requirements_snapshot: unknown; refs_schema_version: number
+  }[]>`
     insert into course.proposals
-      (conversation_id, user_id, turn_id, refs, requirements_snapshot)
+      (conversation_id, user_id, turn_id, refs, requirements_snapshot, refs_schema_version)
     values (${args.conversationId}, ${args.userId}, ${args.turnId},
             ${sql.json(args.refs as never)},
-            ${sql.json(toStored(args.requirementsSnapshot) as never)})
-    returning id, requirements_snapshot`
+            ${sql.json(toStored(args.requirementsSnapshot) as never)},
+            ${REFS_SCHEMA_VERSION})
+    returning id, requirements_snapshot, refs_schema_version`
   if (!row) throw new Error('recordProposal: insert returned no row')
   // The returning clause is read, not decorative. The column is nullable
   // because every pre-0018 row has a null in it, so a null written by THIS
@@ -69,6 +91,15 @@ export async function recordProposal(
   // like every writer in this directory.
   if (row.requirements_snapshot === null) {
     throw new Error(`recordProposal: wrote proposal ${row.id} with no requirements snapshot`)
+  }
+  // Read back for the same reason the snapshot is: this is the writer whose job
+  // is to make a mismatched comparison impossible, and a stamp it did not
+  // actually write is a row every reader will treat as comparable.
+  if (row.refs_schema_version !== REFS_SCHEMA_VERSION) {
+    throw new Error(
+      `recordProposal: wrote proposal ${row.id} at refs schema `
+      + `${row.refs_schema_version}, expected ${REFS_SCHEMA_VERSION}`,
+    )
   }
   return row.id
 }
@@ -122,6 +153,7 @@ function toProposal(row: Row): Proposal {
       : fromStored(row.requirements_snapshot),
     decision: row.decision,
     decidedAt: row.decided_at,
+    refsSchemaVersion: row.refs_schema_version,
   }
 }
 
@@ -133,7 +165,7 @@ export async function loadProposal(
 ): Promise<Proposal | null> {
   const rows = await sql<Row[]>`
     select id, conversation_id, user_id, turn_id, refs, requirements_snapshot,
-           decision, decided_at
+           decision, decided_at, refs_schema_version
       from course.proposals
      where id = ${proposalId} and conversation_id = ${conversationId}`
   const row = rows[0]
@@ -158,7 +190,8 @@ export async function decidedProposals(
   sql: postgres.Sql, args: { userId?: string; limit?: number } = {},
 ): Promise<Proposal[]> {
   const rows = await sql<Row[]>`
-    select id, conversation_id, user_id, turn_id, refs, requirements_snapshot, decision, decided_at
+    select id, conversation_id, user_id, turn_id, refs, requirements_snapshot, decision, decided_at,
+           refs_schema_version
       from course.proposals
      where decision is not null
        ${args.userId ? sql`and user_id = ${args.userId}` : sql``}

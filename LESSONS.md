@@ -46,6 +46,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-6 | The judge | npm run migrate, then npm test (test/judge.test.ts, test/eval-schedule.test.ts; test/judge.live.test.ts reports SKIPPED without LIVE_MODEL=1), then npm run evals |
 | lesson-7-1 | The signal we already collect | npm run migrate, then npm test (test/conversions.test.ts, test/writers.test.ts, test/signals.test.ts) |
 | lesson-7-2 | Three requirements | npm test (test/derive.test.ts), then npm run typecheck |
+| lesson-7-3 | The inversion bug | npm run migrate, then npm test (test/similarity.test.ts), then npm run evals |
 
 ## How this branch was built
 
@@ -326,6 +327,16 @@ site rather than buried in an operator.
 
 **Every derived number carries the rows that produced it.** Including the
 absent one, whose rows are the empty list, which is a fact and not a gap.
+
+**The version goes on the column that has the shape.** SPEC calls it
+itinerary_schema_version on a table with an itinerary. This branch stores refs,
+so the stamp is refs_schema_version, and the migration says what the divergence
+is and why. A column named after a column this table does not have is the defect
+class this repository has paid most for.
+
+**The way to know a test discriminates is to break the thing it guards.**
+Removing one line from `similarity` leaves three of five cases green, and the
+two that go red are the two nobody would have written without this lesson.
 
 ## Hand-offs
 

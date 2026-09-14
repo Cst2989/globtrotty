@@ -122,7 +122,8 @@ import {
 } from '../src/evals/judge.js'
 import { replayGatesOnce } from '../src/evals/replay.js'
 import { runCase } from '../src/evals/runner.js'
-import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
+import { renderScorecard, scorecardOf, withRows, type ScorecardRow } from '../src/evals/scorecard.js'
+import { GOLDEN_UNCHANGED_FLOOR, survivalScores } from '../src/loop/similarity.js'
 import { decidedProposals } from '../src/repo/proposals.js'
 import { readTurnLabels } from '../src/repo/turnLabels.js'
 import { makeSimulatedUser } from '../src/evals/sim-user.js'
@@ -292,9 +293,23 @@ async function main(): Promise<void> {
       }
     }
     const k = [...runs].map(([caseId, passed]) => passAtK({ caseId, passed }))
+    // The survival row. It reads course.conversions, which is empty on this
+    // branch and on any branch a reader checks out, so this prints 0/0 (n/a) and
+    // that is the honest number rather than a missing row. A rate whose
+    // denominator is zero is a rate nobody measured, and the card has said so
+    // since lesson 6.1: the numerator drops when something breaks and the
+    // denominator does not.
+    const survival: ScorecardRow = { name: 'survival:booked_unchanged', tally: { passed: 0, failed: 0, notEvaluated: 0 } }
+    for (const userId of evalUsers) {
+      for (const score of (await survivalScores(sql, { userId })).values()) {
+        if (score.basis === 'none') survival.tally.notEvaluated += 1
+        else if (score.value > GOLDEN_UNCHANGED_FLOOR) survival.tally.passed += 1
+        else survival.tally.failed += 1
+      }
+    }
     const card = withRows(
       scorecardOf(graded, cases.length * RUNS),
-      [...gateRows(await gateMetrics(sql, { userId: evalUsers })), ...passAtKRows(k)],
+      [...gateRows(await gateMetrics(sql, { userId: evalUsers })), survival, ...passAtKRows(k)],
     )
     console.log(renderScorecard(card))
     for (const flaky of k.filter((r) => r.flaky)) {
