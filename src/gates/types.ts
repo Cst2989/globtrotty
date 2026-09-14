@@ -27,9 +27,11 @@ import type { SupplierItem, SupplierKind } from '../supplier/types.js'
  * beside that writer, so it is lesson 4.5's to state and not this file's to
  * predict.
  *
- * 'reviewer' is deliberately NOT here. It needs a model and it arrives in
- * module 5, and keeping it out of `GateName` is what stops the pipeline writing
- * a row claiming a reviewer ran.
+ * 'reviewer' is deliberately NOT here. It needs a model, and the seat arrived at
+ * lesson 6.6 as the offline judge (src/seats.ts, src/evals/judge.ts). Keeping it
+ * out of `GateName` is what stops the pipeline writing a row claiming a reviewer
+ * ran, and it is still out for that reason: the judge's verdicts are scorecard
+ * output over proposals the gates already approved, never a gate verdict.
  */
 export const GATE_NAMES = [
   'provenance', 'freshness', 'slots', 'currency', 'totals', 'budget', 'dates',

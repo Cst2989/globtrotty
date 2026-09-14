@@ -43,6 +43,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-3 | Golden trips and the simulated traveller | npm run migrate, then npm test (test/golden-cases.test.ts, test/sim-user.test.ts, and test/eval-run.test.ts, which takes about four minutes against a remote database and seconds against a local one), then npm run evals for three cases driven end to end |
 | lesson-6-4 | Pinning variance | npm run migrate, then npm test (test/variance.test.ts, test/eval-limits.test.ts), then npm run evals -- --runs 3 for pass^k over three pinned runs |
 | lesson-6-5 | Trajectory grading | npm run migrate, then npm test (test/trajectory.test.ts, test/turn-labels.test.ts), then npm run evals for rates with denominators |
+| lesson-6-6 | The judge | npm run migrate, then npm test (test/judge.test.ts, test/eval-schedule.test.ts; test/judge.live.test.ts reports SKIPPED without LIVE_MODEL=1), then npm run evals |
 
 ## How this branch was built
 
@@ -276,6 +277,27 @@ and it held only until the notebook was allowed to move underneath it. One
 column written at save time is the whole fix, and it could not have been added
 later: the prior notebook states were overwritten in place and no history of
 them exists anywhere in this schema.
+
+**A judge with no calibration is a number, and a number is not a decision.**
+`judgeAgreement` compares the judge against her own accept and reject rows and
+refuses to call it deployable under eighty percent, and an empty calibration set
+does not meet the floor either, because zero of zero is a calibration nobody
+performed. The arithmetic is pinned over a hand-written table rather than over a
+recording, for the reason a recorded verdict pins the parser and nothing else.
+
+**The instrument was never the missing half; the trigger was.** Lesson 5.6's
+canary pins one prompt at one seat and fires when somebody runs it. What catches
+a provider moving weights under a stable alias is a score that falls on a clock,
+which is why the schedule is a table this repository can select from rather than
+a paragraph about what one would do before a migration.
+
+**A seat that grades the thing it is cannot be trusted to grade it.** The judge
+runs on `SEATS.reviewer`, Haiku with no effort and 1,024 tokens, against the
+driver's Opus at high effort with 16,000, so the two differ by model, by
+configuration and by `model_config_id`. That is as far as one provider's key
+reaches: the finding the rule comes from is about the FAMILY, and README.md
+carries the rest of it as a residual rather than as a claim this branch can
+make.
 
 ## Hand-offs
 

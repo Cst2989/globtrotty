@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { vi } from 'vitest'
 import type postgres from 'postgres'
+import type { Limits } from '../src/engine.js'
 import { submitMessage } from '../src/handler.js'
 import { HER_MESSAGE } from '../src/her.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -17,9 +18,35 @@ const LIMITS = DEFAULT_LIMITS
 // for the same reason USER is.
 const OTHER_A = randomUUID()
 const OTHER_B = randomUUID()
-const deps = (sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined)) => ({
-  sql, limits: LIMITS, invoke,
-})
+const deps = (
+  sql: postgres.Sql, invoke = vi.fn().mockResolvedValue(undefined), limits: Limits = LIMITS,
+) => ({ sql, limits, invoke })
+
+/**
+ * `LIMITS` with the global ceiling lifted just above what the account has
+ * already spent today, for the two cases below that are about HER daily
+ * ceiling and about the message she gets for it.
+ *
+ * `whyCapped` (src/engine.ts) checks the GLOBAL ceiling first, and that ceiling
+ * is cross-user and per UTC day, so those cases' verdict was decided by rows
+ * they do not own. `npm run evals` commits one `course.daily_usage` row per
+ * case under a randomUUID user that nothing reads again, so a day with enough
+ * eval runs in it puts the account within $15 of the $50 global ceiling, her
+ * own ceiling row pushes it over, and a case asserting the DAILY message gets
+ * the account one. The suite then goes red for a reason that has nothing to do
+ * with the code under test.
+ *
+ * Read from today's ACTUAL total rather than set to a large constant, and read
+ * inside the transaction so it accounts for her own row, which is the idiom the
+ * global-ceiling case below already uses and for the reason written there:
+ * deleting every row for today to force a clean slate would delete a row this
+ * test does not own.
+ */
+async function dailyOnly(sql: postgres.Sql): Promise<Limits> {
+  const [row] = await sql`select coalesce(sum(cost_micros), 0)::text as total
+                            from course.daily_usage where day = (now() at time zone 'utc')::date`
+  return { ...LIMITS, globalCeilingMicros: BigInt(row!.total as string) + 1n }
+}
 
 describeDb('submitMessage', () => {
   it('creates a conversation, a message, and a queued turn, then invokes', async () => {
@@ -128,7 +155,7 @@ describeDb('submitMessage', () => {
     await withTestDb(async (sql) => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
                 values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
-      const r = await submitMessage(deps(sql), {
+      const r = await submitMessage(deps(sql, undefined, await dailyOnly(sql)), {
         userId: USER, conversationId: null, message: 'a very expensive trip to Japan', idempotencyKey: 'i1',
       })
       expect(r.status).toBe('limit_reached')
@@ -151,7 +178,7 @@ describeDb('submitMessage', () => {
     await withTestDb(async (sql) => {
       await sql`insert into course.daily_usage (user_id, day, cost_micros)
                 values (${USER}, (now() at time zone 'utc')::date, ${LIMITS.dailyCeilingMicros.toString()})`
-      const d = deps(sql)
+      const d = deps(sql, undefined, await dailyOnly(sql))
       const first = await submitMessage(d, {
         userId: USER, conversationId: null, message: 'a very expensive trip to Japan', idempotencyKey: 'same-capped-press',
       })

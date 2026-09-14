@@ -72,6 +72,19 @@
  * this run's turns carry a label row in `course.turn_labels`, and how many of
  * the amounts the agency put in prose match a price its own corpus holds.
  *
+ * From lesson 6.6 the run is one of the three entries in `evals/schedule.ts`,
+ * chosen with `--schedule <name>` and defaulting to `per-pr`. The entry decides
+ * the case selection, the run count, whether the path sections run and whether
+ * the JUDGE runs. `per-pr` is the default and its `judge` is false, so
+ * `npm run evals` stays keyless and needs only `DATABASE_URL`, which is what
+ * keeps this a proof command a reader can run. The judge lives on the nightly
+ * run: `--schedule nightly` calls a model per decided proposal and needs a key
+ * and a billed account, and it is the run whose agreement line says whether the
+ * judge is deployable at all.
+ *
+ * `--runs` stays and overrides the schedule's own count, so a reader can ask for
+ * three runs of the per-PR selection without editing the table.
+ *
  * `replayClient` comes from `test/`, which is the one place this runner reaches
  * into that directory. It is the branch's only keyless model client and a copy
  * under `src/` would be two clients to keep in step, so `tsconfig.json` compiles
@@ -89,17 +102,22 @@
 import 'dotenv/config'
 import { config } from 'dotenv'
 import type postgres from 'postgres'
+import { liveClient } from '../src/client.js'
 import { connect } from '../src/db.js'
 import { fixtureFor, loadGoldenCases } from '../src/evals/cases.js'
 import { gateMetrics, gateRows } from '../src/evals/gateMetrics.js'
 import type { Grade } from '../src/evals/grade.js'
+import { AGREEMENT_FLOOR, judgeAgreement, runJudge, type Labelled } from '../src/evals/judge.js'
+import { replayGates } from '../src/evals/replay.js'
 import { runCase } from '../src/evals/runner.js'
 import { renderScorecard, scorecardOf, withRows } from '../src/evals/scorecard.js'
+import { decidedProposals } from '../src/repo/proposals.js'
 import { readTurnLabels } from '../src/repo/turnLabels.js'
 import { makeSimulatedUser } from '../src/evals/sim-user.js'
 import { casePassed, evalNow, passAtK, passAtKRows, EVAL_TODAY, RECORDED_WORLD_SEED } from '../src/evals/variance.js'
 import { EVAL_LIMITS } from '../src/limits.js'
 import { replayClient } from '../test/model/replay.js'
+import { SCHEDULE, selectionFor, type ScheduleName } from './schedule.js'
 
 // The guard is scripts/demo.ts's, word for word: two scripts giving different
 // advice about the same missing variable is how a reader learns to ignore both.
@@ -109,15 +127,40 @@ if (!process.env.DATABASE_URL) {
   process.exit(1)
 }
 
+/** The value after a flag, or undefined. Read off argv rather than through a flag library: there are two. */
+const flag = (name: string): string | undefined =>
+  process.argv.find((_, i) => process.argv[i - 1] === name)
+
 /**
- * `npm run evals -- --runs 3`. One run by default: pass^k over k=1 is not a
- * measurement, and the per-PR run is not the place to pay for one.
+ * `npm run evals -- --schedule nightly`. The per-PR entry by default, because
+ * it is the one that runs keyless and the one COURSE SPEC's proof command
+ * names.
  *
- * Read off argv rather than through a flag library, because this is the only
- * flag the script has. A value that is not a number, or is zero, falls back to
- * one rather than running the suite NaN times.
+ * An unknown name exits 1 rather than falling back to the default. A run that
+ * silently graded the per-PR selection while its operator believed it was the
+ * nightly one would report a score under the wrong denominator, with no judge
+ * and no sign that anything was missing.
  */
-const RUNS = Math.max(1, Math.trunc(Number(process.argv.find((a, i) => process.argv[i - 1] === '--runs') ?? 1)) || 1)
+const scheduleArg = flag('--schedule') ?? 'per-pr'
+if (!Object.hasOwn(SCHEDULE, scheduleArg)) {
+  console.error(`Unknown --schedule ${scheduleArg}. One of: ${Object.keys(SCHEDULE).join(', ')}.`)
+  process.exit(1)
+}
+const SCHEDULED = SCHEDULE[scheduleArg as ScheduleName]
+
+/**
+ * `npm run evals -- --runs 3`, overriding the schedule's own count, so a reader
+ * can ask for three runs of the per-PR selection without editing the table.
+ *
+ * A value that is not a number, or is zero, falls back to one rather than
+ * running the suite NaN times. Absent, the schedule decides: pass^k over k=1 is
+ * not a measurement, and the per-PR entry is the one that says so by asking for
+ * one run.
+ */
+const runsArg = flag('--runs')
+const RUNS = runsArg === undefined
+  ? SCHEDULED.runs
+  : Math.max(1, Math.trunc(Number(runsArg)) || 1)
 
 /**
  * Deletes everything this run wrote, by the ids this run minted, children first.
@@ -154,7 +197,9 @@ async function deleteRunRows(sql: postgres.Sql, userIds: string[]): Promise<void
 }
 
 async function main(): Promise<void> {
-  const cases = loadGoldenCases()
+  const cases = selectionFor(SCHEDULED.name, loadGoldenCases())
+  console.log(`schedule ${SCHEDULED.name}: ${cases.length} cases, ${RUNS} run(s) each, `
+    + `judge ${SCHEDULED.judge ? 'on' : 'off'}`)
   const graded: { caseId: string; grades: Grade[] }[] = []
   const evalUsers: string[] = []
   // One entry per run that finished, carrying the three things the rate section
@@ -231,17 +276,69 @@ async function main(): Promise<void> {
     // number. `turns labelled` short of `turns` is a finding and not a rounding:
     // it names turns whose write did not happen, and `labelTurn`
     // (src/evals/trajectory.ts) logged each one with its id on the way past.
-    const labels = (await Promise.all(evalRuns.map((r) =>
-      readTurnLabels(sql, { conversationId: r.conversationId, userId: r.userId })))).flat()
-    // Distinct ids, because `invokeInProcess` (src/evals/conversation.ts) pushes
-    // a turn id once per INVOCATION and a turn handed back for a later one is
-    // invoked twice. The label table holds one row per turn, so a denominator
-    // that counted invocations would report a gap on every continuation.
-    const turns = evalRuns.reduce((n, r) => n + new Set(r.turnIds).size, 0)
-    const quoted = labels.reduce((n, l) => n + l.pricesQuoted, 0)
-    const unbacked = labels.reduce((n, l) => n + l.unbackedPrices, 0)
-    console.log(`  turns labelled       ${labels.length}/${turns}`)
-    console.log(`  prices with a search ${quoted - unbacked}/${quoted}`)
+    if (SCHEDULED.trajectory) {
+      const labels = (await Promise.all(evalRuns.map((r) =>
+        readTurnLabels(sql, { conversationId: r.conversationId, userId: r.userId })))).flat()
+      // Distinct ids, because `invokeInProcess` (src/evals/conversation.ts) pushes
+      // a turn id once per INVOCATION and a turn handed back for a later one is
+      // invoked twice. The label table holds one row per turn, so a denominator
+      // that counted invocations would report a gap on every continuation.
+      const turns = evalRuns.reduce((n, r) => n + new Set(r.turnIds).size, 0)
+      const quoted = labels.reduce((n, l) => n + l.pricesQuoted, 0)
+      const unbacked = labels.reduce((n, l) => n + l.unbackedPrices, 0)
+      console.log(`  turns labelled       ${labels.length}/${turns}`)
+      console.log(`  prices with a search ${quoted - unbacked}/${quoted}`)
+    }
+    // The judge, and the two lines that say whether anybody may act on it.
+    //
+    // It runs over the proposals SHE has already decided rather than over the
+    // ones this run produced, because the number being computed is agreement
+    // with her and a proposal nobody answered is not a label. The gates are
+    // replayed first so the judge is shown the server's own rehydrated items
+    // and never the model's prose about them, and a replay that cannot reach a
+    // verdict is a proposal this loop drops rather than one it guesses at.
+    //
+    // `liveClient` and not `replayClient`: there is one judge fixture and a
+    // hundred proposals, so this section is the part of the card that costs
+    // money. That is why `per-pr` turns it off and why the default run is
+    // keyless.
+    if (SCHEDULED.judge) {
+      const decided = await decidedProposals(sql, { limit: 100 })
+      const client = liveClient()
+      const labelled: Labelled[] = []
+      for (const p of decided) {
+        try {
+          const replayed = await replayGates(sql, {
+            proposalId: p.id, conversationId: p.conversationId, userId: p.userId,
+            now: evalNow(), today: EVAL_TODAY,
+          })
+          const verdict = await runJudge(
+            { sql, client, ctx: { userId: p.userId, conversationId: p.conversationId, turnId: p.turnId }, now: Date.now },
+            replayed.outcome,
+          )
+          // A verdict that could not be read is not a disagreement. It is dropped
+          // from the numerator AND from the agreement's denominator, so the rate
+          // never improves because a reply was unparseable, and the line below
+          // prints the decided count beside it so the drop is visible rather
+          // than absorbed. A refused outcome lands here too: `runJudge` returns
+          // null for a proposal the gates would reject today, which is a
+          // proposal the rubric's first paragraph says it has no question about.
+          if (verdict) labelled.push({ proposalId: p.id, decision: p.decision!, verdict: verdict.verdict })
+        } catch (err) {
+          // Named on the way past and counted out of the numerator only, the
+          // same shape the case loop above uses. A proposal written before
+          // migration 0018 carries no requirements snapshot and `replayGates`
+          // refuses it rather than replaying against the live notebook, and one
+          // such row must not take down a card computed over ninety-nine
+          // others.
+          console.error(`proposal ${p.id} could not be judged: ${String(err)}`)
+        }
+      }
+      const agreement = judgeAgreement(labelled)
+      console.log(`  judge agreement      ${agreement.agreed}/${agreement.total}`
+        + ` of ${decided.length} decided proposals`)
+      console.log(`  deployable           ${agreement.meetsFloor ? 'yes' : `no, floor is ${AGREEMENT_FLOOR}`}`)
+    }
     await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })

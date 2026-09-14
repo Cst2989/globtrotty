@@ -17,9 +17,12 @@ import type { GateName } from '../gates/types.js'
  *    convention held up by a code comment.
  *
  * `GateColumn` is wider than `GateName` by one value. `course.gate_results.gate`
- * accepts 'reviewer' (migration 0012) and `GateName` does not, so the reviewer
- * seat module 5 adds can write here without a migration, and the pipeline
- * cannot write a row claiming a reviewer ran.
+ * accepts 'reviewer' (migration 0012) and `GateName` does not, so a reviewer
+ * could write here without a migration, and the pipeline cannot write a row
+ * claiming a reviewer ran. Nothing writes such a row yet. The seat exists from
+ * lesson 6.6 and the judge on it (src/evals/judge.ts) records its verdicts on
+ * the scorecard rather than in this table, because a judge's answer is not a
+ * gate's and a gate row is the one thing the cashier reads.
  */
 type GateColumn = GateName | 'reviewer'
 export type GateResultRow =

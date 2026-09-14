@@ -42,12 +42,14 @@ export const MAX_STORED = 64_000
  * written here, exercised by test/capture.test.ts, and waiting for the lesson
  * that captures a cheap seat. README.md carries it as a residual.
  *
- * Main names a third always-full seat, `reviewer`. This branch has no reviewer:
- * `SEATS` has `driver`, `cheap`, `front_desk`, `scout` and `monitor`, and
- * `GATE_NAMES` deliberately leaves `reviewer` out for the same reason, so that
- * the pipeline cannot write a row claiming a reviewer ran. Module 6 adds the
- * seat and adds it here in the same commit; naming it now would be a branch no
- * `SeatName` can reach and a comment describing main rather than this branch.
+ * Main names a third always-full seat, `reviewer`, and this branch's `reviewer`
+ * (lesson 6.6) is deliberately not on that list. Main's reviewer grades a turn
+ * and its prompts are the corpus; this one is the offline judge
+ * (src/evals/judge.ts), it calls `pgSink` with no capture fields at all, so its
+ * `capture_policy`, `system_prompt`, `user_prompt` and `response` are NULL the
+ * way a scout's are, and holding it at `full` here would name a policy no
+ * caller performs. `GATE_NAMES` still leaves `reviewer` out, so the pipeline
+ * cannot write a gate row claiming a reviewer ran.
  *
  * `sampled_out` is in the type and is returned by nothing. The column's check
  * constraint accepts it (migration 0017) so that a sampler added later is a

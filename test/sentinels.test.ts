@@ -80,6 +80,13 @@ describe('the sentinel grep', () => {
     expect(findSentinels(['src/desks', 'src/agents/prompts'])).toEqual([])
   })
 
+  it('keeps the judge prompt out of everything we deploy, and lets it live in its own file', () => {
+    expect(SENTINELS.map((s) => s.name)).toContain('judge-prompt')
+    // The prompt file itself is allowed to hold its own sentinel; nothing else
+    // is, and src/evals/prompts is inside the walk the first case above runs.
+    expect(findSentinels(['src'])).toHaveLength(0)
+  })
+
   it('names a reason for every pattern', () => {
     // The finding is read by whoever broke the build at five to six on a Friday.
     for (const s of SENTINELS) expect(s.why.length).toBeGreaterThan(40)

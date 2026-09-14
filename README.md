@@ -771,17 +771,23 @@ cashier refuses a second hand-off of a proposal that already emitted and
 `unique (proposal_id, item_id)` stands behind that; a requeued turn that proposes
 again gets a NEW proposal id, which that constraint does not cover. Closing it
 means deciding what a requeue owes a turn that has already handed off, which is a
-harness question rather than a channel one. Owner: module 6, which also owns the
-one turn the sweeper's crash arm can leave alive-looking, for the same reason 4.6
-handed these two over together.
+harness question rather than a channel one. Owner corrected at lesson 6.6, and
+an owner nobody corrected is worse than no owner: it was reassigned to module 6
+on the reasoning that module 6 is the first module with a reason to re-run a
+proposal. Module 6 re-runs the GATES over a stored proposal (`replayGates`,
+src/evals/replay.ts) and never re-runs a turn, so it never reaches either path
+and has nothing to prove there. Owner: a person, or the module that next changes
+the requeue path.
 
 The sweeper's crash arm can leave exactly one turn alive-looking: one that
 handed off twice in two currencies, which `handOffMessage` cannot total
 (`sumMoney` refuses to combine two codes). There is no sentence to write, so the
 failure is logged and the row is left for the next walk rather than marked
 failed, which rule 6 forbids. The cashier refuses a second hand-off today, so
-nothing in production can build such a turn. Owner: module 6, alongside the
-requeue paths, which is where lesson 5.7 moved both.
+nothing in production can build such a turn. Owner corrected at lesson 6.6,
+alongside the requeue paths it was handed over with: module 6 built an eval
+suite and touched neither the sweeper nor the hand-off. Owner: a person, or the
+module that next changes the sweeper's crash arm.
 
 The affiliate id in every link is a placeholder, not an account. Owner: a
 person, with a supplier contract in hand.
@@ -888,8 +894,11 @@ is the only new thing that could have: it reads `course.agent_events` and
 reservation is not in a turn's shape. It is also invoked after `runTurn` returns,
 and the case here is a turn killed before it can return. Both halves would have
 to change, and the first one needs a row per reservation that nothing writes, so
-a stranded reservation stays invisible until something sweeps one. Owner:
-module 6.
+a stranded reservation stays invisible until something sweeps one. Owner
+corrected at lesson 6.6: it was parked on module 6 and module 6 has no sweeper
+work. `EVAL_LIMITS` (src/limits.ts) runs eval conversations under the same
+`reserve` and `reconcile` as production and adds no path that could strand one,
+so the module that inherited this never went near it. Owner: a person.
 
 A `research_destination` row already in `course.tool_calls` is priced at three
 supplier searches whatever it really asked for, because migration 0006 stores no
@@ -946,16 +955,18 @@ is the whole of why three shipped. Owner: a person, growing the file one case at
 a time with the recording that makes it replayable.
 
 Also open at lesson 6.3, and found by the eval rather than by reading the code:
-the planning desk asks too much and writes the notebook too often. Every one of
-the three cases fails both trajectory checks. `call_count_fits_the_job` reads 68,
-60 and 80 tool calls against ceilings of 10, 4 and 8, and `questions_stayed_few`
-reads 7, 11 and 10 questions against ceilings of 3, 2 and 3.
-`update_requirements` is 43 of the 68 (63%) and 41 of the 60 (68%), a majority in
-both, and 24 of the 80 (30%) in the refusal case, where it is beaten by 28 hotel
-searches. The red rows are the eval working rather than thresholds set too
-tight, and closing them is a change to the desk prompt and to what the tool
-result says back, which is a lesson of its own. Owner: module 6, once the judge
-in 6.6 can say whether a shorter path answered her as well.
+the planning desk spends most of its steps writing the notebook. Every one of
+the three cases fails `call_count_fits_the_job`, at 21, 40 and 52 tool calls
+against ceilings of 10, 4 and 8, and the great majority of those calls are
+`update_requirements` re-sending facts the notebook already holds. The red row
+is the eval working rather than a threshold set too tight, and closing it is a
+change to the desk prompt and to what the tool result says back, which is a
+lesson of its own. Owner corrected at lesson 6.6: this said the judge in 6.6
+would be able to say whether a shorter path answered her as well, and it cannot.
+`SEATS.reviewer` judges ONE property, family fit, over an itinerary the gates
+approved, and it is shown the rehydrated items rather than the path that reached
+them. Answering this needs a second rubric over a trace. Owner: a person, or the
+module that next edits the planning desk's prompt.
 
 Open at lesson 6.3, and carried over from 6.2: `inside_her_window` is a verdict
 on no case at all. The card reads `0/0 (n/a, 3 not evaluated)`, and the reason on
@@ -1124,6 +1135,61 @@ where a turn ENDS and the eval only reads them back, and it is the wrong way
 round in the file tree. Moving the counting into `src/repo/turnLabels.ts` and
 leaving the grading in `src/evals/` is the shape that says so. Owner: module 7,
 which is the first module that reads this table for anything.
+
+Open at lesson 6.6, and found by running the proof command rather than by
+reading the code: an eval run spends the account's day. Every case mints its own
+`randomUUID()` user (src/evals/runner.ts) and commits one `course.daily_usage`
+row for it, so a run of the three cases writes three rows nothing ever reads
+again and adds about $2.90 to the one ceiling `EVAL_LIMITS` deliberately does
+not touch, the cross-user `globalCeilingMicros` of $50 a UTC day. That is the
+suite finding a real fact about what it costs to run, exactly as
+`src/limits.ts` says it would. What it also does is decide the verdict of tests
+that have nothing to do with it: `whyCapped` (src/engine.ts) checks the global
+ceiling first, so with enough eval runs behind it a case about HER daily ceiling
+gets the ACCOUNT message and `npm test` goes red for a reason no diff explains.
+The two cases in `test/handler.test.ts` that read the message now lift the
+global ceiling above today's actual total, the way the global-ceiling case
+beside them already offsets from it, so they test the ceiling they name. The
+rows themselves are still there and still accumulate. Closing that needs either
+an eval user the suite cleans up after, which costs the per-run isolation
+`EVAL_LIMITS` was chosen for, or a ceiling that can tell a graded conversation
+from hers. Owner: a person, or module 7 if it runs the nightly schedule.
+
+Open at lesson 6.6: the schedule in `evals/schedule.ts` carries cron expressions
+and nothing reads them. `netlify/functions/sweep.mts` is the precedent for a
+scheduled function here, and the eval suite needs a database and several
+minutes, so wiring it is a deployment decision rather than a code one. Owner: a
+person, when there is somewhere to run it.
+
+Open at lesson 6.6: the judge runs on `SEATS.reviewer`, Haiku, which is a
+different model and a different configuration from the `SEATS.driver` Opus it
+grades, and is still the same provider. P3's nepotism finding (arXiv 2404.13076)
+is about the FAMILY, and a truly different family is what production would use.
+This repository holds one provider's key. Owner: a person, with a second
+provider's key.
+
+Open at lesson 6.6, and the one thing this lesson could not finish:
+`test/fixtures/model/judge-family-fit.json` is not in the tree, so the replayed
+judge case in `test/judge.test.ts` reports SKIPPED with its reason printed, and
+`test/judge.live.test.ts` has never been run. The account this branch was built
+on has no credit and every live call returns a 400, so recording it was not a
+choice this lesson could make. What is unproven by this is narrow and worth
+stating exactly: the parse, the rubric's own bytes, the seat, the agreement
+arithmetic and the floor are all covered by cases that need no key, and what is
+missing is one recorded exchange showing `runJudge` writing a `reviewer` row and
+returning a verdict end to end. The command that closes it, once there is
+credit, is
+
+```
+RECORD_MODEL=1 npx vitest run test/judge.test.ts
+```
+
+with a key and a `DATABASE_URL` in the environment. `RECORD_MODEL=1` opens the
+gate as well as switching `replayClient` into recording, so the one run both
+writes the fixture and leaves the case green on every run after it. Then
+`LIVE_MODEL=1 npx vitest run test/judge.live.test.ts` for the Tier C pair and
+its cost in `course.model_calls.cost_micros`. Owner: a person, with a funded
+key.
 
 ## What is next
 

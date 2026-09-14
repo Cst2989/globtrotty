@@ -109,6 +109,36 @@ export const SEATS = {
    * assumed.
    */
   sim_user: seat(HAIKU, null, 512),
+  /**
+   * The offline judge, grading one property of a proposal the gates approved.
+   *
+   * P3's rule is that a judge runs on a DIFFERENT FAMILY from the desk it
+   * grades, because models measurably prefer their own generations (arXiv
+   * 2404.13076) and a judge from the same family scores like a proud parent.
+   * This course is pinned to two Anthropic model ids, so a genuinely different
+   * family is not something this repository can ship: it holds one provider's
+   * key. What it can do is refuse to grade with the thing being graded. The
+   * driver is Opus at high effort with 16,000 tokens; this is Haiku with no
+   * effort and 1,024, which is a different model, a different configuration and
+   * a different model_config_id, so the whole distance between them is visible
+   * in one `group by`. README.md carries the family as a residual owned by a
+   * person with a second provider's key.
+   *
+   * The name is `reviewer` rather than `judge` because it is the name this
+   * branch has been reserving for this seat since module 4. `0014`'s
+   * `model_calls_seat_check` already accepts it, so the seat needs no
+   * migration, and migration `0012`, src/gates/types.ts and
+   * src/repo/gateResults.ts each name it as the one that would need a model.
+   * It is a seat and not a gate: `GATE_NAMES` still leaves it out, so nothing
+   * can write a course.gate_results row claiming a reviewer ran, and the
+   * judge's verdicts are scorecard output rather than a gate verdict.
+   *
+   * 1,024 tokens, the cheap seat's number, because the reply is a verdict and
+   * one sentence. `VerdictSchema` (src/evals/judge.ts) bounds the sentence at
+   * 300 characters, and the ceiling here is what makes a paragraph hard rather
+   * than what makes it impossible.
+   */
+  reviewer: seat(HAIKU, null, 1_024),
 } as const satisfies Record<string, Seat>
 
 export type SeatName = keyof typeof SEATS

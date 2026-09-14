@@ -104,6 +104,27 @@ export async function decideProposal(
   }
 }
 
+/**
+ * One row, mapped. Extracted at lesson 6.6 so the two readers below share one
+ * mapping: a second hand-written mapper is how `requirements_snapshot` comes to
+ * be passed through `fromStored` on one path and read raw on the other, and the
+ * raw jsonb is the shape whose `Money.minor` is a string rather than a bigint.
+ */
+function toProposal(row: Row): Proposal {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    userId: row.user_id,
+    turnId: row.turn_id,
+    refs: row.refs,
+    requirementsSnapshot: row.requirements_snapshot === null
+      ? null
+      : fromStored(row.requirements_snapshot),
+    decision: row.decision,
+    decidedAt: row.decided_at,
+  }
+}
+
 /** The cashier's precondition, read by (id, conversation_id) and never by id alone. */
 export async function loadProposal(
   sql: postgres.Sql,
@@ -117,16 +138,31 @@ export async function loadProposal(
      where id = ${proposalId} and conversation_id = ${conversationId}`
   const row = rows[0]
   if (!row) return null
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    userId: row.user_id,
-    turnId: row.turn_id,
-    refs: row.refs,
-    requirementsSnapshot: row.requirements_snapshot === null
-      ? null
-      : fromStored(row.requirements_snapshot),
-    decision: row.decision,
-    decidedAt: row.decided_at,
-  }
+  return toProposal(row)
+}
+
+/**
+ * Her answers, newest first, for calibrating a judge against them.
+ *
+ * Only decided rows, because an undecided proposal is not a label: she has not
+ * answered it yet, and counting silence as either answer is how a calibration
+ * set comes to disagree with the person it was built from.
+ *
+ * Newest first by `seq`, the bigint identity migration 0013 gave this table,
+ * and never by `created_at`: two proposals written inside one millisecond order
+ * arbitrarily by a timestamp, so the hundred rows a limit takes would be a
+ * different hundred on a re-run and the agreement rate would move with nothing
+ * having changed.
+ */
+export async function decidedProposals(
+  sql: postgres.Sql, args: { userId?: string; limit?: number } = {},
+): Promise<Proposal[]> {
+  const rows = await sql<Row[]>`
+    select id, conversation_id, user_id, turn_id, refs, requirements_snapshot, decision, decided_at
+      from course.proposals
+     where decision is not null
+       ${args.userId ? sql`and user_id = ${args.userId}` : sql``}
+     order by seq desc
+     limit ${args.limit ?? 100}`
+  return rows.map(toProposal)
 }

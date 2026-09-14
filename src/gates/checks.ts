@@ -84,8 +84,10 @@ export function checkCurrency(items: RehydratedItem[], expected: string | null):
  * Name validity and kind compatibility, and deliberately nothing more. It does
  * NOT verify that the set of slots is complete, that 'outbound' and 'flight'
  * are not both used, or that 'inbound' is present when a return was asked for.
- * Those are itinerary-shape rules, they need the notebook, and they belong to
- * the reviewer seat in module 5.
+ * Those are itinerary-shape rules and they need the notebook. Lesson 6.6's
+ * `SEATS.reviewer` is not where they went: that seat judges family fit and
+ * nothing else, offline, over proposals these checks already approved. They
+ * belong to a gate nobody has written or to a reviewer with a second rubric.
  *
  * `ItemRef.slot` is a plain `string` and this function is exported, so a caller
  * that reached it without going through `ProposalRefsSchema` is still checked.

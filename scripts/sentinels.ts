@@ -65,6 +65,13 @@ export const SENTINELS: readonly Sentinel[] = [
       + 'src/agents/prompts at run time, through the same comment-stripping loader the desks '
       + 'use, and is never inlined anywhere.',
   },
+  {
+    name: 'judge-prompt',
+    pattern: /GLOBETROTTY-JUDGE-PROMPT-DO-NOT-SHIP/,
+    why: 'The judge prompt reached something we deploy. A rubric in a response body is a rubric '
+      + 'the thing being judged can read, which is the one way to make a judge useless. It is read '
+      + 'from src/evals/prompts at run time and is never inlined anywhere.',
+  },
 ]
 
 export type Finding = { file: string; line: number; sentinel: string; excerpt: string }
@@ -77,7 +84,8 @@ export type Finding = { file: string; line: number; sentinel: string; excerpt: s
  * root and from whatever working directory it was started in.
  */
 const ALLOWED = ['/src/desks/front-desk.md', '/src/desks/planning-desk.md',
-                 '/src/agents/prompts/scout.md', '/scripts/sentinels.ts']
+                 '/src/agents/prompts/scout.md', '/src/evals/prompts/family-fit.md',
+                 '/scripts/sentinels.ts']
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist'])
 
