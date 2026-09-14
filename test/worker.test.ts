@@ -194,6 +194,37 @@ describeDb('runTurn end to end', () => {
     })
   })
 
+  // F5: releaseForContinuation must carry the run's accumulated spend into
+  // turns.spend_usd_micros, exactly like completeTurn/failTurn — before this
+  // fix a turn that continued past its deadline reported 0 for whatever it
+  // had already self-debited.
+  it('carries the run\'s accumulated spend into turns.spend_usd_micros on continue_later', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      let calls = 0
+      const agent: Agent = async () => {
+        calls++
+        return { kind: 'continue', costMicros: 0n, recordedMicros: 300n }
+      }
+      const deps = workerDeps(sql, agent)
+      let deadlineCalls = 0
+      // First decideNext check must pass (call_model/continue), so the agent
+      // runs once and self-debits 300n; the second check must trip
+      // continue_later, before the agent is ever asked for a second step.
+      deps.deadlineMs = () => {
+        deadlineCalls++
+        return deadlineCalls === 1 ? Date.now() + 10 * 60_000 : Date.now()
+      }
+      await runTurn(deps, r.turnId!)
+
+      expect(calls).toBe(1)
+      expect(deps.reinvoke).toHaveBeenCalledWith(r.turnId)
+      const [turn] = await sql<TurnRow[]>`select status, spend_usd_micros from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('queued')
+      expect(BigInt(turn!.spend_usd_micros)).toBe(300n)
+    })
+  })
+
   it('stops and records limit_reached when the ceiling is hit mid-turn', async () => {
     await withTestDb(async (sql) => {
       const greedy: Agent = async () => ({

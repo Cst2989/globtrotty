@@ -113,15 +113,29 @@ export async function heartbeat(sql: postgres.Sql, claim: Claim): Promise<void> 
  *
  * Setting `status = 'queued'` here makes the turn immediately claimable — the
  * queued arm of `claimTurn`'s WHERE has no staleness requirement at all.
+ *
+ * `spendMicros` is the run's accumulated total so far (the caller's running
+ * total, same accounting convention as `completeTurn`/`failTurn`), added to
+ * `turns.spend_usd_micros` here for the same reason it is added on every other
+ * exit path: `turns.spend_usd_micros` is a report column of what this TURN
+ * has cost, and a turn that stops for a deadline rather than finishing or
+ * failing must not report 0 for however much it already spent. The caller
+ * (`runTurn`, src/worker.ts) must reset its own running total to `0n`
+ * immediately after this call: the re-invocation this triggers is a FRESH
+ * `runTurn` call that claims the turn and starts its own `turnSpend` at `0n`,
+ * so the amount recorded here must never be added again by the same process
+ * that just recorded it.
  */
 export async function releaseForContinuation(
   sql: postgres.Sql,
   claim: Claim,
   state: TurnState,
+  spendMicros: bigint,
 ): Promise<void> {
   const rows = await sql`
     update turns
-       set state = ${sql.json(state as never)}, status = 'queued', queued_at = now()
+       set state = ${sql.json(state as never)}, status = 'queued', queued_at = now(),
+           spend_usd_micros = spend_usd_micros + ${spendMicros.toString()}
      where id = ${claim.turnId} and attempts = ${claim.attempts} and status = 'running'
     returning id`
   if (rows.length === 0) throw new FencedError(claim.turnId)

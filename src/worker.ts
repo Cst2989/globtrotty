@@ -265,7 +265,16 @@ async function loop(
         // THEN schedule — see releaseForContinuation's doc comment. Using
         // saveTurnState here would leave the turn 'running' with a fresh
         // heartbeat_at, so the re-invocation's own claimTurn could never claim it.
-        await releaseForContinuation(sql, claim, state)
+        //
+        // F5: the run's accumulated spend goes with it, into
+        // turns.spend_usd_micros, exactly like every other exit path — and
+        // turnSpend.total is reset to 0n immediately after: the re-invocation
+        // this triggers is a fresh runTurn call whose own turnSpend starts at
+        // 0n, so this process must never add the same micros again (nothing
+        // reads turnSpend after this branch returns, but zeroing it here keeps
+        // the invariant visible rather than relying on that).
+        await releaseForContinuation(sql, claim, state, turnSpend.total)
+        turnSpend.total = 0n
         await deps.reinvoke(claim.turnId)
         return
       case 'park':
