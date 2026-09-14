@@ -16,7 +16,8 @@
     "evals": "tsx evals/run.ts",
     "migrate": "tsx scripts/migrate.ts",
     "sentinels": "tsx scripts/check-sentinels.ts",
-    "messages": "tsx scripts/messages.ts"
+    "messages": "tsx scripts/messages.ts",
+    "examples": "tsx scripts/refresh-examples.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
