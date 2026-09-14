@@ -14,7 +14,7 @@ import { readSpendFailClosed } from '../repo/spend.js'
 import { recordModelCall } from '../repo/modelCalls.js'
 import {
   recordCanaryRun, previousCanaryRun, recordAlarm, markAlarmNotified, newestRequestShape,
-  ensureOpsConversation, OPS_USER_ID, type CanaryRun, type Band,
+  recentIdenticalAlarm, ensureOpsConversation, OPS_USER_ID, type CanaryRun, type Band,
 } from '../repo/drift.js'
 import { toolsForDesk } from '../tools/registry.js'
 import { FRONT_SCHEMA } from '../agents/frontDesk.js'
@@ -30,6 +30,16 @@ export { OPS_USER_ID }
 /** The four seats the nightly canary calls, one fixed golden request each. */
 export type CanarySeat = 'driver' | 'reviewer' | 'front_desk' | 'scout'
 const CANARY_SEATS: readonly CanarySeat[] = ['driver', 'reviewer', 'front_desk', 'scout']
+
+/** F2: a drift already alarmed on stays suppressed (not re-paged) for a week. */
+const ALARM_DEDUPE_DAYS = 7
+/**
+ * F6: a seat canaried within this window is skipped rather than re-run. The
+ * monitor runs nightly (roughly every 24h); 20h — not 24h — gives room for a
+ * run that starts a little early or a little late without treating its own
+ * previous night's run as "not recent enough" and re-running for nothing.
+ */
+const RECENT_CANARY_HOURS = 20
 
 /**
  * The three full-capture seats (spec section 4, "cheap seats: canary only") —
@@ -290,7 +300,8 @@ async function callCanary(deps: DriftDeps, conversationId: string, seat: CanaryS
   if (seat === 'scout') {
     const p = PRICES[seatConfig.model]
     if (!p) throw new Error(`No price for model "${seatConfig.model}". Refusing to reserve zero.`)
-    const perSearchMicros = WEB_SEARCH_MICROS + BigInt(SCOUT_SEARCH_RESULT_TOKENS * p.inMicrosPerToken)
+    // Math.ceil before BigInt — see src/agents/scout.ts's identical line.
+    const perSearchMicros = WEB_SEARCH_MICROS + BigInt(Math.ceil(SCOUT_SEARCH_RESULT_TOKENS * p.inMicrosPerToken))
     extraMicros = BigInt(SCOUT_MAX_SEARCHES) * perSearchMicros
   }
   const reserved = estimateMicros(seatConfig, inputTokens, extraMicros)
@@ -306,7 +317,18 @@ async function callCanary(deps: DriftDeps, conversationId: string, seat: CanaryS
   // loop, so it is read explicitly here, fresh before every canary call —
   // any of the four calls in this run could be the one that pushes the
   // account over the line for the next.
-  const { globalMicros } = await readSpendFailClosed(sql, OPS_USER_ID, conversationId)
+  // M11: reserve() above has already debited this reservation, so a throw
+  // here (readSpendFailClosed is fail-CLOSED — it throws rather than let a
+  // read failure silently pass the ceiling check) must still refund it before
+  // propagating, or the failure strands `reserved` micros on the ops
+  // conversation/daily counters with nothing left to refund them.
+  let globalMicros: bigint
+  try {
+    ({ globalMicros } = await readSpendFailClosed(sql, OPS_USER_ID, conversationId))
+  } catch (err) {
+    await refund()
+    throw err
+  }
   if (firstCeilingReached({ conversationMicros, dailyMicros, globalMicros }, deps.limits) !== null) {
     await refund()
     return null
@@ -381,12 +403,17 @@ async function notifyAlarm(deps: DriftDeps, alarm: DriftAlarm): Promise<void> {
  */
 export async function runDriftMonitor(
   deps: DriftDeps,
-): Promise<{ alarms: DriftAlarm[]; runs: CanaryRun[]; skipped: CanarySeat[] }> {
+): Promise<{ alarms: DriftAlarm[]; runs: CanaryRun[]; skipped: CanarySeat[]; suppressed: number }> {
   const { sql } = deps
   const conversationId = await ensureOpsConversation(sql, new Date(deps.now()))
   const alarms: DriftAlarm[] = []
   const runs: CanaryRun[] = []
   const skipped: CanarySeat[] = []
+  // Only 'ceiling' skips are drift-worthy on their own (see the skip-alarm
+  // comment below) — a 'recent' skip is the monitor behaving correctly, not a
+  // failure to surface.
+  const ceilingSkips: CanarySeat[] = []
+  let suppressed = 0
 
   for (const seat of SHAPE_SEATS) {
     const stored = await newestRequestShape(sql, seat)
@@ -394,7 +421,12 @@ export async function runDriftMonitor(
     const golden = reduceShape(buildRequest(goldenArgs(seat)))
     const reducedStored = reduceShape(stored)
     if (!shapesEqual(reducedStored, golden)) {
-      const alarm = await recordAlarm(sql, { seat, check: 'shape', detail: shapeDiff(reducedStored, golden) })
+      const detail = shapeDiff(reducedStored, golden)
+      if (await recentIdenticalAlarm(sql, { seat, check: 'shape', detail, withinDays: ALARM_DEDUPE_DAYS })) {
+        suppressed++
+        continue
+      }
+      const alarm = await recordAlarm(sql, { seat, check: 'shape', detail })
       await notifyAlarm(deps, alarm)
       alarms.push(alarm)
     }
@@ -402,12 +434,31 @@ export async function runDriftMonitor(
 
   for (const seat of CANARY_SEATS) {
     const prev = await previousCanaryRun(sql, seat)
+    // F6: a seat canaried within the last RECENT_CANARY_HOURS is skipped
+    // outright — no transport call, no new canary_runs row — rather than
+    // re-run for nothing on a monitor invoked more than once in a night.
+    // `elapsedMs >= 0` guards against a `ranAt` that is AHEAD of `deps.now()`
+    // (real Postgres clock vs. a caller's own, possibly historical, `now()` —
+    // every fixed-clock test in this file is exactly this case): a run this
+    // function has no record of being "recent" relative to must never be
+    // treated as one merely because the two clocks disagree in that direction.
+    if (prev !== null) {
+      const elapsedMs = deps.now() - prev.ranAt.getTime()
+      if (elapsedMs >= 0 && elapsedMs < RECENT_CANARY_HOURS * 60 * 60 * 1000) {
+        skipped.push(seat)
+        continue
+      }
+    }
     const outcome = await callCanary(deps, conversationId, seat)
-    if (outcome === null) { skipped.push(seat); continue }
+    if (outcome === null) { skipped.push(seat); ceilingSkips.push(seat); continue }
     await recordCanaryRun(sql, outcome)
     runs.push(outcome)
     const detail = diffCanary(prev, outcome)
     if (detail !== null) {
+      if (await recentIdenticalAlarm(sql, { seat, check: 'canary', detail, withinDays: ALARM_DEDUPE_DAYS })) {
+        suppressed++
+        continue
+      }
       const alarm = await recordAlarm(sql, { seat, check: 'canary', detail })
       await notifyAlarm(deps, alarm)
       alarms.push(alarm)
@@ -420,11 +471,18 @@ export async function runDriftMonitor(
   // months later that nothing has alarmed in a while. `seat: 'monitor'`
   // rather than one row per skipped seat — this is one fact ("the monitor
   // could not fully run tonight"), not four.
-  if (skipped.length > 0) {
-    const alarm = await recordAlarm(sql, { seat: 'monitor', check: 'canary', detail: { skipped, reason: 'ceiling' } })
+  //
+  // Scoped to CEILING skips only (F6): a 'recent' skip means a previous
+  // invocation already canaried this seat inside the window, which is the
+  // monitor doing exactly what it should — raising an alarm for it would
+  // page on every run after the first tonight for no reason.
+  if (ceilingSkips.length > 0) {
+    const alarm = await recordAlarm(
+      sql, { seat: 'monitor', check: 'canary', detail: { skipped: ceilingSkips, reason: 'ceiling' } },
+    )
     await notifyAlarm(deps, alarm)
     alarms.push(alarm)
   }
 
-  return { alarms, runs, skipped }
+  return { alarms, runs, skipped, suppressed }
 }

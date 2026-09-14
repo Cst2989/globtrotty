@@ -1,6 +1,7 @@
 import type postgres from 'postgres'
 import type { DriftAlarm } from '../notify.js'
 import type { CanarySeat } from '../monitor/drift.js'
+import { SEATS } from '../model/seats.js'
 
 export type Band = 'xs' | 's' | 'm' | 'l' | 'xl'
 
@@ -41,12 +42,14 @@ export async function recordCanaryRun(sql: postgres.Sql, run: CanaryRun): Promis
  * `ran_at` exists. `diffCanary` is only comparing against "the run before
  * this one" if this query actually returns that row.
  */
-export async function previousCanaryRun(sql: postgres.Sql, seat: CanarySeat): Promise<CanaryRun | null> {
+export async function previousCanaryRun(
+  sql: postgres.Sql, seat: CanarySeat,
+): Promise<(CanaryRun & { ranAt: Date }) | null> {
   const rows = await sql<{
     seat: CanarySeat; model: string; stop_reason: string; output_band: Band
-    signal: string; request_id: string | null
+    signal: string; request_id: string | null; ran_at: Date
   }[]>`
-    select seat, model, stop_reason, output_band, signal, request_id
+    select seat, model, stop_reason, output_band, signal, request_id, ran_at
       from canary_runs
      where seat = ${seat}
      order by ran_at desc
@@ -56,6 +59,7 @@ export async function previousCanaryRun(sql: postgres.Sql, seat: CanarySeat): Pr
   return {
     seat: row.seat, model: row.model, stopReason: row.stop_reason,
     outputBand: row.output_band, signal: row.signal, requestId: row.request_id,
+    ranAt: row.ran_at,
   }
 }
 
@@ -95,6 +99,14 @@ export async function markAlarmNotified(sql: postgres.Sql, id: string): Promise<
  * that seat's history (comparing goldenArgs against itself always matches).
  * Excluding the ops user is what keeps this check looking at what real
  * traffic actually sent.
+ *
+ * `prompt_version`/`model_config_id` are pinned to the CURRENT era
+ * (`SEATS[seat]`, src/model/seats.ts), not merely "the newest row overall":
+ * without this, the newest row after a prompt or model-config bump is a
+ * pre-deploy row written under the OLD era, and comparing it against today's
+ * `goldenArgs` shape would alarm on the deploy itself rather than on real
+ * drift — every version bump would file a guaranteed false positive on its
+ * first nightly run.
  */
 export async function newestRequestShape(
   sql: postgres.Sql, seat: 'driver' | 'reviewer' | 'front_desk',
@@ -102,11 +114,49 @@ export async function newestRequestShape(
   const rows = await sql<{ request_shape: unknown }[]>`
     select request_shape from model_calls
      where seat = ${seat} and request_shape is not null and user_id <> ${OPS_USER_ID}
+       and prompt_version = ${SEATS[seat].promptVersion}
+       and model_config_id = ${SEATS[seat].modelConfigId}
      order by created_at desc
      limit 1`
   const row = rows[0]
   if (row === undefined) return null
   return row.request_shape as Record<string, unknown>
+}
+
+/**
+ * True when a `drift_alarms` row for this exact `seat`/`check`/`detail`
+ * already exists within the last `withinDays` days — dedupe for a drift that
+ * has already been reported and is simply still true on the next run (spec:
+ * a stuck-open drift should not re-page every night). "Exact" is byte-
+ * identical after a key-sorted JSON round trip on both sides, computed in TS
+ * rather than via `detail::text = ...` in SQL: jsonb's own key ordering
+ * (shortest-key-first, not alphabetical) does not agree with a naive
+ * alphabetical sort, and comparing here — the same canonicalisation on both
+ * the candidate and every stored row — sidesteps that mismatch entirely
+ * rather than trying to replicate Postgres's ordering in TS.
+ */
+function canonicalJson(value: unknown): string {
+  const sortKeys = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sortKeys)
+    if (v !== null && typeof v === 'object') {
+      const obj = v as Record<string, unknown>
+      return Object.fromEntries(Object.keys(obj).sort().map((k) => [k, sortKeys(obj[k])]))
+    }
+    return v
+  }
+  return JSON.stringify(sortKeys(value))
+}
+
+export async function recentIdenticalAlarm(
+  sql: postgres.Sql,
+  args: { seat: string; check: 'canary' | 'shape'; detail: Record<string, unknown>; withinDays: number },
+): Promise<boolean> {
+  const rows = await sql<{ detail: unknown }[]>`
+    select detail from drift_alarms
+     where seat = ${args.seat} and "check" = ${args.check}
+       and created_at > now() - make_interval(days => ${args.withinDays})`
+  const target = canonicalJson(args.detail)
+  return rows.some((r) => canonicalJson(r.detail) === target)
 }
 
 /** `ops:YYYY-MM`, UTC — the month bucket `ensureOpsConversation` scopes to. */

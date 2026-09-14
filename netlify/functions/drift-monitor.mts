@@ -46,9 +46,9 @@ export default async (req: Request): Promise<Response> => {
   const sql = postgres(env.DATABASE_URL)
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
   const transport = {
-    create: (req: unknown) => client.messages.create(req as never) as Promise<unknown>,
-    countTokens: (req: unknown) =>
-      client.messages.countTokens(req as never) as Promise<{ input_tokens: number }>,
+    create: (body: unknown) => client.messages.create(body as never) as Promise<unknown>,
+    countTokens: (body: unknown) =>
+      client.messages.countTokens(body as never) as Promise<{ input_tokens: number }>,
   }
 
   let result: Awaited<ReturnType<typeof runDriftMonitor>>
