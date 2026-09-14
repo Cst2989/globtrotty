@@ -24,7 +24,7 @@ import { handOff } from '../tools/cashier.js'
 import { escalate } from '../tools/escalate.js'
 import { listExpiredSourceIds, recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
-import { sanitizeSourceId } from '../sanitize.js'
+import { maskIdChars } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
 import type { EscalationReason, Notifier } from '../notify.js'
@@ -510,15 +510,18 @@ async function execute(
  * it. Empty when nothing is stale, so it drops out of the suffix entirely
  * (see `makeDriver` above) rather than appending a hollow heading every turn.
  *
- * `sanitizeSourceId`, not a raw join: an id in this list came from a
+ * `maskIdChars`, not `sanitizeSourceId`: an id in this list came from a
  * supplier's own response (`SupplierItem.sourceId`), so it is untrusted the
  * same way any other supplier-written string is by the time it is echoed
- * back into the model's context.
+ * back into the model's context — but it is rendered here as an ID, in a
+ * comma-joined list, not as prose. `maskIdChars` masks to `'-'` rather than
+ * `sanitizeSourceId`'s `'?'`, which reads as corruption inside something
+ * that is supposed to look like an identifier.
  */
 export function renderExpiredNotice(ids: string[]): string {
   if (ids.length === 0) return ''
   return '## Expired results\n'
-    + `These ids are no longer quotable: ${ids.map(sanitizeSourceId).join(', ')}. `
+    + `These ids are no longer quotable: ${ids.map(maskIdChars).join(', ')}. `
     + 'Re-search before proposing them.'
 }
 
