@@ -10,6 +10,7 @@ import {
 } from '../model/client.js'
 import { costMicros, PRICES, WEB_SEARCH_MICROS } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
+import { readSpendFailClosed } from '../repo/spend.js'
 import { recordModelCall } from '../repo/modelCalls.js'
 import {
   recordCanaryRun, previousCanaryRun, recordAlarm, markAlarmNotified, newestRequestShape,
@@ -229,6 +230,29 @@ function shapesEqual(a: Record<string, unknown>, b: Record<string, unknown>): bo
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
 }
 
+/**
+ * A key-level diff between two reduced shapes, for a shape alarm's `detail`.
+ * NOT the two whole reduced requests — a shape alarm exists to say WHAT
+ * changed, and a full copy of both sides makes that a scavenger hunt in a
+ * jsonb column instead of a one-line answer. Each side is compared via the
+ * same key-sorted JSON round trip `shapesEqual` uses, so a reordered nested
+ * object (e.g. `tools`, already sorted by `reduceShape`, or `system`'s
+ * `cache_control`) is never reported as "changed" merely for changing key
+ * order.
+ */
+function shapeDiff(
+  stored: Record<string, unknown>, golden: Record<string, unknown>,
+): { changed: { key: string; stored: unknown; golden: unknown }[] } {
+  const keys = new Set([...Object.keys(stored), ...Object.keys(golden)])
+  const changed: { key: string; stored: unknown; golden: unknown }[] = []
+  for (const key of keys) {
+    const s = JSON.stringify(canonical(stored[key]))
+    const g = JSON.stringify(canonical(golden[key]))
+    if (s !== g) changed.push({ key, stored: stored[key] ?? null, golden: golden[key] ?? null })
+  }
+  return { changed }
+}
+
 /** The text she (synthetically) said, for the ledger's `user_prompt` — every golden call carries exactly one user message. */
 function userText(args: CallArgs): string {
   return args.messages
@@ -243,10 +267,12 @@ export type DriftDeps = {
 
 /**
  * One canary call, charged to `OPS_USER_ID` exactly like a traveller's seat
- * call: reserve, call, reconcile, record. Returns null — never throws — on a
- * ceiling reached against the ops conversation, so a runaway monitor is
- * capped like everyone else (spec section 4) without ever alarming on its
- * own throttling.
+ * call: reserve, call, reconcile, record. Returns null — never throws — on
+ * the ops conversation, the ops daily total, or the account-wide global
+ * ceiling being reached, so a runaway monitor is capped like everyone else
+ * (spec section 4). This function itself alarms on nothing — `runDriftMonitor`
+ * is what turns a non-empty `skipped` into one alarm, so throttling is
+ * visible rather than silent.
  *
  * Scout alone reserves the search cap (fee plus a bound on the result
  * tokens), mirroring `researchDestination` (src/agents/scout.ts) — the only
@@ -272,7 +298,16 @@ async function callCanary(deps: DriftDeps, conversationId: string, seat: CanaryS
     userId: OPS_USER_ID, conversationId, micros: reserved,
   })
   const refund = () => reconcile(sql, { userId: OPS_USER_ID, conversationId, reserved, actual: 0n, day })
-  if (firstCeilingReached({ conversationMicros, dailyMicros }, deps.limits) !== null) {
+  // The global ceiling protects the ACCOUNT, not a single user's counters, and
+  // `reserve` never reads it (src/repo/reservation.ts — it only ever returns
+  // conversation/daily). A traveller's turn gets this check for free from
+  // `decideNext` before the driver agent is even invoked (src/engine.ts's doc
+  // comment on `firstCeilingReached`); the monitor has no such upstream turn
+  // loop, so it is read explicitly here, fresh before every canary call —
+  // any of the four calls in this run could be the one that pushes the
+  // account over the line for the next.
+  const { globalMicros } = await readSpendFailClosed(sql, OPS_USER_ID, conversationId)
+  if (firstCeilingReached({ conversationMicros, dailyMicros, globalMicros }, deps.limits) !== null) {
     await refund()
     return null
   }
@@ -299,38 +334,56 @@ async function callCanary(deps: DriftDeps, conversationId: string, seat: CanaryS
   return { ...fp, requestId: result.requestId }
 }
 
+/**
+ * Best-effort, like escalations: the alarm row is already committed, so a
+ * failed notify or a failed stamp must never fail the run.
+ *
+ * M2 pattern (3b.5, `src/tools/escalate.ts`): `markAlarmNotified` runs
+ * OUTSIDE the notifier's `try`, guarded by a `notified` flag. A single
+ * shared `try` around both calls used to log "notify/stamp failed" whichever
+ * one actually broke — which is a lie the moment `notify` succeeds and only
+ * the (best-effort) stamp doesn't land: the notifier did its job.
+ */
 async function notifyAlarm(deps: DriftDeps, alarm: DriftAlarm): Promise<void> {
+  let notified = false
   try {
     await deps.notifier.alarm(alarm)
-    await markAlarmNotified(deps.sql, alarm.id)
+    notified = true
   } catch (err) {
-    // Best-effort, like escalations (3b.5): the row is already committed, so
-    // a failed notify or a failed stamp must never fail the run.
-    console.error('runDriftMonitor: alarm notify/stamp failed', { alarmId: alarm.id, err })
+    console.error(`runDriftMonitor: notifier failed for ${alarm.id}: ${(err as Error).message}`)
+  }
+  if (notified) {
+    await markAlarmNotified(deps.sql, alarm.id).catch((err: unknown) => {
+      console.error(`runDriftMonitor: notified_at stamp failed for ${alarm.id}: ${(err as Error).message}`)
+    })
   }
 }
 
 /**
  * The nightly job (spec section 4). Two independent checks:
  *
- *  1. Shape, run FIRST and against whatever real production traffic already
- *     wrote — this seat's canary call (below) always matches `goldenArgs`
- *     exactly, so checking shape after recording this run's own canary would
- *     make the check tautological. Checked before the canary loop touches
- *     `model_calls` at all, so "the newest request shape" means the newest
- *     REAL one.
+ *  1. Shape, run first and against whatever real production traffic already
+ *     wrote. `newestRequestShape` (src/repo/drift.ts) excludes `OPS_USER_ID`
+ *     rows itself now, which is the check's REAL guard against tautology
+ *     (this seat's own canary call always matches `goldenArgs` exactly, so
+ *     comparing against its own writes would never alarm on anything).
+ *     Running shape before the canary loop is kept anyway, belt to that
+ *     query filter's suspenders: it means this run's own canary writes
+ *     cannot be "the newest row" by construction, not merely by exclusion.
  *  2. Canary, one golden call per seat, fingerprinted and diffed against the
  *     seat's previous stored run.
  *
- * A ceiling reached on the ops conversation skips that seat's canary
- * entirely — no alarm, no fingerprint, no comparison — and is reported back
- * in `skipped` rather than silently dropped.
+ * A ceiling reached on the ops conversation OR the account-wide global
+ * ceiling skips that seat's canary entirely — no fingerprint, no comparison
+ * — and is reported back in `skipped`. A non-empty `skipped` itself files
+ * one alarm (a monitor that cannot run some or all of its seats is
+ * drift-worthy on its own).
  */
 export async function runDriftMonitor(
   deps: DriftDeps,
 ): Promise<{ alarms: DriftAlarm[]; runs: CanaryRun[]; skipped: CanarySeat[] }> {
   const { sql } = deps
-  const conversationId = await ensureOpsConversation(sql)
+  const conversationId = await ensureOpsConversation(sql, new Date(deps.now()))
   const alarms: DriftAlarm[] = []
   const runs: CanaryRun[] = []
   const skipped: CanarySeat[] = []
@@ -341,7 +394,7 @@ export async function runDriftMonitor(
     const golden = reduceShape(buildRequest(goldenArgs(seat)))
     const reducedStored = reduceShape(stored)
     if (!shapesEqual(reducedStored, golden)) {
-      const alarm = await recordAlarm(sql, { seat, check: 'shape', detail: { stored: reducedStored, golden } })
+      const alarm = await recordAlarm(sql, { seat, check: 'shape', detail: shapeDiff(reducedStored, golden) })
       await notifyAlarm(deps, alarm)
       alarms.push(alarm)
     }
@@ -359,6 +412,18 @@ export async function runDriftMonitor(
       await notifyAlarm(deps, alarm)
       alarms.push(alarm)
     }
+  }
+
+  // A monitor that cannot run is itself drift-worthy: one skip is easily a
+  // transient ceiling brush, but silence here is exactly the failure mode
+  // this whole job exists to surface loudly rather than let a human notice
+  // months later that nothing has alarmed in a while. `seat: 'monitor'`
+  // rather than one row per skipped seat — this is one fact ("the monitor
+  // could not fully run tonight"), not four.
+  if (skipped.length > 0) {
+    const alarm = await recordAlarm(sql, { seat: 'monitor', check: 'canary', detail: { skipped, reason: 'ceiling' } })
+    await notifyAlarm(deps, alarm)
+    alarms.push(alarm)
   }
 
   return { alarms, runs, skipped }

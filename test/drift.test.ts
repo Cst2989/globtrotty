@@ -4,12 +4,13 @@ import { withTestDb, describeDb } from './helpers/db.js'
 import {
   outputBand, fingerprint, diffCanary, reduceShape, goldenArgs, runDriftMonitor,
 } from '../src/monitor/drift.js'
+import { authorise } from '../src/monitor/authorise.js'
 import {
   previousCanaryRun, ensureOpsConversation, OPS_USER_ID, type CanaryRun,
 } from '../src/repo/drift.js'
+import { DEFAULT_LIMITS } from '../src/limits.js'
 import { buildRequest } from '../src/model/client.js'
 import { LogNotifier, type Notifier } from '../src/notify.js'
-import { DEFAULT_LIMITS } from '../src/limits.js'
 import type { ModelResult } from '../src/model/client.js'
 
 const HAIKU = 'claude-haiku-4-5-20251001'
@@ -181,6 +182,28 @@ describe('reduceShape', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Pure: authorise
+// ---------------------------------------------------------------------------
+describe('authorise', () => {
+  const req = (secretHeader: string | null, body: unknown = null) => ({
+    headers: { get: (name: string) => (name === 'x-worker-secret' ? secretHeader : null) },
+    body,
+  })
+  it('the secret matches -> true', () => {
+    expect(authorise(req('shh'), 'shh')).toBe(true)
+  })
+  it('a scheduled marker (Netlify\'s next_run body) with no secret header -> true', () => {
+    expect(authorise(req(null, { next_run: '2026-09-14T03:00:00.000Z' }), 'shh')).toBe(true)
+  })
+  it('neither a matching secret nor a scheduled marker -> false', () => {
+    expect(authorise(req(null, { other: 'field' }), 'shh')).toBe(false)
+  })
+  it('a wrong secret alongside a forged scheduled marker -> false', () => {
+    expect(authorise(req('nope', { next_run: '2026-09-14T03:00:00.000Z' }), 'shh')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // DB: runDriftMonitor
 // ---------------------------------------------------------------------------
 function driverResponse(toolName = 'explore_flights') {
@@ -285,7 +308,7 @@ describeDb('runDriftMonitor', () => {
     await withTestDb(async (sql) => {
       const traveller = await seedTraveller(sql, '2')
       await runDriftMonitor(deps(sql, makeTransport()))
-      const opsConversationId = await ensureOpsConversation(sql)
+      const opsConversationId = await ensureOpsConversation(sql, NOW)
       const [ops] = await sql`select spend_usd_micros from conversations where id = ${opsConversationId} and user_id = ${OPS_USER_ID}`
       expect(ops).toBeDefined()
       const calls = await sql`select cost_micros from model_calls where conversation_id = ${opsConversationId}`
@@ -297,31 +320,38 @@ describeDb('runDriftMonitor', () => {
     })
   })
 
-  it('a seeded driver request_shape off by one in max_tokens produces a shape alarm', async () => {
+  // Seeded with a TRAVELLER user/conversation, not OPS_USER_ID — with
+  // `newestRequestShape` now excluding OPS_USER_ID rows (item 3, review round
+  // 1), a row seeded under the ops user would never be seen as "newest" at
+  // all, and the alarm would depend on nothing this test actually sets up.
+  it('a traveller-written driver request_shape off by one in max_tokens produces a shape alarm', async () => {
     await withTestDb(async (sql) => {
+      const traveller = await seedTraveller(sql, '6')
       const golden = buildRequest(goldenArgs('driver'))
       const bad = { ...golden, max_tokens: (golden.max_tokens as number) + 1 }
-      const conversationId = await ensureOpsConversation(sql)
       await sql`insert into model_calls (
                   conversation_id, user_id, seat, prompt_version, model_config_id, model, request_shape, capture_policy
                 ) values (
-                  ${conversationId}, ${OPS_USER_ID}, 'driver', 'driver@2', 'x', ${OPUS},
+                  ${traveller.conversationId}, ${traveller.userId}, 'driver', 'driver@2', 'x', ${OPUS},
                   ${sql.json(bad as never)}, 'full'
                 )`
       const out = await runDriftMonitor(deps(sql, makeTransport()))
       const shapeAlarms = out.alarms.filter((a) => a.check === 'shape' && a.seat === 'driver')
       expect(shapeAlarms).toHaveLength(1)
+      expect(shapeAlarms[0]!.detail).toMatchObject({
+        changed: [{ key: 'max_tokens', stored: (golden.max_tokens as number) + 1, golden: golden.max_tokens }],
+      })
     })
   })
 
-  it('a seeded driver request_shape equal to the golden shape produces no shape alarm', async () => {
+  it('a traveller-written driver request_shape equal to the golden shape produces no shape alarm', async () => {
     await withTestDb(async (sql) => {
+      const traveller = await seedTraveller(sql, '7')
       const golden = buildRequest(goldenArgs('driver'))
-      const conversationId = await ensureOpsConversation(sql)
       await sql`insert into model_calls (
                   conversation_id, user_id, seat, prompt_version, model_config_id, model, request_shape, capture_policy
                 ) values (
-                  ${conversationId}, ${OPS_USER_ID}, 'driver', 'driver@2', 'x', ${OPUS},
+                  ${traveller.conversationId}, ${traveller.userId}, 'driver', 'driver@2', 'x', ${OPUS},
                   ${sql.json(golden as never)}, 'full'
                 )`
       const out = await runDriftMonitor(deps(sql, makeTransport()))
@@ -329,6 +359,18 @@ describeDb('runDriftMonitor', () => {
       expect(shapeAlarms).toHaveLength(0)
     })
   })
+
+  // The tautology this guards against: every canary call itself writes a
+  // matching-golden `model_calls` row for OPS_USER_ID. Two runs with no
+  // traveller-written row at all must never manufacture a shape alarm out of
+  // the monitor's own writes, on the first run OR the second.
+  it('two consecutive canary runs with no traveller rows produce zero shape alarms', async () => {
+    await withTestDb(async (sql) => {
+      await runDriftMonitor(deps(sql, makeTransport()))
+      const out = await runDriftMonitor(deps(sql, makeTransport()))
+      expect(out.alarms.filter((a) => a.check === 'shape')).toHaveLength(0)
+    })
+  }, 20_000)
 
   it('a notifier that throws leaves the alarm row unnotified, and the run still completes', async () => {
     await withTestDb(async (sql) => {
@@ -341,16 +383,62 @@ describeDb('runDriftMonitor', () => {
     })
   }, 15_000)
 
-  it('a ceiling reached on the ops user skips canaries, writes no alarm, and leaves a traveller untouched', async () => {
+  // M2 pattern (item 5, review round 1): a successful notify with a stamp
+  // that cannot land must not be reported, or behave, as a notify failure.
+  it('a stamp failure after a successful notify does not fail the run, and notified_at stays null', async () => {
+    await withTestDb(async (sql) => {
+      const alarmFn = vi.fn().mockResolvedValue(undefined)
+      const notifier: Notifier = { notify: vi.fn(), alarm: alarmFn }
+      await runDriftMonitor(deps(sql, makeTransport({ driverTool: 'explore_flights' }), notifier))
+      // A stamp that cannot land: make the drift_alarms row unreachable for the
+      // update by wrapping sql so that `update drift_alarms set notified_at` throws.
+      const failingSql = new Proxy(sql, {
+        apply(target, thisArg, args: unknown[]) {
+          const text = String((args[0] as TemplateStringsArray).join('?'))
+          if (text.includes('update drift_alarms set notified_at')) throw new Error('stamp down')
+          return Reflect.apply(target as unknown as (...a: unknown[]) => unknown, thisArg, args)
+        },
+      }) as typeof sql
+      const out = await runDriftMonitor(deps(failingSql, makeTransport({ driverTool: 'propose_itinerary' }), notifier))
+      expect(out.alarms).toHaveLength(1)
+      expect(alarmFn).toHaveBeenCalledTimes(1)   // the second run's one canary alarm (driver's tool name changed)
+      const [row] = await sql`select notified_at from drift_alarms where id = ${out.alarms[0]!.id}`
+      expect(row!.notified_at).toBeNull()
+    })
+  }, 15_000)
+
+  it('a ceiling reached on the ops user skips every seat, writes one skip alarm, and leaves a traveller untouched', async () => {
     await withTestDb(async (sql) => {
       const traveller = await seedTraveller(sql, '3')
-      const conversationId = await ensureOpsConversation(sql)
+      const conversationId = await ensureOpsConversation(sql, NOW)
       await sql`update conversations set spend_usd_micros = ${DEFAULT_LIMITS.conversationCeilingMicros.toString()}
                  where id = ${conversationId}`
-      const out = await runDriftMonitor(deps(sql, makeTransport()))
-      expect(out.skipped.length).toBeGreaterThan(0)
+      const transport = makeTransport()
+      const out = await runDriftMonitor(deps(sql, transport))
+      expect(out.skipped).toEqual(['driver', 'reviewer', 'front_desk', 'scout'])
       expect(out.runs).toHaveLength(0)
-      expect(out.alarms).toHaveLength(0)
+      expect(transport.create).not.toHaveBeenCalled()
+      expect(out.alarms).toHaveLength(1)
+      expect(out.alarms[0]).toMatchObject({ seat: 'monitor', check: 'canary' })
+      expect(out.alarms[0]!.detail).toMatchObject({ reason: 'ceiling', skipped: ['driver', 'reviewer', 'front_desk', 'scout'] })
+      const [t] = await sql`select spend_usd_micros from conversations where id = ${traveller.conversationId}`
+      expect(BigInt(t!.spend_usd_micros as string)).toBe(traveller.spend)
+    })
+  })
+
+  it('a global ceiling reached by another user\'s spend skips every seat, writes one skip alarm, and makes no transport calls', async () => {
+    await withTestDb(async (sql) => {
+      const traveller = await seedTraveller(sql, '8')
+      const otherUserId = '00000000-0000-4000-8000-00000000f999'
+      await sql`insert into daily_usage (user_id, day, cost_micros)
+                values (${otherUserId}, (now() at time zone 'utc')::date, ${DEFAULT_LIMITS.globalCeilingMicros.toString()})`
+      const transport = makeTransport()
+      const out = await runDriftMonitor(deps(sql, transport))
+      expect(out.skipped).toEqual(['driver', 'reviewer', 'front_desk', 'scout'])
+      expect(out.runs).toHaveLength(0)
+      expect(transport.create).not.toHaveBeenCalled()
+      expect(out.alarms).toHaveLength(1)
+      expect(out.alarms[0]).toMatchObject({ seat: 'monitor', check: 'canary' })
       const [t] = await sql`select spend_usd_micros from conversations where id = ${traveller.conversationId}`
       expect(BigInt(t!.spend_usd_micros as string)).toBe(traveller.spend)
     })
@@ -358,11 +446,18 @@ describeDb('runDriftMonitor', () => {
 })
 
 describeDb('ensureOpsConversation', () => {
-  it('reuses the newest existing ops conversation rather than creating a new one', async () => {
+  it('returns the same conversation for two calls in the same UTC month', async () => {
     await withTestDb(async (sql) => {
-      const first = await ensureOpsConversation(sql)
-      const second = await ensureOpsConversation(sql)
+      const first = await ensureOpsConversation(sql, new Date('2026-09-01T00:00:00Z'))
+      const second = await ensureOpsConversation(sql, new Date('2026-09-30T23:59:59Z'))
       expect(second).toBe(first)
+    })
+  })
+  it('mints a different conversation the following UTC month', async () => {
+    await withTestDb(async (sql) => {
+      const september = await ensureOpsConversation(sql, new Date('2026-09-15T00:00:00Z'))
+      const october = await ensureOpsConversation(sql, new Date('2026-10-01T00:00:00Z'))
+      expect(october).not.toBe(september)
     })
   })
 })
