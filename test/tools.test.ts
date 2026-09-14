@@ -15,7 +15,7 @@ describe('registry', () => {
     // is how the model reaches it.
     expect([...DESK_TOOLS.planning].sort()).toEqual(
       ['ask_user', 'explore_flights', 'explore_hotels', 'escalate_to_human', 'hand_off_to_booking',
-       'propose_itinerary', 'revise_component', 'update_requirements'].sort(),
+       'propose_itinerary', 'research_destination', 'revise_component', 'update_requirements'].sort(),
     )
   })
 
@@ -66,15 +66,31 @@ describe('provenance is assigned by the harness, never by the model', () => {
     revise_component: { proposalId: '00000000-0000-4000-8000-000000000001', change: { kind: 'swap', slot: 'stay', sourceId: 'KIWI-1' } },
     hand_off_to_booking: { proposalId: '00000000-0000-4000-8000-000000000001' },
     escalate_to_human: { reason: 'user_request' },
+    // Not a code-door tool (the loop below skips it, and it carries no
+    // provenance-shaped field to guard) — kept here anyway as the canonical
+    // valid input for the tool, matching what test/driver.test.ts's
+    // research_destination case sends through validateToolCall.
+    research_destination: { city: 'Faro' },
   }
 
   const codeDoorTools = Object.values(TOOLS).filter((t) => t.door === 'code')
 
   it('has a valid-input fixture for every code-door tool (fixture stays in sync)', () => {
     // If this fails, a new code-door tool was added without a fixture above,
-    // and the loop below would silently test nothing for it.
+    // and the loop below would silently test nothing for it. Filtered to
+    // code-door names on the right: VALID_INPUT also carries
+    // research_destination (a worker-door tool, exercised by the driver
+    // test instead), which must not make this equality fail.
+    const codeDoorNames = new Set(codeDoorTools.map((t) => t.name))
     expect(codeDoorTools.map((t) => t.name).sort())
-      .toEqual(Object.keys(VALID_INPUT).sort())
+      .toEqual(Object.keys(VALID_INPUT).filter((n) => codeDoorNames.has(n)).sort())
+  })
+
+  it('names only real tools in VALID_INPUT — no stale or typo’d key', () => {
+    // The filter above would silently hide a VALID_INPUT key that matches no
+    // tool at all (a rename, a typo) — it would just never appear on either
+    // side of that equality. This is the check that actually catches one.
+    expect(Object.keys(VALID_INPUT).every((n) => n in TOOLS)).toBe(true)
   })
 
   const PROVENANCE_FIELDS = ['source', 'stated_by', 'price', 'currency', 'fetchedAt', 'url']

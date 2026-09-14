@@ -43,8 +43,14 @@ import type { Seat } from '../model/seats.js'
  * whose per-token rate is fractional (every multiplier in `costMicros` already
  * is: 1.25x, 2x, 0.1x), an un-rounded `micros` here would crash the pre-dispatch
  * path outright, not just misprice it.
+ *
+ * `extraMicros` bounds a server-side tool the seat may call: a tool billed at a
+ * flat per-call fee (`WEB_SEARCH_MICROS`, src/pricing.ts) rather than per token
+ * is not expressible as a token count, so a seat that allows up to N calls
+ * passes N times its fee here — bounded, and known before the call, exactly
+ * like every other term in this function.
  */
-export function estimateMicros(seat: Seat, inputTokens: number): bigint {
+export function estimateMicros(seat: Seat, inputTokens: number, extraMicros: bigint = 0n): bigint {
   const p = PRICES[seat.model]
   if (!p) throw new Error(`No price for model "${seat.model}". Refusing to reserve zero.`)
   // Math.max(..., 1): a future price whose cache-write multiplier somehow
@@ -52,7 +58,7 @@ export function estimateMicros(seat: Seat, inputTokens: number): bigint {
   const worstCaseInputMult = Math.max(p.cacheWrite1hMult, 1)
   const micros =
     inputTokens * p.inMicrosPerToken * worstCaseInputMult + seat.maxTokens * p.outMicrosPerToken
-  return BigInt(Math.ceil(micros))   // round UP: a bound must never undercount
+  return BigInt(Math.ceil(micros)) + extraMicros   // round UP: a bound must never undercount
 }
 
 /**

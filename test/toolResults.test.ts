@@ -1,6 +1,6 @@
 import { expect, it, describe } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
-import { recordResults, rehydrate } from '../src/repo/toolResults.js'
+import { recordResults, rehydrate, listExpiredSourceIds } from '../src/repo/toolResults.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { money } from '../src/money.js'
 import type { FlightSearch } from '../src/supplier/types.js'
@@ -315,6 +315,86 @@ describeDb('tool_results repo', () => {
                  where conversation_id = ${conversationId} and source_id = ${item!.sourceId}`
       const got = await rehydrate(sql, conversationId, [item!.sourceId])
       expect(got.get(item!.sourceId)!.searchParams).toBeNull()
+    })
+  })
+})
+
+describeDb('listExpiredSourceIds', () => {
+  // Two distinct params (via `flexDays`), same pattern as
+  // test/gate-pipeline.test.ts's `seed`: MockSupplier derives every sourceId
+  // from `hash(JSON.stringify(params))` alone, so two batches from the same
+  // literal params object collide on sourceId and this test would stop
+  // discriminating "batch A" from "batch B".
+  it('lists only the newest row per source_id whose fetched_at + ttl_seconds is past now', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '13')
+      const t0 = new Date('2026-08-01T10:00:00Z')
+      const olderParams: FlightSearch = { ...params, flexDays: 1 }
+      const newerParams: FlightSearch = { ...params, flexDays: 2 }
+      const olderItems = await new MockSupplier({ kind: 'flight', now: () => t0 }).search(olderParams)
+      const newerFetch = new Date(t0.getTime() + 30 * 60_000) // 30 minutes apart
+      const newerItems = await new MockSupplier({ kind: 'flight', now: () => newerFetch }).search(newerParams)
+      await recordResults(sql, { conversationId, userId, turnId: null, params: olderParams, items: olderItems })
+      await recordResults(sql, { conversationId, userId, turnId: null, params: newerParams, items: newerItems })
+
+      // CORRECTION vs. the brief's prose ("a `now` 20 minutes after the
+      // second"): ttl is 900 s = 15 minutes, so 20 minutes after the SECOND
+      // batch's own fetch is already past ITS OWN ttl too, regardless of the
+      // spacing between the two batches — that would expire both, not just
+      // the first. 10 minutes after the second (inside its 15-minute ttl) is
+      // what actually produces "first expired, second not."
+      const now = new Date(newerFetch.getTime() + 10 * 60_000)
+      const expired = await listExpiredSourceIds(sql, conversationId, now)
+      expect([...expired].sort()).toEqual(olderItems.map((i) => i.sourceId).sort())
+      for (const i of newerItems) expect(expired).not.toContain(i.sourceId)
+    })
+  })
+
+  it('removes an id from the expired list once a newer fetch supersedes it', async () => {
+    await withTestDb(async (sql) => {
+      const { userId, conversationId } = await convo(sql, '14')
+      const t0 = new Date('2026-08-01T10:00:00Z')
+      const searchParams: FlightSearch = { ...params, flexDays: 3 }
+      const items = await new MockSupplier({ kind: 'flight', now: () => t0 }).search(searchParams)
+      await recordResults(sql, { conversationId, userId, turnId: null, params: searchParams, items })
+
+      const now = new Date(t0.getTime() + 20 * 60_000) // past the 15-minute ttl
+      const before = await listExpiredSourceIds(sql, conversationId, now)
+      expect(before).toContain(items[0]!.sourceId)
+      expect(before.length).toBe(items.length)
+
+      // A re-fetch of just the first id, freshly stamped as of `now` — a newer
+      // row through `recordResults`, exactly as a real re-search would produce.
+      const refreshed = { ...items[0]!, fetchedAt: now }
+      await recordResults(sql, {
+        conversationId, userId, turnId: null, params: searchParams, items: [refreshed],
+      })
+
+      const after = await listExpiredSourceIds(sql, conversationId, now)
+      expect(after).not.toContain(items[0]!.sourceId)
+      for (const i of items.slice(1)) expect(after).toContain(i.sourceId)
+      expect(after.length).toBe(items.length - 1)
+    })
+  })
+
+  it('never returns another conversation\'s ids', async () => {
+    await withTestDb(async (sql) => {
+      const a = await convo(sql, '15')
+      const b = await convo(sql, '16')
+      const t0 = new Date('2026-08-01T10:00:00Z')
+      const searchParams: FlightSearch = { ...params, flexDays: 4 }
+      const items = await new MockSupplier({ kind: 'flight', now: () => t0 }).search(searchParams)
+      await recordResults(sql, {
+        conversationId: a.conversationId, userId: a.userId, turnId: null, params: searchParams, items,
+      })
+
+      const now = new Date(t0.getTime() + 20 * 60_000) // past the 15-minute ttl
+      const expiredA = await listExpiredSourceIds(sql, a.conversationId, now)
+      expect(expiredA.length).toBe(items.length)
+
+      // b never searched; its own list must never surface a's expired ids.
+      const expiredB = await listExpiredSourceIds(sql, b.conversationId, now)
+      expect(expiredB).toEqual([])
     })
   })
 })

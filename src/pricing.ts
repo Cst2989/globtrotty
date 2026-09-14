@@ -3,7 +3,15 @@ export type Usage = {
   cache_creation_input_tokens: number
   cache_read_input_tokens: number
   output_tokens: number
+  server_tool_use?: { web_search_requests: number }
 }
+
+/**
+ * USD micros per web search call. $0.01/call: unlike token counts, the
+ * provider bills a fixed per-call fee for the web-search server tool, so this
+ * is a flat add-on in `costMicros`, not a per-token rate in the `PRICES` table.
+ */
+export const WEB_SEARCH_MICROS = 10_000n
 
 /**
  * Which ephemeral cache TTL a request asked for. It is a PRICE input, not a
@@ -70,6 +78,7 @@ export function costMicros(model: string, u: Usage, cacheWriteTtl: CacheTtl): bi
     u.input_tokens * p.inMicrosPerToken +
     u.cache_creation_input_tokens * p.inMicrosPerToken * writeMult(p, cacheWriteTtl) +
     u.cache_read_input_tokens * p.inMicrosPerToken * p.cacheReadMult +
-    u.output_tokens * p.outMicrosPerToken
+    u.output_tokens * p.outMicrosPerToken +
+    (u.server_tool_use?.web_search_requests ?? 0) * Number(WEB_SEARCH_MICROS)
   return BigInt(Math.ceil(micros)) // round UP: never undercount a guardrail
 }

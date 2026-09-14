@@ -7,3 +7,6 @@
 
 [functions."sweep"]
   schedule = "*/5 * * * *"
+
+[functions."drift-monitor"]
+  schedule = "0 3 * * *"

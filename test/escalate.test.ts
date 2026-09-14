@@ -19,7 +19,7 @@ describeDb('escalate_to_human', () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '01')
       const notify = vi.fn().mockResolvedValue(undefined)
-      const out = await escalate(deps(sql, { notify }), s, { reason: 'price_moved' })
+      const out = await escalate(deps(sql, { notify, alarm: vi.fn() }), s, { reason: 'price_moved' })
       expect(out).toMatch(/escalated/i)
       const [e] = await sql`select reason, notified_at, turn_id from escalations where conversation_id = ${s.conversationId}`
       expect(e!.reason).toBe('price_moved'); expect(e!.notified_at).not.toBeNull(); expect(e!.turn_id).toBe(s.turnId)
@@ -31,7 +31,7 @@ describeDb('escalate_to_human', () => {
   it('keeps the row and the status when the notifier throws; notified_at stays null', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '02')
-      const out = await escalate(deps(sql, { notify: vi.fn().mockRejectedValue(new Error('smtp down')) }), s, { reason: 'safety' })
+      const out = await escalate(deps(sql, { notify: vi.fn().mockRejectedValue(new Error('smtp down')), alarm: vi.fn() }), s, { reason: 'safety' })
       expect(out).toMatch(/escalated/i)
       const [e] = await sql`select notified_at from escalations where conversation_id = ${s.conversationId}`
       expect(e!.notified_at).toBeNull()
@@ -46,10 +46,10 @@ describeDb('escalate_to_human', () => {
         await sql`insert into escalations (conversation_id, user_id, reason, created_at) values (${s.conversationId}, ${s.userId}, 'user_request', ${new Date(NOW.getTime() - i * 60_000)})`
       }
       const notify = vi.fn()
-      const out = await escalate(deps(sql, { notify }), s, { reason: 'user_request' })
+      const out = await escalate(deps(sql, { notify, alarm: vi.fn() }), s, { reason: 'user_request' })
       expect(out).toMatch(/limit/i); expect(notify).not.toHaveBeenCalled()
       expect(await sql`select 1 from escalations where conversation_id = ${s.conversationId}`).toHaveLength(MAX_ESCALATIONS_PER_DAY)
-      const tomorrow = { ...deps(sql, { notify: vi.fn().mockResolvedValue(undefined) }), now: () => NOW.getTime() + 86_400_000 }
+      const tomorrow = { ...deps(sql, { notify: vi.fn().mockResolvedValue(undefined), alarm: vi.fn() }), now: () => NOW.getTime() + 86_400_000 }
       expect(await escalate(tomorrow, s, { reason: 'user_request' })).toMatch(/escalated/i)
     })
   })
@@ -67,5 +67,30 @@ describeDb('escalate_to_human', () => {
     const lines: string[] = []
     await new LogNotifier((l) => lines.push(l)).notify({ id: 'x', conversationId: 'c1', userId: 'u', turnId: null, proposalId: null, reason: 'safety', createdAt: NOW })
     expect(lines).toHaveLength(1); expect(lines[0]).toContain('safety'); expect(lines[0]).toContain('c1')
+  })
+  it('the LogNotifier writes one line naming the seat and the check for a drift alarm', async () => {
+    const lines: string[] = []
+    await new LogNotifier((l) => lines.push(l)).alarm({ id: 'y', seat: 'driver', check: 'canary', detail: {}, createdAt: NOW })
+    expect(lines).toHaveLength(1); expect(lines[0]).toContain('driver'); expect(lines[0]).toContain('canary')
+  })
+  it('does not fail the turn when the notified_at stamp fails after a successful notify', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '07')
+      const notify = vi.fn().mockResolvedValue(undefined)
+      // A stamp that cannot land: make the escalations row unreachable for the update
+      // by wrapping sql so that `update escalations set notified_at` throws.
+      const failingSql = new Proxy(sql, {
+        apply(target, thisArg, args: unknown[]) {
+          const text = String((args[0] as TemplateStringsArray).join('?'))
+          if (text.includes('update escalations set notified_at')) throw new Error('stamp down')
+          return Reflect.apply(target as unknown as (...a: unknown[]) => unknown, thisArg, args)
+        },
+      }) as typeof sql
+      const out = await escalate({ sql: failingSql, notifier: { notify, alarm: vi.fn() }, now: () => NOW.getTime() }, s, { reason: 'safety' })
+      expect(out).toMatch(/escalated/i)
+      expect(notify).toHaveBeenCalledTimes(1)
+      const [e] = await sql`select notified_at from escalations where conversation_id = ${s.conversationId}`
+      expect(e!.notified_at).toBeNull()
+    })
   })
 })

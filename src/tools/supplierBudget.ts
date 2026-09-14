@@ -10,8 +10,15 @@ import type postgres from 'postgres'
  * fenced) but still calls `Supplier.quote` once per item to verify the price
  * before minting a link — ruling: one hand-off counts as one supplier call,
  * so it is on this list despite not being an `api`-door tool.
+ *
+ * `research_destination` is a `worker`-door tool (src/tools/registry.ts): its
+ * result is a scout's prose, not ours, and it reaches no supplier of ours at
+ * all — but the scout's own web searches are metered and billed by the model
+ * provider, which is exactly the "reaches a metered, rate-limited third
+ * party" this list exists to name, whatever its door.
  */
-export const SUPPLIER_DOORS: readonly string[] = ['explore_flights', 'explore_hotels', 'hand_off_to_booking']
+export const SUPPLIER_DOORS: readonly string[] =
+  ['explore_flights', 'explore_hotels', 'hand_off_to_booking', 'research_destination']
 
 /**
  * Spec section 8: "Supplier APIs are rate-limited and sometimes metered, and v1

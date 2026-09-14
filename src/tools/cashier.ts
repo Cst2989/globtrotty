@@ -2,7 +2,7 @@ import type postgres from 'postgres'
 import { loadProposal, type ProposalRow, type StoredItineraryItem } from '../repo/proposals.js'
 import { linksForProposal, mintLinks, type LinkClickRow } from '../repo/linkClicks.js'
 import { formatMoney, money } from '../money.js'
-import { maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
+import { maskControlChars, maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
 import { BookingUrlError } from '../supplier/urls.js'
 import type { Supplier, SupplierItem } from '../supplier/types.js'
 
@@ -167,7 +167,10 @@ function render(p: ProposalRow, links: LinkClickRow[], now: Date, verified: bool
   const head = verified
     ? 'Verified just now against the suppliers; every item is still offered at the price she accepted (within 0.5%).'
     : `These were the prices when we found them. Prices move; tell her to check the total before she pays.`
+  // The reviewer's issues are OUR OWN model's prose (the reviewer seat), not a
+  // supplier's — maskControlChars, not maskUntrustedText, so a two-sentence
+  // issue is not cut mid-word and a name with a non-ASCII letter is not mangled.
   const warn = p.gateOutcome === 'shipped_unapproved' && p.reviewIssues.length > 0
-    ? `\n\nThe reviewer did not approve this offer: ${p.reviewIssues.map(maskUntrustedText).join('; ')}. Say so plainly before the links.` : ''
+    ? `\n\nThe reviewer did not approve this offer: ${p.reviewIssues.map(maskControlChars).join('; ')}. Say so plainly before the links.` : ''
   return `${head}${warn}\n\nGive her these links, one per line, exactly as written:\n${lines.join('\n')}\n\nThis is the point of no return: do not re-quote, revise, or re-propose this set.`
 }

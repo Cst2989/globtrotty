@@ -146,3 +146,28 @@ export async function rehydrate(
   }
   return out
 }
+
+/**
+ * Newest row per source id, then the ones past their own ttl. The gate's
+ * freshness rule, as a warning the model reads before it proposes.
+ *
+ * Same newest-row rule as `rehydrate` above (`distinct on (source_id) ...
+ * order by source_id, fetched_at desc, id desc`), because a re-fetch that
+ * refreshes an id must retire it from this list even though the OLDER row for
+ * that same id is, and stays, past its own ttl — only the newest fetch speaks
+ * for a source id's freshness. Scoped to one conversation for the same reason
+ * `rehydrate` is: staleness in someone else's conversation is not staleness
+ * in this one.
+ */
+export async function listExpiredSourceIds(
+  sql: postgres.Sql, conversationId: string, now: Date,
+): Promise<string[]> {
+  const rows = await sql<{ source_id: string }[]>`
+    select source_id from (
+      select distinct on (source_id) source_id, fetched_at, ttl_seconds
+        from tool_results where conversation_id = ${conversationId}
+       order by source_id, fetched_at desc, id desc) newest
+     where fetched_at + make_interval(secs => ttl_seconds) < ${now}
+     order by source_id`
+  return rows.map((r) => r.source_id)
+}

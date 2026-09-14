@@ -78,7 +78,7 @@ describeDb('releaseForContinuation', () => {
       const t = await seedTurn(sql)
       const claim = (await claimTurn(sql, t.id))!
 
-      await releaseForContinuation(sql, claim, { step: 1, messages: [] })
+      await releaseForContinuation(sql, claim, { step: 1, messages: [] }, 0n)
 
       const [row] = await sql`select status, heartbeat_at from turns where id = ${t.id}`
       expect(row!.status).toBe('queued')
@@ -98,8 +98,22 @@ describeDb('releaseForContinuation', () => {
       await claimTurn(sql, t.id)   // a second worker supersedes the first
 
       await expect(
-        releaseForContinuation(sql, first, { step: 9, messages: [] }),
+        releaseForContinuation(sql, first, { step: 9, messages: [] }, 0n),
       ).rejects.toThrow(FencedError)
+    })
+  })
+
+  // F5: the run's accumulated spend is carried into turns.spend_usd_micros in
+  // the same statement, exactly like completeTurn/failTurn.
+  it('carries spendMicros into turns.spend_usd_micros', async () => {
+    await withTestDb(async (sql) => {
+      const t = await seedTurn(sql)
+      const claim = (await claimTurn(sql, t.id))!
+
+      await releaseForContinuation(sql, claim, { step: 1, messages: [] }, 300n)
+
+      const [row] = await sql`select spend_usd_micros from turns where id = ${t.id}`
+      expect(BigInt(row!.spend_usd_micros as string)).toBe(300n)
     })
   })
 })

@@ -34,6 +34,13 @@ describe('buildRequest', () => {
     expect(oc.effort).toBeUndefined()
   })
 
+  it('sends no thinking block for a seat that takes no effort', () => {
+    // Haiku 4.5 does not accept {type: 'adaptive'} and 400s on it.
+    const req = buildRequest({ ...base, seat: SEATS.scout })
+    expect(req.thinking).toBeUndefined()
+    expect('thinking' in req).toBe(false)
+  })
+
   it('never prefills an assistant turn — it returns 400 on Opus 5', () => {
     const sent = buildRequest(base).messages as LoopMessage[]
     expect(sent.at(-1)!.role).toBe('user')

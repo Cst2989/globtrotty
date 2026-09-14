@@ -13,6 +13,7 @@ export type ModelUsage = {
   cache_creation_input_tokens: number
   cache_read_input_tokens: number
   output_tokens: number
+  server_tool_use?: { web_search_requests: number }
 }
 
 /**
@@ -113,6 +114,11 @@ export function withSuffix(messages: LoopMessage[], suffix: string | undefined):
  *    the old shape, because it is model-agnostic, so the compiler is no help
  *    here and the shape test is the guard.
  *  - an assistant prefill — returns 400 on Opus 5.
+ *  - `thinking` at all, for a seat that takes no effort (`seat.effort === null`
+ *    — the Haiku seats). Haiku 4.5 does not accept `{type: 'adaptive'}`
+ *    (it takes `budget_tokens` or nothing) and 400s on it; omitting the block
+ *    entirely is what makes the front desk (Task 3, the first Haiku caller in
+ *    this repo) work at all.
  * `effort` lives INSIDE `output_config`, never at the top level.
  */
 export function buildRequest(args: CallArgs): Record<string, unknown> {
@@ -131,8 +137,10 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
     // Breakpoints FIRST, suffix second: the volatile notebook must land after
     // the rolling breakpoint, never carry it.
     messages: withSuffix(placeBreakpoints(messages), args.suffix),
-    thinking: { type: 'adaptive' },
   }
+  // `seat.effort === null` marks the Haiku seats (src/model/seats.ts) — see the
+  // doc comment above for why they get no `thinking` block at all.
+  if (seat.effort !== null) req.thinking = { type: 'adaptive' }
   if (head.tools.length > 0) req.tools = head.tools
   if (Object.keys(outputConfig).length > 0) req.output_config = outputConfig
   return req

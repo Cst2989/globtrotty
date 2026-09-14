@@ -10,6 +10,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "ci:migrate": "bash scripts/ci-migrate.sh",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "demo": "tsx scripts/demo.ts"

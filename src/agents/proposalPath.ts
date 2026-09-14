@@ -3,7 +3,7 @@ import { countReviewerVerdicts } from '../repo/gateResults.js'
 import { saveProposal, type GateOutcomeLabel } from '../repo/proposals.js'
 import { SEATS } from '../model/seats.js'
 import { formatMoney } from '../money.js'
-import { maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
+import { maskControlChars, sanitizeSourceId } from '../sanitize.js'
 import { MAX_REVIEW_ROUNDS, reviewOffer, type ReviewDeps } from './reviewer.js'
 import type { Notebook } from '../notebook.js'
 
@@ -55,10 +55,12 @@ export async function runProposalPath(
     // proposes again, which is the next round.
     // F3: the reviewer's issues are text a MODEL (Opus, the reviewer seat)
     // wrote — untrusted the same way any model/supplier output is, and headed
-    // straight into the driver's own context. maskUntrustedText strips control
+    // straight into the driver's own context. maskControlChars strips control
     // characters (a raw newline included) before this joins them, so an
-    // issue engineered to look like a new instruction line cannot fence.
-    return `Revise: ${review.verdict.issues.map(maskUntrustedText).join('; ')}`
+    // issue engineered to look like a new instruction line cannot fence. It is
+    // OUR OWN model's prose, not a supplier's, so unlike sanitizeSourceId above
+    // it keeps Unicode letters and carries no length cap.
+    return `Revise: ${review.verdict.issues.map(maskControlChars).join('; ')}`
   } else {
     gateOutcome = 'shipped_unapproved'
     issues = review.verdict.issues
@@ -80,6 +82,6 @@ export async function runProposalPath(
   // Same masking as the Revise: reply above, for the same reason: `issues`
   // here is either the reviewer's own text or the fixed "skipped: spending
   // limit reached" string — never assume the former is safe to interpolate raw.
-  return `${head} The reviewer has NOT approved it and the rounds are used up: ${issues.map(maskUntrustedText).join('; ')}. `
+  return `${head} The reviewer has NOT approved it and the rounds are used up: ${issues.map(maskControlChars).join('; ')}. `
        + 'Tell her what you chose, and pass on the reviewer\'s concerns in her words — she decides.'
 }

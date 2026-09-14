@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { withTestDb, describeDb } from './helpers/db.js'
-import { costMicros } from '../src/pricing.js'
+import { costMicros, WEB_SEARCH_MICROS } from '../src/pricing.js'
 import { recordSpend, readSpendFailClosed } from '../src/repo/spend.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
@@ -83,6 +83,16 @@ describe('costMicros', () => {
       // TTL is exactly how a 1h write silently bills at the 5m rate.
       costMicros('claude-opus-5', { ...ZERO, cache_creation_input_tokens: 1_000 })
     expect(call).toThrow(/cache write TTL/)
+  })
+
+  it('charges each web search at $10 per 1,000 on top of tokens', () => {
+    const u = { ...ZERO, input_tokens: 1000, server_tool_use: { web_search_requests: 3 } }
+    expect(costMicros('claude-haiku-4-5-20251001', u, '1h')).toBe(1_000n + 3n * WEB_SEARCH_MICROS)
+  })
+
+  it('charges nothing extra when server_tool_use is absent', () => {
+    const u = { ...ZERO, input_tokens: 1000 }
+    expect(costMicros('claude-haiku-4-5-20251001', u, '1h')).toBe(1_000n)
   })
 })
 

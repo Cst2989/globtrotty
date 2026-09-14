@@ -1,0 +1,39 @@
+# .github/workflows/test.yml
+name: test
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: ci, POSTGRES_PASSWORD: ci, POSTGRES_DB: globetrotty }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/globetrotty
+      SUPABASE_URL: http://localhost
+      SUPABASE_ANON_KEY: placeholder
+      SUPABASE_SERVICE_ROLE_KEY: placeholder
+      WORKER_SHARED_SECRET: placeholder
+      SITE_URL: http://localhost
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_SEARCH_API: ${{ secrets.GOOGLE_SEARCH_API }}
+      LIVE_MODEL: '1'
+      LIVE_SUPPLIERS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm ci:migrate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test

@@ -62,6 +62,9 @@ export const ReviseComponent = z.strictObject({
 /** Takes the proposal id only — everything else (price, url, tracking ref) is server-built. */
 export const HandOff = z.strictObject({ proposalId: z.uuid() })
 
+/** One city, nothing else: the model names the destination, the scout does the rest. */
+export const ResearchDestination = z.strictObject({ city: z.string().min(1).max(80) })
+
 /** Fixed-format only: a reason code from the enum, and optionally a proposal id. No free text reaches the row. */
 export const EscalateToHuman = z.strictObject({
   reason: z.enum(ESCALATION_REASONS as [EscalationReason, ...EscalationReason[]]),
@@ -85,6 +88,8 @@ export const TOOLS: Record<string, ToolDef> = {
     description: 'After she has ACCEPTED a proposal in chat, hand her tracked booking links. Takes the proposal_id only. Refuses if she has not accepted, or accepted more than 30 minutes ago.' },
   escalate_to_human: { name: 'escalate_to_human', door: 'code', schema: EscalateToHuman,
     description: 'Hand this conversation to a human. reason is one of the fixed codes; add proposalId when it concerns a saved proposal. Use when a supplier is down, a price moved past what she accepted, she asks for a person, or you cannot satisfy a constraint.' },
+  research_destination: { name: 'research_destination', door: 'worker', schema: ResearchDestination,
+    description: 'Ask a scout for a 300-word brief on one city for this traveller: neighbourhoods, season, airport transfer, what to avoid. Words only — it never returns prices.' },
 }
 
 /**
@@ -95,7 +100,8 @@ export const TOOLS: Record<string, ToolDef> = {
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
   planning: ['update_requirements', 'ask_user', 'explore_flights', 'explore_hotels',
-             'propose_itinerary', 'revise_component', 'hand_off_to_booking', 'escalate_to_human'],
+             'propose_itinerary', 'revise_component', 'hand_off_to_booking', 'escalate_to_human',
+             'research_destination'],
 }
 
 /**

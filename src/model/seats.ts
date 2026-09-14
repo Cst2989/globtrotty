@@ -38,8 +38,10 @@ const OPUS = 'claude-opus-5'
 // highest-volume seat, so it is pinned exactly (spec section 7).
 const HAIKU = 'claude-haiku-4-5-20251001'
 
+// A prompt file edit is a version bump, always: driver.md gained the Scouts
+// section in Task 7 (plan 3c), so driver@2 -> driver@3.
 export const SEATS: Record<SeatName, Seat> = {
-  driver:     seat(OPUS,  'high', 16_000, 'driver@2'),
+  driver:     seat(OPUS,  'high', 16_000, 'driver@3'),
   reviewer:   seat(OPUS,  'high', 8_000,  'reviewer@1'),
   front_desk: seat(HAIKU, null,   1_024,  'front_desk@1'),
   scout:      seat(HAIKU, null,   2_048,  'scout@1'),

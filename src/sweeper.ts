@@ -60,7 +60,9 @@ export async function sweep(
       returning t.id, t.conversation_id, t.user_id
     ),
     convo as (
-      update conversations c set status = 'failed', updated_at = now()
+      update conversations c
+         set status = case when c.status = 'escalated' then 'escalated' else 'failed' end,
+             updated_at = now()
         from reap r where c.id = r.conversation_id and c.user_id = r.user_id
     )
     select id from reap`

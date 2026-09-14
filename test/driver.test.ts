@@ -6,7 +6,8 @@ import { runTurn } from '../src/worker.js'
 import { submitMessage } from '../src/handler.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { recordResults } from '../src/repo/toolResults.js'
-import { applyRequirementsPatch, loadNotebook } from '../src/repo/notebook.js'
+import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../src/repo/notebook.js'
+import { sanitizeSourceId, maskIdChars } from '../src/sanitize.js'
 import { estimateMicros, reconcile, reserve } from '../src/repo/reservation.js'
 import { SEATS } from '../src/model/seats.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -92,7 +93,7 @@ describeDb('driver', () => {
       expect(row!.seat).toBe('driver')
       expect(row!.capture_policy).toBe('full')   // the driver is never sampled out
       expect(row!.thinking_mode).toBe('adaptive')
-      expect(row!.prompt_version).toBe('driver@2')
+      expect(row!.prompt_version).toBe('driver@3')
       expect(BigInt(row!.cost_micros as string)).toBe(step.recordedMicros!)
     })
   })
@@ -550,6 +551,85 @@ describeDb('driver', () => {
     })
   })
 
+  // The price half of `trimForContext` (spec section 4), implemented as a
+  // warning in the suffix rather than in the tool result itself: the model
+  // reads it BEFORE it proposes, not after a rejection. `deps.now` is the real
+  // `Date.now()` (see `deps` above), so the corpus row must be stale against
+  // WALL-CLOCK time — seeding its `fetchedAt` 30 minutes in the past, well
+  // past the mock supplier's 900-second (15-minute) ttl, achieves that
+  // without a fake clock.
+  it('appends an expired-results notice to the suffix when the corpus holds a stale batch', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '30')
+      const staleParams: FlightSearch = {
+        kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
+        returnDate: null, flexDays: 0, adults: 2, children: 0, infants: 0,
+        cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+      }
+      const items = await new MockSupplier({
+        kind: 'flight', now: () => new Date(Date.now() - 30 * 60_000),
+      }).search(staleParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: null, params: staleParams, items,
+      })
+      let sent: Record<string, unknown> | null = null
+      const create = vi.fn().mockImplementation(async (req: unknown) => {
+        sent = req as Record<string, unknown>
+        return textResponse('ok')
+      })
+      await makeDriver(deps(sql, create))(ctx(s))
+      const messages = sent!.messages as Array<{ content: Array<Record<string, unknown>> }>
+      const lastBlock = messages.at(-1)!.content.at(-1)!
+      const text = String(lastBlock.text)
+      // `lastBlock` IS the last content block of the last message — the
+      // notice, being part of `suffix`, always lands there (src/model/client.ts's
+      // `withSuffix`).
+      expect(text).toContain('## Expired results')
+      for (const i of items) expect(text).toContain(maskIdChars(i.sourceId))
+    })
+  })
+
+  // M10: seeds a FRESH batch, not an empty corpus — a corpus with zero rows
+  // trivially has zero expired ones, which exercises nothing about the
+  // "nothing is stale" branch of listExpiredSourceIds. A batch that is
+  // present and genuinely fresh (fetchedAt now, well inside its ttl) is the
+  // real case this test claims to cover.
+  it('omits the expired-results notice entirely when nothing in the corpus is stale', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '31')
+      const freshParams: FlightSearch = {
+        kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12',
+        returnDate: null, flexDays: 0, adults: 2, children: 0, infants: 0,
+        cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+      }
+      const freshItems = await new MockSupplier({ kind: 'flight' }).search(freshParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: null, params: freshParams, items: freshItems,
+      })
+      // A non-empty notebook, so the suffix is non-empty either way — an
+      // empty notebook would make the "notice dropped out entirely" case
+      // indistinguishable from "the suffix was never appended at all"
+      // (`withSuffix` skips appending anything when `suffix.length === 0`).
+      await applyRequirementsPatch(sql, {
+        conversationId: s.conversationId, userId: s.userId, source: 'user',
+        patch: { destination: 'Faro' },
+      })
+      let sent: Record<string, unknown> | null = null
+      const create = vi.fn().mockImplementation(async (req: unknown) => {
+        sent = req as Record<string, unknown>
+        return textResponse('ok')
+      })
+      await makeDriver(deps(sql, create))(ctx(s))
+      const messages = sent!.messages as Array<{ content: Array<Record<string, unknown>> }>
+      const lastBlock = messages.at(-1)!.content.at(-1)!
+      const text = String(lastBlock.text)
+      expect(text).not.toContain('## Expired results')
+      // With nothing expired, the suffix block is the rendered notebook alone.
+      const notebook = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(text).toBe(renderNotebook(notebook))
+    })
+  })
+
   it('runs propose_itinerary through the gates and reports a pass', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '12')
@@ -748,6 +828,11 @@ describeDb('driver', () => {
         { sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId, conversationId: null, message: 'a week in Faro', idempotencyKey: 'rt1' },
       )
+      // This test calls `makeDriver` directly (not `routeAgent`), so the
+      // conversation `submitMessage` created at `desk = 'front'` (Task 1) is
+      // seeded straight to 'planning' — the desk flag plays no part in what
+      // this test is checking (per-model-call spend, exactly once).
+      await sql`update conversations set desk = 'planning' where id = ${r.conversationId}`
       const create = vi.fn().mockResolvedValue(textResponse('Faro it is.'))
       await runTurn({
         sql, limits: DEFAULT_LIMITS,
@@ -772,6 +857,61 @@ describeDb('driver', () => {
       expect(BigInt(conv!.spend_usd_micros as string)).toBe(6_250n)
       expect(BigInt(turn!.spend_usd_micros as string)).toBe(6_250n)
       expect(BigInt(daily!.cost_micros as string)).toBe(6_250n)
+    })
+  })
+
+  // research_destination's door is 'worker' (src/tools/registry.ts), so its
+  // result must arrive fenced like an api-door result — it is a model's prose,
+  // paid for, but still untrusted content by the time it reaches the driver's
+  // own transcript. The scout's own Haiku call is a SECOND model call within
+  // the same tool step, priced and recorded separately from the driver's.
+  it('research_destination: fences the brief as untrusted and folds the scout cost into step.spent', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '25')
+      const scoutUsage = {
+        input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
+        output_tokens: 200, server_tool_use: { web_search_requests: 1 },
+      }
+      const create = vi.fn()
+        .mockResolvedValueOnce(toolResponse('research_destination', { city: 'Faro' }))
+        .mockResolvedValueOnce({
+          content: [{ type: 'text', text: 'Faro is the gateway to the Algarve.' }],
+          stop_reason: 'end_turn', model: 'claude-haiku-4-5-20251001', _request_id: 'req_scout',
+          usage: scoutUsage,
+        })
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      expect(step.name).toBe('research_destination')
+      const out = String(await step.run())
+      expect(out).toContain('trust="untrusted"')
+      expect(out).toContain('Faro is the gateway to the Algarve.')
+      // 1000*1 (input) + 200*5 (output) + 1*10_000 (one search) = 12_000
+      expect(step.spent!.micros).toBe(12_000n)
+      const [mc] = await sql`
+        select seat, cost_micros from model_calls where turn_id = ${s.turnId} and seat = 'scout'`
+      expect(mc!.seat).toBe('scout')
+      expect(BigInt(mc!.cost_micros as string)).toBe(12_000n)
+    })
+  })
+
+  it('counts research_destination against the same per-turn supplier budget, though it is a worker-door tool', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '29')
+      for (let i = 0; i < DEFAULT_LIMITS.maxSupplierCallsPerTurn; i++) {
+        await sql`insert into tool_calls (turn_id, call_id, name, status)
+                  values (${s.turnId}, ${'pre' + i}, 'explore_flights', 'done')`
+      }
+      const create = vi.fn().mockResolvedValue(toolResponse('research_destination', { city: 'Faro' }))
+      const step = await makeDriver(deps(sql, create))(ctx(s))
+      expect(step.kind).toBe('tool')
+      if (step.kind !== 'tool') throw new Error('unreachable')
+      const result = String(await step.run())
+      expect(result).toMatch(/budget|limit|searches/i)
+      expect(result).toContain(String(DEFAULT_LIMITS.maxSupplierCallsPerTurn))
+      // The budget gate fires before execute() ever calls the scout, so the
+      // shared transport sees only the driver's own call — never a second one
+      // for the scout's Haiku request.
+      expect(create).toHaveBeenCalledTimes(1)
     })
   })
 })

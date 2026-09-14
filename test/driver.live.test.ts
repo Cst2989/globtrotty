@@ -5,10 +5,22 @@
 // TypeScript types even though sending it returns a 400 on Opus 5, so `tsc` is
 // blind to that whole class of drift. Gated on LIVE_MODEL so the default
 // `pnpm test` run stays offline — same pattern as `test/supplier-kiwi.live.test.ts`.
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import { buildRequest, callModel } from '../src/model/client.js'
 import { SEATS } from '../src/model/seats.js'
+import { FRONT_SCHEMA } from '../src/agents/frontDesk.js'
+import { WEB_SEARCH_TOOL } from '../src/agents/scout.js'
+import { renderNotebook } from '../src/repo/notebook.js'
+import { emptyNotebook, type Notebook } from '../src/notebook.js'
+
+// L1: read the real prompt files exactly as the agents themselves do
+// (src/agents/frontDesk.ts, src/agents/scout.ts) rather than a hand-written
+// stand-in — a live pin that sends a DIFFERENT prompt than production proves
+// nothing about whether production's actual request shape is still accepted.
+const FRONT_DESK_SYSTEM = readFileSync(new URL('../src/agents/prompts/front_desk.md', import.meta.url), 'utf8')
+const SCOUT_SYSTEM = readFileSync(new URL('../src/agents/prompts/scout.md', import.meta.url), 'utf8')
 // Not called in the two assertions below — no single live call here is large
 // enough, or repeated enough, to reliably exercise a cache read. Imported
 // anyway, per the task brief's exact test file, as the reference to why this
@@ -83,5 +95,62 @@ live('driver against the real API', () => {
     const parsed = JSON.parse((text as { text: string }).text)
     expect(typeof parsed.approved).toBe('boolean')
     expect(Array.isArray(parsed.issues)).toBe(true)
+  }, 60_000)
+})
+
+// Task 9's canary pins: one live call per Haiku seat, proving against the real
+// API exactly the two things the driver's live tests above prove for Opus —
+// "no thinking block on Haiku" (src/model/client.ts's `buildRequest` doc
+// comment) and the server tool's real response shape — rather than trusting a
+// stubbed transport for either.
+live('Haiku seats against the real API', () => {
+  it('front_desk: no thinking block, structured output for FRONT_SCHEMA', async () => {
+    const r = await callModel(
+      transport(),
+      {
+        seat: SEATS.front_desk, tools: [],
+        system: FRONT_DESK_SYSTEM,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'a week in Portugal in September for two' }] }],
+        outputSchema: FRONT_SCHEMA,
+      },
+      () => Date.now(),
+    )
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') throw new Error(`refused: ${r.explanation}`)
+    const text = r.content.find((b) => b.type === 'text')
+    expect(text).toBeDefined()
+    const parsed = JSON.parse((text as { type: 'text'; text: string }).text)
+    expect(['new_trip', 'faq', 'unclear']).toContain(parsed.label)
+  }, 60_000)
+
+  it('scout: accepts the server-side web_search tool, sends the notebook suffix, and actually searches', async () => {
+    // A non-empty notebook — the real prompt talks about "this party" and
+    // "their month", so a pin that sends none of that is not exercising the
+    // shape production actually sends (src/agents/scout.ts's `suffix`).
+    const notebook: Notebook = {
+      ...emptyNotebook(),
+      partySize: { value: { adults: 2, children: 0, infants: 0 }, source: 'user', at: new Date().toISOString() },
+      departureDate: { value: '2026-09-12', source: 'user', at: new Date().toISOString() },
+    }
+    const r = await callModel(
+      transport(),
+      {
+        seat: SEATS.scout, tools: [WEB_SEARCH_TOOL],
+        system: SCOUT_SYSTEM,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'City: Faro' }] }],
+        suffix: renderNotebook(notebook),
+      },
+      () => Date.now(),
+    )
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') throw new Error(`refused: ${r.explanation}`)
+    expect(typeof r.usage.server_tool_use?.web_search_requests).toBe('number')
+    // L1: the golden city (Faro) should provoke at least one real search — a
+    // brief with zero searches proves nothing about the tool actually firing.
+    // If this turns out flaky against the live API (the model answers from
+    // its own knowledge without searching), loosen to `>= 0` and say so in
+    // the report rather than silently deleting the assertion.
+    expect(r.usage.server_tool_use!.web_search_requests).toBeGreaterThanOrEqual(1)
+    expect(r.content.some((b) => (b as { type: string }).type === 'web_search_tool_result')).toBe(true)
   }, 60_000)
 })

@@ -52,6 +52,14 @@ export type AgentStep =
       recordedMicros?: bigint
     }
   /**
+   * "Call me again": the agent did work that ends no turn and adds nothing to
+   * the transcript — the front desk routing a conversation to planning. The
+   * step counter still advances so a misbehaving agent cannot loop forever
+   * under maxSteps. `recordedMicros` follows the same rule as everywhere else:
+   * already debited, folded into the turn total, never passed to recordSpend.
+   */
+  | { kind: 'continue'; costMicros: bigint; recordedMicros?: bigint }
+  /**
    * Ends the turn in a NAMED failure, with words she can act on. Spec section 8:
    * a refused driver call "fails the turn with words she can act on and does not
    * consume quota" — parking would record status 'done' with fail_reason null,
@@ -257,7 +265,16 @@ async function loop(
         // THEN schedule — see releaseForContinuation's doc comment. Using
         // saveTurnState here would leave the turn 'running' with a fresh
         // heartbeat_at, so the re-invocation's own claimTurn could never claim it.
-        await releaseForContinuation(sql, claim, state)
+        //
+        // F5: the run's accumulated spend goes with it, into
+        // turns.spend_usd_micros, exactly like every other exit path — and
+        // turnSpend.total is reset to 0n immediately after: the re-invocation
+        // this triggers is a fresh runTurn call whose own turnSpend starts at
+        // 0n, so this process must never add the same micros again (nothing
+        // reads turnSpend after this branch returns, but zeroing it here keeps
+        // the invariant visible rather than relying on that).
+        await releaseForContinuation(sql, claim, state, turnSpend.total)
+        turnSpend.total = 0n
         await deps.reinvoke(claim.turnId)
         return
       case 'park':
@@ -350,6 +367,17 @@ async function loop(
         await heartbeat(sql, claim)
         await failTurn(sql, claim, step.reason, turnSpend.total, step.message)
         return
+      }
+      case 'continue': {
+        await heartbeat(sql, claim)
+        await recordSpend(sql, {
+          userId: claim.userId, conversationId: claim.conversationId,
+          costMicros: step.costMicros,
+        })
+        turnSpend.total += step.costMicros
+        state = { ...state, step: state.step + 1 }
+        await saveTurnState(sql, claim, state)
+        continue
       }
       case 'tool':
         break // fall through to the tool handling below
