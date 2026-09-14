@@ -123,6 +123,8 @@ import {
 import { replayGatesOnce } from '../src/evals/replay.js'
 import { runCase } from '../src/evals/runner.js'
 import { renderScorecard, scorecardOf, withRows, type ScorecardRow } from '../src/evals/scorecard.js'
+import { conversionByPromptVersion } from '../src/loop/calibration.js'
+import { RELEASE } from '../src/loop/release.js'
 import { GOLDEN_UNCHANGED_FLOOR, survivalScores } from '../src/loop/similarity.js'
 import { decidedProposals } from '../src/repo/proposals.js'
 import { readTurnLabels } from '../src/repo/turnLabels.js'
@@ -408,6 +410,18 @@ async function main(): Promise<void> {
         + ` of ${decided.length} decided proposals`)
       console.log(`  deployable           ${agreement.meetsFloor ? 'yes' : `no, floor is ${AGREEMENT_FLOOR}`}`)
     }
+    // The release canary's verdict, and the honest thing about it is the numbers.
+    // Three golden cases, one prompt version, nobody in the candidate arm and no
+    // conversions, so this prints one line that says n=3 and answers nothing. A
+    // release canary needs enough conversations that a difference in conversion
+    // is larger than the noise in conversion, and three is not a sample, it is an
+    // anecdote with a denominator.
+    for (const userId of evalUsers) {
+      for (const row of await conversionByPromptVersion(sql, { userId })) {
+        console.log(`  conversion ${row.promptVersion}  ${row.conversions}/${row.proposals} proposals`)
+      }
+    }
+    console.log(`  release arm          ${RELEASE.rolloutPercent}% candidate, rollback is a commit`)
     await deleteRunRows(sql, evalUsers)
   } finally {
     await sql.end({ timeout: 5 })
