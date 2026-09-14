@@ -117,6 +117,8 @@ at the last update.
 
 **The DB tests write real rows to the production Supabase project.** CI needs a non-production `DATABASE_URL`.
 
+**CI's database is a container, not Supabase.** `.github/workflows/test.yml` runs a bare `postgres:16` service and `scripts/ci-migrate.sh` applies `supabase/ci-bootstrap.sql` (creates the `anon`/`authenticated` roles the migrations assume) then every migration in name order — there is no Supabase project behind CI, so anything relying on Supabase-specific behavior beyond plain Postgres will not be exercised there.
+
 **Three functions move money** — `recordSpend`, `reserve`, `reconcile`. `completeTurn`/`failTurn` write `turns.spend_usd_micros`, a different column on a different table. A previous plan shipped three double-charges through three unrelated doors; **money invariants here are not reviewable by reading.**
 
 **Two recurring defect classes, both still live:**

@@ -6,6 +6,11 @@ export default defineConfig({
     environment: 'node',
     include: ['test/**/*.test.ts'],
     setupFiles: ['./test/setup.ts'],
+    // CI's Postgres is a fresh local container; the default 5000ms timeout
+    // has been tight enough to cause intermittent timeouts against the
+    // remote Supabase project in full-suite runs. Raised for all tests
+    // (DB tests are the ones this protects) rather than per-file.
+    testTimeout: 30000,
     /**
      * Pinned, and deliberately NOT UTC.
      *
