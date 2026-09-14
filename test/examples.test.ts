@@ -1,56 +1,107 @@
-import { similarity, type BookedSet } from '../src/loop/similarity.js'
-import { REFS_SCHEMA_VERSION } from '../src/repo/proposals.js'
-import { valueOr } from '../src/loop/derive.js'
+import { randomUUID } from 'node:crypto'
+import type postgres from 'postgres'
+import { bookingUrl } from '../src/cashier.js'
+import { MIN_OBSERVATIONS } from '../src/loop/derive.js'
+import { EXAMPLES_PER_PROMPT, renderExamples, selectExamples } from '../src/loop/examples.js'
+import { money } from '../src/money.js'
+import { emptyNotebook, type Notebook } from '../src/notebook.js'
+import { recordConversion } from '../src/repo/conversions.js'
+import { recordLinkClicks } from '../src/repo/linkClicks.js'
+import { decideProposal, recordProposal } from '../src/repo/proposals.js'
+import { describeDb, withRealDb } from './helpers/db.js'
 
-const ref = (slot: string, sourceId: string) => ({ sourceId, quantity: 1, slot })
-const booked = (proposalId: string, ids: string[]): BookedSet =>
-  ({ proposalId, itemIds: new Set(ids) })
+const stated = <T>(value: T) => ({ value, source: 'user' as const, at: '2026-09-14T10:00:00Z' })
 
-describe('an unsegmented survival ranking', () => {
-  it('puts the one-component trips above the trip that was actually hard', () => {
-    // Her hotel-only request: one component, booked exactly as proposed.
-    const easy = similarity(
-      { id: 'hotel-only', refs: [ref('stay', 'mock-hotel-1')], refsSchemaVersion: REFS_SCHEMA_VERSION },
-      booked('hotel-only', ['mock-hotel-1']))
-    const alsoEasy = similarity(
-      { id: 'flight-only', refs: [ref('flight', 'mock-flight-1')], refsSchemaVersion: REFS_SCHEMA_VERSION },
-      booked('flight-only', ['mock-flight-1']))
-    // Her Portugal trip with the toddler: three components, and she swapped the
-    // transfer for one we would never have found, which is the trip a person
-    // calls an agency for.
-    const hard = similarity(
-      {
-        id: 'portugal-toddler',
-        refs: [ref('flight', 'mock-flight-1'), ref('stay', 'mock-hotel-1'), ref('transfer', 'mock-transfer-1')],
-        refsSchemaVersion: REFS_SCHEMA_VERSION,
-      },
-      booked('portugal-toddler', ['mock-flight-1', 'mock-hotel-1', 'mock-transfer-7']))
-    const ranked = [easy, alsoEasy, hard]
-      .map((s, i) => ({ value: valueOr(s, 0), id: ['hotel-only', 'flight-only', 'portugal-toddler'][i]! }))
-      .sort((a, b) => b.value - a.value)
-    // Both easy trips outrank the hard one, and with two examples in the prompt
-    // the hard one is never shown to the desk. Run monthly, the desk's examples
-    // become a gallery of one-component bookings, and the agency gets worse at
-    // exactly the requests it exists for.
-    expect(ranked.map((r) => r.id)).toEqual(['hotel-only', 'flight-only', 'portugal-toddler'])
-    expect(ranked[2]!.value).toBeLessThan(ranked[0]!.value)
+/** The three slots a booking in this file may fill, in the order a proposal grows. */
+const COMPONENTS = [
+  { sourceId: 'mock-flight-1', quantity: 1, slot: 'flight' },
+  { sourceId: 'mock-hotel-1', quantity: 1, slot: 'stay' },
+  { sourceId: 'mock-transfer-1', quantity: 1, slot: 'transfer' },
+]
+
+/**
+ * A conversation, a proposal she accepted as proposed, and one link click and
+ * one conversion per component, reusing `recordProposal`, `recordLinkClicks` and
+ * `recordConversion` the way lesson 7.3's own database case does.
+ *
+ * Written out in full here rather than imported from test/similarity.test.ts:
+ * `test/regressions.test.ts` pins cross-test imports, and a shared fixture
+ * builder between two test files is a seam with no owner.
+ */
+async function bookedProposal(
+  sql: postgres.Sql, userId: string,
+  args: { nights: number; children: number; components: number },
+): Promise<string> {
+  const [conversation] = await sql<{ id: string }[]>`
+    insert into course.conversations (user_id) values (${userId}) returning id`
+  const refs = COMPONENTS.slice(0, args.components)
+  const snapshot: Notebook = {
+    ...emptyNotebook(),
+    nights: stated(args.nights),
+    partySize: stated({ adults: 2, children: args.children, infants: 0 }),
+  }
+  const proposalId = await recordProposal(sql, {
+    conversationId: conversation!.id, userId, turnId: null,
+    refs, requirementsSnapshot: snapshot,
+  })
+  await decideProposal(sql, {
+    proposalId, conversationId: conversation!.id, decision: 'accept',
+  })
+  const trackingRefs = refs.map(() => randomUUID())
+  await recordLinkClicks(sql, {
+    proposalId, turnId: null, userId, verified: true, quotedAt: new Date(),
+    links: refs.map((r, i) => ({
+      id: trackingRefs[i]!, sourceId: r.sourceId, supplier: 'mock', trackingRef: trackingRefs[i]!,
+      url: bookingUrl('mock', r.sourceId, trackingRefs[i]!), quoted: money(40_000n, 'EUR'),
+    })),
+  })
+  for (const ref of trackingRefs) {
+    await recordConversion(sql, {
+      trackingRef: ref, supplier: 'mock', bookedAt: new Date('2026-09-20T00:00:00Z'),
+      amountMinor: 40_000n, currency: 'EUR', commissionMinor: 2_800n, reportedAt: new Date(),
+    })
+  }
+  return proposalId
+}
+
+describeDb('selection, within a difficulty', () => {
+  it('returns nothing for a segment below the observation threshold', async () => {
+    await withRealDb(async (sql, userId) => {
+      await bookedProposal(sql, userId, { nights: 3, children: 0, components: 1 })
+      // One booking is not a ranking. The desk gets no examples rather than one
+      // chosen by noise, which is lesson 7.2's guard applied to the segment and
+      // not to the traveller.
+      expect(await selectExamples(sql, { userId, difficulty: 'simple' })).toEqual([])
+    })
   })
 
-  it('cannot tell a bad proposal from a hard trip, because both look like a heavy edit', () => {
-    const badProposal = similarity(
-      { id: 'bad', refs: [ref('stay', 'mock-hotel-1')], refsSchemaVersion: REFS_SCHEMA_VERSION },
-      booked('bad', ['mock-hotel-9']))
-    const hardTrip = similarity(
-      {
-        id: 'hard',
-        refs: [ref('flight', 'mock-flight-1'), ref('stay', 'mock-hotel-1')],
-        refsSchemaVersion: REFS_SCHEMA_VERSION,
-      },
-      booked('hard', ['mock-flight-1', 'mock-hotel-9', 'mock-transfer-7']))
-    // Neither number knows which it is looking at, and the ranking treats them
-    // as the same evidence. The fix is not a better number, it is a smaller
-    // question: compare within difficulty and never across it.
-    expect(valueOr(badProposal, 1)).toBeLessThan(0.5)
-    expect(valueOr(hardTrip, 1)).toBeLessThan(0.5)
+  it('ranks the hard trip first inside its own segment', async () => {
+    await withRealDb(async (sql, userId) => {
+      for (let i = 0; i < MIN_OBSERVATIONS; i += 1) {
+        await bookedProposal(sql, userId, { nights: 3, children: 0, components: 1 })
+        await bookedProposal(sql, userId, { nights: 3, children: 1, components: 3 })
+      }
+      const complex = await selectExamples(sql, { userId, difficulty: 'complex' })
+      const simple = await selectExamples(sql, { userId, difficulty: 'simple' })
+      // The trips the unsegmented ranking suppressed are now the examples the
+      // desk sees for hard requests, and the easy ones are still the examples
+      // for easy requests. Nothing was thrown away and no score was adjusted.
+      expect(complex).toHaveLength(EXAMPLES_PER_PROMPT)
+      expect(complex.every((e) => e.difficulty === 'complex')).toBe(true)
+      expect(simple.every((e) => e.difficulty === 'simple')).toBe(true)
+    })
+  })
+
+  it('carries the rows behind every example into the rendered file', async () => {
+    await withRealDb(async (sql, userId) => {
+      for (let i = 0; i < MIN_OBSERVATIONS; i += 1) {
+        await bookedProposal(sql, userId, { nights: 3, children: 1, components: 3 })
+      }
+      const examples = await selectExamples(sql, { userId, difficulty: 'complex' })
+      const file = renderExamples([{ difficulty: 'complex', examples }], '2026-09-14T10:00:00Z')
+      for (const example of examples) expect(file).toContain(example.proposalId)
+      // And the provenance is inside a comment, so it never reaches the model.
+      expect(file.indexOf(examples[0]!.proposalId)).toBeLessThan(file.indexOf('-->'))
+    })
   })
 })
