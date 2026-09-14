@@ -1,7 +1,6 @@
 import type postgres from 'postgres'
 import { classifyDesk } from '../classify.js'
 import type { ModelClient } from '../client.js'
-import { TODAY } from '../conversation.js'
 import { loadDesk, renderPrompt } from '../desks.js'
 import { textOfBlocks, whichCeiling, type ContentBlock, type Limits } from '../engine.js'
 import { isUnbilled } from '../errors.js'
@@ -34,6 +33,21 @@ export type DriverDeps = {
   run: ToolRunner
   limits: Limits
   now: () => number
+  /**
+   * The calendar the planning desk plans from, rendered into `{{today}}` below.
+   *
+   * Required and with no default, for the reason `constraintsFromNotebook`
+   * (src/gates/notebookConstraints.ts) gives about its own `today`: a default is
+   * how one caller silently keeps the old behaviour. Every production caller
+   * passes `TODAY` (src/conversation.ts), which is what it read off the module
+   * before lesson 6.4. The eval chain passes `EVAL_TODAY`
+   * (src/evals/conversation.ts), so the desk and the dates gate read ONE
+   * calendar: with the desk on `TODAY` and the gate on `EVAL_TODAY`, the day
+   * those two constants part company the desk plans one year and the gate
+   * judges against another, and the gate fails proposals the desk was right to
+   * make.
+   */
+  today: string
 }
 
 /**
@@ -118,7 +132,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       // prompt, which is the stable prefix lesson 5.6 caches, so every fact she
       // stated would have thrown that prefix away. It rides in the suffix
       // instead.
-      system: renderPrompt(desk, deskName === 'front' ? {} : { today: TODAY }),
+      system: renderPrompt(desk, deskName === 'front' ? {} : { today: deps.today }),
       messages: ctx.state.messages,
       // Empty for the front desk, so `buildRequest` omits `tools` entirely and
       // the model is offered no door to open.

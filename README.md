@@ -1003,6 +1003,14 @@ reason and `seedFor` is what a case gets the first time it is recorded in a
 world of its own. Until then a live run and a replayed run of one case are two
 different worlds. Owner: a person with a key, re-recording the three.
 
+Open at lesson 6.4, operability: `npm run evals` writes to the reader's real
+database and cleans up nothing, so `--runs 3` leaves nine conversations and their
+turns, messages, corpus rows, gate results and daily_usage rows instead of three.
+The money is simulated and the ledger is not, because a replayed call is priced
+from the usage in its recording and debited like a real one, so a pass is worth
+more than $2.50 of the $50 cross-user day that `npm run trip` shares. Owner:
+lesson 6.6, where the nightly schedule makes it sixty conversations a night.
+
 The three `pass^k:` rows read 0/3 at this tag, and not because anything is
 flaky: `call_count_fits_the_job` fails on all three cases for the reason the
 lesson 6.3 residual above gives, and a case with a failed check did not pass.

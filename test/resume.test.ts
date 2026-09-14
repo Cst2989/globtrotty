@@ -1,3 +1,4 @@
+import { TODAY } from '../src/conversation.js'
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { makeDriver } from '../src/agents/driver.js'
@@ -41,6 +42,7 @@ describeDb('a turn that survives a crash and a resume', () => {
       ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
 
       // One step per invocation, so the turn is handed back twice, which is

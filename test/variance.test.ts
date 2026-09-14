@@ -1,12 +1,17 @@
+import { readFileSync } from 'node:fs'
 import { loadGoldenCases } from '../src/evals/cases.js'
+import { invocationClock } from '../src/evals/conversation.js'
 import { rate } from '../src/evals/scorecard.js'
-import { EVAL_TODAY, passAtK, passAtKRows, RECORDED_WORLD_SEED, seedFor } from '../src/evals/variance.js'
+import { EVAL_TODAY, evalNow, passAtK, passAtKRows, RECORDED_WORLD_SEED, seedFor } from '../src/evals/variance.js'
+import { checkFreshness } from '../src/gates/checks.js'
 import { travelWindowFrom } from '../src/gates/notebookConstraints.js'
+import type { RehydratedItem } from '../src/gates/types.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { money } from '../src/money.js'
 import { applyRequirements, emptyNotebook } from '../src/notebook.js'
 import { SEATS } from '../src/seats.js'
 import { mockSuppliers } from '../src/supplier/mock.js'
-import type { HotelSearch } from '../src/supplier/types.js'
+import type { HotelSearch, SupplierItem } from '../src/supplier/types.js'
 
 const AT = '2026-08-29T10:00:00Z'
 const stay = (checkIn: string, checkOut: string): HotelSearch => ({
@@ -32,25 +37,66 @@ describe('what moves between two runs of one case, and what no longer does', () 
 
   it('plans from its own calendar, which TODAY cannot move', () => {
     const nb = applyRequirements(emptyNotebook(), { month: 'September', nights: 7 }, 'user', AT).next
-    // EVAL_TODAY and TODAY hold the same string today and are two constants, so
-    // the lesson that moves TODAY moves the reader's transcript and not the
-    // suite's anchor.
-    expect(travelWindowFrom(nb, EVAL_TODAY)).toEqual(travelWindowFrom(nb, '2026-08-29'))
-    expect(EVAL_TODAY).not.toBe('')
+    // Written out rather than computed by the same function on the other side of
+    // the assertion, so this goes red if EVAL_TODAY moves rather than agreeing
+    // with itself whatever it holds.
+    expect(travelWindowFrom(nb, EVAL_TODAY)).toEqual({ earliest: '2026-09-01', latest: '2026-10-07' })
+    // The day a lesson moves TODAY to December, the reader's own window is a
+    // year further out. The suite's is not, because the two are two constants.
+    expect(travelWindowFrom(nb, '2026-12-01')).toEqual({ earliest: '2027-09-01', latest: '2027-10-07' })
   })
 
-  it('replays a recorded case in the world its recording was made in', () => {
-    // The bill this lesson leaves, written as an assertion rather than as a
-    // sentence in a residual nobody runs. `seedFor` gives a case a world of its
-    // own, and the three recordings on this branch were made before it existed,
-    // in MockConfig's default world, with the model's own `propose_trip` naming
-    // the ids IT saw there. Replaying those responses in any other world fails
-    // the provenance gate on every proposal, correctly, so the eval run passes
-    // RECORDED_WORLD_SEED and the re-recording is owed.
-    expect(RECORDED_WORLD_SEED).toBe(1)
-    for (const kase of loadGoldenCases()) {
-      expect(seedFor(kase.id)).not.toBe(RECORDED_WORLD_SEED)
+  it('renders the desk prompt from the caller calendar and not the module constant', () => {
+    // Half a pin is worse than none. Until this lesson's fix round `makeDriver`
+    // rendered `{{today}}` off module-scope `TODAY` (src/agents/driver.ts) while
+    // the gates read `EVAL_TODAY`, so the day those two constants part company a
+    // live eval would have the desk planning one year and the dates gate judging
+    // another, and the gate would fail proposals the desk was right to make.
+    // Invisible on the replayed path, because `replayClient` matches on the model
+    // and ignores the prompt, which is exactly why it is asserted here.
+    const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+    for (const file of ['src/agents/driver.ts', 'src/evals/conversation.ts', 'src/evals/runner.ts']) {
+      expect(read(file)).not.toMatch(/^import \{[^}]*\bTODAY\b[^}]*\} from/m)
     }
+    expect(read('src/agents/driver.ts')).toContain('{ today: deps.today }')
+  })
+
+  it('replays a recorded case in the world its recording was made in', async () => {
+    // The bill this lesson leaves, written as the mechanism rather than as a
+    // sentence in a residual nobody runs. The three recordings were made before
+    // the world was pinned, against an unseeded `mockSuppliers()`, and the
+    // model's own `propose_trip` names the source ids IT saw there.
+    const search = stay('2026-09-19', '2026-09-26')
+    const recorded = await mockSuppliers({ hotel: { seed: RECORDED_WORLD_SEED } }).hotel.search(search)
+    const unseeded = await mockSuppliers().hotel.search(search)
+    expect(recorded.map((i) => i.sourceId)).toEqual(unseeded.map((i) => i.sourceId))
+    for (const kase of loadGoldenCases()) {
+      const own = await mockSuppliers({ hotel: { seed: seedFor(kase.id) } }).hotel.search(search)
+      // Not one id survives the move, so replaying a recorded proposal in the
+      // case's own world names ids no search in that conversation returned, and
+      // the provenance gate refuses every one of them. That is why `evals/run.ts`
+      // passes RECORDED_WORLD_SEED and why the re-recording is owed.
+      expect(own.map((i) => i.sourceId)).not.toEqual(recorded.map((i) => i.sourceId))
+    }
+  })
+
+  it('stamps a supplier item from the same clock the freshness gate reads', async () => {
+    // The coupling `runCase` depends on and nothing asserted until now: the mock
+    // stamps `fetchedAt` from the clock it is handed, and the gates age items
+    // against `deps.now()`. Drop `now` from either supplier config and the two
+    // clocks are sixteen days apart, `age < 0` on every item, and the freshness
+    // gate refuses a proposal in which nothing is stale.
+    const [item] = await mockSuppliers({
+      hotel: { seed: RECORDED_WORLD_SEED, now: evalNow },
+    }).hotel.search(stay('2026-09-19', '2026-09-26'))
+    expect(item!.fetchedAt.toISOString()).toBe(evalNow().toISOString())
+    const rehydrated: RehydratedItem[] = [{
+      ref: { sourceId: item!.sourceId, quantity: 1, slot: 'stay' },
+      item: item as SupplierItem, lineTotal: money(item!.price.minor, item!.price.currency),
+    }]
+    expect(checkFreshness(rehydrated, evalNow())).toEqual([])
+    // The same item read against a clock that is not the one that stamped it.
+    expect(checkFreshness(rehydrated, new Date('2026-08-28T10:00:00Z'))).toHaveLength(1)
   })
 
   it('has no way to tell one set of weights from the next, by string', () => {
@@ -72,6 +118,36 @@ describe('what moves between two runs of one case, and what no longer does', () 
     const perConversationMicros = 300_000n
     expect(BigInt(nightly) * perConversationMicros).toBeGreaterThan(DEFAULT_LIMITS.dailyCeilingMicros)
     expect(loadGoldenCases().length).toBeLessThan(nightly)
+  })
+})
+
+describe("the eval's two clocks", () => {
+  it('spends an invocation budget as real time passes', async () => {
+    // `decideNext` hands a turn back when another step will not fit in what is
+    // left of the invocation, and `withRetry` refuses a sleep that would cross
+    // it. Both read `deadlineMs() - now()`, so both are dead arithmetic unless
+    // that difference shrinks.
+    const clock = invocationClock()
+    const before = clock.deadlineMs() - clock.now()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(clock.deadlineMs() - clock.now()).toBeLessThan(before)
+  })
+
+  it('leaves the world where it was while the budget runs down', () => {
+    // The other half, and the reason there are two clocks rather than one: the
+    // instant a case is graded at does not move, however long the run takes.
+    const first = evalNow().getTime()
+    invocationClock().now()
+    expect(evalNow().getTime()).toBe(first)
+    expect(evalNow().toISOString()).toBe('2026-08-29T10:00:00.000Z')
+  })
+
+  it('is what a frozen pair could not do', () => {
+    // The shape this replaced, both before and after the clock was pinned: a
+    // deadline recomputed from the current instant on every read is a constant
+    // distance away for ever, so nothing can reach it.
+    const rolling = { now: () => evalNow().getTime(), deadlineMs: () => evalNow().getTime() + 120_000 }
+    expect(rolling.deadlineMs() - rolling.now()).toBe(120_000)
   })
 })
 

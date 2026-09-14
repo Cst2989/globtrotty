@@ -1,3 +1,4 @@
+import { TODAY } from '../src/conversation.js'
 import { randomUUID } from 'node:crypto'
 import type postgres from 'postgres'
 import { makeDriver } from '../src/agents/driver.js'
@@ -65,7 +66,7 @@ describeDb('the desk is decided once and remembered', () => {
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         textMessage('Three stays near the beach.'),
       ])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
       // Three replies used, not four: the classifier ran once, on step 0, and
       // steps 1 and 2 reused the decision instead of asking again.
@@ -92,7 +93,7 @@ describeDb('the desk is decided once and remembered', () => {
         () => { throw apiError(503) },
         textMessage('Three stays near the beach.'),
       ])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
       // Three calls, not four: the routing call, the attempt that failed, and
@@ -128,6 +129,7 @@ describeDb('the desk is decided once and remembered', () => {
         sql, client, run: mockRunner(),
         limits: { ...DEFAULT_LIMITS, conversationCeilingMicros: 1n },
         now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -156,7 +158,7 @@ describeDb('the desk is decided once and remembered', () => {
         labelMessage('faq'),
         textMessage('Portugal is in the Schengen area, so it depends on your nationality.'),
       ])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
       const rows = await sql<{ seat: string }[]>`
         select seat from course.model_calls where turn_id = ${turnId} order by seq`

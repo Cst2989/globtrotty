@@ -90,7 +90,12 @@ describeDb('a golden case, driven end to end with nobody typing', () => {
 
   it('gives two pinned runs of one case the same graded result', async () => {
     await withTestDb(async (sql) => {
-      const kase = loadGoldenCases()[1]!    // hotel-only-02, the shortest case
+      // portugal-toddler-01, and it is chosen because it is the SHORTEST by every
+      // measured dimension: 30 recorded exchanges and 21 tool calls against
+      // hotel-only-02's 65 and 40. This case runs twice against a remote
+      // Postgres inside one timeout, so the measurement is what picks it and not
+      // the `maxFrontierCalls` a golden case happens to declare.
+      const kase = loadGoldenCases()[0]!
       const pinned = {
         sql, limits: EVAL_LIMITS, simUser: makeSimulatedUser,
         seed: RECORDED_WORLD_SEED, now: evalNow, today: EVAL_TODAY,

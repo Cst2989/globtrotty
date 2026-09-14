@@ -57,10 +57,13 @@ export const DEFAULT_LIMITS: Limits = {
  * case that has stopped resembling the thing it measures. It is not as tight as
  * it can be made: the longest case on this branch, `no-for-1500-03`, spends
  * about $1.57 across its ninety-six model calls, and a ceiling of $2 stopped it
- * two model calls short of the end of its own recording, which is a suite
- * measuring its budget rather than its agency. Half of production's leaves room
- * for a case that runs half again as long and still refuses one that has
- * doubled.
+ * two model calls short of the end of its own recording. What stopped it was not
+ * the spend, which never reached $2, but the RESERVATION: the driver reserves an
+ * upper bound before every call (src/agents/driver.ts) and the last turn's
+ * reservation was what crossed. $4 is chosen against that, so the case that
+ * spends $1.57 keeps its headroom, and it is a ceiling a case would have to more
+ * than double its spend to reach. A number that generous is not a cost control,
+ * it is a runaway stop, and the cost control is the global ceiling below.
  *
  * There is no fifth writer of the ledger here and no second definition of any
  * number. An eval conversation reserves and reconciles through `reserve` and

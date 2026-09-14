@@ -141,7 +141,7 @@ try {
      * charge the same micros twice.
      */
     const agent: Agent = async (ctx) => makeDriver({
-      sql, client, run: await runnerFor(ctx), limits: DEFAULT_LIMITS, now: Date.now,
+      sql, client, run: await runnerFor(ctx), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY,
     })(ctx)
 
     await runTurn(

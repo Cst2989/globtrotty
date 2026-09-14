@@ -251,6 +251,24 @@ day a lesson needs a different date in a transcript, every golden case that says
 nobody connected to the evals, and the suite would have kept passing while
 measuring a different trip.
 
+**Half a pin is worse than no pin.** The first version of that split reached the
+gates and not the desk: `makeDriver` still rendered `{{today}}` from module-scope
+`TODAY` while `constraintsFromNotebook` read `EVAL_TODAY`, so the day those two
+parted company the desk would have planned one year and the dates gate judged
+another, and the gate would have failed proposals the desk was right to make.
+With one constant nothing was wrong, which is why nothing was red. `today` is a
+required field on `DriverDeps` now, every production caller passes `TODAY`, and
+the eval chain passes its own.
+
+**A pinned clock is domain time, and a deadline is not domain time.** Freezing
+`now` for the fares, the gates and the notebook also froze the two places that
+measure how long the process really worked: `deadlineMs() - now()` became a
+constant no turn could ever reach, and every `course.model_calls` row an eval
+wrote claimed a latency of zero. The deadline had been unreachable before the
+freeze as well, by a second route, because it was recomputed from the current
+instant on every read rather than anchored at the start of the invocation. One
+function returns both clocks now and says which question each answers.
+
 **A replay against the live state is not a replay.** The gates and the evals
 share one implementation, which is the strongest guarantee in this repository,
 and it held only until the notebook was allowed to move underneath it. One

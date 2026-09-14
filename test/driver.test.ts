@@ -1,3 +1,4 @@
+import { TODAY } from '../src/conversation.js'
 import { randomUUID } from 'node:crypto'
 import type { Message } from '@anthropic-ai/sdk/resources/messages'
 import type postgres from 'postgres'
@@ -84,6 +85,7 @@ describeDb('one invocation of the driver is one model call', () => {
       ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -120,6 +122,7 @@ describeDb('one invocation of the driver is one model call', () => {
         run: mockRunner(),
         limits: DEFAULT_LIMITS,
         now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -164,6 +167,7 @@ describeDb('one invocation of the driver is one model call', () => {
       const client = fakeClient([down, down, down])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await expect(runTurn(workerDeps(sql, { agent }), turnId)).rejects.toThrow()
       expect(client.calls).toBe(3)
@@ -199,6 +203,7 @@ describeDb('one invocation of the driver is one model call', () => {
       const client = fakeClient([labelMessage('new_trip'), down, down, down])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await expect(runTurn(workerDeps(sql, { agent }), turnId)).rejects.toThrow()
       // One routing call plus one driver call per attempt. The routing call is
@@ -240,6 +245,7 @@ describeDb('one invocation of the driver is one model call', () => {
       ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
       // Three calls for two steps: the routing call, then one driver call per
@@ -295,6 +301,7 @@ describeDb('one invocation of the driver is one model call', () => {
         ),
         limits: DEFAULT_LIMITS,
         now: Date.now,
+        today: TODAY,
       })(ctx)
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -329,6 +336,7 @@ describeDb('one invocation of the driver is one model call', () => {
       ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       // One step, then the deadline is behind us, so the harness hands the turn
       // back exactly the way a fifteen minute invocation running out does.
@@ -389,6 +397,7 @@ describeDb('one invocation of the driver is one model call', () => {
         }),
         limits: DEFAULT_LIMITS,
         now: Date.now,
+        today: TODAY,
       })(ctx)
 
       // One step, then the invocation is out of wall clock and hands the turn
@@ -469,6 +478,7 @@ describeDb('what the driver answers by itself', () => {
       const chain = countingRunner()
       const agent = makeDriver({
         sql, client, run: chain.run, limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -518,6 +528,7 @@ describeDb('what the driver answers by itself', () => {
       const chain = countingRunner()
       const agent = makeDriver({
         sql, client, run: chain.run, limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -572,6 +583,7 @@ describeDb('what the driver answers by itself', () => {
         run: chain.run,
         limits: { ...DEFAULT_LIMITS, maxSupplierCallsPerTurn: 1 },
         now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -630,6 +642,7 @@ describeDb('what the driver answers by itself', () => {
         run: chain.run,
         limits: { ...DEFAULT_LIMITS, maxSupplierCallsPerTurn: 6 },
         now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -678,6 +691,7 @@ describeDb('what the driver answers by itself', () => {
       ])
       const agent = makeDriver({
         sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now,
+        today: TODAY,
       })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
@@ -735,7 +749,7 @@ describeDb('the cache, on the row and in the prompt', () => {
           { city: 'Faro', checkIn: '2026-09-19', checkOut: '2026-09-26', adults: 2, children: 1 }),
         warm,
       ])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
       const rows = await sql<{ cache_read_input_tokens: number }[]>`
         select cache_read_input_tokens from course.model_calls
@@ -751,7 +765,7 @@ describeDb('the cache, on the row and in the prompt', () => {
       // changed its mind.
       const { turnId } = await seededTurn(sql)
       const client = fakeClient([labelMessage('new_trip'), cold])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
       const [row] = await sql<{ cost_micros: string }[]>`
         select cost_micros from course.model_calls
@@ -784,7 +798,7 @@ describeDb('the cache, on the row and in the prompt', () => {
         labelMessage('new_trip'),
         textMessage('Three stays near the beach in Faro.'),
       ])
-      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now })
+      const agent = makeDriver({ sql, client, run: mockRunner(), limits: DEFAULT_LIMITS, now: Date.now, today: TODAY })
       await runTurn(workerDeps(sql, { agent }), turnId)
 
       const suffix = lastUserText(client.sent[1]!)

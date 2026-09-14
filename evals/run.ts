@@ -26,16 +26,43 @@
  * system working, and reddening the run for it would teach a reader that a red
  * gate row is noise.
  *
- * From lesson 6.4 every input a case has is pinned by this file rather than read
- * off a module constant: the supplier world comes from the case id (`seedFor`),
- * the calendar is the suite's own (`EVAL_TODAY`, never `TODAY`), the clock is
- * fixed (`evalNow`), and the budget is `EVAL_LIMITS` rather than production's.
+ * From lesson 6.4 every input a case has is chosen by this file rather than read
+ * off a module constant, and three of the four are pinned:
+ *
+ *  - the calendar is the suite's own, `EVAL_TODAY` and never `TODAY`, and it
+ *    reaches the planning desk's `{{today}}` as well as the dates gate, because
+ *    a calendar pinned on one of those and not the other is worse than none;
+ *  - domain time is fixed at `evalNow()`, which is both the instant the mock
+ *    suppliers stamp `fetchedAt` with and the instant the gates age those items
+ *    against. Elapsed time is not pinned and cannot be: the invocation deadline
+ *    and `latency_ms` measure how long this process really worked
+ *    (`invocationClock`, src/evals/conversation.ts);
+ *  - the budget is `EVAL_LIMITS` rather than production's;
+ *  - the supplier world is `RECORDED_WORLD_SEED` and NOT `seedFor(kase.id)`.
+ *    That one is the lesson's own outstanding bill: these three cases replay
+ *    recordings whose `propose_trip` names the source ids of the world they were
+ *    recorded in, so a case cannot run in a world of its own until it is
+ *    re-recorded there. Written up at that constant and in README's residuals.
+ *
  * `--runs 3` then runs every case three times and prints a `pass^k:` row per
  * case with k as its denominator, so a case that passes twice out of three is
  * named as flaky rather than averaged into a rate. One run by default, because
  * k=1 is not a measurement and the per-PR run should not pay for one. On a
  * replayed run nothing about the model moves, so a flaky line here would be a
  * finding about this suite rather than about the desk.
+ *
+ * ## What a run leaves behind
+ *
+ * This script connects to the reader's real DATABASE_URL and cleans up nothing,
+ * so one pass leaves three conversations with their turns, messages, corpus
+ * rows, gate results and daily_usage rows, and `--runs 3` leaves nine of each.
+ * The money is simulated and the ledger is not: every replayed call is priced
+ * from the usage in its recording and debited through `reserve` and `reconcile`
+ * like a real one, so a pass spends nothing at the provider and still writes
+ * real rows against the $50 cross-user day that `npm run trip` shares. Two of
+ * the three cases were measured at $0.94 and $1.57, so a pass is worth more than
+ * $2.50 of that day and `--runs 3` more than $7.50. Lesson 6.6's nightly
+ * schedule is sixty conversations a night against the same ceiling.
  *
  * `replayClient` comes from `test/`, which is the one place this runner reaches
  * into that directory. It is the branch's only keyless model client and a copy
@@ -151,10 +178,15 @@ async function main(): Promise<void> {
           // throws into the same catch, so a drifted run is a case that did not
           // complete rather than a card printed over an unfinished recording.
           client.done()
-          // Suffixed, because `scorecardOf` counts one entry per graded case and
-          // three runs of one case are three graded cases. The pass^k rows below
-          // are where the three are put back together under one id.
-          graded.push({ caseId: `${result.caseId}#${i}`, grades: result.grades })
+          // Suffixed only when there is more than one run, because `scorecardOf`
+          // counts one entry per graded case and three runs of one case are
+          // three graded cases. At the default the id is the golden file's own,
+          // which is what the FAIL lines and the residuals quote. The pass^k
+          // rows below are where several runs are put back together under one id.
+          graded.push({
+            caseId: RUNS > 1 ? `${result.caseId}#${i}` : result.caseId,
+            grades: result.grades,
+          })
           runs.set(kase.id, [...(runs.get(kase.id) ?? []), casePassed(result)])
         } catch (err) {
           // Counted in casesExpected and not in casesGraded, and named on the way

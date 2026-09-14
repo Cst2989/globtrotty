@@ -99,21 +99,74 @@ async function chainFor(deps: EvalDeps, ctx: AgentContext): Promise<ToolRunner> 
   ))
 }
 
+/**
+ * How long one in-process invocation may run, in WALL milliseconds. Generous,
+ * because an eval is not a ten second HTTP handler and a case that parks for
+ * want of time is a case measuring the clock, and finite, because a budget that
+ * cannot be spent is not a budget.
+ */
+const INVOCATION_MS = 120_000
+
+/**
+ * The two clocks one invocation needs, which are not one clock.
+ *
+ * The eval pins DOMAIN time: `deps.now` is `evalNow` (src/evals/variance.ts), so
+ * the fares a case sees, the instant the gates age items against and the
+ * timestamps the notebook records are the same on every run. ELAPSED time is a
+ * different quantity and cannot be pinned, because everything that measures it
+ * is asking how long this process has actually been working: `decideNext` asks
+ * whether another step fits in what is left of the invocation (src/worker.ts),
+ * `withRetry` asks how much of that is left before it sleeps, and `callModel`
+ * subtracts two readings to write `latency_ms`.
+ *
+ * A frozen clock makes all three meaningless rather than strict. `deadlineMs`
+ * minus `now` is a constant, so no eval turn can ever hand itself back for a
+ * later invocation, and every `course.model_calls` row an eval writes claims a
+ * latency of zero. Neither is red, which is why both are written down here.
+ *
+ * The deadline is ANCHORED at the start of the invocation rather than computed
+ * fresh on each read. `deps.now().getTime() + INVOCATION_MS` was a deadline that
+ * moved forward every time it was looked at, which is the same unreachable
+ * constant by a second route, and it was that shape before this lesson froze
+ * anything.
+ *
+ * Exported so `test/variance.test.ts` can hold the two halves side by side
+ * keyless: what this returns spends its budget as real time passes, and the
+ * frozen pair it replaces does not.
+ */
+export function invocationClock(): { now: () => number; deadlineMs: () => number } {
+  const deadline = Date.now() + INVOCATION_MS
+  return { now: () => Date.now(), deadlineMs: () => deadline }
+}
+
 /** The in-process invoke: tier 2 hands the turn to tier 3 without an HTTP hop. */
 function invokeInProcess(deps: EvalDeps, seen: string[]) {
   return async (turnId: string): Promise<void> => {
-    seen.push(turnId)
+    // Recorded ONCE per turn, however many invocations that turn takes. A turn
+    // released on the deadline above comes back through this same function with
+    // the same id, and `callsOf` (src/evals/runner.ts) walks these ids to build
+    // the trace: a repeated id would count that turn's tool calls twice and make
+    // `call_count_fits_the_job` a number that moves with the wall clock.
+    if (!seen.includes(turnId)) seen.push(turnId)
+    const clock = invocationClock()
     await runTurn({
       sql: deps.sql,
       limits: deps.limits,
-      now: () => deps.now().getTime(),
-      // A generous deadline, because an eval is not a ten second HTTP handler
-      // and a case that parks for want of time is a case measuring the clock.
-      deadlineMs: () => deps.now().getTime() + 120_000,
+      now: clock.now,
+      deadlineMs: clock.deadlineMs,
       reinvoke: invokeInProcess(deps, seen),
       agent: async (ctx) => makeDriver({
         sql: deps.sql, client: deps.client, limits: deps.limits,
-        now: () => deps.now().getTime(),
+        // Wall, because the driver's only use of it is the pair of readings
+        // `callModel` subtracts for `latency_ms`.
+        now: clock.now,
+        // Pinned, and the whole point of finding 2: the planning desk renders
+        // `{{today}}` from this, so the desk and the dates gate now read one
+        // calendar. With the desk on module-scope `TODAY` and the gate on
+        // `EVAL_TODAY`, the day those two part company the desk plans one year
+        // and the gate judges another, and the gate fails proposals the desk was
+        // right to make.
+        today: deps.today,
         run: await chainFor(deps, ctx),
       })(ctx),
     }, turnId)

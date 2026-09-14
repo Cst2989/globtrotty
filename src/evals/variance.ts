@@ -11,7 +11,11 @@ import type { ScorecardRow } from './scorecard.js'
  * desk decides the dates it searches on, and a desk that searches a day either
  * side lands in a different world. Seeding from the case id makes the world a
  * property of the case, so two runs of one case share fares however the desk
- * phrases its searches, and two different cases never accidentally share one.
+ * phrases its searches, and two different cases are overwhelmingly unlikely to
+ * share one. Overwhelmingly and not never: the fold to `% 1_000_000` below makes
+ * this a birthday problem, about a 0.02% chance of one collision across P3's
+ * twenty cases, and the honest claim is the probability rather than a guarantee
+ * the arithmetic does not give.
  *
  * FNV-1a, the same hash src/supplier/mock.ts uses, because the two numbers are
  * mixed together inside the mock and using two different hashes here would make
@@ -47,7 +51,7 @@ export function seedFor(caseId: string): number {
  * sites, because a bare 1 is indistinguishable from nobody having thought about
  * it, which is the defect this whole lesson opened on.
  */
-export const RECORDED_WORLD_SEED = 1
+export const RECORDED_WORLD_SEED: number = 1
 
 /**
  * The day the eval suite plans from, and deliberately NOT `TODAY`
