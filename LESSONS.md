@@ -45,6 +45,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-6-5 | Trajectory grading | npm run migrate, then npm test (test/trajectory.test.ts, test/turn-labels.test.ts), then npm run evals for rates with denominators |
 | lesson-6-6 | The judge | npm run migrate, then npm test (test/judge.test.ts, test/eval-schedule.test.ts; test/judge.live.test.ts reports SKIPPED without LIVE_MODEL=1), then npm run evals |
 | lesson-7-1 | The signal we already collect | npm run migrate, then npm test (test/conversions.test.ts, test/writers.test.ts, test/signals.test.ts) |
+| lesson-7-2 | Three requirements | npm test (test/derive.test.ts), then npm run typecheck |
 
 ## How this branch was built
 
@@ -315,6 +316,16 @@ two duplicate writers shipped in one plan, both invisible to every test, because
 no test exercised the seam. test/writers.test.ts is that test, as a grep over
 src/, and it is four lines of assertion for a defect class that has cost more
 than any other on this branch.
+
+**A number derived from nothing is not a zero.** `DerivedScore` is a union whose
+third arm carries no value at all, so `score.value ?? 0` does not compile.
+P4 names the accidental `?? 0` as the usual shape of this bug. On this branch
+the compiler names it instead, and `valueOr` is the one door a caller goes
+through when it really must have a number, with the decision visible at the call
+site rather than buried in an operator.
+
+**Every derived number carries the rows that produced it.** Including the
+absent one, whose rows are the empty list, which is a fact and not a gap.
 
 ## Hand-offs
 
