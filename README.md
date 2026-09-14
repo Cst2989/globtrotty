@@ -570,7 +570,7 @@ comment.
 
 Drift is detected behaviourally and not by reading the response. `response.model`
 echoes the alias we sent and `claude-opus-5` is alias only, so a string
-comparison cannot see a weights change. The canary in `test/canary.live.test.ts`
+comparison cannot see a weights change. The drift canary in `test/canary.live.test.ts`
 sends a golden prompt at the seat's exact configuration and is pinned against
 `modelConfigId`, which encodes model, effort and ceiling, so a failure names the
 configuration that produced it. It is gated on `LIVE_MODEL=1` and reports

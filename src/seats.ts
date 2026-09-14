@@ -23,8 +23,8 @@ export type Seat = {
    * before and after a weights swap and a string comparison detects nothing.
    * This string is the only record of the configuration we INTENDED, so it
    * encodes model plus effort plus maxTokens: changing any of them changes the
-   * id, and `group by model_config_id` separates the eras. Lesson 5.6's canary
-   * is pinned against it.
+   * id, and `group by model_config_id` separates the eras. Lesson 5.6's drift
+   * canary is pinned against it.
    */
   readonly modelConfigId: string
 }
@@ -144,7 +144,7 @@ export const SEATS = {
    * seat's is `claude-haiku-4-5-20251001/noeffort/1024`, the same string
    * `cheap` and `front_desk` carry, and `group by model_config_id` therefore
    * cannot tell a judge call from a classification or a routing call. That is
-   * the anchor lesson 5.6's canary is pinned against, so the drift question
+   * the anchor lesson 5.6's drift canary is pinned against, so the drift question
    * "did this configuration's behaviour move" cannot be asked about the judge
    * alone. `group by seat` can separate them, which is the whole argument for
    * giving this seat its own name, and `seatNameOf` matches on the seat

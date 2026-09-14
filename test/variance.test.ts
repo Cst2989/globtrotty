@@ -102,7 +102,7 @@ describe('what moves between two runs of one case, and what no longer does', () 
   it('has no way to tell one set of weights from the next, by string', () => {
     // LL3 section 19: response.model echoes the ALIAS you sent, and
     // claude-opus-5 is alias only. The only record of what we intended is the
-    // configuration id, and lesson 5.6's canary is already pinned against it.
+    // configuration id, and lesson 5.6's drift canary is already pinned against it.
     expect(SEATS.driver.model).toBe('claude-opus-5')
     expect(SEATS.driver.modelConfigId).toContain('claude-opus-5/')
   })

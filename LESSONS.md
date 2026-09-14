@@ -36,7 +36,7 @@ Every lesson of the course ends on a tag. Check the tag out, install, and run th
 | lesson-5-3 | The front desk and the planning desk | npm run migrate, then npm test (test/desk-routing.test.ts, test/sentinels.test.ts, test/desks.test.ts) |
 | lesson-5-4 | Staff | npm run migrate, then npm test (test/scout.test.ts) |
 | lesson-5-5 | Fence text you did not write | npm test (test/injection-corpus.test.ts, test/outbound.test.ts) |
-| lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the canary |
+| lesson-5-6 | Memory and context | npm run migrate, then npm test (test/cache.test.ts, test/memory.test.ts), then LIVE_MODEL=1 npm test for the drift canary |
 | lesson-5-7 | What she sees | npm run migrate, then npm test (test/channel.test.ts, test/isolation.test.ts, test/capture.test.ts, test/monitor.test.ts), then npm run trip for the offer card |
 | lesson-6-1 | Why snapshot tests lie | npm test (test/eval-snapshot.test.ts, test/grade.test.ts, test/scorecard.test.ts), then npm run evals for the first scorecard, which exits 1 because one of its two worlds is graded red on purpose |
 | lesson-6-2 | The gates are already evals | npm run migrate, then npm test (test/eval-replay.test.ts, test/gate-metrics.test.ts), then npm run evals for the card with its gate rows |
@@ -293,7 +293,7 @@ eval ceilings rather than hers, so the night it runs is bounded by the same four
 functions that bound a turn and there is no fifth writer of the ledger.
 
 **The instrument was never the missing half; the trigger was.** Lesson 5.6's
-canary pins one prompt at one seat and fires when somebody runs it. What catches
+drift canary pins one prompt at one seat and fires when somebody runs it. What catches
 a provider moving weights under a stable alias is a score that falls on a clock,
 which is why the schedule is a table this repository can select from rather than
 a paragraph about what one would do before a migration.
@@ -341,6 +341,17 @@ red, the row written at a shape this comparison was never built for, which now
 slips through instead of being refused. The case that calls
 `assertComparableShape` directly keeps passing, and that gap is the tell that
 the guard function, not its call site, is what the direct test pins.
+
+**Two machines, one word.** A RELEASE canary (src/loop/release.ts) ships a
+change we made to a fraction of traffic, keyed on the conversation id so a
+resumed turn stays in its arm, and is judged by conversion per prompt version. A
+DRIFT canary (test/canary.live.test.ts, module 5, scheduled by module 6) replays
+a fixed prompt on a clock and diffs the output, and is judged by whether the
+answer moved when the input did not. One grades a change we made and the other
+grades a change the provider made. They share a name and a rollback switch is
+the only thing either of them has in common with the other, which is that
+neither has one: the release canary's rollback is a commit and the drift
+canary has nothing to roll back.
 
 ## Hand-offs
 
