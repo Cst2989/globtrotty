@@ -335,8 +335,11 @@ is and why. A column named after a column this table does not have is the defect
 class this repository has paid most for.
 
 **The way to know a test discriminates is to break the thing it guards.**
-Removing one line from `similarity` leaves three of five cases green, and the
-two that go red are the two nobody would have written without this lesson.
+Removing the guard call from inside `similarity` turns one of the five cases
+red, the row written at a shape this comparison was never built for, which now
+slips through instead of being refused. The case that calls
+`assertComparableShape` directly keeps passing, and that gap is the tell that
+the guard function, not its call site, is what the direct test pins.
 
 ## Hand-offs
 
