@@ -20,6 +20,14 @@
  * round trip against the live PostgREST endpoint, signed in as two distinct
  * `auth.users`, can.
  *
+ * Migration 0017 (final review, I2) then NARROWED `own_agent_events` to
+ * `user_id = auth.uid() and kind <> 'screened'`, so the reply the outbound
+ * filter withheld — stored verbatim in `payload.original` by `screenReply` —
+ * is not readable by the very role it was withheld from. This test seeds a
+ * `screened` row alongside A's ordinary one and asserts A gets the ordinary
+ * one back and only that: an assertion the owner connection cannot make,
+ * for the same reason as everything else in this file.
+ *
  * That's what makes this test different from every other one in the suite,
  * and why it is gated rather than run by default:
  *
@@ -102,6 +110,8 @@ type SeededRows = {
   toolResultId: string
   gateResultId: string
   agentEventId: string
+  /** kind = 'screened' — migration 0017 hides this one from the browser role. */
+  screenedAgentEventId: string
   escalationId: string
 }
 
@@ -178,6 +188,17 @@ async function seedGrantedTables(
     returning id`
   const agentEventId = agentEvent!.id
 
+  // The I2 row: what `screenReply` (src/worker.ts) writes when the outbound
+  // filter replaces a model-authored reply. `payload.original` is the withheld
+  // text itself, which is why migration 0017 keeps this row out of the
+  // traveller's own reads.
+  const [screenedEvent] = await sql<{ id: string }[]>`
+    insert into agent_events (conversation_id, user_id, turn_id, kind, payload)
+    values (${conversationId}, ${userId}, ${turnId}, 'screened',
+      ${sql.json({ reason: 'payment_details', original: 'What is the CVV on your card?' })})
+    returning id`
+  const screenedAgentEventId = screenedEvent!.id
+
   const [escalation] = await sql<{ id: string }[]>`
     insert into escalations (conversation_id, user_id, turn_id, proposal_id, reason)
     values (${conversationId}, ${userId}, ${turnId}, ${proposalId}, 'user_request')
@@ -186,7 +207,7 @@ async function seedGrantedTables(
 
   return {
     conversationId, messageId, turnId, proposalId, linkClickId,
-    toolResultId, gateResultId, agentEventId, escalationId,
+    toolResultId, gateResultId, agentEventId, screenedAgentEventId, escalationId,
   }
 }
 
@@ -288,6 +309,20 @@ describeLive('RLS: two-user isolation against the live Supabase project (migrati
           expect(errorMessage, `A's select on ${table} should not error`).toBeNull()
           expect(ids, `A should see exactly her own row on ${table}`).toEqual([expectedIdByTable[table]])
         }
+
+        // --- A's own SCREENED agent_event is hidden from her too (0017, I2) ---
+        // The loop above already required agent_events to come back as exactly
+        // one id; this spells out which invariant that is carrying, so a future
+        // edit cannot weaken it by accident. `payload.original` holds the text
+        // the outbound filter withheld — the browser role must not be able to
+        // fetch it back, even on her own conversation.
+        const { ids: aEventIds, errorMessage: aEventError } = await selectIds(clientA, 'agent_events')
+        expect(aEventError).toBeNull()
+        expect(aEventIds).toContain(seedA.agentEventId)
+        expect(
+          aEventIds,
+          "A must not be able to read back the reply the filter withheld from her",
+        ).not.toContain(seedA.screenedAgentEventId)
 
         // --- Both are refused outright (no grant at all) on the ungranted tables ---
         // `select('*')`, not `select('id')`: `daily_usage` has no `id` column at

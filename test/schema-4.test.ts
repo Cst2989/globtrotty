@@ -38,14 +38,31 @@ describeDb('0016 plan 4 schema', () => {
   })
   it('has a policy on every granted table and none elsewhere', async () => {
     await withTestDb(async (sql) => {
-      const rows = await sql<{ tablename: string; policyname: string; cmd: string }[]>`
-        select tablename, policyname, cmd from pg_policies where schemaname = 'public'`
+      const rows = await sql<{ tablename: string; policyname: string; cmd: string; qual: string }[]>`
+        select tablename, policyname, cmd, qual from pg_policies where schemaname = 'public'`
       const byTable = new Map(rows.map((r) => [r.tablename, r]))
       for (const t of ['conversations','messages','turns','proposals','link_clicks','agent_events','escalations','tool_results','gate_results']) {
         expect(byTable.get(t)?.cmd).toBe('SELECT')
       }
       expect(byTable.has('daily_usage')).toBe(false)
       expect(byTable.has('model_calls')).toBe(false)
+    })
+  })
+  /**
+   * Migration 0017 (final review, I2). `screenReply` stores the withheld reply
+   * verbatim in `agent_events.payload.original`; 0016's policy let the
+   * traveller's own anon client read it back. The predicate — not just the
+   * policy's existence — is what closes that, so it is pinned here: an
+   * `agent_events` policy that drifts back to a bare `user_id = auth.uid()`
+   * fails this test rather than silently re-opening the row.
+   */
+  it('hides screened agent events from the browser role', async () => {
+    await withTestDb(async (sql) => {
+      const [p] = await sql<{ qual: string }[]>`
+        select qual from pg_policies
+         where schemaname = 'public' and tablename = 'agent_events'
+           and policyname = 'own_agent_events'`
+      expect(p?.qual).toBe("((user_id = auth.uid()) AND (kind <> 'screened'::text))")
     })
   })
   it('does not force RLS anywhere', async () => {
