@@ -207,9 +207,19 @@ const OUTBOUND_RULES: OutboundRule[] = [
     reason: 'date of birth with passport or card',
     test: (t) => /\bdate of birth\b/.test(t) && /\b(passport|card)\b/.test(t),
   },
+  // Fix round 1, item 3: the original pattern anchored on ANY noun after
+  // "of your" — so "send a copy of your booking confirmation" (a perfectly
+  // ordinary offer) blocked as readily as an actual solicitation, while a
+  // natural phrasing that swaps the verb ("upload", "email") or drops "of
+  // your" entirely ("send me a photo of your passport" reordered as "send
+  // your passport photo") slipped past a request for something else. Fixed
+  // on both axes: the verb list widens (send/upload/share/email/attach/
+  // text/provide), and the object narrows to an actual identity document —
+  // never a bare noun — so a benign "of your booking" or "of your itinerary"
+  // no longer matches at all.
   {
-    reason: 'send a photo, scan, or copy of your',
-    test: (t) => /\bsend\s+(me\s+)?(a\s+)?(photo|scan|copy)\s+of\s+your\b/.test(t),
+    reason: 'photo, scan, or copy of an identity document',
+    test: (t) => /\b(?:send|upload|share|email|attach|text|provide)\s+(?:me\s+|us\s+)?(?:an?\s+)?(?:photo|picture|scan|copy|image)\s+of\s+your\s+(?:passport|id|identity|licen[cs]e|card|visa|document)\b/.test(t),
   },
 ]
 

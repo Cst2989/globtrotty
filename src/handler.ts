@@ -1,5 +1,5 @@
 import type postgres from 'postgres'
-import type { ActionPayload } from './actions.js'
+import { ActionPayload } from './actions.js'
 import { readDesk, type Desk } from './repo/conversations.js'
 import { exceedsAnyCeiling } from './engine.js'
 import type { Limits } from './engine.js'
@@ -178,17 +178,20 @@ export async function submitAction(
   const { sql, limits, invoke } = deps
   const { conversationId } = input
 
+  // Validated before anything reaches the database. `SubmitActionInput`
+  // types `action` as `ActionPayload` at compile time, which a caller that
+  // built its own request body by hand (a route handler decoding JSON off
+  // the wire) can defeat — `.parse` re-checks the actual value and throws on
+  // anything malformed, rather than letting a bad payload reach `JSON.
+  // stringify` and land as a row nothing downstream (`parseAction`) can read
+  // back.
+  ActionPayload.parse(input.action)
+
   const desk = await readDesk(sql, conversationId, input.userId)
   if (desk !== 'planning') throw new ActionRefused(desk)
 
   // Fail closed, same as submitMessage: BEFORE any message or turn is written.
   const spend = await readSpendFailClosed(sql, input.userId, conversationId)
-
-  // Recorded regardless of what happens next — same preservation guarantee as
-  // submitMessage's message insert: a card press she made is never dropped,
-  // even if the ceiling below stops the turn before it starts.
-  await sql`insert into messages (conversation_id, user_id, role, content)
-            values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)})`
 
   if (exceedsAnyCeiling(spend, limits)) {
     await sql`update conversations set status = 'limit_reached', updated_at = now()
@@ -196,28 +199,54 @@ export async function submitAction(
     return { conversationId, turnId: null, status: 'limit_reached' }
   }
 
-  const inserted = await sql`
-    insert into turns (conversation_id, user_id, idempotency_key)
-    values (${conversationId}, ${input.userId}, ${input.idempotencyKey})
-    on conflict do nothing
-    returning id`
+  /**
+   * Turn insert FIRST, action row SECOND — the reverse of `submitMessage`'s
+   * order, and deliberately so. A typed message is HER words: dropping it
+   * would lose something she said, which is why `submitMessage` preserves it
+   * even when the turn cannot start. A card press is not that: it is an
+   * instruction meant for exactly one turn. If this call does not create a
+   * FRESH turn — a retry that lands while another turn already holds the
+   * active slot, or a genuine duplicate of an idempotency key already
+   * served — writing the action row anyway would leave it sitting in the
+   * transcript for some OTHER, unrelated turn to read and act on later,
+   * carrying out the same press twice. Unlike a typed message, an operator
+   * instruction must not be preserved for a later turn: a press during a
+   * running turn is refused (409 upstream) and can simply be repeated once
+   * she sees that.
+   *
+   * The turn insert, the action row and the `working` flip commit together
+   * in one transaction: a crash between "the turn exists" and "the action
+   * row exists" would otherwise let a turn run with no instruction to read,
+   * or leave an action row orphaned under a turn never marked `working`.
+   */
+  const freshTurnId = await sql.begin(async (tx) => {
+    const inserted = await tx`
+      insert into turns (conversation_id, user_id, idempotency_key)
+      values (${conversationId}, ${input.userId}, ${input.idempotencyKey})
+      on conflict do nothing
+      returning id`
+    if (inserted.length === 0) return null
 
-  if (inserted.length === 0) {
+    const turnId = inserted[0]!.id as string
+    await tx`insert into messages (conversation_id, user_id, role, content)
+              values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)})`
+    await tx`update conversations set status = 'working', updated_at = now()
+               where id = ${conversationId} and user_id = ${input.userId}`
+    return turnId
+  }) as string | null
+
+  if (freshTurnId === null) {
     const dupe = await sql`
       select id from turns
        where conversation_id = ${conversationId} and idempotency_key = ${input.idempotencyKey}`
     if (dupe.length > 0) {
       return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
     }
-    return { conversationId, turnId: null, status: 'busy' }   // another turn is in flight
+    return { conversationId, turnId: null, status: 'busy' }   // another turn is in flight; no action row written
   }
 
-  const turnId = inserted[0]!.id as string
-  await sql`update conversations set status = 'working', updated_at = now()
-             where id = ${conversationId} and user_id = ${input.userId}`
-
   // Persist first, then schedule — same ordering guarantee as submitMessage.
-  await invoke(turnId).catch(() => {})
+  await invoke(freshTurnId).catch(() => {})
 
-  return { conversationId, turnId, status: 'queued' }
+  return { conversationId, turnId: freshTurnId, status: 'queued' }
 }

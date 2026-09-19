@@ -53,6 +53,22 @@ describeDb('escalate_to_human', () => {
       expect(await escalate(tomorrow, s, { reason: 'user_request' })).toMatch(/escalated/i)
     })
   })
+  // Fix round 1, item 1: `screenReply` (src/worker.ts) writes `reason:
+  // 'safety'` rows directly, outside this tool, and must never eat into the
+  // driver's day budget for an unrelated genuine escalation.
+  it('a day already carrying three safety escalations still allows a user_request one', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '06')
+      for (let i = 0; i < MAX_ESCALATIONS_PER_DAY; i++) {
+        await sql`insert into escalations (conversation_id, user_id, reason, created_at) values (${s.conversationId}, ${s.userId}, 'safety', ${new Date(NOW.getTime() - i * 60_000)})`
+      }
+      const notify = vi.fn().mockResolvedValue(undefined)
+      const out = await escalate(deps(sql, { notify, alarm: vi.fn() }), s, { reason: 'user_request' })
+      expect(out).toMatch(/escalated/i)
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('refuses a proposal id from another conversation and records nothing', async () => {
     await withTestDb(async (sql) => {
       const a = await seed(sql, '04'); const b = await seed(sql, '05')

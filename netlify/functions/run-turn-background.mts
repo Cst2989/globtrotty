@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { loadEnv } from '../../src/env.js'
 import { runTurn, echoAgent } from '../../src/worker.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
+import { LogNotifier } from '../../src/notify.js'
 
 /**
  * Tier 3: the background function. Netlify Functions v2 (esbuild-bundled, `.mts`) hand every
@@ -73,6 +74,7 @@ export default async (req: Request): Promise<Response> => {
         now: () => Date.now(),
         deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
         reinvoke: (id) => reinvoke(env, id),
+        notifier: new LogNotifier(),
       },
       turnId,
     )

@@ -11,13 +11,16 @@ import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { recordSpend } from '../src/repo/spend.js'
 import { SCREENED_REPLY } from '../src/sanitize.js'
+import { LogNotifier, type Notifier } from '../src/notify.js'
 import type { TurnState } from '../src/engine.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const LIMITS = DEFAULT_LIMITS
 
-const workerDeps = (sql: postgres.Sql, agent: Agent = echoAgent): WorkerDeps => ({
-  sql, limits: LIMITS, agent,
+const workerDeps = (
+  sql: postgres.Sql, agent: Agent = echoAgent, notifier: Notifier = new LogNotifier(() => {}),
+): WorkerDeps => ({
+  sql, limits: LIMITS, agent, notifier,
   now: () => Date.now(),
   deadlineMs: () => Date.now() + 600_000,
   reinvoke: vi.fn().mockResolvedValue(undefined),
@@ -643,13 +646,15 @@ describeDb('runTurn end to end', () => {
  * conversation's terminal status.
  */
 describeDb('runTurn: the outbound solicitation filter', () => {
-  it('replaces a screened reply, records the event, escalates, and sticks the conversation as escalated', async () => {
+  it('replaces a screened reply, records the event, escalates, pages, and sticks the conversation as escalated', async () => {
     await withTestDb(async (sql) => {
       const r = await submit(sql, 'a week in Portugal')
       const soliciting: Agent = async () => ({
         kind: 'message', text: 'Please send me a photo of your passport', costMicros: 200n,
       })
-      await runTurn(workerDeps(sql, soliciting), r.turnId!)
+      const notify = vi.fn().mockResolvedValue(undefined)
+      const notifier: Notifier = { notify, alarm: vi.fn() }
+      await runTurn(workerDeps(sql, soliciting, notifier), r.turnId!)
 
       const [agentMsg] = await sql<MessageRow[]>`
         select role, content from messages
@@ -661,14 +666,19 @@ describeDb('runTurn: the outbound solicitation filter', () => {
         select kind, payload from agent_events where conversation_id = ${r.conversationId}`
       expect(events).toHaveLength(1)
       expect(events[0]!.kind).toBe('screened')
-      expect(events[0]!.payload.reason).toBe('send a photo, scan, or copy of your')
+      expect(events[0]!.payload.reason).toBe('photo, scan, or copy of an identity document')
       expect(events[0]!.payload.original).toBe('Please send me a photo of your passport')
 
-      const escalations = await sql<{ reason: string; proposal_id: string | null }[]>`
-        select reason, proposal_id from escalations where conversation_id = ${r.conversationId}`
+      const escalations = await sql<{ reason: string; proposal_id: string | null; notified_at: Date | null }[]>`
+        select reason, proposal_id, notified_at from escalations where conversation_id = ${r.conversationId}`
       expect(escalations).toHaveLength(1)
       expect(escalations[0]!.reason).toBe('safety')
       expect(escalations[0]!.proposal_id).toBeNull()
+      // Fix round 1, item 2: nothing paged a human on a screened reply before
+      // this. `screenReply` now calls the notifier the same way `escalate.ts`
+      // does, and stamps `notified_at` once the page actually went out.
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect(escalations[0]!.notified_at).not.toBeNull()
 
       const [conv] = await sql<ConversationRow[]>`
         select status from conversations where id = ${r.conversationId}`
@@ -678,6 +688,37 @@ describeDb('runTurn: the outbound solicitation filter', () => {
 
       const [turn] = await sql<TurnRow[]>`select status from turns where id = ${r.turnId}`
       expect(turn!.status).toBe('done')
+    })
+  })
+
+  // Fix round 1, item 5: the 'park' branch runs the same screenReply as
+  // 'message' — pinned separately because the two are two different call
+  // sites in loop(), and a fix to one is not proof the other was touched.
+  it('screens a park-branch reply exactly like a message-branch one', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const asking: Agent = async () => ({
+        kind: 'park', message: 'Please send me a photo of your passport', costMicros: 100n,
+      })
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [agentMsg] = await sql<MessageRow[]>`
+        select content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+      expect(agentMsg!.content).toBe(SCREENED_REPLY)
+
+      const events = await sql`select kind from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(1)
+
+      const escalations = await sql<{ reason: string }[]>`
+        select reason from escalations where conversation_id = ${r.conversationId}`
+      expect(escalations).toHaveLength(1)
+      expect(escalations[0]!.reason).toBe('safety')
+
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      expect(conv!.status).toBe('escalated')
     })
   })
 

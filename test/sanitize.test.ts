@@ -122,9 +122,11 @@ describe('screenOutbound', () => {
     ['Send me your 2FA code.', '2fa'],
     ['What is your social security number?', 'social security'],
     ['Please confirm your date of birth to match your card.', 'date of birth with passport or card'],
-    ['Please send me a photo of your passport.', 'send a photo, scan, or copy of your'],
-    ['Please send a scan of your licence.', 'send a photo, scan, or copy of your'],
-    ['Please send a copy of your booking confirmation.', 'send a photo, scan, or copy of your'],
+    ['Please send me a photo of your passport.', 'photo, scan, or copy of an identity document'],
+    ['Please send a scan of your licence.', 'photo, scan, or copy of an identity document'],
+    ['Please upload a copy of your passport.', 'photo, scan, or copy of an identity document'],
+    ['Could you share a scan of your passport?', 'photo, scan, or copy of an identity document'],
+    ['Email me a photo of your ID', 'photo, scan, or copy of an identity document'],
   ])('blocks %j (reason: %s)', (text, reason) => {
     expect(screenOutbound(text)).toEqual({ ok: false, reason })
   })
@@ -146,6 +148,12 @@ describe('screenOutbound', () => {
     // trigger, if ever added for extra caution, would make this an
     // accepted false positive instead.
     'The passport office is on Rua X.',
+    // Fix round 1, item 3: the widened rule 20 narrows the OBJECT to an
+    // actual identity document, precisely so an ordinary offer to send a
+    // booking confirmation — which was a false positive under the old,
+    // any-noun version of this rule — is no longer caught.
+    'I will send a copy of your booking confirmation to your email',
+    'bring photo ID to check-in',
   ])('leaves %j alone', (text) => {
     expect(screenOutbound(text)).toEqual({ ok: true })
   })

@@ -13,7 +13,8 @@ import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import { parseAction, renderActionMessage } from './actions.js'
 import { screenOutbound, SCREENED_REPLY } from './sanitize.js'
 import { recordAgentEvent } from './repo/agentEvents.js'
-import { recordEscalation } from './repo/escalations.js'
+import { recordEscalation, markNotified } from './repo/escalations.js'
+import type { Notifier } from './notify.js'
 
 export type AgentContext = {
   state: TurnState
@@ -127,6 +128,13 @@ export type WorkerDeps = {
   now: () => number
   deadlineMs: () => number
   reinvoke: (turnId: string) => Promise<void>
+  /**
+   * The human desk's inbox. Required, not optional — `screenReply` (below)
+   * pages a human on every screened reply, and a worker with no way to do
+   * that is a worker that silently drops a safety event rather than one
+   * that fails loudly at construction time, before any turn runs.
+   */
+  notifier: Notifier
   /**
    * How often to emit a liveness heartbeat while a step is in flight. Defaults to
    * HEARTBEAT_INTERVAL_MS. Tests override this to something short so the behavior
@@ -247,22 +255,25 @@ const UNREADABLE_ACTION_TEXT =
  * The outbound side of the sanitize boundary: every agent reply passes
  * through `screenOutbound` (src/sanitize.ts) here, in the ONE place both
  * `case 'message'` and `case 'park'` reach on their way to a stored message.
- * A hit replaces `text` with `SCREENED_REPLY` and records why — the audit
- * row (`agent_events`, kind `'screened'`) and the page to a human
- * (`recordEscalation`, reason `'safety'`) are both best-effort and swallowed:
- * a screened reply must still reach her, and the turn must still finish,
- * even if the write documenting it or the page itself fails. That mirrors
- * `escalate.ts`'s own notifier — a failed notification is logged, never
- * something that blocks the exchange it describes.
+ * A hit replaces `text` with `SCREENED_REPLY`, records why, and pages a
+ * human.
  *
- * `recordEscalation` is called directly, not through the `escalate_to_human`
- * tool: this is a filter firing on the office's OWN words, not a model
- * choosing to escalate, so the tool's per-user daily limit does not apply —
- * controller ruling: a screened reply is a safety event and must always
- * page, however many have paged already today.
+ * `recordAgentEvent` is best-effort and swallowed — the audit row is a
+ * nice-to-have alongside the escalation, never something that blocks it.
+ * `recordEscalation` is NOT swallowed: it is called directly rather than
+ * through the `escalate_to_human` tool (a filter firing on the office's OWN
+ * words is not a model choosing to escalate, so the tool's per-user daily
+ * limit must not gate it — controller ruling: a screened reply always
+ * pages), and its row is the one thing this function cannot proceed without
+ * — there is no `e: Escalation` to hand the notifier otherwise. From there
+ * the notifier call follows `escalate.ts`'s own pattern exactly: `notify`
+ * is best-effort and swallowed, and `markNotified` runs only when `notify`
+ * actually succeeded, also best-effort. A screened reply must still reach
+ * her, and the turn must still finish, even if the page itself fails to
+ * send or to stamp.
  */
 async function screenReply(
-  sql: postgres.Sql, claim: Claim, text: string,
+  sql: postgres.Sql, notifier: Notifier, claim: Claim, text: string,
 ): Promise<string> {
   const s = screenOutbound(text)
   if (s.ok) return text
@@ -274,12 +285,23 @@ async function screenReply(
     console.error(`worker: recordAgentEvent for screened reply failed: ${(err as Error).message}`)
   })
 
-  await recordEscalation(sql, {
+  const e = await recordEscalation(sql, {
     conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
     proposalId: null, reason: 'safety',
-  }).catch((err: unknown) => {
-    console.error(`worker: escalation for screened reply failed: ${(err as Error).message}`)
   })
+
+  let notified = false
+  try {
+    await notifier.notify(e)
+    notified = true
+  } catch (err) {
+    console.error(`worker: notifier failed for screened escalation ${e.id}: ${(err as Error).message}`)
+  }
+  if (notified) {
+    await markNotified(sql, e.id).catch((err: unknown) => {
+      console.error(`worker: notified_at stamp failed for ${e.id}: ${(err as Error).message}`)
+    })
+  }
 
   return SCREENED_REPLY
 }
@@ -406,7 +428,7 @@ async function loop(
         })
         turnSpend.total += step.costMicros
         await completeTurn(sql, claim, {
-          state, agentMessage: await screenReply(sql, claim, step.text),
+          state, agentMessage: await screenReply(sql, deps.notifier, claim, step.text),
           parked: true, spendMicros: turnSpend.total,
         })
         return
@@ -426,7 +448,7 @@ async function loop(
         // is not a failure, and recording it as one would make "how often
         // does the driver actually fail?" unanswerable.
         await completeTurn(sql, claim, {
-          state, agentMessage: await screenReply(sql, claim, step.message),
+          state, agentMessage: await screenReply(sql, deps.notifier, claim, step.message),
           parked: true, spendMicros: turnSpend.total,
         })
         return

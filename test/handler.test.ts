@@ -174,7 +174,7 @@ async function insertConversation(sql: postgres.Sql, desk: 'front' | 'planning')
 }
 
 describeDb('submitAction', () => {
-  it('writes an action row that parses back to the payload, queues a turn, and invokes', async () => {
+  it('writes exactly one action row that parses back to the payload, queues a turn, and invokes', async () => {
     await withTestDb(async (sql) => {
       const conversationId = await insertConversation(sql, 'planning')
       const invoke = vi.fn().mockResolvedValue(undefined)
@@ -183,23 +183,29 @@ describeDb('submitAction', () => {
       })
       expect(r.status).toBe('queued')
       expect(invoke).toHaveBeenCalledWith(r.turnId)
-      const [row] = await sql`select role, content from messages where conversation_id = ${conversationId}`
-      expect(row!.role).toBe('action')
-      expect(parseAction(row!.content as string)).toEqual(HAND_OFF)
+      const msgs = await sql`select role, content from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.role).toBe('action')
+      expect(parseAction(msgs[0]!.content as string)).toEqual(HAND_OFF)
     })
   })
 
-  it('refuses with busy while a turn is in flight', async () => {
+  // Fix round 1, item 4: a retried press used to write a SECOND action row —
+  // one the turn already running would never read, and one some later,
+  // unrelated turn could pick up from the transcript and act on again.
+  it('refuses with busy while a turn is in flight, and writes no second action row', async () => {
     await withTestDb(async (sql) => {
       const conversationId = await insertConversation(sql, 'planning')
       const d = deps(sql)
       await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1' })
       const b = await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a2' })
       expect(b.status).toBe('busy')
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)   // only the first call's action row
     })
   })
 
-  it('returns the same turn for a duplicate idempotency key', async () => {
+  it('returns the same turn for a duplicate idempotency key, and writes no second action row', async () => {
     await withTestDb(async (sql) => {
       const conversationId = await insertConversation(sql, 'planning')
       const d = deps(sql)
@@ -207,6 +213,23 @@ describeDb('submitAction', () => {
       const b = await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'same' })
       expect(b.status).toBe('duplicate')
       expect(b.turnId).toBe(a.turnId)
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)   // the retry wrote nothing new
+    })
+  })
+
+  // Fix round 1, item 6.
+  it('throws on a malformed action payload before writing anything', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const malformed = { action: 'hand_off', proposalId: 'not-a-uuid' } as unknown as ActionPayload
+      await expect(
+        submitAction(deps(sql), { userId: USER, conversationId, action: malformed, idempotencyKey: 'a1' }),
+      ).rejects.toThrow()
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)
+      const turns = await sql`select id from turns where conversation_id = ${conversationId}`
+      expect(turns).toHaveLength(0)
     })
   })
 

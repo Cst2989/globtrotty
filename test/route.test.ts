@@ -27,7 +27,7 @@ describeDb('routeAgent', () => {
         .mockResolvedValueOnce(frontVerdict({ label: 'new_trip', answer: null, title: 'Portugal, September' }))
         .mockResolvedValueOnce(driverText('September in the Algarve, then. When would you fly?'))
       await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(),
-        deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }, r.turnId!)
+        deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }, r.turnId!)
       expect(create).toHaveBeenCalledTimes(2)
       const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId}`
       expect(new Set(seats.map((s) => s.seat))).toEqual(new Set(['front_desk', 'driver']))
@@ -46,7 +46,7 @@ describeDb('routeAgent', () => {
       const r = await submitMessage({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId: USER, conversationId: null, message: 'do you take payment?', idempotencyKey: 'k2' })
       const create = vi.fn().mockResolvedValue(frontVerdict({ label: 'faq', answer: 'No, you pay the supplier.', title: null }))
-      const w = { sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }
+      const w = { sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }
       await runTurn(w, r.turnId!)
       const r2 = await submitMessage({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId: USER, conversationId: r.conversationId, message: 'and cancellations?', idempotencyKey: 'k3' })
@@ -62,7 +62,7 @@ describeDb('routeAgent', () => {
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'k4' })
       await sql`update conversations set desk = 'planning' where id = ${r.conversationId}`
       const create = vi.fn().mockResolvedValue(driverText('Hello. Where to?'))
-      await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }, r.turnId!)
+      await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }, r.turnId!)
       const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId}`
       expect(seats.map((s) => s.seat)).toEqual(['driver'])
     })
