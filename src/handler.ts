@@ -23,6 +23,19 @@ export type SubmitActionInput = {
   conversationId: string
   action: ActionPayload
   idempotencyKey: string
+  /**
+   * Plan 4a, Task 8: her typed reject reason, stored as an ordinary
+   * `role = 'user'` message in the SAME transaction as the action row,
+   * immediately before it. `src/actions.ts`'s `rejected` payload deliberately
+   * carries no `reason` field — the driver's operator text says "her reason,
+   * if she gave one, is in her own message" — so the decide route passes the
+   * reason here rather than folding it into the action's JSON. Undefined (or
+   * blank) writes nothing; when a fresh turn cannot be won (a retry, a
+   * concurrent turn), this note is not written either — same all-or-nothing
+   * guarantee the action row itself gets, so a reason never ends up attached
+   * to a turn that never runs.
+   */
+  userNote?: string
 }
 
 /**
@@ -228,6 +241,10 @@ export async function submitAction(
     if (inserted.length === 0) return null
 
     const turnId = inserted[0]!.id as string
+    if (input.userNote && input.userNote.trim().length > 0) {
+      await tx`insert into messages (conversation_id, user_id, role, content)
+                values (${conversationId}, ${input.userId}, 'user', ${input.userNote})`
+    }
     await tx`insert into messages (conversation_id, user_id, role, content)
               values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)})`
     await tx`update conversations set status = 'working', updated_at = now()

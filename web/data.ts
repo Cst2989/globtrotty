@@ -38,6 +38,43 @@ export type LatestTurn = {
   fail_reason: string | null
 }
 
+/** One itinerary line, trimmed from `proposals.itinerary` for the card. */
+export type ProposalItemLite = {
+  slot: string
+  sourceId: string
+  kind: 'flight' | 'hotel'
+  name: string
+  priceMinor: string
+  currency: string
+  fetchedAt: string
+}
+
+export type ProposalRowLite = {
+  id: string
+  totalMinor: string
+  currency: string
+  gateOutcome: 'approved' | 'shipped_unapproved' | 'rejected'
+  reviewIssues: string[]
+  decision: 'accept' | 'reject' | null
+  items: ProposalItemLite[]
+}
+
+export type LinkLite = {
+  itemId: string
+  url: string
+  quotedMinor: string
+  currency: string
+}
+
+/** One corpus row from `tool_results`, trimmed for the swap picker. */
+export type AlternativeLite = {
+  sourceId: string
+  name: string
+  priceMinor: string
+  currency: string
+  fetchedAt: string
+}
+
 export type Thread = {
   conversation: ConversationHeader | null
   messages: ThreadMessage[]
@@ -154,6 +191,15 @@ export function toThreadView(rows: ThreadMessage[]): ThreadMessage[] {
  * it belongs to someone else — RLS makes those indistinguishable, which is
  * exactly the property a 404 needs (never confirm another traveller's
  * conversation exists).
+ *
+ * Fix round 2 (Task 7 review, item 2): the message query is bounded
+ * (`.limit(500)`, newest-first) rather than unbounded — a long-running
+ * conversation is otherwise a slow, ever-growing page load on every render.
+ * It is fetched newest-first so the `limit` keeps the RECENT 500, then
+ * reversed back to oldest-first for display (the order every caller of
+ * `loadThread` — `ThreadView`, the sidebar's first-message logic elsewhere —
+ * already assumes). A conversation past 500 messages loses its EARLIEST
+ * turns from view; there is no pagination yet, so they are simply not shown.
  */
 export async function loadThread(sb: SupabaseClient, id: string): Promise<Thread> {
   const { data: conversation, error } = await sb
@@ -168,8 +214,10 @@ export async function loadThread(sb: SupabaseClient, id: string): Promise<Thread
     .from('messages')
     .select('id, role, content, created_at')
     .eq('conversation_id', id)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
+    .limit(500)
   if (messagesError) throw messagesError
+  const oldestFirst = [...(messages ?? [])].reverse()
 
   const { data: turns, error: turnsError } = await sb
     .from('turns')
@@ -190,7 +238,137 @@ export async function loadThread(sb: SupabaseClient, id: string): Promise<Thread
       status: conversation.status as string,
       updated_at: conversation.updated_at as string,
     },
-    messages: toThreadView((messages ?? []) as ThreadMessage[]),
+    messages: toThreadView(oldestFirst as ThreadMessage[]),
     latestTurn,
   }
+}
+
+type StoredItineraryLike = { items?: unknown }
+type StoredItineraryItemLike = {
+  slot?: unknown; sourceId?: unknown; kind?: unknown; name?: unknown
+  priceMinor?: unknown; currency?: unknown; fetchedAt?: unknown
+}
+
+/**
+ * Trims `proposals.itinerary` (the REHYDRATED snapshot `src/repo/proposals.ts`
+ * wrote — never the model's own version, see that module's doc comment) down
+ * to the five fields the card renders. Never throws: a shape this reader does
+ * not recognise (a future schema version, a hand-edited row) yields an empty
+ * item list rather than a 500 — the card still shows the total, the gate
+ * outcome and the buttons even if an individual line cannot be read.
+ */
+export function itineraryItemsLite(itinerary: unknown): ProposalItemLite[] {
+  const items = (itinerary as StoredItineraryLike | null)?.items
+  if (!Array.isArray(items)) return []
+  const out: ProposalItemLite[] = []
+  for (const raw of items as StoredItineraryItemLike[]) {
+    const { slot, sourceId, kind, name, priceMinor, currency, fetchedAt } = raw
+    if (
+      typeof slot !== 'string' || typeof sourceId !== 'string' || typeof name !== 'string'
+      || typeof priceMinor !== 'string' || typeof currency !== 'string' || typeof fetchedAt !== 'string'
+      || (kind !== 'flight' && kind !== 'hotel')
+    ) continue
+    out.push({ slot, sourceId, kind, name, priceMinor, currency, fetchedAt })
+  }
+  return out
+}
+
+/**
+ * Fix round 1 (this task): extracted so the newest-per-`sourceId` dedup rule
+ * for the swap picker's corpus reads is pinned without a live DB — same
+ * shape of test as `firstMessagePerConversation` above. Correct only when
+ * `rows` already arrives newest-first, which `loadAlternatives` guarantees by
+ * ordering on `fetched_at` descending before calling this.
+ */
+export function newestAlternativePerSourceId(
+  rows: { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string }[],
+): AlternativeLite[] {
+  const seen = new Set<string>()
+  const out: AlternativeLite[] = []
+  for (const r of rows) {
+    if (seen.has(r.source_id)) continue
+    seen.add(r.source_id)
+    out.push({
+      sourceId: r.source_id, name: r.name, priceMinor: String(r.price_minor),
+      currency: r.currency, fetchedAt: r.fetched_at,
+    })
+  }
+  return out
+}
+
+/**
+ * Proposals for one conversation, newest first, itinerary items trimmed via
+ * `itineraryItemsLite`. Links are read only for proposals already accepted —
+ * spec §2: "After accept, the card shows the links from `link_clicks` as the
+ * only anchors on the page" — a decided-`'reject'`-or-undecided proposal
+ * gets an empty `links` array rather than a wasted query.
+ */
+export async function loadProposals(
+  sb: SupabaseClient, conversationId: string,
+): Promise<Array<ProposalRowLite & { links: LinkLite[] }>> {
+  const { data: rows, error } = await sb
+    .from('proposals')
+    .select('id, itinerary, total_minor, currency, gate_outcome, review_issues, decision, created_at')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  if (!rows || rows.length === 0) return []
+
+  const proposals: ProposalRowLite[] = rows.map((r) => ({
+    id: r.id as string,
+    totalMinor: String(r.total_minor),
+    currency: r.currency as string,
+    gateOutcome: r.gate_outcome as ProposalRowLite['gateOutcome'],
+    reviewIssues: (r.review_issues ?? []) as string[],
+    decision: r.decision as 'accept' | 'reject' | null,
+    items: itineraryItemsLite(r.itinerary),
+  }))
+
+  const acceptedIds = proposals.filter((p) => p.decision === 'accept').map((p) => p.id)
+  const linksByProposal = new Map<string, LinkLite[]>()
+  if (acceptedIds.length > 0) {
+    const { data: links, error: linksError } = await sb
+      .from('link_clicks')
+      .select('proposal_id, item_id, url, quoted_minor, currency')
+      .in('proposal_id', acceptedIds)
+    if (linksError) throw linksError
+    for (const l of links ?? []) {
+      const proposalId = l.proposal_id as string
+      const list = linksByProposal.get(proposalId) ?? []
+      list.push({
+        itemId: l.item_id as string, url: l.url as string,
+        quotedMinor: String(l.quoted_minor), currency: l.currency as string,
+      })
+      linksByProposal.set(proposalId, list)
+    }
+  }
+
+  return proposals.map((p) => ({ ...p, links: linksByProposal.get(p.id) ?? [] }))
+}
+
+/**
+ * The swap picker's corpus reads: the newest `tool_results` row per
+ * `source_id`, for one conversation and one kind. `tool_results` is
+ * append-only (`src/repo/toolResults.ts`'s own doc comment), so a `source_id`
+ * can have several rows across separate fetches; `.limit(200)` plus the
+ * newest-first ordering bounds the read the same way `listConversations`
+ * above bounds its own first-message lookup, and `newestAlternativePerSourceId`
+ * does the dedup client-side for the same reason given there: no live test
+ * here confirms a PostgREST `distinct on`-equivalent shape, so this takes the
+ * flat-query-plus-JS-dedup fallback instead.
+ */
+export async function loadAlternatives(
+  sb: SupabaseClient, conversationId: string, kind: 'flight' | 'hotel',
+): Promise<AlternativeLite[]> {
+  const { data, error } = await sb
+    .from('tool_results')
+    .select('source_id, name, price_minor, currency, fetched_at')
+    .eq('conversation_id', conversationId)
+    .eq('kind', kind)
+    .order('fetched_at', { ascending: false })
+    .limit(200)
+  if (error) throw error
+  return newestAlternativePerSourceId(
+    (data ?? []) as { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string }[],
+  )
 }

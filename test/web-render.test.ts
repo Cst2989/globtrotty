@@ -9,7 +9,9 @@ import { describe, expect, it } from 'vitest'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { StatusLine } from '../web/components/StatusLine.js'
 import { ThreadView } from '../web/components/Thread.js'
-import { messageForStatus } from '../web/components/MessageBox.js'
+import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
+import { ProposalCard } from '../web/components/ProposalCard.js'
+import type { ProposalRowLite, LinkLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
   it('renders an agent message as escaped plain text — no markdown, no script', () => {
@@ -98,6 +100,32 @@ describe('messageForStatus', () => {
   })
 })
 
+// Task 8, carried item 1 from Task 7's review: the landing box's 409/429
+// branch used to always `router.refresh()`, which for `conversationId ===
+// 'new'` refreshed the SAME empty landing page rather than showing the
+// conversation `submitMessage` had already created.
+describe('nextLocation', () => {
+  const body = { conversationId: 'abc-123' }
+
+  it('pushes to the new conversation on a 200 from the landing box', () => {
+    expect(nextLocation('new', 200, body)).toEqual({ type: 'push', url: '/c/abc-123' })
+  })
+
+  it('pushes to the new conversation on a 429 from the landing box too', () => {
+    expect(nextLocation('new', 429, body)).toEqual({ type: 'push', url: '/c/abc-123' })
+  })
+
+  it('refreshes in place for an existing conversation on 200, 409 or 429', () => {
+    expect(nextLocation('c1', 200, body)).toEqual({ type: 'refresh' })
+    expect(nextLocation('c1', 409, body)).toEqual({ type: 'refresh' })
+    expect(nextLocation('c1', 429, body)).toEqual({ type: 'refresh' })
+  })
+
+  it('refreshes rather than pushes for a 409 from the landing box (unreachable in practice, but must not crash)', () => {
+    expect(nextLocation('new', 409, body)).toEqual({ type: 'refresh' })
+  })
+})
+
 describe('ThreadView', () => {
   it('renders the message list and an already-prepared action row through MessageBubble, in order', () => {
     const html = renderToStaticMarkup(
@@ -127,5 +155,76 @@ describe('ThreadView', () => {
     expect(html).toContain('a week in Lisbon')
     expect(html).toContain('You accepted the proposal')
     expect(html).not.toContain('<script>')
+  })
+})
+
+const BASE_ITEMS = [
+  { slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString() },
+  { slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString() },
+]
+const NO_ALTERNATIVES = { flight: [], hotel: [] }
+
+function proposal(overrides: Partial<ProposalRowLite & { links: LinkLite[] }> = {}): ProposalRowLite & { links: LinkLite[] } {
+  return {
+    id: 'p1', totalMinor: '57900', currency: 'EUR', gateOutcome: 'approved', reviewIssues: [],
+    decision: null, items: BASE_ITEMS, links: [],
+    ...overrides,
+  }
+}
+
+const NOOP_HANDLERS = {
+  pending: false, error: null,
+  onAccept: () => {}, onReject: () => {}, onSwap: () => {}, onShift: () => {},
+}
+
+describe('ProposalCard', () => {
+  it('a pending (decision: null) card shows Accept/Reject buttons and no anchors', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
+    )
+    expect(html).toContain('Accept')
+    expect(html).toContain('Reject')
+    expect(html).not.toContain('<a ')
+  })
+
+  it('an accepted card with two links renders exactly those two anchors, with the stored hrefs and rel', () => {
+    const links: LinkLite[] = [
+      { itemId: 'F1', url: 'https://mock.example/book/F1?gt_ref=abc', quotedMinor: '12300', currency: 'EUR' },
+      { itemId: 'H1', url: 'https://mock.example/book/H1?gt_ref=def', quotedMinor: '45600', currency: 'EUR' },
+    ]
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, {
+        proposal: proposal({ decision: 'accept', links }),
+        alternatives: NO_ALTERNATIVES,
+        ...NOOP_HANDLERS,
+      }),
+    )
+    const hrefs = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1])
+    expect(hrefs).toHaveLength(2)
+    expect(hrefs).toEqual(links.map((l) => l.url))
+    expect(html).toContain('rel="noopener noreferrer"')
+    // Decided: no more buttons (note: "Accepted" below legitimately
+    // contains the substring "Accept", so this checks for the button itself).
+    expect(html).not.toContain('<button')
+    expect(html).toContain('Accepted')
+  })
+
+  it('a rejected card has no anchors and no buttons', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, { proposal: proposal({ decision: 'reject' }), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
+    )
+    expect(html).not.toContain('<a ')
+    expect(html).not.toContain('Accept')
+  })
+
+  it('a shipped_unapproved card shows the reviewer\'s issues text', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, {
+        proposal: proposal({ gateOutcome: 'shipped_unapproved', reviewIssues: ['the stay is far from the beach'] }),
+        alternatives: NO_ALTERNATIVES,
+        ...NOOP_HANDLERS,
+      }),
+    )
+    expect(html).toContain('the stay is far from the beach')
   })
 })

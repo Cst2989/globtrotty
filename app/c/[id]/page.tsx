@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { createServerSupabase } from '@/web/supabase/server'
-import { listConversations, loadThread } from '@/web/data'
+import { listConversations, loadThread, loadProposals, loadAlternatives } from '@/web/data'
 import { Sidebar } from '@/web/components/Sidebar'
 import { ThreadLive } from '@/web/components/Thread'
 import { MessageBox } from '@/web/components/MessageBox'
+import { ProposalCardLive } from '@/web/components/ProposalCard'
 
 /**
  * The proxy (`proxy.ts` → `web/supabase/middleware.ts`) already redirects an
@@ -38,11 +39,19 @@ export default async function ConversationPage({
   } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const [conversations, thread] = await Promise.all([listConversations(sb), loadThread(sb, id)])
+  const [conversations, thread, proposals, flightAlternatives, hotelAlternatives] = await Promise.all([
+    listConversations(sb),
+    loadThread(sb, id),
+    loadProposals(sb, id),
+    loadAlternatives(sb, id, 'flight'),
+    loadAlternatives(sb, id, 'hotel'),
+  ])
 
   if (!thread.conversation) {
     redirect('/c/new')
   }
+
+  const alternatives = { flight: flightAlternatives, hotel: hotelAlternatives }
 
   return (
     <div className="conversation-layout">
@@ -54,6 +63,9 @@ export default async function ConversationPage({
           messages={thread.messages}
           latestTurn={thread.latestTurn}
         >
+          {proposals.map((proposal) => (
+            <ProposalCardLive key={proposal.id} proposal={proposal} alternatives={alternatives} />
+          ))}
           <MessageBox conversationId={thread.conversation.id} status={thread.conversation.status} />
         </ThreadLive>
       </div>

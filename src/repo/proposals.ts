@@ -88,6 +88,25 @@ type Row = {
   parent_proposal_id: string | null; created_at: Date
 }
 
+/**
+ * Plan 4a, Task 8: the decide/revise route handlers' authorisation check, run
+ * on the OWNER connection — RLS does not apply there, so this is the ONLY
+ * thing standing between a signed-in traveller and another traveller's
+ * proposal id (see web/messagesRoute.ts's doc comment for the same argument
+ * applied to conversation ids). One select on `(id, user_id)`; a proposal
+ * that belongs to someone else looks identical to one that does not exist at
+ * all, which is exactly the property a 404 needs — never confirm a foreign
+ * proposal's existence.
+ */
+export async function loadProposalForUser(
+  sql: postgres.Sql, proposalId: string, userId: string,
+): Promise<{ id: string; conversationId: string } | null> {
+  const rows = await sql<{ id: string; conversation_id: string }[]>`
+    select id, conversation_id from proposals where id = ${proposalId} and user_id = ${userId}`
+  const r = rows[0]
+  return r ? { id: r.id, conversationId: r.conversation_id } : null
+}
+
 /** Scoped to the conversation: a proposal id from another conversation is "not found", never "forbidden". */
 export async function loadProposal(
   sql: postgres.Sql, conversationId: string, proposalId: string,

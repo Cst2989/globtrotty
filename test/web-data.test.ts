@@ -8,7 +8,10 @@
 // mapping) and `firstMessagePerConversation` (the sidebar's first-line
 // dedup rule).
 import { describe, expect, it } from 'vitest'
-import { toThreadView, firstMessagePerConversation, type ThreadMessage } from '../web/data.js'
+import {
+  toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
+  type ThreadMessage,
+} from '../web/data.js'
 
 const PROPOSAL_ID = '44444444-4444-4444-8444-444444444444'
 
@@ -65,5 +68,62 @@ describe('firstMessagePerConversation', () => {
 
   it('returns an empty map for no rows', () => {
     expect(firstMessagePerConversation([]).size).toBe(0)
+  })
+})
+
+describe('itineraryItemsLite', () => {
+  it('trims a real StoredItinerary down to the five card fields', () => {
+    const itinerary = {
+      schemaVersion: 1,
+      items: [
+        {
+          slot: 'outbound', quantity: 1, sourceId: 'F1', supplier: 'mock', kind: 'flight', name: 'BER→FAO',
+          priceMinor: '12300', currency: 'EUR', priceBasis: 'total', fetchedAt: '2026-09-13T12:00:00.000Z',
+          lineTotalMinor: '12300', bookingUrl: null, detail: {}, searchParams: null,
+        },
+        {
+          slot: 'stay', quantity: 1, sourceId: 'H1', supplier: 'mock', kind: 'hotel', name: 'Casa Bela',
+          priceMinor: '45600', currency: 'EUR', priceBasis: 'total', fetchedAt: '2026-09-13T12:05:00.000Z',
+          lineTotalMinor: '45600', bookingUrl: null, detail: {}, searchParams: null,
+        },
+      ],
+    }
+    expect(itineraryItemsLite(itinerary)).toEqual([
+      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z' },
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z' },
+    ])
+  })
+
+  it('never throws on a shape it does not recognise; drops unreadable items instead', () => {
+    expect(itineraryItemsLite(null)).toEqual([])
+    expect(itineraryItemsLite({})).toEqual([])
+    expect(itineraryItemsLite({ items: 'not an array' })).toEqual([])
+    expect(itineraryItemsLite({ items: [{ slot: 'outbound' }] })).toEqual([])
+    expect(itineraryItemsLite({
+      items: [
+        { slot: 'outbound', sourceId: 'F1', kind: 'bogus', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
+        { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
+      ],
+    })).toEqual([
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
+    ])
+  })
+})
+
+describe('newestAlternativePerSourceId', () => {
+  it('keeps the first (newest, given newest-first input) row per source_id', () => {
+    const rows = [
+      { source_id: 'A', name: 'newer A', price_minor: '100', currency: 'EUR', fetched_at: 't2' },
+      { source_id: 'B', name: 'B', price_minor: '200', currency: 'EUR', fetched_at: 't2' },
+      { source_id: 'A', name: 'older A, must be ignored', price_minor: '999', currency: 'EUR', fetched_at: 't1' },
+    ]
+    const out = newestAlternativePerSourceId(rows)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({ sourceId: 'A', name: 'newer A', priceMinor: '100', currency: 'EUR', fetchedAt: 't2' })
+    expect(out[1]).toEqual({ sourceId: 'B', name: 'B', priceMinor: '200', currency: 'EUR', fetchedAt: 't2' })
+  })
+
+  it('returns an empty list for no rows', () => {
+    expect(newestAlternativePerSourceId([])).toEqual([])
   })
 })

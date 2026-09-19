@@ -244,6 +244,62 @@ describeDb('submitAction', () => {
     })
   })
 
+  // Plan 4a, Task 8: the decide route's reject-with-a-reason path. Her typed
+  // reason is stored as an ordinary 'user' message, BEFORE the action row, in
+  // the same fresh-turn transaction — never folded into the action's own JSON
+  // (src/actions.ts's `rejected` payload has no `reason` field by design).
+  const REJECTED: ActionPayload = { action: 'rejected', proposalId: PROPOSAL_ID }
+
+  it('writes a userNote as an ordinary user message before the action row, in the same turn', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const r = await submitAction(deps(sql, invoke), {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'r1',
+        userNote: 'too far from the beach',
+      })
+      expect(r.status).toBe('queued')
+      const msgs = await sql`select role, content from messages where conversation_id = ${conversationId} order by created_at`
+      expect(msgs).toHaveLength(2)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[0]!.content).toBe('too far from the beach')
+      expect(msgs[1]!.role).toBe('action')
+      expect(parseAction(msgs[1]!.content as string)).toEqual(REJECTED)
+    })
+  })
+
+  it('writes no note at all when userNote is omitted or blank', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      await submitAction(deps(sql), {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'r2',
+      })
+      const conversationId2 = await insertConversation(sql, 'planning')
+      await submitAction(deps(sql), {
+        userId: USER, conversationId: conversationId2, action: REJECTED, idempotencyKey: 'r3', userNote: '   ',
+      })
+      for (const c of [conversationId, conversationId2]) {
+        const msgs = await sql`select role from messages where conversation_id = ${c}`
+        expect(msgs).toHaveLength(1)
+        expect(msgs[0]!.role).toBe('action')
+      }
+    })
+  })
+
+  it('writes no note when the turn cannot be won (busy)', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const d = deps(sql)
+      await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1' })
+      const b = await submitAction(d, {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'a2', userNote: 'never written',
+      })
+      expect(b.status).toBe('busy')
+      const notes = await sql`select id from messages where conversation_id = ${conversationId} and content = 'never written'`
+      expect(notes).toHaveLength(0)
+    })
+  })
+
   it('never creates a conversation', async () => {
     await withTestDb(async (sql) => {
       const before = await sql`select count(*)::int as n from conversations`
