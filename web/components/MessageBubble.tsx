@@ -1,5 +1,3 @@
-import { parseAction, describeActionForUi } from '@/src/actions'
-
 export type MessageRole = 'user' | 'agent' | 'action'
 
 export type MessageBubbleProps = {
@@ -8,30 +6,27 @@ export type MessageBubbleProps = {
 }
 
 /**
- * Renders one `messages` row. `content` is always a plain React text child —
+ * Renders one thread row. `content` is always a plain React text child —
  * never raw-HTML-injecting markup (the sentinel test greps `web/` for that
  * dangerous prop name) — so an agent reply that contains something that
  * LOOKS like markdown or HTML (a supplier snippet, a prompt-injection
  * attempt) renders as literal text via React's own escaping, not as markup.
  *
- * An `action` row is never a traveller's or agent's free text: it is JSON a
- * route handler wrote (`src/actions.ts`'s `ActionPayload`). `parseAction`
- * turns it back into a payload and `describeActionForUi` renders the fixed,
- * ids-free sentence for it — the raw JSON (and any id inside it) never
- * reaches the page.
+ * Fix round 1 (Minor): an `action` row's `content` is no longer JSON by the
+ * time it reaches this component. `web/data.ts`'s `loadThread` (via
+ * `toThreadView`) now turns it into its fixed, ids-free UI sentence
+ * server-side, before the row ever leaves the server — so the raw JSON a
+ * route handler wrote never enters the RSC payload, let alone this render.
+ * This component's only remaining job for that role is the `message-action`
+ * styling hook.
  */
 export function MessageBubble({ role, content }: MessageBubbleProps) {
-  if (role === 'action') {
-    const action = parseAction(content)
-    return (
-      <p className="message message-action" data-role="action">
-        {action ? describeActionForUi(action) : 'You took an action'}
-      </p>
-    )
-  }
-
   return (
-    <p className="message" data-role={role} style={{ whiteSpace: 'pre-wrap' }}>
+    <p
+      className={role === 'action' ? 'message message-action' : 'message'}
+      data-role={role}
+      style={{ whiteSpace: 'pre-wrap' }}
+    >
       {content}
     </p>
   )

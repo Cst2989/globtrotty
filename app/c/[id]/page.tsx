@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { z } from 'zod'
 import { createServerSupabase } from '@/web/supabase/server'
 import { listConversations, loadThread } from '@/web/data'
 import { Sidebar } from '@/web/components/Sidebar'
@@ -15,6 +16,11 @@ import { MessageBox } from '@/web/components/MessageBox'
  * `loadThread` returning `conversation: null` covers both "no such id" and
  * "belongs to someone else": RLS makes those indistinguishable, so both
  * send her back to the landing box rather than confirming which one it was.
+ *
+ * Fix round 1 (Minor): a non-uuid `id` (a stray path segment, a typo'd
+ * link) is rejected the same way — `/c/new` — before it ever reaches
+ * `loadThread`/Postgres, rather than trusting a malformed string to a
+ * `uuid`-typed column comparison.
  */
 export default async function ConversationPage({
   params,
@@ -22,6 +28,10 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
+  if (!z.uuid().safeParse(id).success) {
+    redirect('/c/new')
+  }
+
   const sb = await createServerSupabase()
   const {
     data: { user },

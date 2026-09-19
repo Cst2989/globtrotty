@@ -6,6 +6,9 @@ export type SubscribeConversationArgs = {
   onChange: () => void
 }
 
+/** How long to wait after the LAST change in a burst before actually refetching. */
+const DEBOUNCE_MS = 250
+
 /**
  * Browser-only Realtime subscription for one conversation. Two
  * `postgres_changes` listeners on one channel — `conversations` (status
@@ -22,28 +25,49 @@ export type SubscribeConversationArgs = {
  * place (`web/data.ts`), rather than this module growing a second copy of
  * that logic to merge a payload in place.
  *
+ * Fix round 1 (Important): `onChange` is debounced 250ms, trailing —
+ * repeated inside this function (not by the caller) so every caller gets it
+ * for free. A single turn can touch `conversations` (the `working` →
+ * `active`/`awaiting_user` flip) and write several `messages` rows in quick
+ * succession; without this, each one fired its own `router.refresh()`,
+ * turning one turn's worth of progress into a burst of redundant server
+ * round-trips instead of one refetch after the burst settles.
+ *
  * Returns an unsubscribe function; the caller (a `useEffect`) is
- * responsible for calling it on unmount.
+ * responsible for calling it on unmount. Unsubscribing cancels a pending
+ * debounced call too — a change that arrives right before unmount must
+ * never fire `onChange` against an already-torn-down component.
  */
 export function subscribeConversation(
   sb: SupabaseClient,
   { conversationId, userId, onChange }: SubscribeConversationArgs,
 ): () => void {
+  let pending: ReturnType<typeof setTimeout> | null = null
+
+  const debouncedOnChange = () => {
+    if (pending) clearTimeout(pending)
+    pending = setTimeout(() => {
+      pending = null
+      onChange()
+    }, DEBOUNCE_MS)
+  }
+
   const channel = sb
     .channel(`conv-${conversationId}`)
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'messages', filter: `user_id=eq.${userId}` },
-      () => onChange(),
+      () => debouncedOnChange(),
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${userId}` },
-      () => onChange(),
+      () => debouncedOnChange(),
     )
     .subscribe()
 
   return () => {
+    if (pending) clearTimeout(pending)
     sb.removeChannel(channel)
   }
 }

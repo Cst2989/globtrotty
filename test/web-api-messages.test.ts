@@ -146,6 +146,42 @@ describeDb('POST /api/conversations/[id]/messages', () => {
     })
   })
 
+  // Fix round 1 (Important). Break: comment out the ownership `select` in
+  // web/messagesRoute.ts and this test 500s instead of 404ing — submitMessage
+  // runs on the owner connection (bypasses RLS) and has no authorisation
+  // check of its own; see that module's doc comment.
+  it('a conversation id belonging to someone else returns 404 and writes nothing', async () => {
+    await withTestDb(async (sql) => {
+      const [row] = await sql`insert into conversations (user_id) values (${OTHER}) returning id`
+      const conversationId = row!.id as string
+      const invoke = vi.fn()
+      const handler = makePost({ sql, invoke })
+
+      const res = await handler(
+        USER, req({ text: 'hi', idempotencyKey: 'ownership-key-1' }), ctx(conversationId),
+      )
+
+      expect(res.status).toBe(404)
+      expect(invoke).not.toHaveBeenCalled()
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)
+    })
+  })
+
+  it('a non-uuid conversation id returns 404 instead of reaching submitMessage', async () => {
+    await withTestDb(async (sql) => {
+      const invoke = vi.fn()
+      const handler = makePost({ sql, invoke })
+
+      const res = await handler(
+        USER, req({ text: 'hi', idempotencyKey: 'ownership-key-2' }), ctx('not-a-uuid'),
+      )
+
+      expect(res.status).toBe(404)
+      expect(invoke).not.toHaveBeenCalled()
+    })
+  })
+
   it('a capped daily ceiling returns 429 limit_reached', async () => {
     await withTestDb(async (sql) => {
       const { DEFAULT_LIMITS } = await import('../src/limits.js')

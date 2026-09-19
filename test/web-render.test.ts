@@ -9,8 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { StatusLine } from '../web/components/StatusLine.js'
 import { ThreadView } from '../web/components/Thread.js'
-
-const PROPOSAL_ID = '44444444-4444-4444-8444-444444444444'
+import { messageForStatus } from '../web/components/MessageBox.js'
 
 describe('MessageBubble', () => {
   it('renders an agent message as escaped plain text — no markdown, no script', () => {
@@ -34,18 +33,28 @@ describe('MessageBubble', () => {
     expect(html).toContain('&lt;b&gt;hi&lt;/b&gt;')
   })
 
-  it('renders an action row as its plain-language description, never the JSON', () => {
-    const content = JSON.stringify({ action: 'hand_off', proposalId: PROPOSAL_ID })
-    const html = renderToStaticMarkup(createElement(MessageBubble, { role: 'action', content }))
+  // Fix round 1 (Minor): `web/data.ts`'s `loadThread` now turns an action
+  // row's raw JSON into its plain sentence server-side (see `toThreadView`,
+  // tested against that directly in test/web-data.test.ts) — by the time
+  // `content` reaches this component it is already that sentence, so there
+  // is nothing left for `MessageBubble` to parse. This just pins that an
+  // `action` row still gets the `message-action` styling hook and renders
+  // exactly like any other row otherwise (escaped plain text, no special
+  // JSON handling left in this component at all).
+  it('renders an action row\'s already-prepared sentence with the message-action styling hook', () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, { role: 'action', content: 'You accepted the proposal' }),
+    )
     expect(html).toContain('You accepted the proposal')
-    expect(html).not.toContain(PROPOSAL_ID)
-    expect(html).not.toContain('hand_off')
-    expect(html).not.toContain('proposalId')
+    expect(html).toContain('message-action')
   })
 
-  it('renders a malformed action row without throwing and without the raw content', () => {
-    const html = renderToStaticMarkup(createElement(MessageBubble, { role: 'action', content: 'not json' }))
-    expect(html).not.toContain('not json')
+  it('renders action-role content as escaped plain text too, same as agent/user', () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, { role: 'action', content: '<script>alert(1)</script>' }),
+    )
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
 })
 
@@ -71,8 +80,26 @@ describe('StatusLine', () => {
   })
 })
 
+describe('messageForStatus', () => {
+  it('tells her a busy (409) send is saved and will be read next', () => {
+    expect(messageForStatus(409)).toMatch(/saved/i)
+    expect(messageForStatus(409)).toMatch(/read next/i)
+  })
+
+  it('tells her a capped (429) send is saved but delayed to tomorrow', () => {
+    expect(messageForStatus(429)).toMatch(/saved/i)
+    expect(messageForStatus(429)).toMatch(/tomorrow/i)
+  })
+
+  it('falls back to the generic could-not-be-sent text for any other status', () => {
+    expect(messageForStatus(400)).toMatch(/could not be sent/i)
+    expect(messageForStatus(500)).toMatch(/could not be sent/i)
+    expect(messageForStatus(0)).toMatch(/could not be sent/i)
+  })
+})
+
 describe('ThreadView', () => {
-  it('renders the message list and an action row through MessageBubble, in order', () => {
+  it('renders the message list and an already-prepared action row through MessageBubble, in order', () => {
     const html = renderToStaticMarkup(
       createElement(ThreadView, {
         conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
@@ -80,9 +107,12 @@ describe('ThreadView', () => {
         messages: [
           { id: 'm1', role: 'user', content: 'a week in Lisbon', created_at: new Date().toISOString() },
           {
+            // Already run through web/data.ts's toThreadView by the time
+            // ThreadView sees it — see that test file for the JSON→sentence
+            // mapping itself.
             id: 'm2',
             role: 'action',
-            content: JSON.stringify({ action: 'hand_off', proposalId: PROPOSAL_ID }),
+            content: 'You accepted the proposal',
             created_at: new Date().toISOString(),
           },
           {
@@ -96,7 +126,6 @@ describe('ThreadView', () => {
     )
     expect(html).toContain('a week in Lisbon')
     expect(html).toContain('You accepted the proposal')
-    expect(html).not.toContain(PROPOSAL_ID)
     expect(html).not.toContain('<script>')
   })
 })
