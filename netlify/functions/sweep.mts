@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { loadEnv } from '../../src/env.js'
+import { invokeBackground } from '../../src/invoke.js'
 import { sweep } from '../../src/sweeper.js'
 
 /**
@@ -36,9 +37,12 @@ export default async (): Promise<Response> => {
     console.error('sweep: reaped crash-loop turns', { turnIds: result.reaped })
   }
 
+  // best-effort: the next sweep will retry a turn that never restarted —
+  // invokeBackground (src/invoke.ts) already swallows a failed fetch.
+  const invoke = invokeBackground(env)
   for (let i = 0; i < result.requeued.length; i += CONCURRENCY) {
     const batch = result.requeued.slice(i, i + CONCURRENCY)
-    await Promise.all(batch.map((turnId) => reinvoke(env, turnId)))
+    await Promise.all(batch.map((turnId) => invoke(turnId)))
   }
 
   return new Response(
@@ -47,12 +51,4 @@ export default async (): Promise<Response> => {
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   )
-}
-
-async function reinvoke(env: ReturnType<typeof loadEnv>, turnId: string): Promise<void> {
-  await fetch(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-worker-secret': env.WORKER_SHARED_SECRET },
-    body: JSON.stringify({ turnId }),
-  }).catch(() => {})   // best-effort: the next sweep will retry a turn that never restarted
 }

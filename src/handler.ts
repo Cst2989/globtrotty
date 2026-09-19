@@ -1,4 +1,6 @@
 import type postgres from 'postgres'
+import type { ActionPayload } from './actions.js'
+import { readDesk, type Desk } from './repo/conversations.js'
 import { exceedsAnyCeiling } from './engine.js'
 import type { Limits } from './engine.js'
 import { readSpendFailClosed } from './repo/spend.js'
@@ -14,6 +16,27 @@ export type SubmitInput = {
   conversationId: string | null
   message: string
   idempotencyKey: string
+}
+
+export type SubmitActionInput = {
+  userId: string
+  conversationId: string
+  action: ActionPayload
+  idempotencyKey: string
+}
+
+/**
+ * Thrown by `submitAction` when the conversation is not yet at the planning
+ * desk. A card action names a `proposal_id` — nothing at the front desk ever
+ * has one, so a route handler that lets one through there is a bug upstream
+ * (a stale card rendered from a cached page, a race with `routeToPlanning`),
+ * not a state `submitAction` should quietly paper over by routing it anyway.
+ */
+export class ActionRefused extends Error {
+  constructor(readonly desk: Desk) {
+    super(`submitAction: conversation is at the '${desk}' desk, not 'planning'`)
+    this.name = 'ActionRefused'
+  }
 }
 
 // `turnId` is `null`, not `''`, when no turn exists to name — an empty string
@@ -129,6 +152,72 @@ export async function submitMessage(
   // Persist first, then schedule. A failed invoke leaves a durable queued turn
   // that the sweeper will pick up within a couple of minutes.
   await deps.invoke(turnId).catch(() => {})
+
+  return { conversationId, turnId, status: 'queued' }
+}
+
+/**
+ * The operator channel's tier 2: a card press (accept / reject / revise),
+ * rather than typed text, becomes a `messages` row. Mirrors `submitMessage`
+ * above property for property — same fail-closed spend read ahead of any
+ * write, same durable-before-scheduled turn insert, same idempotency race,
+ * same `working` flip and best-effort `invoke` — everything here is that
+ * same shape with one row's role and content swapped, and one guard added:
+ *
+ * `submitAction` never creates a conversation. A card exists only once a
+ * conversation has a `proposal_id` to name, which only happens at the
+ * planning desk — so unlike `submitMessage`, `conversationId` is required and
+ * there is nothing for this function to create on her behalf. `readDesk`
+ * enforces the other half of that: a conversation not (yet, or no longer) at
+ * `'planning'` refuses with `ActionRefused` rather than writing an action row
+ * nothing downstream is set up to read.
+ */
+export async function submitAction(
+  deps: SubmitDeps, input: SubmitActionInput,
+): Promise<SubmitResult> {
+  const { sql, limits, invoke } = deps
+  const { conversationId } = input
+
+  const desk = await readDesk(sql, conversationId, input.userId)
+  if (desk !== 'planning') throw new ActionRefused(desk)
+
+  // Fail closed, same as submitMessage: BEFORE any message or turn is written.
+  const spend = await readSpendFailClosed(sql, input.userId, conversationId)
+
+  // Recorded regardless of what happens next — same preservation guarantee as
+  // submitMessage's message insert: a card press she made is never dropped,
+  // even if the ceiling below stops the turn before it starts.
+  await sql`insert into messages (conversation_id, user_id, role, content)
+            values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)})`
+
+  if (exceedsAnyCeiling(spend, limits)) {
+    await sql`update conversations set status = 'limit_reached', updated_at = now()
+               where id = ${conversationId} and user_id = ${input.userId}`
+    return { conversationId, turnId: null, status: 'limit_reached' }
+  }
+
+  const inserted = await sql`
+    insert into turns (conversation_id, user_id, idempotency_key)
+    values (${conversationId}, ${input.userId}, ${input.idempotencyKey})
+    on conflict do nothing
+    returning id`
+
+  if (inserted.length === 0) {
+    const dupe = await sql`
+      select id from turns
+       where conversation_id = ${conversationId} and idempotency_key = ${input.idempotencyKey}`
+    if (dupe.length > 0) {
+      return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
+    }
+    return { conversationId, turnId: null, status: 'busy' }   // another turn is in flight
+  }
+
+  const turnId = inserted[0]!.id as string
+  await sql`update conversations set status = 'working', updated_at = now()
+             where id = ${conversationId} and user_id = ${input.userId}`
+
+  // Persist first, then schedule — same ordering guarantee as submitMessage.
+  await invoke(turnId).catch(() => {})
 
   return { conversationId, turnId, status: 'queued' }
 }
