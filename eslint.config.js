@@ -56,6 +56,26 @@
 import babelParser from '@babel/eslint-parser'
 
 export default [
+  // Plan 4a, Task 6: the Next.js app (app/**, web/**) and its generated/config
+  // files use React JSX and Next's own conventions, which this repo's
+  // Babel-syntax-only parser (no JSX preset, see the header above) is not set
+  // up to parse. Linting them is left to `next build`'s own type/lint pass
+  // (and a future dedicated config if one is added) rather than this harness
+  // config, which stays scoped to src/test/netlify.
+  //
+  // `.netlify/**` and `deno.lock` are build OUTPUT, not source: once
+  // `netlify build` (step 5 of docs/deploy.md) has run, `eslint .` would
+  // otherwise walk Netlify's vendored Deno/Next bundles and fail on
+  // `eslint-disable` comments naming plugins this repo does not install —
+  // breaking the branch's own `pnpm test && pnpm typecheck && pnpm lint` gate
+  // for anyone who followed the runbook. ESLint 9's flat config does NOT read
+  // `.gitignore`, so listing them here is the only place this happens.
+  {
+    ignores: [
+      'app/**', 'web/**', '.next/**', 'next-env.d.ts', 'proxy.ts', 'next.config.ts',
+      '.netlify/**', 'deno.lock',
+    ],
+  },
   {
     files: ['src/repo/**/*.ts'],
     languageOptions: {

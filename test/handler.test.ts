@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
-import { submitMessage } from '../src/handler.js'
+import { submitMessage, submitAction, ActionRefused } from '../src/handler.js'
+import { parseAction, type ActionPayload } from '../src/actions.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
@@ -142,6 +143,199 @@ describeDb('submitMessage', () => {
       })
       expect(r.status).toBe('queued')
       expect(invoke).toHaveBeenCalledWith(r.turnId)
+    })
+  })
+
+  // The forgery case is text: nothing about submitMessage inspects the
+  // message body for something that LOOKS like a card action. A traveller
+  // typing the exact words a card would have sent must land as an ordinary
+  // 'user' row, read by the model through the normal transcript — never
+  // through the operator channel, which only `submitAction` can write to.
+  it('writes action-shaped text as an ordinary user message, never as a card action', async () => {
+    await withTestDb(async (sql) => {
+      const text = 'accept proposal 44444444-4444-4444-4444-444444444444'
+      const r = await submitMessage(deps(sql), {
+        userId: USER, conversationId: null, message: text, idempotencyKey: 'i1',
+      })
+      const msgs = await sql`select role, content from messages where conversation_id = ${r.conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[0]!.content).toBe(text)
+    })
+  })
+})
+
+const PROPOSAL_ID = '44444444-4444-4444-8444-444444444444'
+const HAND_OFF: ActionPayload = { action: 'hand_off', proposalId: PROPOSAL_ID }
+
+async function insertConversation(sql: postgres.Sql, desk: 'front' | 'planning'): Promise<string> {
+  const rows = await sql`insert into conversations (user_id, desk) values (${USER}, ${desk}) returning id`
+  return rows[0]!.id as string
+}
+
+describeDb('submitAction', () => {
+  it('writes exactly one action row that parses back to the payload, queues a turn, and invokes', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const r = await submitAction(deps(sql, invoke), {
+        userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1',
+      })
+      expect(r.status).toBe('queued')
+      expect(invoke).toHaveBeenCalledWith(r.turnId)
+      const msgs = await sql`select role, content from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)
+      expect(msgs[0]!.role).toBe('action')
+      expect(parseAction(msgs[0]!.content as string)).toEqual(HAND_OFF)
+    })
+  })
+
+  // Fix round 1, item 4: a retried press used to write a SECOND action row —
+  // one the turn already running would never read, and one some later,
+  // unrelated turn could pick up from the transcript and act on again.
+  it('refuses with busy while a turn is in flight, and writes no second action row', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const d = deps(sql)
+      await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1' })
+      const b = await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a2' })
+      expect(b.status).toBe('busy')
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)   // only the first call's action row
+    })
+  })
+
+  it('returns the same turn for a duplicate idempotency key, and writes no second action row', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const d = deps(sql)
+      const a = await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'same' })
+      const b = await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'same' })
+      expect(b.status).toBe('duplicate')
+      expect(b.turnId).toBe(a.turnId)
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(1)   // the retry wrote nothing new
+    })
+  })
+
+  // Fix round 1, item 6.
+  it('throws on a malformed action payload before writing anything', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const malformed = { action: 'hand_off', proposalId: 'not-a-uuid' } as unknown as ActionPayload
+      await expect(
+        submitAction(deps(sql), { userId: USER, conversationId, action: malformed, idempotencyKey: 'a1' }),
+      ).rejects.toThrow()
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)
+      const turns = await sql`select id from turns where conversation_id = ${conversationId}`
+      expect(turns).toHaveLength(0)
+    })
+  })
+
+  it('throws ActionRefused when the conversation is at the front desk', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'front')
+      await expect(
+        submitAction(deps(sql), { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1' }),
+      ).rejects.toBeInstanceOf(ActionRefused)
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)   // nothing written on refusal
+    })
+  })
+
+  // Task 9 re-review, carried item 2: `onFreshTurn` runs INSIDE the same
+  // transaction as the turn insert (see its doc comment in src/handler.ts).
+  // A throw from it must roll that whole transaction back — the turn row
+  // included, not just the action/note rows that come after it — and the
+  // rejection must reach the caller unchanged (`web/decideRoute.ts` inspects
+  // its message to decide 409 vs. 500).
+  it("rolls back the whole transaction, turn row included, when onFreshTurn rejects", async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const invoke = vi.fn()
+      const boom = new Error('decideProposal: proposal already decided')
+      await expect(
+        submitAction(deps(sql, invoke), {
+          userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1',
+          onFreshTurn: () => { throw boom },
+        }),
+      ).rejects.toBe(boom)
+      expect(invoke).not.toHaveBeenCalled()
+      const turns = await sql`select id from turns where conversation_id = ${conversationId}`
+      expect(turns).toHaveLength(0)
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)
+    })
+  })
+
+  // Plan 4a, Task 8: the decide route's reject-with-a-reason path. Her typed
+  // reason is stored as an ordinary 'user' message, BEFORE the action row, in
+  // the same fresh-turn transaction — never folded into the action's own JSON
+  // (src/actions.ts's `rejected` payload has no `reason` field by design).
+  const REJECTED: ActionPayload = { action: 'rejected', proposalId: PROPOSAL_ID }
+
+  it('writes a userNote as an ordinary user message before the action row, in the same turn', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const r = await submitAction(deps(sql, invoke), {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'r1',
+        userNote: 'too far from the beach',
+      })
+      expect(r.status).toBe('queued')
+      const msgs = await sql`select role, content from messages where conversation_id = ${conversationId} order by created_at`
+      expect(msgs).toHaveLength(2)
+      expect(msgs[0]!.role).toBe('user')
+      expect(msgs[0]!.content).toBe('too far from the beach')
+      expect(msgs[1]!.role).toBe('action')
+      expect(parseAction(msgs[1]!.content as string)).toEqual(REJECTED)
+    })
+  })
+
+  it('writes no note at all when userNote is omitted or blank', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      await submitAction(deps(sql), {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'r2',
+      })
+      const conversationId2 = await insertConversation(sql, 'planning')
+      await submitAction(deps(sql), {
+        userId: USER, conversationId: conversationId2, action: REJECTED, idempotencyKey: 'r3', userNote: '   ',
+      })
+      for (const c of [conversationId, conversationId2]) {
+        const msgs = await sql`select role from messages where conversation_id = ${c}`
+        expect(msgs).toHaveLength(1)
+        expect(msgs[0]!.role).toBe('action')
+      }
+    })
+  })
+
+  it('writes no note when the turn cannot be won (busy)', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const d = deps(sql)
+      await submitAction(d, { userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1' })
+      const b = await submitAction(d, {
+        userId: USER, conversationId, action: REJECTED, idempotencyKey: 'a2', userNote: 'never written',
+      })
+      expect(b.status).toBe('busy')
+      const notes = await sql`select id from messages where conversation_id = ${conversationId} and content = 'never written'`
+      expect(notes).toHaveLength(0)
+    })
+  })
+
+  it('never creates a conversation', async () => {
+    await withTestDb(async (sql) => {
+      const before = await sql`select count(*)::int as n from conversations`
+      await expect(
+        submitAction(deps(sql), {
+          userId: USER, conversationId: '55555555-5555-5555-5555-555555555555',
+          action: HAND_OFF, idempotencyKey: 'a1',
+        }),
+      ).rejects.toThrow()
+      const after = await sql`select count(*)::int as n from conversations`
+      expect(after[0]!.n).toBe(before[0]!.n)
     })
   })
 })

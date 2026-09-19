@@ -56,6 +56,16 @@ const canCarryBreakpoint = (b: ContentBlock | undefined): boolean =>
  * Memory and the notebook are deliberately NOT cached: they change every turn,
  * so anything cached behind them would be invalidated on every request. They
  * belong after the last breakpoint.
+ *
+ * A `system` message (the operator channel, plan 4a Task 2) is skipped
+ * ENTIRELY by both walks below, not just excluded from carrying a mark: it is
+ * a card action rendered fresh by `src/worker.ts`'s hydration on every read of
+ * `messages`, from a row that is itself mutable in spirit even though nothing
+ * currently rewrites it, so treating any of its blocks as a stable, cacheable
+ * prefix is the wrong default. This also keeps the ROLLING breakpoint off of
+ * it specifically: `normalizeOperatorTurns` (src/model/client.ts) can leave a
+ * `system` message trailing, and the rolling mark must land on the last
+ * eligible block of the message BEFORE it instead.
  */
 export function placeBreakpoints(messages: LoopMessage[]): LoopMessage[] {
   if (messages.length === 0) return []
@@ -67,14 +77,15 @@ export function placeBreakpoints(messages: LoopMessage[]): LoopMessage[] {
   // One of the four is spent on system+tools, so the transcript gets three.
   const budget = MAX_BREAKPOINTS - 1
 
-  // Walk the flattened block sequence. The counter advances on EVERY block, so
-  // the spacing still respects the 20-block lookback, but a breakpoint is only
-  // placed on a block that can carry one — a `thinking` block at an every-15
-  // position defers the mark to the next eligible block rather than being
-  // stamped with a field the API rejects.
+  // Walk the flattened block sequence. The counter advances on EVERY block of
+  // a non-`system` message, so the spacing still respects the 20-block
+  // lookback, but a breakpoint is only placed on a block that can carry one —
+  // a `thinking` block at an every-15 position defers the mark to the next
+  // eligible block rather than being stamped with a field the API rejects.
   const positions: Array<[number, number]> = []
   let sinceLast = 0
   for (let m = 0; m < out.length; m++) {
+    if (out[m]!.role === 'system') continue
     const content = out[m]!.content
     for (let b = 0; b < content.length; b++) {
       sinceLast++
@@ -89,9 +100,11 @@ export function placeBreakpoints(messages: LoopMessage[]): LoopMessage[] {
   // GROWING transcript cacheable across steps. Searched BACKWARDS for the last
   // eligible block rather than assumed to be `content.at(-1)` — a trailing
   // message with an empty `content` array, or one ending in a thinking block,
-  // would otherwise index at -1 and throw.
+  // would otherwise index at -1 and throw. A `system` message is skipped
+  // entirely here too, so a trailing one never carries the rolling mark.
   let rolling: [number, number] | null = null
   for (let m = out.length - 1; m >= 0 && rolling === null; m--) {
+    if (out[m]!.role === 'system') continue
     const content = out[m]!.content
     for (let b = content.length - 1; b >= 0; b--) {
       if (canCarryBreakpoint(content[b])) { rolling = [m, b]; break }

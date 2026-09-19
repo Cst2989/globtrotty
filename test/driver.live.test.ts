@@ -63,6 +63,34 @@ live('driver against the real API', () => {
     expect(r.content.some((b) => b.type === 'text')).toBe(true)
   }, 120_000)
 
+  /**
+   * Fix round 1 (plan 4a, Task 2 review, Minor). Written but NOT run in this
+   * session — no Anthropic credit available. Pins that a transcript carrying
+   * a trailing `system` message (the operator channel), plus a volatile
+   * suffix, is still a request shape the real API accepts through
+   * `buildRequest`'s new `normalizeOperatorTurns` step — not just something
+   * the stubbed-transport tests in test/model-client.test.ts believe is fine.
+   */
+  it('accepts a transcript with a trailing operator system message plus a suffix', async () => {
+    const r = await callModel(
+      transport(),
+      {
+        seat: SEATS.driver, system: 'Answer in exactly one short sentence.', tools: [],
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'I want a week in Faro' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'Sure — say when.' }] },
+          {
+            role: 'system',
+            content: [{ type: 'text', text: 'Operator: test operator message; reply with the word ok.' }],
+          },
+        ],
+        suffix: '- destination: Faro',
+      },
+      () => Date.now(),
+    )
+    expect(r.kind).toBe('ok')
+  }, 120_000)
+
   it('returns the exact model id we pinned, which is why drift needs a canary', async () => {
     const r = await callModel(
       transport(),

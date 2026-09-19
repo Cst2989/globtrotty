@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import { firstCeilingReached, type Limits } from '../engine.js'
 import { classifyError } from '../errors.js'
@@ -11,8 +10,11 @@ import { costMicros, PRICES, WEB_SEARCH_MICROS } from '../pricing.js'
 import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
 import { cutAtWords, maskControlChars, redactPrices } from '../sanitize.js'
+import { loadPrompt } from './prompts/load.js'
 
-const SYSTEM = readFileSync(new URL('./prompts/scout.md', import.meta.url), 'utf8')
+// See src/agents/prompts/load.ts: resolves beside this module, or from the process cwd for
+// the esbuild-bundled Netlify function where import.meta.url no longer neighbours prompts/.
+const SYSTEM = loadPrompt('scout')
 export const SCOUT_MAX_WORDS = 300
 export const SCOUT_MAX_SEARCHES = 3
 /**

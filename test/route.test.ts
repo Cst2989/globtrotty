@@ -27,16 +27,31 @@ describeDb('routeAgent', () => {
         .mockResolvedValueOnce(frontVerdict({ label: 'new_trip', answer: null, title: 'Portugal, September' }))
         .mockResolvedValueOnce(driverText('September in the Algarve, then. When would you fly?'))
       await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(),
-        deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }, r.turnId!)
+        deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }, r.turnId!)
       expect(create).toHaveBeenCalledTimes(2)
       const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId}`
       expect(new Set(seats.map((s) => s.seat))).toEqual(new Set(['front_desk', 'driver']))
       const [c] = await sql`select desk, title, status, spend_usd_micros from conversations where id = ${r.conversationId}`
       expect(c!.desk).toBe('planning'); expect(c!.title).toBe('Portugal, September'); expect(c!.status).toBe('awaiting_user')
       expect(BigInt(c!.spend_usd_micros as string)).toBe(3_000n)
-      const msgs = await sql`select role, content from messages where conversation_id = ${r.conversationId} order by created_at`
-      expect(msgs.map((m) => m.role)).toEqual(['user', 'agent'])
-      expect(msgs[1]!.content).toContain('Algarve')
+      // Final review: this used to be `order by created_at` + `msgs[1]`, and
+      // flaked. `withTestDb` (test/helpers/db.ts) wraps the whole test in ONE
+      // transaction, and Postgres' `now()` is the TRANSACTION start time — so
+      // every row written through the `messages.created_at` default in a DB
+      // test carries the IDENTICAL timestamp. Her message and the agent's
+      // reply are a total tie, and Postgres guarantees nothing about tie
+      // order: the plan flips between an index scan on `messages_thread`
+      // (TID order ≈ insert order) and a seq scan + unstable quicksort as the
+      // shared project's statistics move under load. So: assert which rows
+      // exist, order-independently, and pin the agent row by ROLE. NOT with a
+      // secondary `order by role` — that sorts 'agent' before 'user' and
+      // would pin the wrong answer for the wrong reason.
+      const msgs = await sql`select role from messages where conversation_id = ${r.conversationId}`
+      expect(msgs.map((m) => m.role).sort()).toEqual(['agent', 'user'])
+      const agentMsgs = await sql`select content from messages
+        where conversation_id = ${r.conversationId} and role = 'agent'`
+      expect(agentMsgs).toHaveLength(1)
+      expect(agentMsgs[0]!.content).toContain('Algarve')
       const [t] = await sql`select spend_usd_micros from turns where id = ${r.turnId}`
       expect(BigInt(t!.spend_usd_micros as string)).toBe(BigInt(c!.spend_usd_micros as string))
     })
@@ -46,7 +61,7 @@ describeDb('routeAgent', () => {
       const r = await submitMessage({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId: USER, conversationId: null, message: 'do you take payment?', idempotencyKey: 'k2' })
       const create = vi.fn().mockResolvedValue(frontVerdict({ label: 'faq', answer: 'No, you pay the supplier.', title: null }))
-      const w = { sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }
+      const w = { sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }
       await runTurn(w, r.turnId!)
       const r2 = await submitMessage({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId: USER, conversationId: r.conversationId, message: 'and cancellations?', idempotencyKey: 'k3' })
@@ -62,7 +77,7 @@ describeDb('routeAgent', () => {
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'k4' })
       await sql`update conversations set desk = 'planning' where id = ${r.conversationId}`
       const create = vi.fn().mockResolvedValue(driverText('Hello. Where to?'))
-      await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {} }, r.turnId!)
+      await runTurn({ sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create)), now: () => Date.now(), deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}) }, r.turnId!)
       const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId}`
       expect(seats.map((s) => s.seat)).toEqual(['driver'])
     })

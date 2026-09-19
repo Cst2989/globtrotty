@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import { firstCeilingReached, type Limits } from '../engine.js'
 import { classifyError } from '../errors.js'
@@ -24,6 +23,7 @@ import { addMoney, money, type Money } from '../money.js'
 import type { RehydratedItem } from '../gates/types.js'
 import type { StoredItem } from '../supplier/types.js'
 import type { Notifier, DriftAlarm } from '../notify.js'
+import { loadPrompt } from '../agents/prompts/load.js'
 
 export { OPS_USER_ID }
 
@@ -48,10 +48,12 @@ const RECENT_CANARY_HOURS = 20
  */
 const SHAPE_SEATS: readonly ('driver' | 'reviewer' | 'front_desk')[] = ['driver', 'reviewer', 'front_desk']
 
-const DRIVER_SYSTEM = readFileSync(new URL('../agents/prompts/driver.md', import.meta.url), 'utf8')
-const REVIEWER_SYSTEM = readFileSync(new URL('../agents/prompts/reviewer.md', import.meta.url), 'utf8')
-const FRONT_DESK_SYSTEM = readFileSync(new URL('../agents/prompts/front_desk.md', import.meta.url), 'utf8')
-const SCOUT_SYSTEM = readFileSync(new URL('../agents/prompts/scout.md', import.meta.url), 'utf8')
+// See src/agents/prompts/load.ts: resolves beside that module, or from the process cwd for
+// the esbuild-bundled Netlify function where import.meta.url no longer neighbours prompts/.
+const DRIVER_SYSTEM = loadPrompt('driver')
+const REVIEWER_SYSTEM = loadPrompt('reviewer')
+const FRONT_DESK_SYSTEM = loadPrompt('front_desk')
+const SCOUT_SYSTEM = loadPrompt('scout')
 
 /**
  * Fixed "now" for rendering the reviewer's golden offer text. `goldenArgs`

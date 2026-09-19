@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 import { firstCeilingReached, type Limits, type LoopMessage } from '../engine.js'
@@ -28,15 +27,16 @@ import { maskIdChars } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
 import type { Notebook, Provenance } from '../notebook.js'
 import type { EscalationReason, Notifier } from '../notify.js'
+import { loadPrompt } from './prompts/load.js'
 
 /**
- * `import.meta.url`, never `__dirname` — this package is `"type": "module"` with
- * NodeNext resolution, where `__dirname` is undefined. The prompt is a file so
- * `promptVersion` points at something a human reviews and a prompt change is a
- * reviewable diff. There is no build step (tsx and vitest only), so the relative
- * URL resolves against the source tree at run time.
+ * The prompt is a file so `promptVersion` points at something a human reviews and a prompt
+ * change is a reviewable diff. `loadPrompt` (src/agents/prompts/load.ts) resolves it either
+ * beside the module (tsx, vitest, an unbundled server) or from the process cwd (the esbuild-
+ * bundled Netlify function, whose `import.meta.url` no longer neighbours `prompts/` — see
+ * that module's doc comment).
  */
-const SYSTEM = readFileSync(new URL('./prompts/driver.md', import.meta.url), 'utf8')
+const SYSTEM = loadPrompt('driver')
 
 const DESK = 'planning' as const
 

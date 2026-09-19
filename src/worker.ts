@@ -10,6 +10,11 @@ import {
 import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
+import { parseAction, renderActionMessage } from './actions.js'
+import { screenOutbound, SCREENED_REPLY } from './sanitize.js'
+import { recordAgentEvent } from './repo/agentEvents.js'
+import { recordEscalation, markNotified } from './repo/escalations.js'
+import type { Notifier } from './notify.js'
 
 export type AgentContext = {
   state: TurnState
@@ -124,6 +129,13 @@ export type WorkerDeps = {
   deadlineMs: () => number
   reinvoke: (turnId: string) => Promise<void>
   /**
+   * The human desk's inbox. Required, not optional — `screenReply` (below)
+   * pages a human on every screened reply, and a worker with no way to do
+   * that is a worker that silently drops a safety event rather than one
+   * that fails loudly at construction time, before any turn runs.
+   */
+  notifier: Notifier
+  /**
    * How often to emit a liveness heartbeat while a step is in flight. Defaults to
    * HEARTBEAT_INTERVAL_MS. Tests override this to something short so the behavior
    * can be observed without a real multi-second wait.
@@ -227,7 +239,72 @@ async function withHeartbeat<T>(
   }
 }
 
-type MessageRow = { role: 'user' | 'agent'; content: string }
+type MessageRow = { role: 'user' | 'agent' | 'action'; content: string }
+
+/**
+ * Said when an `action` row's `content` fails `parseAction` — a garbled
+ * write, not something a card the UI actually renders could produce. Never
+ * thrown: an unreadable action still has to become SOME message so the turn
+ * can proceed, and it must never fall back to a `user` role, which would let
+ * an unparseable row read as her own words rather than as the office's.
+ */
+const UNREADABLE_ACTION_TEXT =
+  'Operator: a card action was recorded but could not be read. Ask her what she would like to do.'
+
+/**
+ * The outbound side of the sanitize boundary: every agent reply passes
+ * through `screenOutbound` (src/sanitize.ts) here, in the ONE place both
+ * `case 'message'` and `case 'park'` reach on their way to a stored message.
+ * A hit replaces `text` with `SCREENED_REPLY`, records why, and pages a
+ * human.
+ *
+ * `recordAgentEvent` is best-effort and swallowed — the audit row is a
+ * nice-to-have alongside the escalation, never something that blocks it.
+ * `recordEscalation` is NOT swallowed: it is called directly rather than
+ * through the `escalate_to_human` tool (a filter firing on the office's OWN
+ * words is not a model choosing to escalate, so the tool's per-user daily
+ * limit must not gate it — controller ruling: a screened reply always
+ * pages), and its row is the one thing this function cannot proceed without
+ * — there is no `e: Escalation` to hand the notifier otherwise. From there
+ * the notifier call follows `escalate.ts`'s own pattern exactly: `notify`
+ * is best-effort and swallowed, and `markNotified` runs only when `notify`
+ * actually succeeded, also best-effort. A screened reply must still reach
+ * her, and the turn must still finish, even if the page itself fails to
+ * send or to stamp.
+ */
+async function screenReply(
+  sql: postgres.Sql, notifier: Notifier, claim: Claim, text: string,
+): Promise<string> {
+  const s = screenOutbound(text)
+  if (s.ok) return text
+
+  await recordAgentEvent(sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    kind: 'screened', payload: { reason: s.reason, original: text.slice(0, 4000) },
+  }).catch((err: unknown) => {
+    console.error(`worker: recordAgentEvent for screened reply failed: ${(err as Error).message}`)
+  })
+
+  const e = await recordEscalation(sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    proposalId: null, reason: 'safety',
+  })
+
+  let notified = false
+  try {
+    await notifier.notify(e)
+    notified = true
+  } catch (err) {
+    console.error(`worker: notifier failed for screened escalation ${e.id}: ${(err as Error).message}`)
+  }
+  if (notified) {
+    await markNotified(sql, e.id).catch((err: unknown) => {
+      console.error(`worker: notified_at stamp failed for ${e.id}: ${(err as Error).message}`)
+    })
+  }
+
+  return SCREENED_REPLY
+}
 
 async function loop(
   deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint },
@@ -241,10 +318,23 @@ async function loop(
        where conversation_id = ${claim.conversationId} order by created_at`
     state = {
       ...state,
-      messages: rows.map((r): LoopMessage => ({
-        role: r.role === 'agent' ? 'assistant' : 'user',
-        content: [{ type: 'text', text: r.content }],
-      })),
+      messages: rows.map((r): LoopMessage => {
+        // 'action' hydrates as the operator channel (src/engine.ts's
+        // LoopMessage doc comment) — a `system` message, never `user`: a
+        // button press is not her typed text, and treating it as one would
+        // let it be forged by typing the same JSON into the chat box.
+        if (r.role === 'action') {
+          const parsed = parseAction(r.content)
+          return {
+            role: 'system',
+            content: [{ type: 'text', text: parsed ? renderActionMessage(parsed) : UNREADABLE_ACTION_TEXT }],
+          }
+        }
+        return {
+          role: r.role === 'agent' ? 'assistant' : 'user',
+          content: [{ type: 'text', text: r.content }],
+        }
+      }),
     }
   }
 
@@ -338,7 +428,8 @@ async function loop(
         })
         turnSpend.total += step.costMicros
         await completeTurn(sql, claim, {
-          state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
+          state, agentMessage: await screenReply(sql, deps.notifier, claim, step.text),
+          parked: true, spendMicros: turnSpend.total,
         })
         return
       }
@@ -351,11 +442,14 @@ async function loop(
           costMicros: step.costMicros,
         })
         turnSpend.total += step.costMicros
-        // `parked: true` moves the conversation to 'awaiting_user'. fail_reason
-        // stays null: parking is not a failure, and recording it as one would
-        // make "how often does the driver actually fail?" unanswerable.
+        // `parked: true` moves the conversation to 'awaiting_user' — unless
+        // `screenReply` just escalated it, in which case `completeTurn`'s own
+        // sticky guard keeps it 'escalated'. fail_reason stays null: parking
+        // is not a failure, and recording it as one would make "how often
+        // does the driver actually fail?" unanswerable.
         await completeTurn(sql, claim, {
-          state, agentMessage: step.message, parked: true, spendMicros: turnSpend.total,
+          state, agentMessage: await screenReply(sql, deps.notifier, claim, step.message),
+          parked: true, spendMicros: turnSpend.total,
         })
         return
       }

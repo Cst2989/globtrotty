@@ -25,7 +25,14 @@ export type ToolResultBlock = {
 }
 export type ContentBlock = TextBlock | ToolUseBlock | ThinkingBlock | ToolResultBlock
 
-export type LoopMessage = { role: 'user' | 'assistant'; content: ContentBlock[] }
+/**
+ * `'system'` is the operator channel (plan 4a, Task 2): a card action
+ * (`messages.role = 'action'`) hydrated by `src/worker.ts`'s `loop()` into a
+ * mid-conversation message that reads as neither her words nor the model's —
+ * an instruction from the office. It is never produced by the model and never
+ * carries her raw text, so it can never be forged by typing.
+ */
+export type LoopMessage = { role: 'user' | 'assistant' | 'system'; content: ContentBlock[] }
 
 export type TurnState = { step: number; messages: LoopMessage[] }
 

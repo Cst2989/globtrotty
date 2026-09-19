@@ -1,4 +1,6 @@
 import type postgres from 'postgres'
+import { ActionPayload } from './actions.js'
+import { readDesk, type Desk } from './repo/conversations.js'
 import { exceedsAnyCeiling } from './engine.js'
 import type { Limits } from './engine.js'
 import { readSpendFailClosed } from './repo/spend.js'
@@ -14,6 +16,71 @@ export type SubmitInput = {
   conversationId: string | null
   message: string
   idempotencyKey: string
+}
+
+export type SubmitActionInput = {
+  userId: string
+  conversationId: string
+  action: ActionPayload
+  idempotencyKey: string
+  /**
+   * Plan 4a, Task 8: her typed reject reason, stored as an ordinary
+   * `role = 'user'` message in the SAME transaction as the action row,
+   * immediately before it. `src/actions.ts`'s `rejected` payload deliberately
+   * carries no `reason` field — the driver's operator text says "her reason,
+   * if she gave one, is in her own message" — so the decide route passes the
+   * reason here rather than folding it into the action's JSON. Undefined (or
+   * blank) writes nothing; when a fresh turn cannot be won (a retry, a
+   * concurrent turn), this note is not written either — same all-or-nothing
+   * guarantee the action row itself gets, so a reason never ends up attached
+   * to a turn that never runs.
+   */
+  userNote?: string
+  /**
+   * Fix round 1 (Task 8 review, Critical). Runs INSIDE the fresh turn's own
+   * transaction, right after the turn row is inserted and before the
+   * note/action rows — so it only ever runs when a turn was actually WON,
+   * never on a `busy`/`duplicate` result, and any throw inside it rolls back
+   * the whole transaction (the turn insert included; postgres.js rolls back
+   * `sql.begin`'s callback on an uncaught throw and rethrows to the caller).
+   *
+   * The decide route uses this to make `decideProposal` atomic with the
+   * hand-off/rejected action turn it authorises: recording the decision
+   * BEFORE calling `submitAction` (the original shape) could leave an
+   * accepted proposal with `decision = 'accept'` but no hand-off turn ever
+   * queued — a turn already in flight, or the account's spend ceiling,
+   * both fail AFTER the decision would already have been written, with no
+   * way back once the cashier's own 30-minute acceptance window has since
+   * expired. Folding the write into the same transaction as the turn that
+   * is supposed to act on it means a decision is recorded if and only if a
+   * turn was actually queued to read it.
+   *
+   * MUST use the `tx` handle it is given — never close over the root `sql`
+   * (or any other connection) instead. `tx` is the same transaction that
+   * just won the insert against `turns_one_active_per_conversation` (the
+   * partial unique index the whole "one turn in flight" guarantee rests
+   * on); that lock is held until `tx` commits or rolls back. A query run on
+   * a DIFFERENT connection inside this callback — even a read of the same
+   * conversation's own rows — can block behind a lock this very
+   * transaction holds, and since nothing can make `tx` itself proceed until
+   * that other connection's query returns, the two wait on each other
+   * forever. Every statement `onFreshTurn` needs must run on `tx`.
+   */
+  onFreshTurn?: (tx: postgres.TransactionSql) => Promise<void>
+}
+
+/**
+ * Thrown by `submitAction` when the conversation is not yet at the planning
+ * desk. A card action names a `proposal_id` — nothing at the front desk ever
+ * has one, so a route handler that lets one through there is a bug upstream
+ * (a stale card rendered from a cached page, a race with `routeToPlanning`),
+ * not a state `submitAction` should quietly paper over by routing it anyway.
+ */
+export class ActionRefused extends Error {
+  constructor(readonly desk: Desk) {
+    super(`submitAction: conversation is at the '${desk}' desk, not 'planning'`)
+    this.name = 'ActionRefused'
+  }
 }
 
 // `turnId` is `null`, not `''`, when no turn exists to name — an empty string
@@ -131,4 +198,118 @@ export async function submitMessage(
   await deps.invoke(turnId).catch(() => {})
 
   return { conversationId, turnId, status: 'queued' }
+}
+
+/**
+ * The operator channel's tier 2: a card press (accept / reject / revise),
+ * rather than typed text, becomes a `messages` row. Mirrors `submitMessage`
+ * above property for property — same fail-closed spend read ahead of any
+ * write, same durable-before-scheduled turn insert, same idempotency race,
+ * same `working` flip and best-effort `invoke` — everything here is that
+ * same shape with one row's role and content swapped, and one guard added:
+ *
+ * `submitAction` never creates a conversation. A card exists only once a
+ * conversation has a `proposal_id` to name, which only happens at the
+ * planning desk — so unlike `submitMessage`, `conversationId` is required and
+ * there is nothing for this function to create on her behalf. `readDesk`
+ * enforces the other half of that: a conversation not (yet, or no longer) at
+ * `'planning'` refuses with `ActionRefused` rather than writing an action row
+ * nothing downstream is set up to read.
+ */
+export async function submitAction(
+  deps: SubmitDeps, input: SubmitActionInput,
+): Promise<SubmitResult> {
+  const { sql, limits, invoke } = deps
+  const { conversationId } = input
+
+  // Validated before anything reaches the database. `SubmitActionInput`
+  // types `action` as `ActionPayload` at compile time, which a caller that
+  // built its own request body by hand (a route handler decoding JSON off
+  // the wire) can defeat — `.parse` re-checks the actual value and throws on
+  // anything malformed, rather than letting a bad payload reach `JSON.
+  // stringify` and land as a row nothing downstream (`parseAction`) can read
+  // back.
+  ActionPayload.parse(input.action)
+
+  const desk = await readDesk(sql, conversationId, input.userId)
+  if (desk !== 'planning') throw new ActionRefused(desk)
+
+  // Fail closed, same as submitMessage: BEFORE any message or turn is written.
+  const spend = await readSpendFailClosed(sql, input.userId, conversationId)
+
+  if (exceedsAnyCeiling(spend, limits)) {
+    await sql`update conversations set status = 'limit_reached', updated_at = now()
+               where id = ${conversationId} and user_id = ${input.userId}`
+    return { conversationId, turnId: null, status: 'limit_reached' }
+  }
+
+  /**
+   * Turn insert FIRST, action row SECOND — the reverse of `submitMessage`'s
+   * order, and deliberately so. A typed message is HER words: dropping it
+   * would lose something she said, which is why `submitMessage` preserves it
+   * even when the turn cannot start. A card press is not that: it is an
+   * instruction meant for exactly one turn. If this call does not create a
+   * FRESH turn — a retry that lands while another turn already holds the
+   * active slot, or a genuine duplicate of an idempotency key already
+   * served — writing the action row anyway would leave it sitting in the
+   * transcript for some OTHER, unrelated turn to read and act on later,
+   * carrying out the same press twice. Unlike a typed message, an operator
+   * instruction must not be preserved for a later turn: a press during a
+   * running turn is refused (409 upstream) and can simply be repeated once
+   * she sees that.
+   *
+   * The turn insert, the action row and the `working` flip commit together
+   * in one transaction: a crash between "the turn exists" and "the action
+   * row exists" would otherwise let a turn run with no instruction to read,
+   * or leave an action row orphaned under a turn never marked `working`.
+   */
+  const freshTurnId = await sql.begin(async (tx) => {
+    const inserted = await tx`
+      insert into turns (conversation_id, user_id, idempotency_key)
+      values (${conversationId}, ${input.userId}, ${input.idempotencyKey})
+      on conflict do nothing
+      returning id`
+    if (inserted.length === 0) return null
+
+    const turnId = inserted[0]!.id as string
+
+    // The turn is WON at this point — `onFreshTurn` (if given) runs now, not
+    // before the insert above, so a throw here (e.g. `decideProposal`'s
+    // "already decided") rolls back the turn along with it: see this
+    // input field's own doc comment.
+    if (input.onFreshTurn) await input.onFreshTurn(tx)
+
+    if (input.userNote && input.userNote.trim().length > 0) {
+      await tx`insert into messages (conversation_id, user_id, role, content)
+                values (${conversationId}, ${input.userId}, 'user', ${input.userNote})`
+    }
+    // Fix round 1 (Task 8 review, Important): `created_at` is explicitly
+    // `clock_timestamp()`, not the column's own `now()` default, so the
+    // action row's timestamp is always strictly later than the note's —
+    // `now()` is fixed for the whole transaction in Postgres, so the note
+    // (inserted just above, with the column default) and the action would
+    // otherwise share the exact same `created_at`, leaving their read-back
+    // order to depend on an untested tiebreak (insertion order/id) rather
+    // than the timestamp a reader actually sorts by.
+    await tx`insert into messages (conversation_id, user_id, role, content, created_at)
+              values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)}, clock_timestamp())`
+    await tx`update conversations set status = 'working', updated_at = now()
+               where id = ${conversationId} and user_id = ${input.userId}`
+    return turnId
+  }) as string | null
+
+  if (freshTurnId === null) {
+    const dupe = await sql`
+      select id from turns
+       where conversation_id = ${conversationId} and idempotency_key = ${input.idempotencyKey}`
+    if (dupe.length > 0) {
+      return { conversationId, turnId: dupe[0]!.id as string, status: 'duplicate' }
+    }
+    return { conversationId, turnId: null, status: 'busy' }   // another turn is in flight; no action row written
+  }
+
+  // Persist first, then schedule — same ordering guarantee as submitMessage.
+  await invoke(freshTurnId).catch(() => {})
+
+  return { conversationId, turnId: freshTurnId, status: 'queued' }
 }

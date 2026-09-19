@@ -1,6 +1,19 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
+const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
+
 export default defineConfig({
+  // Plan 4a, Task 7. Mirrors tsconfig.json's `paths` (`"@/*": ["./*"]`) —
+  // Next's own build reads that straight out of tsconfig, but Vitest
+  // resolves modules through Vite, which knows nothing about it without
+  // this. Needed once web/app code under test (routes, components) started
+  // importing other web/app modules with the `@/` alias instead of a
+  // relative path.
+  resolve: {
+    alias: { '@': REPO_ROOT },
+  },
   test: {
     globals: true,
     environment: 'node',

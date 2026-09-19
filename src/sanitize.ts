@@ -155,6 +155,97 @@ export function redactPrices(text: string): string {
   return out
 }
 
+export type Screen = { ok: true } | { ok: false; reason: string }
+
+/**
+ * The reply the traveller sees in place of anything `screenOutbound` blocks.
+ * A fixed, pre-written sentence — not a template built from the reason or the
+ * blocked text — because the ONE thing that must never happen on this path is
+ * an untrusted or model-authored fragment reaching her after the filter fired.
+ */
+export const SCREENED_REPLY =
+  'I can’t continue this reply — it asked for something we never ask for. A person will look at this conversation.'
+
+type OutboundRule = { reason: string; test: (lower: string) => boolean }
+
+// Every phrase below is matched case-insensitively against the agent's OWN
+// reply, not supplier or traveller text — the one thing this office must
+// never do is ask her for a secret or a document number, however it phrases
+// the ask. Ordered roughly by how likely a real solicitation attempt is to
+// use exactly that wording; order does not otherwise matter, since a hit on
+// any rule blocks the whole message.
+const OUTBOUND_RULES: OutboundRule[] = [
+  { reason: 'card number', test: (t) => /\bcard number\b/.test(t) },
+  { reason: 'credit card', test: (t) => /\bcredit card\b/.test(t) },
+  { reason: 'cvv', test: (t) => /\bcvv\b/.test(t) },
+  { reason: 'cvc', test: (t) => /\bcvc\b/.test(t) },
+  // "near 'card'": expiry dates come up for visas and documents too — only
+  // paired with the word "card" somewhere in the same reply is this a
+  // payment-detail ask rather than, say, a passport's own expiry.
+  { reason: 'expiry date near card', test: (t) => /\bexpiry date\b/.test(t) && /\bcard\b/.test(t) },
+  { reason: 'iban', test: (t) => /\biban\b/.test(t) },
+  { reason: 'sort code', test: (t) => /\bsort code\b/.test(t) },
+  { reason: 'account number', test: (t) => /\baccount number\b/.test(t) },
+  { reason: 'routing number', test: (t) => /\brouting number\b/.test(t) },
+  { reason: 'passport number', test: (t) => /\bpassport number\b/.test(t) },
+  { reason: 'passport photo, scan, or copy', test: (t) => /\bpassport\s+(photo|scan|copy)\b/.test(t) },
+  { reason: 'id number', test: (t) => /\bid number\b/.test(t) },
+  { reason: 'national id', test: (t) => /\bnational id\b/.test(t) },
+  {
+    reason: "driver's licence or license number",
+    test: (t) => /\bdriver[’']?s?\s+licen[cs]e number\b/.test(t),
+  },
+  { reason: 'password', test: (t) => /\bpassword\b/.test(t) },
+  { reason: 'one-time code', test: (t) => /\bone-time code\b/.test(t) },
+  { reason: 'verification code', test: (t) => /\bverification code\b/.test(t) },
+  { reason: '2fa', test: (t) => /\b2fa\b/.test(t) },
+  { reason: 'social security', test: (t) => /\bsocial security\b/.test(t) },
+  // "together with 'passport|card'": a birth date alone is ordinary travel
+  // paperwork small talk; paired with a request that names a document, it
+  // reads as building a stolen-identity dossier one field at a time.
+  {
+    reason: 'date of birth with passport or card',
+    test: (t) => /\bdate of birth\b/.test(t) && /\b(passport|card)\b/.test(t),
+  },
+  // Fix round 1, item 3: the original pattern anchored on ANY noun after
+  // "of your" — so "send a copy of your booking confirmation" (a perfectly
+  // ordinary offer) blocked as readily as an actual solicitation, while a
+  // natural phrasing that swaps the verb ("upload", "email") or drops "of
+  // your" entirely ("send me a photo of your passport" reordered as "send
+  // your passport photo") slipped past a request for something else. Fixed
+  // on both axes: the verb list widens (send/upload/share/email/attach/
+  // text/provide), and the object narrows to an actual identity document —
+  // never a bare noun — so a benign "of your booking" or "of your itinerary"
+  // no longer matches at all.
+  {
+    reason: 'photo, scan, or copy of an identity document',
+    test: (t) => /\b(?:send|upload|share|email|attach|text|provide)\s+(?:me\s+|us\s+)?(?:an?\s+)?(?:photo|picture|scan|copy|image)\s+of\s+your\s+(?:passport|id|identity|licen[cs]e|card|visa|document)\b/.test(t),
+  },
+]
+
+/**
+ * The last line of defense before an agent's reply reaches a stored message
+ * (`src/worker.ts`'s `loop()`, `case 'message'` and `case 'park'`): a
+ * deterministic table of phrases this office never has a legitimate reason
+ * to say, checked case-insensitively against the WHOLE reply.
+ *
+ * Deliberately over-eager, same instinct as `redactPrices`: a blocked "the
+ * passport office is on Rua X" is a harmless false positive (a place name
+ * that happens to contain "passport" — this rule set does not fire on the
+ * word "passport" alone, so today it does not actually happen to trigger,
+ * but if a future rule ever widens to catch bare mentions of "passport" for
+ * extra caution, a sentence like that becoming collateral damage is an
+ * ACCEPTED false positive); a surviving "what's your CVV?" is the one
+ * failure this product must not have. The safe direction always wins.
+ */
+export function screenOutbound(text: string): Screen {
+  const lower = text.toLowerCase()
+  for (const rule of OUTBOUND_RULES) {
+    if (rule.test(lower)) return { ok: false, reason: rule.reason }
+  }
+  return { ok: true }
+}
+
 /** Cuts to at most `maxWords`, preferring the last sentence boundary under the cap. */
 export function cutAtWords(text: string, maxWords: number): { text: string; cut: boolean } {
   const words = text.split(/\s+/).filter((w) => w.length > 0)

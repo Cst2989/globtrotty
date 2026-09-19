@@ -838,7 +838,7 @@ describeDb('driver', () => {
         sql, limits: DEFAULT_LIMITS,
         agent: makeDriver(deps(sql, create)),
         now: () => Date.now(), deadlineMs: () => Date.now() + 600_000,
-        reinvoke: async () => {},
+        reinvoke: async () => {}, notifier: new LogNotifier(() => {}),
       }, r.turnId!)
 
       const [call] = await sql`

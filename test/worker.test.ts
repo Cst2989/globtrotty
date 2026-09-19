@@ -10,13 +10,17 @@ import { sweep } from '../src/sweeper.js'
 import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { recordSpend } from '../src/repo/spend.js'
+import { SCREENED_REPLY } from '../src/sanitize.js'
+import { LogNotifier, type Notifier } from '../src/notify.js'
 import type { TurnState } from '../src/engine.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const LIMITS = DEFAULT_LIMITS
 
-const workerDeps = (sql: postgres.Sql, agent: Agent = echoAgent): WorkerDeps => ({
-  sql, limits: LIMITS, agent,
+const workerDeps = (
+  sql: postgres.Sql, agent: Agent = echoAgent, notifier: Notifier = new LogNotifier(() => {}),
+): WorkerDeps => ({
+  sql, limits: LIMITS, agent, notifier,
   now: () => Date.now(),
   deadlineMs: () => Date.now() + 600_000,
   reinvoke: vi.fn().mockResolvedValue(undefined),
@@ -635,6 +639,107 @@ describeDb('runTurn end to end', () => {
 })
 
 /**
+ * Task 4: the outbound solicitation filter. `screenOutbound` (src/sanitize.ts)
+ * itself is a pure function, exhaustively tested in test/sanitize.test.ts —
+ * this end-to-end test pins the seam where a hit actually changes what
+ * reaches the traveller: the stored reply, the audit row, the page, and the
+ * conversation's terminal status.
+ */
+describeDb('runTurn: the outbound solicitation filter', () => {
+  it('replaces a screened reply, records the event, escalates, pages, and sticks the conversation as escalated', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const soliciting: Agent = async () => ({
+        kind: 'message', text: 'Please send me a photo of your passport', costMicros: 200n,
+      })
+      const notify = vi.fn().mockResolvedValue(undefined)
+      const notifier: Notifier = { notify, alarm: vi.fn() }
+      await runTurn(workerDeps(sql, soliciting, notifier), r.turnId!)
+
+      const [agentMsg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+      expect(agentMsg!.content).toBe(SCREENED_REPLY)
+
+      const events = await sql<{ kind: string; payload: { reason: string; original: string } }[]>`
+        select kind, payload from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(1)
+      expect(events[0]!.kind).toBe('screened')
+      expect(events[0]!.payload.reason).toBe('photo, scan, or copy of an identity document')
+      expect(events[0]!.payload.original).toBe('Please send me a photo of your passport')
+
+      const escalations = await sql<{ reason: string; proposal_id: string | null; notified_at: Date | null }[]>`
+        select reason, proposal_id, notified_at from escalations where conversation_id = ${r.conversationId}`
+      expect(escalations).toHaveLength(1)
+      expect(escalations[0]!.reason).toBe('safety')
+      expect(escalations[0]!.proposal_id).toBeNull()
+      // Fix round 1, item 2: nothing paged a human on a screened reply before
+      // this. `screenReply` now calls the notifier the same way `escalate.ts`
+      // does, and stamps `notified_at` once the page actually went out.
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect(escalations[0]!.notified_at).not.toBeNull()
+
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      // Sticky: completeTurn's own guard (src/repo/turns.ts) keeps 'escalated'
+      // rather than overwriting it with 'awaiting_user' on this parked path.
+      expect(conv!.status).toBe('escalated')
+
+      const [turn] = await sql<TurnRow[]>`select status from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('done')
+    })
+  })
+
+  // Fix round 1, item 5: the 'park' branch runs the same screenReply as
+  // 'message' — pinned separately because the two are two different call
+  // sites in loop(), and a fix to one is not proof the other was touched.
+  it('screens a park-branch reply exactly like a message-branch one', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const asking: Agent = async () => ({
+        kind: 'park', message: 'Please send me a photo of your passport', costMicros: 100n,
+      })
+      await runTurn(workerDeps(sql, asking), r.turnId!)
+
+      const [agentMsg] = await sql<MessageRow[]>`
+        select content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+      expect(agentMsg!.content).toBe(SCREENED_REPLY)
+
+      const events = await sql`select kind from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(1)
+
+      const escalations = await sql<{ reason: string }[]>`
+        select reason from escalations where conversation_id = ${r.conversationId}`
+      expect(escalations).toHaveLength(1)
+      expect(escalations[0]!.reason).toBe('safety')
+
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      expect(conv!.status).toBe('escalated')
+    })
+  })
+
+  // Break/restore proof for the TDD step: this is the exact shape the test
+  // above must fail against once `screenOutbound` stops firing at all.
+  it('an agent step that returns clean text is stored unchanged', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const clean: Agent = async () => ({ kind: 'message', text: 'Here is your itinerary.', costMicros: 10n })
+      await runTurn(workerDeps(sql, clean), r.turnId!)
+      const [agentMsg] = await sql<MessageRow[]>`
+        select content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'`
+      expect(agentMsg!.content).toBe('Here is your itinerary.')
+      const events = await sql`select id from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(0)
+    })
+  })
+})
+
+/**
  * T0.2. The crash handler used to write `provider_down` for every error, so a
  * permanent 400 and a transient 429 were recorded identically — and a model
  * refusal, which is an HTTP 200 and never throws at all, had no value to be
@@ -777,6 +882,64 @@ describeDb('runTurn error classification', () => {
       // ...and are NOT charged to the conversation a second time. This agent
       // called recordSpend never, so a fail path that did would read 7_000n.
       expect(BigInt(convo!.spend_usd_micros)).toBe(0n)
+    })
+  })
+
+  /**
+   * The operator channel (plan 4a, Task 2). A card action is a `messages` row
+   * with `role = 'action'`, written only by a route handler — never the model
+   * — and `loop()` hydrates it into a mid-conversation `system` message
+   * before the agent ever sees the transcript. Pinned here rather than only
+   * in `test/model-client.test.ts`/`test/engine.test.ts` because those two
+   * pin the SHAPE; this one pins that the real hydration path actually
+   * produces that shape from a real database row.
+   */
+  it('hydrates an action row as an operator system message the agent can see', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'take it')
+      const proposalId = '00000000-0000-4000-8000-000000000001'
+      await sql`insert into messages (conversation_id, user_id, role, content)
+        values (${r.conversationId}, ${USER}, 'action',
+                ${JSON.stringify({ action: 'hand_off', proposalId })})`
+
+      let captured: TurnState['messages'] | null = null
+      const agent: Agent = async (ctx) => {
+        captured = ctx.state.messages
+        return { kind: 'message', text: 'ok', costMicros: 0n }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      expect(captured).not.toBeNull()
+      const last = captured!.at(-1)!
+      expect(last.role).toBe('system')
+      const text = last.content.find((b) => b.type === 'text')
+      if (text?.type !== 'text') throw new Error('unreachable')
+      expect(text.text).toContain('hand_off_to_booking')
+      expect(text.text).toContain(proposalId)
+    })
+  })
+
+  it('hydrates a malformed action row into a system message instead of throwing or becoming user text', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'take it')
+      await sql`insert into messages (conversation_id, user_id, role, content)
+        values (${r.conversationId}, ${USER}, 'action', 'garbage')`
+
+      let captured: TurnState['messages'] | null = null
+      const agent: Agent = async (ctx) => {
+        captured = ctx.state.messages
+        return { kind: 'message', text: 'ok', costMicros: 0n }
+      }
+      // Must not throw: an unreadable action row is a recorded outcome to
+      // hand the agent, not a reason to crash the turn.
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      expect(captured).not.toBeNull()
+      const last = captured!.at(-1)!
+      expect(last.role).toBe('system')
+      const text = last.content.find((b) => b.type === 'text')
+      if (text?.type !== 'text') throw new Error('unreachable')
+      expect(text.text).toContain('could not be read')
     })
   })
 })

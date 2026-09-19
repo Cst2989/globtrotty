@@ -401,7 +401,7 @@ async function main() {
   step('a fresh worker picks it up...')
   await runTurn(
     { sql, limits: DEFAULT_LIMITS, agent: demoAgent, now: () => Date.now(),
-      deadlineMs: () => Date.now() + 600_000, reinvoke: noopInvoke },
+      deadlineMs: () => Date.now() + 600_000, reinvoke: noopInvoke, notifier: new LogNotifier() },
     turnId,
   )
   ok(`turn row: ${JSON.stringify(await turnRow(turnId))}`)

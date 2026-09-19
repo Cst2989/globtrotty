@@ -266,6 +266,12 @@ describe('TurnState transcript blocks', () => {
         { role: 'user', content: [
           { type: 'tool_result', tool_use_id: 'toolu_01', content: '{"results":3}' },
         ] },
+        // The operator channel (plan 4a, Task 2): a hydrated card action. Its
+        // role must survive the round trip as 'system', not silently widen to
+        // 'user' or 'assistant' — that is the whole point of widening the type.
+        { role: 'system', content: [
+          { type: 'text', text: 'Operator: the traveller accepted proposal p1 using the card.' },
+        ] },
       ],
     }
     const assistant = state.messages[1]!
@@ -282,5 +288,11 @@ describe('TurnState transcript blocks', () => {
     const think = roundTripped.messages[1]!.content[0]
     if (think?.type !== 'thinking') throw new Error('unreachable')
     expect(think.signature).toBe('sig-abc')
+    // The system message's role and text survive too.
+    const system = roundTripped.messages[3]!
+    expect(system.role).toBe('system')
+    expect(system.content[0]).toEqual(
+      { type: 'text', text: 'Operator: the traveller accepted proposal p1 using the card.' },
+    )
   })
 })

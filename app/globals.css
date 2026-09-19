@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light dark;
+  --gt-bg: #ffffff;
+  --gt-fg: #111111;
+  --gt-border: #e2e2e2;
+  --gt-muted: #666666;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --gt-bg: #111111;
+    --gt-fg: #f2f2f2;
+    --gt-border: #333333;
+    --gt-muted: #999999;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--gt-bg);
+  color: var(--gt-fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--gt-border);
+}
+
+.main {
+  flex: 1;
+  padding: 1.5rem;
+  /* Leaves room for the fixed footer bar so it never overlaps content. */
+  padding-bottom: 3.5rem;
+}
+
+.conversation-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.conversation-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--gt-border);
+  border-radius: 0.5rem;
+}
+
+.message-action {
+  font-style: italic;
+  color: var(--gt-muted);
+}
+
+.footer {
+  /* Fixed, not a normal-flow sibling: `position: fixed` takes it out of
+     `.app-shell`'s flex layout (row direction), so nesting it there doesn't
+     turn it into a third column — it always pins to the bottom of the
+     viewport instead, visible without scrolling regardless of content
+     length. */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.8rem;
+  color: var(--gt-muted);
+  border-top: 1px solid var(--gt-border);
+  background: var(--gt-bg);
+}
