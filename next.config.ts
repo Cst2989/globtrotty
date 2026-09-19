@@ -22,6 +22,29 @@ if (!projectUrl || !anonKey) {
 const csp = cspFor(projectUrl)
 
 const nextConfig: NextConfig = {
+  // Plan 4a, Task 7. `src/` (and `web/session.ts`) write relative imports
+  // with an explicit `.js` extension pointing at sibling `.ts` files —
+  // correct, and required, under `tsconfig.harness.json`'s `NodeNext`
+  // module resolution, which is what actually runs those files outside this
+  // app (tsx scripts, the Netlify functions). Turbopack (Next 16's default
+  // bundler) only maps `.js` → `.ts`/`.tsx` when the tsconfig it reads has
+  // `moduleResolution: "nodenext"` — which the ROOT tsconfig.json
+  // deliberately does NOT use (Task 6: `"bundler"`, specifically so `tsc
+  // --noEmit` can resolve `next/server`'s subpath import, which NodeNext
+  // resolution cannot — see that task's report). Flipping the root config to
+  // `nodenext` to satisfy Turbopack would silently break `pnpm typecheck`'s
+  // root pass again. Verified empirically (`next build`, `next build
+  // --webpack`, and a `turbopack.resolveExtensions` override all tried
+  // first): only building with webpack, with this `resolve.extensionAlias`,
+  // resolves it — `package.json`'s `dev`/`build` scripts pass `--webpack`
+  // for exactly this reason. `resolveExtensions` is left unset here
+  // (Turbopack-only; irrelevant once webpack is what actually runs).
+  webpack(config) {
+    config.resolve.extensionAlias = {
+      '.js': ['.js', '.ts', '.tsx'],
+    }
+    return config
+  },
   async headers() {
     return [
       {

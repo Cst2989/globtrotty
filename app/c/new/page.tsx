@@ -5,22 +5,21 @@ import { Sidebar } from '@/web/components/Sidebar'
 import { MessageBox } from '@/web/components/MessageBox'
 
 /**
- * Sends her straight back into her most recently updated conversation, if
- * she has one — the old unconditional `redirect('/c/new')` lost that state
- * on every visit. With none yet, this renders the same landing box
- * `app/c/new/page.tsx` does.
+ * The landing box: always reachable directly (unlike `/`, which redirects
+ * here only when she has no conversation yet — see `app/page.tsx`), so she
+ * can always start a fresh one from the sidebar's "New conversation" link
+ * even with existing conversations open. `MessageBox`'s `conversationId=
+ * 'new'` posts to `/api/conversations/new/messages`, which creates the
+ * conversation.
  */
-export default async function HomePage() {
-  const supabase = await createServerSupabase()
+export default async function NewConversationPage() {
+  const sb = await createServerSupabase()
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const conversations = await listConversations(supabase)
-  if (conversations.length > 0) {
-    redirect(`/c/${conversations[0]!.id}`)
-  }
+  const conversations = await listConversations(sb)
 
   return (
     <div className="conversation-layout">

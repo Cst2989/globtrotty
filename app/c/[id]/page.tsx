@@ -1,0 +1,52 @@
+import { redirect } from 'next/navigation'
+import { createServerSupabase } from '@/web/supabase/server'
+import { listConversations, loadThread } from '@/web/data'
+import { Sidebar } from '@/web/components/Sidebar'
+import { ThreadLive } from '@/web/components/Thread'
+import { MessageBox } from '@/web/components/MessageBox'
+
+/**
+ * The proxy (`proxy.ts` → `web/supabase/middleware.ts`) already redirects an
+ * unauthenticated request to `/login` before it reaches here, but the check
+ * is repeated (matching `app/page.tsx`'s existing pattern) rather than
+ * relying on that alone — belt and braces for a page that reads a specific
+ * conversation.
+ *
+ * `loadThread` returning `conversation: null` covers both "no such id" and
+ * "belongs to someone else": RLS makes those indistinguishable, so both
+ * send her back to the landing box rather than confirming which one it was.
+ */
+export default async function ConversationPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const sb = await createServerSupabase()
+  const {
+    data: { user },
+  } = await sb.auth.getUser()
+  if (!user) redirect('/login')
+
+  const [conversations, thread] = await Promise.all([listConversations(sb), loadThread(sb, id)])
+
+  if (!thread.conversation) {
+    redirect('/c/new')
+  }
+
+  return (
+    <div className="conversation-layout">
+      <Sidebar conversations={conversations} activeId={id} />
+      <div className="conversation-main">
+        <ThreadLive
+          userId={user.id}
+          conversation={thread.conversation}
+          messages={thread.messages}
+          latestTurn={thread.latestTurn}
+        >
+          <MessageBox conversationId={thread.conversation.id} status={thread.conversation.status} />
+        </ThreadLive>
+      </div>
+    </div>
+  )
+}

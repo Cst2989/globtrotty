@@ -46,6 +46,38 @@ body {
   padding-bottom: 3.5rem;
 }
 
+.conversation-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.conversation-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--gt-border);
+  border-radius: 0.5rem;
+}
+
+.message-action {
+  font-style: italic;
+  color: var(--gt-muted);
+}
+
 .footer {
   /* Fixed, not a normal-flow sibling: `position: fixed` takes it out of
      `.app-shell`'s flex layout (row direction), so nesting it there doesn't
