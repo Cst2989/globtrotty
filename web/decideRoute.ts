@@ -136,14 +136,19 @@ export function makeDecide(deps: DecideRouteDeps) {
 
       if (result.status === 'busy') return NextResponse.json({ error: 'busy' }, { status: 409 })
       if (result.status === 'limit_reached') return NextResponse.json({ error: 'limit_reached' }, { status: 429 })
-      // Fix round 2 (carried item 5), 'duplicate' named explicitly rather
-      // than falling into the same line as 'queued' below: this route's
-      // `idempotencyKey` is a fresh `randomUUID()` on every call, so
-      // `submitAction` can only report 'duplicate' when it read back a
-      // turn some OTHER, already-committed call to this same conversation
-      // won. Either way a turn exists for this decision — 200 with its id,
-      // same shape as 'queued', because the decision was already recorded
-      // by whichever request actually won it, not by this one.
+      // Fix round 2 (carried item 5): 'duplicate' named as its own branch
+      // rather than left to fall through to the line below by accident.
+      // This route's `idempotencyKey` is a fresh `randomUUID()` on every
+      // call (above), so `submitAction` cannot actually return 'duplicate'
+      // here today — that status only fires when a read-back finds a row
+      // already stored under THIS SAME idempotency_key, and no earlier
+      // call could have stored a key this call only just generated.
+      // Handled explicitly anyway, rather than relying on that argument to
+      // justify silence: 200 with the existing turn id, same response shape
+      // as 'queued', is the right answer regardless — the decision was
+      // already recorded by whichever call actually wrote that turn — and
+      // this branch stops being silently-unreachable-by-luck the moment
+      // `idempotencyKey` here ever stops being derived fresh per call.
       if (result.status === 'duplicate') return NextResponse.json({ turnId: result.turnId })
       return NextResponse.json({ turnId: result.turnId })   // status === 'queued'
     } catch (err) {
