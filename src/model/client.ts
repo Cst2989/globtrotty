@@ -119,6 +119,43 @@ export function withSuffix(messages: LoopMessage[], suffix: string | undefined):
 }
 
 /**
+ * Fix round 1 (plan 4a, Task 2 review). Ordinary DB row ordering can hydrate a
+ * transcript like `[user, system, user]` — a card action, then a typed
+ * message before the agent ever replies — which `withSuffix` alone cannot
+ * repair: that shape already has a `user` turn directly after the `system`
+ * one, which the API rejects (a `system` message must be the last entry, or
+ * be followed by an assistant turn). This is a structural fix on the whole
+ * transcript, not a suffix-placement rule, so it is its own function.
+ *
+ * Every `system` message is pulled out (in original order) and merged into
+ * ONE `system` message, re-inserted immediately after the LAST `user`
+ * message. That single placement is what makes a trailing `system` block
+ * always immediately preceded by a `user` turn — which is exactly what
+ * `withSuffix`'s trailing-`system`-strip logic above then relies on to find
+ * the right place to attach the suffix.
+ *
+ * Throws when there is a `system` message but no `user` message anywhere to
+ * anchor it to — a shape `submitMessage` (the only writer of the first `user`
+ * row in any conversation) makes unreachable in production, so this is a
+ * loud, deliberate refusal rather than a silent misplacement.
+ */
+export function normalizeOperatorTurns(messages: LoopMessage[]): LoopMessage[] {
+  const systemBlocks = messages
+    .filter((m) => m.role === 'system')
+    .flatMap((m) => m.content)
+  if (systemBlocks.length === 0) return messages
+
+  const rest = messages.filter((m) => m.role !== 'system')
+  const lastUserIdx = rest.map((m) => m.role).lastIndexOf('user')
+  if (lastUserIdx === -1) {
+    throw new Error('buildRequest: an operator message needs a preceding user turn')
+  }
+
+  const merged: LoopMessage = { role: 'system', content: systemBlocks }
+  return [...rest.slice(0, lastUserIdx + 1), merged, ...rest.slice(lastUserIdx + 1)]
+}
+
+/**
  * Assembles the request. Separate from `callModel` so a test can assert the
  * SHAPE without a transport — several of the constraints here are things the
  * API rejects with a 400, and a shape test catches them before a live call does.
@@ -149,9 +186,17 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
     model: seat.model,
     max_tokens: seat.maxTokens,
     system: head.system,
-    // Breakpoints FIRST, suffix second: the volatile notebook must land after
-    // the rolling breakpoint, never carry it.
-    messages: withSuffix(placeBreakpoints(messages), args.suffix),
+    // Normalize FIRST — `placeBreakpoints` must see any `system` message
+    // (the operator channel) in its FINAL position to skip its blocks and
+    // land the rolling breakpoint on the message actually preceding it
+    // (src/model/cache.ts). Breakpoints before suffix, same as always: the
+    // volatile notebook must land after the rolling breakpoint, never carry
+    // it, which is also why this is NOT simply "withSuffix, then
+    // normalizeOperatorTurns, then placeBreakpoints" in that literal order —
+    // running placeBreakpoints after the suffix is appended would make the
+    // suffix's own text block the last eligible one and cache it, exactly the
+    // outcome `placeBreakpoints`'s doc comment says must never happen.
+    messages: withSuffix(placeBreakpoints(normalizeOperatorTurns(messages)), args.suffix),
   }
   // `seat.effort === null` marks the Haiku seats (src/model/seats.ts) — see the
   // doc comment above for why they get no `thinking` block at all.

@@ -66,6 +66,41 @@ describe('placeBreakpoints', () => {
     placeBreakpoints(input)
     expect(input).toEqual(snapshot)
   })
+
+  /**
+   * Fix round 1 (plan 4a, Task 2 review): a `system` message (the operator
+   * channel) must never carry a breakpoint, and a TRAILING one must not steal
+   * the rolling breakpoint from the message actually preceding it — the
+   * rolling mark exists to keep the growing, repeated transcript cacheable,
+   * and a `system` message is neither of those things.
+   */
+  it('skips a system message entirely — the rolling breakpoint lands on the preceding turn', () => {
+    const messages: LoopMessage[] = [
+      turn(0), turn(1),
+      { role: 'system', content: [{ type: 'text', text: 'Operator: card action' }] },
+    ]
+    const out = placeBreakpoints(messages)
+    expect(marked(out)).toEqual(['1:0'])                 // turn(1), the message before the system one
+    const system = out.at(-1)!
+    expect(system.role).toBe('system')
+    for (const b of system.content) expect((b as { cache_control?: unknown }).cache_control).toBeUndefined()
+  })
+
+  it('a system message never counts toward the every-15 intermediate spacing either', () => {
+    // 14 ordinary turns (indices 0-13), a system message at index 14, then 6
+    // more turns (indices 15-20). If the system message's block were counted,
+    // the every-15 trigger would land AT it (index 14, sinceLast 15); with it
+    // skipped, sinceLast only reaches 15 one message later, at index 15.
+    const messages: LoopMessage[] = [
+      ...Array.from({ length: 14 }, (_, i) => turn(i)),
+      { role: 'system', content: [{ type: 'text', text: 'Operator: card action' }] },
+      ...Array.from({ length: 6 }, (_, i) => turn(i + 14)),
+    ]
+    const out = placeBreakpoints(messages)
+    // The intermediate lands on 15:0 (not 14, the system message), and the
+    // rolling breakpoint on the last block, 20:0 — neither is the system message.
+    expect(marked(out)).toEqual(['15:0', '20:0'])
+  })
 })
 
 describe('cacheableSystem', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildRequest, buildCountTokensRequest, estimateInputTokens, callModel, withSuffix,
+  normalizeOperatorTurns,
 } from '../src/model/client.js'
 import { SEATS } from '../src/model/seats.js'
 import type { LoopMessage } from '../src/engine.js'
@@ -144,6 +145,106 @@ describe('buildRequest suffix', () => {
     })
     const roles = (req.messages as LoopMessage[]).map((m) => m.role)
     expect(roles).toEqual(['user', 'system'])
+  })
+})
+
+/**
+ * Fix round 1 (plan 4a, Task 2 review, Critical). Ordinary row ordering can
+ * hydrate `[…, system, user]` — a card action, then a typed message before
+ * the agent replies — a `user` turn directly after `system` is a documented
+ * 400. `withSuffix` alone cannot repair that shape (it only ever looks at a
+ * TRAILING run); `normalizeOperatorTurns` fixes the whole transcript instead.
+ */
+describe('normalizeOperatorTurns', () => {
+  it('moves a system message from the middle to immediately after the LAST user message', () => {
+    const out = normalizeOperatorTurns([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      { role: 'system', content: [{ type: 'text', text: 'Operator: x' }] },
+      { role: 'user', content: [{ type: 'text', text: 'accept?' }] },
+    ])
+    expect(out.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'system'])
+    expect(out[2]!.content).toEqual([{ type: 'text', text: 'accept?' }])   // untouched otherwise
+  })
+
+  it('is followed by an assistant turn rather than trailing, when that is where the last user message sits', () => {
+    // [user, assistant, system] → the last user is index 0, so the system
+    // message moves to right after it; the assistant that followed it in the
+    // original order stays after it too. This is still valid: a `system`
+    // message must be the last entry OR be followed by an assistant turn, and
+    // here it IS followed by one.
+    const out = normalizeOperatorTurns([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      { role: 'system', content: [{ type: 'text', text: 'Operator: x' }] },
+    ])
+    expect(out.map((m) => m.role)).toEqual(['user', 'system', 'assistant'])
+  })
+
+  it('throws when a system message has no preceding user turn to anchor it to', () => {
+    expect(() => normalizeOperatorTurns(
+      [{ role: 'system', content: [{ type: 'text', text: 'Operator: x' }] }],
+    )).toThrow('buildRequest: an operator message needs a preceding user turn')
+  })
+
+  it('merges two system messages into one, concatenating their content blocks in order', () => {
+    const out = normalizeOperatorTurns([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'system', content: [{ type: 'text', text: 'first' }] },
+      { role: 'system', content: [{ type: 'text', text: 'second' }] },
+    ])
+    expect(out.map((m) => m.role)).toEqual(['user', 'system'])
+    expect(out[1]!.content).toEqual([
+      { type: 'text', text: 'first' },
+      { type: 'text', text: 'second' },
+    ])
+  })
+
+  it('is a no-op when there is no system message at all', () => {
+    expect(normalizeOperatorTurns(msgs)).toEqual(msgs)
+  })
+
+  it('through buildRequest: [user, assistant, system, user] + a suffix lands the suffix on the last user message', () => {
+    const req = buildRequest({
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+        { role: 'system', content: [{ type: 'text', text: 'Operator: x' }] },
+        { role: 'user', content: [{ type: 'text', text: 'accept?' }] },
+      ],
+      suffix: 'NOTEBOOK',
+    })
+    const sent = req.messages as LoopMessage[]
+    expect(sent.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'system'])
+    expect(sent[2]!.content.at(-1)).toEqual({ type: 'text', text: 'NOTEBOOK' })
+  })
+
+  it('through buildRequest: [user, assistant, system] with an empty suffix reorders to [user, system, assistant]', () => {
+    const req = buildRequest({
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+        { role: 'system', content: [{ type: 'text', text: 'Operator: x' }] },
+      ],
+      suffix: '',
+    })
+    const sent = req.messages as LoopMessage[]
+    expect(sent.map((m) => m.role)).toEqual(['user', 'system', 'assistant'])
+  })
+
+  it('through buildRequest: never caches the volatile suffix even with the new normalize step in the pipeline', () => {
+    // Guards the invariant src/model/cache.ts documents: the rolling
+    // breakpoint must never land on the notebook/suffix text, which changes
+    // every turn. normalizeOperatorTurns and placeBreakpoints both run BEFORE
+    // withSuffix precisely so the suffix block never exists yet when
+    // placeBreakpoints picks the rolling block.
+    const req = buildRequest({ ...base, suffix: '- destination: Faro (user)' })
+    const sent = req.messages as Array<{ content: Array<Record<string, unknown>> }>
+    const blocks = sent.at(-1)!.content
+    expect(blocks.at(-1)!.text).toBe('- destination: Faro (user)')
+    expect(blocks.at(-1)!.cache_control).toBeUndefined()
   })
 })
 
