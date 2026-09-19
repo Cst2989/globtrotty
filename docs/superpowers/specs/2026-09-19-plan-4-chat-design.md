@@ -184,3 +184,74 @@ the owner connection. `anon` keeps nothing. The worker, as owner, is unaffected.
 | Reads via RLS with the user's cookie; writes via the owner connection in routes | one trust boundary in the browser, one in the server | none |
 | Solicitation filter is deterministic, replaces and escalates | parent §10 asks for it; a model-based check would be a new seat | false positives replace a benign reply, and page a human |
 | `SITE_URL` is the Netlify URL | the functions call each other through it | one env var to change on a custom domain |
+
+---
+
+## 9. Corrections after build (2026-09-19)
+
+Written at plan 4a's Task 11, from the branch's final review and its fix wave. Each bullet names a
+place where the build differs from a section above. **The sections above are left as written** —
+this list is the correction, and where the two disagree, this list is right. Full reasoning in
+`docs/superpowers/2026-09-19-plan-4-chat-decisions.md`.
+
+- **§2, the message route's body.** Built as `{ text, idempotencyKey }`, not `{ text }`. The client
+  mints a `crypto.randomUUID()` per send, so a retry lands on `submitMessage`'s existing turn-insert
+  conflict instead of creating a second turn. The body is a `z.strictObject`, so an unexpected key
+  (a `user_id`, say) is a 400 rather than a silently ignored field.
+
+- **§3, "Realtime carries ids and statuses, never prose."** Not true as built, and not made true.
+  Migration 0016 adds `messages` and `conversations` to `supabase_realtime` as whole tables, so the
+  publication carries every column — `messages.content` included, and an `action` row's raw JSON
+  with it. The guarantee that actually holds is one layer up: the publication is scoped per user by
+  RLS, and `web/realtime.ts` **ignores every payload and refetches** through the RLS-scoped server
+  read, so no payload prose ever reaches a component or the RSC payload. A column-list publication
+  would make the original sentence true at no behavioural cost (the client already ignores the
+  payload); it is parked, backlog 4a.12.
+
+- **§4, the pipeline order.** `buildRequest` is
+  `normalizeOperatorTurns(withSuffix(placeBreakpoints(messages), suffix))` — normalisation runs
+  **last**, after the suffix, which is what makes "a trailing operator message stays last" true on
+  the accept path. It shipped in the opposite order and was corrected by the final review's C1.
+  `placeBreakpoints` still runs first, on the raw transcript, so the volatile notebook never carries
+  the rolling cache breakpoint, and it skips `system` blocks wherever they sit.
+
+- **§4, "the routes assert `desk = 'planning'` and `409` otherwise."** True as of the fix wave, not
+  before it: `submitAction`'s `ActionRefused` was uncaught in both routes and surfaced as a 500.
+  Both now catch it by class and answer `409 { error: 'not_planning' }`.
+
+- **§5, RLS.** Enabled with policies, **never forced** — `0003_lockdown.sql`'s warning stands: a
+  policy the owner is subject to would make the global daily ceiling's cross-user
+  `sum(daily_usage.cost_micros)` return only the caller's rows, read far below the cap, and stop
+  firing with no error and no failing test. `daily_usage` has no grant and no policy at all.
+
+- **§5, `agent_events`.** Migration **0017** narrows `own_agent_events` to
+  `user_id = auth.uid() and kind <> 'screened'`. Under 0016's bare predicate the traveller's own
+  browser role could fetch, with one PostgREST call, the exact reply §6's filter had replaced.
+  `test/schema-4.test.ts` pins the policy's predicate text, not just its existence.
+
+- **§6, CSP.** `script-src` keeps `'self' 'unsafe-inline'`; the nonce / `'strict-dynamic'` shape was
+  not attempted. It is not a Next limitation — what is unverified is whether that pattern survives
+  `@netlify/plugin-nextjs`'s edge handler and the Netlify CDN. With `'unsafe-inline'` present the
+  script directive provides no XSS protection; the rest of the header is real and pinned by
+  `test/web-csp.test.ts`. Backlog 4a.4.
+
+- **§7, the isolation proof.** It is `test/rls.live.test.ts`, run against the real project with
+  `LIVE_SUPABASE=1`: two throwaway users created through the admin API and signed in with a
+  password, each of the nine granted tables checked from B's anon client (0 rows) and A's (exactly
+  her own row), a **discriminator** conversation re-seeded under B to tell a correct per-user filter
+  apart from a blanket deny (a hosted project rules out proving the negative with a throwaway
+  `drop policy`), all six ungranted tables refused outright, and — since 0017 — an assertion that A
+  cannot read her own screened original. Cleanup deletes by conversation ids captured at insert
+  time, because `auth.users` has no FK to `conversations` and `deleteUser` does not cascade.
+
+- **§7 / §1, deploy.** A Netlify **background** function answers every HTTP request with a fixed
+  `202` before the handler's own reply exists; the plan's "must print 401" cold-invocation check was
+  wrong. The 401 is in the function log. What the 202 does prove — and what closes the bundled
+  prompt-file finding — is that module initialisation succeeded: invocations complete in under a
+  second with no init error.
+
+- **§1, the proxy.** `/.netlify/` is excluded from `proxy.ts`'s matcher and treated as public by
+  `decide()`. The first production deploy answered the background function's own URL with a
+  `307 → /login`. Those paths never carried a session; the worker's `timingSafeEqual` check on
+  `x-worker-secret` is the only door on them. See backlog 4a.13 for what that leaves resting on
+  `netlify.toml`'s `schedule` keys.
