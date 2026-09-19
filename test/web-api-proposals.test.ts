@@ -196,6 +196,39 @@ describeDb('POST /api/proposals/[id]/decide', () => {
     })
   })
 
+  /**
+   * Final review, I3. Spec §4: "the routes assert `desk = 'planning'` and
+   * `409` otherwise." `submitAction` throws `ActionRefused`; before the fix
+   * neither route caught it, so it reached `withUser` as a 500.
+   *
+   * Unreachable through the product — `desk` is monotonic and
+   * `src/repo/conversations.ts` is its only writer, so it only ever goes
+   * 'front' -> 'planning' — which is why the desk is moved BACK here with a
+   * direct update inside withTestDb's rolled-back transaction rather than by
+   * driving the app. That is the whole point: the contract has to hold even
+   * for a state the product cannot currently reach.
+   */
+  it("a conversation that is not at the planning desk is 409, and writes nothing", async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '17')
+      await sql`update conversations set desk = 'front' where id = ${s.conversationId}`
+      const invoke = vi.fn()
+      const handler = makeDecide({ sql, invoke })
+
+      const res = await handler(USER, req({ decision: 'accept' }), ctx(s.proposalId))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'not_planning' })
+      expect(invoke).not.toHaveBeenCalled()
+      const [proposal] = await sql`select decision from proposals where id = ${s.proposalId}`
+      expect(proposal!.decision).toBeNull()
+      const msgs = await sql`select id from messages where conversation_id = ${s.conversationId}`
+      expect(msgs).toHaveLength(0)
+      const turns = await sql`select id from turns where conversation_id = ${s.conversationId} and status = 'queued'`
+      expect(turns).toHaveLength(0)
+    })
+  })
+
   it('a non-uuid id is 404 before any query runs', async () => {
     await withTestDb(async (sql) => {
       const handler = makeDecide({ sql, invoke: vi.fn() })
@@ -366,6 +399,37 @@ describeDb('POST /api/proposals/[id]/revise', () => {
       expect(res.status).toBe(404)
       const msgs = await sql`select id from messages where conversation_id = ${s.conversationId}`
       expect(msgs).toHaveLength(0)
+    })
+  })
+
+  /**
+   * Final review, I3. Spec §4: "the routes assert `desk = 'planning'` and
+   * `409` otherwise." `submitAction` throws `ActionRefused`; before the fix
+   * this route had no catch at all, so it reached `withUser` as a 500.
+   *
+   * Unreachable through the product — `desk` is monotonic and
+   * `src/repo/conversations.ts` is its only writer, so it only ever goes
+   * 'front' -> 'planning' — which is why the desk is moved BACK here with a
+   * direct update inside withTestDb's rolled-back transaction rather than by
+   * driving the app. That is the whole point: the contract has to hold even
+   * for a state the product cannot currently reach.
+   */
+  it("a conversation that is not at the planning desk is 409, and writes nothing", async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '18')
+      await sql`update conversations set desk = 'front' where id = ${s.conversationId}`
+      const invoke = vi.fn()
+      const handler = makeRevise({ sql, invoke })
+
+      const res = await handler(USER, req({ kind: 'shift', days: 2 }), ctx(s.proposalId))
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'not_planning' })
+      expect(invoke).not.toHaveBeenCalled()
+      const msgs = await sql`select id from messages where conversation_id = ${s.conversationId}`
+      expect(msgs).toHaveLength(0)
+      const turns = await sql`select id from turns where conversation_id = ${s.conversationId} and status = 'queued'`
+      expect(turns).toHaveLength(0)
     })
   })
 

@@ -6,7 +6,7 @@ import { withUser, type RouteContext, type SessionUser } from '@/web/session'
 import { readInvokeEnv } from '@/web/invoke'
 import { ownerSql } from '@/src/db/owner'
 import { invokeBackground } from '@/src/invoke'
-import { submitAction } from '@/src/handler'
+import { ActionRefused, submitAction } from '@/src/handler'
 import { decideProposal, loadProposalForUser } from '@/src/repo/proposals'
 import { DEFAULT_LIMITS } from '@/src/limits'
 import type { ActionPayload } from '@/src/actions'
@@ -152,6 +152,18 @@ export function makeDecide(deps: DecideRouteDeps) {
       if (result.status === 'duplicate') return NextResponse.json({ turnId: result.turnId })
       return NextResponse.json({ turnId: result.turnId })   // status === 'queued'
     } catch (err) {
+      // Final review, I3. Spec §4: "the routes assert `desk = 'planning'` and
+      // `409` otherwise." `submitAction` makes that assertion and throws
+      // `ActionRefused`; without this branch it reached `withUser` as an
+      // ordinary error and became a 500. Unreachable today — `desk` is
+      // monotonic, and `src/repo/conversations.ts` is its only writer — so
+      // this closes a contract gap rather than a live bug, which is also why
+      // it is a separate `instanceof` check and not folded into the message
+      // regex below: a class, not a string, and it cannot be confused with a
+      // decide-specific failure.
+      if (err instanceof ActionRefused) {
+        return NextResponse.json({ error: 'not_planning' }, { status: 409 })
+      }
       // Only `decideProposal`'s own "already decided"/"not found" throw (see
       // its doc comment in src/repo/proposals.ts) maps to 409 here. Anything
       // else — a bug in `onFreshTurn`, or in `submitAction` itself — must not

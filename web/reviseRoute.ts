@@ -6,7 +6,7 @@ import { withUser, type RouteContext, type SessionUser } from '@/web/session'
 import { readInvokeEnv } from '@/web/invoke'
 import { ownerSql } from '@/src/db/owner'
 import { invokeBackground } from '@/src/invoke'
-import { submitAction } from '@/src/handler'
+import { ActionRefused, submitAction } from '@/src/handler'
 import { loadProposalForUser } from '@/src/repo/proposals'
 import { DEFAULT_LIMITS } from '@/src/limits'
 import { SLOT_NAMES } from '@/src/gates/rehydrateGate'
@@ -94,15 +94,31 @@ export function makeRevise(deps: ReviseRouteDeps) {
       }
     }
 
-    const result = await submitAction(
-      { sql: deps.sql, limits: DEFAULT_LIMITS, invoke: deps.invoke },
-      {
-        userId: user.id,
-        conversationId: proposal.conversationId,
-        action: { action: 'revise', proposalId, change: parsed.data },
-        idempotencyKey: randomUUID(),
-      },
-    )
+    // Final review, I3. Spec §4: "the routes assert `desk = 'planning'` and
+    // `409` otherwise." `submitAction` throws `ActionRefused` when the
+    // conversation is still at the front desk; this route had no catch at all,
+    // so that surfaced as a framework 500. Only `ActionRefused` is caught —
+    // anything else still propagates to `withUser`'s 500, which is what an
+    // unexpected failure should be. Unreachable today (`desk` is monotonic and
+    // `src/repo/conversations.ts` is its only writer): a contract gap, not a
+    // live bug.
+    let result
+    try {
+      result = await submitAction(
+        { sql: deps.sql, limits: DEFAULT_LIMITS, invoke: deps.invoke },
+        {
+          userId: user.id,
+          conversationId: proposal.conversationId,
+          action: { action: 'revise', proposalId, change: parsed.data },
+          idempotencyKey: randomUUID(),
+        },
+      )
+    } catch (err) {
+      if (err instanceof ActionRefused) {
+        return NextResponse.json({ error: 'not_planning' }, { status: 409 })
+      }
+      throw err
+    }
 
     if (result.status === 'busy') return NextResponse.json({ error: 'busy' }, { status: 409 })
     if (result.status === 'limit_reached') return NextResponse.json({ error: 'limit_reached' }, { status: 429 })
