@@ -779,4 +779,62 @@ describeDb('runTurn error classification', () => {
       expect(BigInt(convo!.spend_usd_micros)).toBe(0n)
     })
   })
+
+  /**
+   * The operator channel (plan 4a, Task 2). A card action is a `messages` row
+   * with `role = 'action'`, written only by a route handler — never the model
+   * — and `loop()` hydrates it into a mid-conversation `system` message
+   * before the agent ever sees the transcript. Pinned here rather than only
+   * in `test/model-client.test.ts`/`test/engine.test.ts` because those two
+   * pin the SHAPE; this one pins that the real hydration path actually
+   * produces that shape from a real database row.
+   */
+  it('hydrates an action row as an operator system message the agent can see', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'take it')
+      const proposalId = '00000000-0000-4000-8000-000000000001'
+      await sql`insert into messages (conversation_id, user_id, role, content)
+        values (${r.conversationId}, ${USER}, 'action',
+                ${JSON.stringify({ action: 'hand_off', proposalId })})`
+
+      let captured: TurnState['messages'] | null = null
+      const agent: Agent = async (ctx) => {
+        captured = ctx.state.messages
+        return { kind: 'message', text: 'ok', costMicros: 0n }
+      }
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      expect(captured).not.toBeNull()
+      const last = captured!.at(-1)!
+      expect(last.role).toBe('system')
+      const text = last.content.find((b) => b.type === 'text')
+      if (text?.type !== 'text') throw new Error('unreachable')
+      expect(text.text).toContain('hand_off_to_booking')
+      expect(text.text).toContain(proposalId)
+    })
+  })
+
+  it('hydrates a malformed action row into a system message instead of throwing or becoming user text', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'take it')
+      await sql`insert into messages (conversation_id, user_id, role, content)
+        values (${r.conversationId}, ${USER}, 'action', 'garbage')`
+
+      let captured: TurnState['messages'] | null = null
+      const agent: Agent = async (ctx) => {
+        captured = ctx.state.messages
+        return { kind: 'message', text: 'ok', costMicros: 0n }
+      }
+      // Must not throw: an unreadable action row is a recorded outcome to
+      // hand the agent, not a reason to crash the turn.
+      await runTurn(workerDeps(sql, agent), r.turnId!)
+
+      expect(captured).not.toBeNull()
+      const last = captured!.at(-1)!
+      expect(last.role).toBe('system')
+      const text = last.content.find((b) => b.type === 'text')
+      if (text?.type !== 'text') throw new Error('unreachable')
+      expect(text.text).toContain('could not be read')
+    })
+  })
 })

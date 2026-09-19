@@ -10,6 +10,7 @@ import {
 import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
+import { parseAction, renderActionMessage } from './actions.js'
 
 export type AgentContext = {
   state: TurnState
@@ -227,7 +228,17 @@ async function withHeartbeat<T>(
   }
 }
 
-type MessageRow = { role: 'user' | 'agent'; content: string }
+type MessageRow = { role: 'user' | 'agent' | 'action'; content: string }
+
+/**
+ * Said when an `action` row's `content` fails `parseAction` — a garbled
+ * write, not something a card the UI actually renders could produce. Never
+ * thrown: an unreadable action still has to become SOME message so the turn
+ * can proceed, and it must never fall back to a `user` role, which would let
+ * an unparseable row read as her own words rather than as the office's.
+ */
+const UNREADABLE_ACTION_TEXT =
+  'Operator: a card action was recorded but could not be read. Ask her what she would like to do.'
 
 async function loop(
   deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint },
@@ -241,10 +252,23 @@ async function loop(
        where conversation_id = ${claim.conversationId} order by created_at`
     state = {
       ...state,
-      messages: rows.map((r): LoopMessage => ({
-        role: r.role === 'agent' ? 'assistant' : 'user',
-        content: [{ type: 'text', text: r.content }],
-      })),
+      messages: rows.map((r): LoopMessage => {
+        // 'action' hydrates as the operator channel (src/engine.ts's
+        // LoopMessage doc comment) — a `system` message, never `user`: a
+        // button press is not her typed text, and treating it as one would
+        // let it be forged by typing the same JSON into the chat box.
+        if (r.role === 'action') {
+          const parsed = parseAction(r.content)
+          return {
+            role: 'system',
+            content: [{ type: 'text', text: parsed ? renderActionMessage(parsed) : UNREADABLE_ACTION_TEXT }],
+          }
+        }
+        return {
+          role: r.role === 'agent' ? 'assistant' : 'user',
+          content: [{ type: 'text', text: r.content }],
+        }
+      }),
     }
   }
 

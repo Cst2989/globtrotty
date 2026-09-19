@@ -60,6 +60,10 @@ const canCarryBreakpoint = (b: ContentBlock | undefined): boolean =>
 export function placeBreakpoints(messages: LoopMessage[]): LoopMessage[] {
   if (messages.length === 0) return []
 
+  // Role-agnostic: a `system` message (the operator channel, plan 4a Task 2)
+  // walks the same as any other — its blocks are as eligible for a breakpoint
+  // as a `user` or `assistant` message's.
+  //
   // Deep copy: a caller's TurnState is persisted to turns.state, and stamping
   // cache_control onto it would write a transport concern into durable state.
   const out: LoopMessage[] = JSON.parse(JSON.stringify(messages))

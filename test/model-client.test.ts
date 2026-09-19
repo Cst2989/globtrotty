@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  buildRequest, buildCountTokensRequest, estimateInputTokens, callModel,
+  buildRequest, buildCountTokensRequest, estimateInputTokens, callModel, withSuffix,
 } from '../src/model/client.js'
 import { SEATS } from '../src/model/seats.js'
 import type { LoopMessage } from '../src/engine.js'
@@ -118,6 +118,32 @@ describe('buildRequest suffix', () => {
 
   it('changes nothing when there is no volatile context to send', () => {
     expect(buildRequest(base).messages).toEqual(buildRequest({ ...base, suffix: '' }).messages)
+  })
+
+  it('withSuffix appends to the LAST USER message even when a system message follows it', () => {
+    const msgsWithAction: LoopMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+      { role: 'user', content: [{ type: 'text', text: 'accept?' }] },
+      { role: 'system', content: [{ type: 'text', text: 'Operator: …' }] },
+    ]
+    const out = withSuffix(msgsWithAction, 'NOTEBOOK')
+    expect(out.at(-1)!.role).toBe('system')
+    expect(out[2]!.content.at(-1)).toEqual({ type: 'text', text: 'NOTEBOOK' })
+    expect(out).toHaveLength(4)
+  })
+
+  it('never produces a user turn after a system turn', () => {
+    const req = buildRequest({
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        { role: 'system', content: [{ type: 'text', text: 'Operator: x' }] },
+      ],
+      suffix: 'NB',
+    })
+    const roles = (req.messages as LoopMessage[]).map((m) => m.role)
+    expect(roles).toEqual(['user', 'system'])
   })
 })
 

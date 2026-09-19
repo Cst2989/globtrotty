@@ -84,23 +84,38 @@ export type Transport = {
 
 /**
  * Appends volatile context (the suffix) after the last block of the transcript,
- * without ever leaving the request ending on an assistant turn.
+ * without ever leaving the request ending on an assistant turn, and without
+ * ever placing a NEW user turn directly after a `system` message.
  *
- * Appended to the last USER turn where there is one: a new trailing user
- * message would be a second consecutive user turn, and appending to an
- * assistant turn would present the notebook as something the model said. When
- * the transcript ends on an assistant turn, a new user turn is opened instead —
- * that also happens to be what keeps the request from prefilling an assistant
- * turn, which is a 400 on Opus 5.
+ * A trailing run of `system` messages — the operator channel, plan 4a Task 2:
+ * a card action hydrated mid-conversation — is set aside first and reattached
+ * unchanged at the end. The API rejects a user turn that follows a `system`
+ * message directly (it must be the last entry, or be followed by an assistant
+ * turn), so the suffix is placed as if that trailing block were not there at
+ * all: appended to the last USER turn before it where one exists (a new
+ * trailing user message would otherwise be a second consecutive user turn,
+ * and appending to an assistant turn would present the notebook as something
+ * the model said), or — when the remainder ends on assistant, or is empty —
+ * inserted as a new user turn immediately before the trailing system block
+ * (which lands at the very end of the request when there is no such block).
+ * That new-turn placement also happens to be what keeps the request from
+ * prefilling an assistant turn, which is a 400 on Opus 5.
  */
 export function withSuffix(messages: LoopMessage[], suffix: string | undefined): LoopMessage[] {
   if (suffix === undefined || suffix.length === 0) return messages
   const block: ContentBlock = { type: 'text', text: suffix }
-  const last = messages.at(-1)
-  if (last !== undefined && last.role === 'user') {
-    return [...messages.slice(0, -1), { ...last, content: [...last.content, block] }]
-  }
-  return [...messages, { role: 'user', content: [block] }]
+
+  let split = messages.length
+  while (split > 0 && messages[split - 1]!.role === 'system') split--
+  const head = messages.slice(0, split)
+  const tail = messages.slice(split)
+
+  const last = head.at(-1)
+  const headWithSuffix: LoopMessage[] = last !== undefined && last.role === 'user'
+    ? [...head.slice(0, -1), { ...last, content: [...last.content, block] }]
+    : [...head, { role: 'user', content: [block] }]
+
+  return [...headWithSuffix, ...tail]
 }
 
 /**
