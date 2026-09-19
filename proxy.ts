@@ -10,6 +10,11 @@ export async function proxy(request: NextRequest) {
   return updateSession(request)
 }
 
+// `/.netlify/` is excluded: the background worker, the sweeper and the drift
+// monitor live there and authenticate with `WORKER_SHARED_SECRET`, not a
+// session cookie. Found in the plan-4a deploy smoke — with the default matcher
+// the edge proxy answered the worker's POST with a 307 to `/login`, so no turn
+// could ever start. `decide()` mirrors the exclusion as a second line.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|\\.netlify/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }

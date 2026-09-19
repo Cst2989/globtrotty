@@ -6,7 +6,14 @@ import { NextResponse, type NextRequest } from 'next/server'
 // session) must both be reachable before a user exists.
 const PUBLIC_PATHS = ['/login', '/auth/callback']
 
+// Netlify's own function paths (`/.netlify/functions/*`) carry the worker's
+// shared-secret header, never a session; the function checks it itself. The
+// `proxy.ts` matcher already skips them — this keeps the pure decision honest
+// if the matcher ever regresses.
+const WORKER_PREFIX = '/.netlify/'
+
 function isPublicPath(pathname: string): boolean {
+  if (pathname.startsWith(WORKER_PREFIX)) return true
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 

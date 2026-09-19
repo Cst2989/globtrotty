@@ -24,6 +24,13 @@ describe('decide', () => {
     expect(decide('/auth/callback', false)).toBe('next')
   })
 
+  it('lets Netlify function paths through without a session (worker secret auths them)', () => {
+    // Deploy smoke (plan 4a, Task 10): the default matcher 307'd the
+    // background worker to /login, so no turn could start.
+    expect(decide('/.netlify/functions/run-turn-background', false)).toBe('next')
+    expect(decide('/.netlify/functions/sweep', false)).toBe('next')
+  })
+
   it('responds 401 for an unauthenticated API route', () => {
     expect(decide('/api/turns', false)).toBe('401')
   })
