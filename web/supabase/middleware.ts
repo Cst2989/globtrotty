@@ -70,7 +70,15 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const decision = decide(request.nextUrl.pathname, Boolean(user))
 
   if (decision === '401') {
-    return new NextResponse(null, { status: 401 })
+    // Same reasoning as the redirect branch below: `setAll` above may have
+    // refreshed the session cookie onto `response` before the 401 decision
+    // was reached, and a bare `new NextResponse(...)` here would drop that
+    // write.
+    const unauthorizedResponse = new NextResponse(null, { status: 401 })
+    for (const cookie of response.cookies.getAll()) {
+      unauthorizedResponse.cookies.set(cookie)
+    }
+    return unauthorizedResponse
   }
 
   if (decision === 'redirect') {

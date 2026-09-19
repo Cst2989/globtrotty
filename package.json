@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:migrate": "bash scripts/ci-migrate.sh",
-    "typecheck": "tsc -p tsconfig.harness.json --noEmit && tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.harness.json --noEmit && tsc --noEmit && tsc -p tsconfig.webtests.json --noEmit",
     "lint": "eslint .",
     "demo": "tsx scripts/demo.ts"
   },
