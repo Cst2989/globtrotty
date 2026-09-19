@@ -1,10 +1,17 @@
 import { timingSafeEqual } from 'node:crypto'
 import postgres from 'postgres'
 import { z } from 'zod'
-import { loadEnv } from '../../src/env.js'
-import { runTurn, echoAgent } from '../../src/worker.js'
+import Anthropic from '@anthropic-ai/sdk'
+import { loadEnv, loadOptionalEnv } from '../../src/env.js'
+import { runTurn } from '../../src/worker.js'
 import { DEFAULT_LIMITS } from '../../src/limits.js'
 import { LogNotifier } from '../../src/notify.js'
+import { invokeBackground } from '../../src/invoke.js'
+import { routeAgent } from '../../src/agents/route.js'
+import type { Transport } from '../../src/model/client.js'
+import { KiwiSupplier } from '../../src/supplier/kiwi.js'
+import { SearchApiHotels } from '../../src/supplier/searchapi.js'
+import { MockSupplier } from '../../src/supplier/mock.js'
 
 /**
  * Tier 3: the background function. Netlify Functions v2 (esbuild-bundled, `.mts`) hand every
@@ -22,8 +29,10 @@ import { LogNotifier } from '../../src/notify.js'
  * against `runTurn` directly. There is no Netlify-hosted test harness in this repo, so this
  * file itself is exercised only by manual/staging verification, never by `pnpm test`.
  *
- * `echoAgent` is wired in directly, matching the rest of plan 1 — a later plan swaps it for
- * the real agent fleet behind the same `Agent` type and nothing else here changes.
+ * `routeAgent` (src/agents/route.ts) is the real agent fleet as of plan 4a Task 5 — front desk
+ * then driver, wired to the real Anthropic transport and the real flight/hotel suppliers.
+ * `echoAgent` stays exported from `worker.ts`, unused here, purely so `test/worker.test.ts`
+ * keeps exercising the harness without a model; this handler never imports it.
  */
 
 // Background functions on Netlify run up to 15 minutes; leave headroom so a turn that would
@@ -63,6 +72,20 @@ export default async (req: Request): Promise<Response> => {
   }
   const { turnId } = parsed.data
 
+  // GOOGLE_SEARCH_API is optional (src/env.ts's loadOptionalEnv): a real deploy that has not
+  // set it still boots, but hotel search silently degrades to fixtures unless flagged loudly
+  // here — the one place that log line can be written once per invocation.
+  const searchKey = loadOptionalEnv(process.env, 'GOOGLE_SEARCH_API')
+  if (!searchKey) {
+    console.error('run-turn: GOOGLE_SEARCH_API unset — hotels are MOCK')
+  }
+
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
+  const transport: Transport = {
+    create: (req, options) => client.messages.create(req as never, options as never) as Promise<unknown>,
+    countTokens: (req) => client.messages.countTokens(req as never) as Promise<{ input_tokens: number }>,
+  }
+
   const startedMs = Date.now()
   const sql = postgres(env.DATABASE_URL)
   try {
@@ -70,10 +93,18 @@ export default async (req: Request): Promise<Response> => {
       {
         sql,
         limits: DEFAULT_LIMITS,
-        agent: echoAgent,
+        agent: routeAgent({
+          sql,
+          transport,
+          limits: DEFAULT_LIMITS,
+          now: () => Date.now(),
+          notifier: new LogNotifier(),
+          flights: new KiwiSupplier(),
+          hotels: searchKey ? new SearchApiHotels(searchKey) : new MockSupplier({ kind: 'hotel' }),
+        }),
         now: () => Date.now(),
         deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,
-        reinvoke: (id) => reinvoke(env, id),
+        reinvoke: invokeBackground(env),
         notifier: new LogNotifier(),
       },
       turnId,
@@ -83,12 +114,4 @@ export default async (req: Request): Promise<Response> => {
   }
 
   return new Response('ok', { status: 200 })
-}
-
-async function reinvoke(env: ReturnType<typeof loadEnv>, turnId: string): Promise<void> {
-  await fetch(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-worker-secret': env.WORKER_SHARED_SECRET },
-    body: JSON.stringify({ turnId }),
-  })
 }
