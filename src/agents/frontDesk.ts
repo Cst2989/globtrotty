@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import { z } from 'zod'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
@@ -12,8 +11,11 @@ import { estimateMicros, reconcile, reserve } from '../repo/reservation.js'
 import { recordModelCall } from '../repo/modelCalls.js'
 import { recordFrontLabel, routeToPlanning } from '../repo/conversations.js'
 import { maskControlChars } from '../sanitize.js'
+import { loadPrompt } from './prompts/load.js'
 
-const SYSTEM = readFileSync(new URL('./prompts/front_desk.md', import.meta.url), 'utf8')
+// See src/agents/prompts/load.ts: resolves beside this module, or from the process cwd for
+// the esbuild-bundled Netlify function where import.meta.url no longer neighbours prompts/.
+const SYSTEM = loadPrompt('front_desk')
 
 export type FrontLabel = 'new_trip' | 'faq' | 'unclear' | 'fallback'
 

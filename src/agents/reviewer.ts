@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type postgres from 'postgres'
 import { z } from 'zod'
 import { firstCeilingReached, type Limits } from '../engine.js'
@@ -19,8 +18,11 @@ import { maskUntrustedText, sanitizeSourceId } from '../sanitize.js'
 import { fenceResult } from '../tools/validate.js'
 import type { RehydratedItem } from '../gates/types.js'
 import type { Notebook } from '../notebook.js'
+import { loadPrompt } from './prompts/load.js'
 
-const SYSTEM = readFileSync(new URL('./prompts/reviewer.md', import.meta.url), 'utf8')
+// See src/agents/prompts/load.ts: resolves beside this module, or from the process cwd for
+// the esbuild-bundled Netlify function where import.meta.url no longer neighbours prompts/.
+const SYSTEM = loadPrompt('reviewer')
 
 /** Spec section 5: `rounds < MAX_ROUNDS`. Two verdicts, then ship unapproved. */
 export const MAX_REVIEW_ROUNDS = 2
