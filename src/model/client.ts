@@ -100,6 +100,10 @@ export type Transport = {
  * (which lands at the very end of the request when there is no such block).
  * That new-turn placement also happens to be what keeps the request from
  * prefilling an assistant turn, which is a 400 on Opus 5.
+ *
+ * Exported and tested on its own, so it stays correct in isolation; inside
+ * `buildRequest` it is followed by `normalizeOperatorTurns`, which then lifts
+ * that trailing `system` run to the very end of the request.
  */
 export function withSuffix(messages: LoopMessage[], suffix: string | undefined): LoopMessage[] {
   if (suffix === undefined || suffix.length === 0) return messages
@@ -129,10 +133,14 @@ export function withSuffix(messages: LoopMessage[], suffix: string | undefined):
  *
  * Every `system` message is pulled out (in original order) and merged into
  * ONE `system` message, re-inserted immediately after the LAST `user`
- * message. That single placement is what makes a trailing `system` block
- * always immediately preceded by a `user` turn — which is exactly what
- * `withSuffix`'s trailing-`system`-strip logic above then relies on to find
- * the right place to attach the suffix.
+ * message. Because this step runs LAST in `buildRequest` — after
+ * `withSuffix`, see the pipeline note there — that single placement is also
+ * what puts the operator message at the very END of the request whenever
+ * there is a suffix: `withSuffix` always leaves the non-`system` part of the
+ * transcript ending on a `user` turn, so the merged `system` message is
+ * appended behind it. With no suffix it still lands immediately after the
+ * last `user` message, which is valid whether or not an assistant turn
+ * follows it.
  *
  * Throws when there is a `system` message but no `user` message anywhere to
  * anchor it to — a shape `submitMessage` (the only writer of the first `user`
@@ -186,17 +194,34 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
     model: seat.model,
     max_tokens: seat.maxTokens,
     system: head.system,
-    // Normalize FIRST — `placeBreakpoints` must see any `system` message
-    // (the operator channel) in its FINAL position to skip its blocks and
-    // land the rolling breakpoint on the message actually preceding it
-    // (src/model/cache.ts). Breakpoints before suffix, same as always: the
-    // volatile notebook must land after the rolling breakpoint, never carry
-    // it, which is also why this is NOT simply "withSuffix, then
-    // normalizeOperatorTurns, then placeBreakpoints" in that literal order —
-    // running placeBreakpoints after the suffix is appended would make the
-    // suffix's own text block the last eligible one and cache it, exactly the
-    // outcome `placeBreakpoints`'s doc comment says must never happen.
-    messages: withSuffix(placeBreakpoints(normalizeOperatorTurns(messages)), args.suffix),
+    // Pipeline: placeBreakpoints -> withSuffix -> normalizeOperatorTurns.
+    //
+    // `placeBreakpoints` runs FIRST because the volatile notebook must land
+    // AFTER the rolling breakpoint and never carry it: placing breakpoints
+    // once the suffix has been appended would make the suffix's own text
+    // block the last eligible one and cache it — exactly the outcome
+    // `placeBreakpoints`'s doc comment says must never happen.
+    //
+    // `normalizeOperatorTurns` runs LAST — after the suffix — which is what
+    // the Task 2 ruling specified ("every system message moves to immediately
+    // after the LAST user message (after the suffix)") and what spec §4 means
+    // by "a trailing operator message stays last". Running it BEFORE the
+    // suffix (the shape this branch shipped until the final review) anchored
+    // the operator message to the last STORED user turn, so on the ordinary
+    // accept path — `[user, assistant(proposal), action]` — it landed in
+    // front of the assistant's proposal and `withSuffix`, seeing a transcript
+    // ending on assistant, then opened a NEW trailing user turn for the
+    // notebook behind it. The instruction naming the tool to call ended up
+    // two turns from the end, ahead of the message it refers to.
+    //
+    // Running it after `placeBreakpoints` moves no breakpoint.
+    // `normalizeOperatorTurns` only extracts, merges and re-inserts `system`
+    // messages — which `placeBreakpoints` skips entirely wherever they sit —
+    // and never reorders the non-`system` messages relative to one another,
+    // so both walks visit the same blocks in the same order either way. And
+    // the suffix block still does not exist when breakpoints are placed, so
+    // it still cannot carry one.
+    messages: normalizeOperatorTurns(withSuffix(placeBreakpoints(messages), args.suffix)),
   }
   // `seat.effort === null` marks the Haiku seats (src/model/seats.ts) — see the
   // doc comment above for why they get no `thinking` block at all.

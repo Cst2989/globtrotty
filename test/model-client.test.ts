@@ -154,6 +154,12 @@ describe('buildRequest suffix', () => {
  * the agent replies — a `user` turn directly after `system` is a documented
  * 400. `withSuffix` alone cannot repair that shape (it only ever looks at a
  * TRAILING run); `normalizeOperatorTurns` fixes the whole transcript instead.
+ *
+ * Final review C1: it now runs LAST in `buildRequest`, after `withSuffix`,
+ * which is what the Task 2 ruling said all along — "every system message
+ * moves to immediately after the LAST user message (after the suffix)". The
+ * cases below therefore pin where the operator message ends up once the
+ * notebook is in place, not just where it ends up in the stored transcript.
  */
 describe('normalizeOperatorTurns', () => {
   it('moves a system message from the middle to immediately after the LAST user message', () => {
@@ -220,6 +226,32 @@ describe('normalizeOperatorTurns', () => {
     expect(sent[2]!.content.at(-1)).toEqual({ type: 'text', text: 'NOTEBOOK' })
   })
 
+  it('through buildRequest: [user, assistant, system] + a suffix leaves the operator message LAST', () => {
+    // The ordinary card path: she typed, the agent proposed, she pressed a
+    // button. Final review C1 — normalise runs AFTER the suffix, so the
+    // operator instruction is the last thing the model reads, not something
+    // buried two turns back in front of the proposal it refers to.
+    //
+    // `withSuffix` sees a transcript whose non-`system` part ends on the
+    // assistant, so the notebook does NOT join the stored user turn: it opens
+    // a new user turn of its own (appending to an assistant turn would present
+    // the notebook as something the model said). The operator message is then
+    // lifted behind it.
+    const req = buildRequest({
+      ...base,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'a week in Portugal' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'Here is your proposal' }] },
+        { role: 'system', content: [{ type: 'text', text: 'Operator: … hand_off_to_booking' }] },
+      ],
+      suffix: 'NOTEBOOK',
+    })
+    const sent = req.messages as LoopMessage[]
+    expect(sent.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'system'])
+    expect(sent[2]!.content).toEqual([{ type: 'text', text: 'NOTEBOOK' }])
+    expect(sent.at(-1)!.content).toEqual([{ type: 'text', text: 'Operator: … hand_off_to_booking' }])
+  })
+
   it('through buildRequest: [user, assistant, system] with an empty suffix reorders to [user, system, assistant]', () => {
     const req = buildRequest({
       ...base,
@@ -237,9 +269,11 @@ describe('normalizeOperatorTurns', () => {
   it('through buildRequest: never caches the volatile suffix even with the new normalize step in the pipeline', () => {
     // Guards the invariant src/model/cache.ts documents: the rolling
     // breakpoint must never land on the notebook/suffix text, which changes
-    // every turn. normalizeOperatorTurns and placeBreakpoints both run BEFORE
-    // withSuffix precisely so the suffix block never exists yet when
-    // placeBreakpoints picks the rolling block.
+    // every turn. placeBreakpoints runs FIRST in the pipeline precisely so the
+    // suffix block does not exist yet when the rolling block is picked — and
+    // moving normalizeOperatorTurns to the END (final review C1) does not
+    // change that, because it only moves `system` messages, which
+    // placeBreakpoints skips wherever they sit.
     const req = buildRequest({ ...base, suffix: '- destination: Faro (user)' })
     const sent = req.messages as Array<{ content: Array<Record<string, unknown>> }>
     const blocks = sent.at(-1)!.content
