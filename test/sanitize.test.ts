@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { redactPrices, cutAtWords, PRICE_REDACTED, maskUntrustedText, maskControlChars, maskIdChars } from '../src/sanitize.js'
+import {
+  redactPrices, cutAtWords, PRICE_REDACTED, maskUntrustedText, maskControlChars, maskIdChars,
+  screenOutbound,
+} from '../src/sanitize.js'
 import { renderExpiredNotice } from '../src/agents/driver.js'
 
 describe('maskControlChars', () => {
@@ -91,6 +94,60 @@ describe('maskIdChars', () => {
     const out = maskIdChars(long)
     expect(out.length).toBe(129)
     expect(out.endsWith('…')).toBe(true)
+  })
+})
+
+describe('screenOutbound', () => {
+  it.each([
+    ['What is your card number?', 'card number'],
+    ['Can you give me your credit card details?', 'credit card'],
+    ['What is the CVV on the back?', 'cvv'],
+    ['What is the CVC printed on it?', 'cvc'],
+    ['Please confirm the card’s expiry date.', 'expiry date near card'],
+    ['Please send your IBAN.', 'iban'],
+    ['What is your sort code?', 'sort code'],
+    ['What is your account number?', 'account number'],
+    ['What is the routing number?', 'routing number'],
+    ['Can you tell me your passport number?', 'passport number'],
+    ['Please upload a passport photo.', 'passport photo, scan, or copy'],
+    ['Please upload a passport scan.', 'passport photo, scan, or copy'],
+    ['Please upload a passport copy.', 'passport photo, scan, or copy'],
+    ['What is your id number?', 'id number'],
+    ['What is your national id?', 'national id'],
+    ['What is your driver’s licence number?', "driver's licence or license number"],
+    ['What is your driver license number?', "driver's licence or license number"],
+    ['What is your password?', 'password'],
+    ['Can you read me the one-time code?', 'one-time code'],
+    ['What is the verification code?', 'verification code'],
+    ['Send me your 2FA code.', '2fa'],
+    ['What is your social security number?', 'social security'],
+    ['Please confirm your date of birth to match your card.', 'date of birth with passport or card'],
+    ['Please send me a photo of your passport.', 'send a photo, scan, or copy of your'],
+    ['Please send a scan of your licence.', 'send a photo, scan, or copy of your'],
+    ['Please send a copy of your booking confirmation.', 'send a photo, scan, or copy of your'],
+  ])('blocks %j (reason: %s)', (text, reason) => {
+    expect(screenOutbound(text)).toEqual({ ok: false, reason })
+  })
+
+  // Case-insensitive: the same phrase in another case must still be caught.
+  it('matches regardless of case', () => {
+    expect(screenOutbound('WHAT IS YOUR CVV?')).toEqual({ ok: false, reason: 'cvv' })
+  })
+
+  it.each([
+    'We never ask for payment or passport details.',
+    'Here are the prices for the week.',
+    'Thanks, I have updated your booking.',
+    'What is your check-in date?',
+    // A place name, not a request for a document: this office's rules key
+    // on a REQUEST (a number, a photo/scan/copy, a paired birth date) —
+    // never on the bare word "passport" — so a mention like this is left
+    // alone. See screenOutbound's doc comment for why a bare "passport"
+    // trigger, if ever added for extra caution, would make this an
+    // accepted false positive instead.
+    'The passport office is on Rua X.',
+  ])('leaves %j alone', (text) => {
+    expect(screenOutbound(text)).toEqual({ ok: true })
   })
 })
 

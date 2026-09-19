@@ -11,6 +11,9 @@ import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import { parseAction, renderActionMessage } from './actions.js'
+import { screenOutbound, SCREENED_REPLY } from './sanitize.js'
+import { recordAgentEvent } from './repo/agentEvents.js'
+import { recordEscalation } from './repo/escalations.js'
 
 export type AgentContext = {
   state: TurnState
@@ -240,6 +243,47 @@ type MessageRow = { role: 'user' | 'agent' | 'action'; content: string }
 const UNREADABLE_ACTION_TEXT =
   'Operator: a card action was recorded but could not be read. Ask her what she would like to do.'
 
+/**
+ * The outbound side of the sanitize boundary: every agent reply passes
+ * through `screenOutbound` (src/sanitize.ts) here, in the ONE place both
+ * `case 'message'` and `case 'park'` reach on their way to a stored message.
+ * A hit replaces `text` with `SCREENED_REPLY` and records why — the audit
+ * row (`agent_events`, kind `'screened'`) and the page to a human
+ * (`recordEscalation`, reason `'safety'`) are both best-effort and swallowed:
+ * a screened reply must still reach her, and the turn must still finish,
+ * even if the write documenting it or the page itself fails. That mirrors
+ * `escalate.ts`'s own notifier — a failed notification is logged, never
+ * something that blocks the exchange it describes.
+ *
+ * `recordEscalation` is called directly, not through the `escalate_to_human`
+ * tool: this is a filter firing on the office's OWN words, not a model
+ * choosing to escalate, so the tool's per-user daily limit does not apply —
+ * controller ruling: a screened reply is a safety event and must always
+ * page, however many have paged already today.
+ */
+async function screenReply(
+  sql: postgres.Sql, claim: Claim, text: string,
+): Promise<string> {
+  const s = screenOutbound(text)
+  if (s.ok) return text
+
+  await recordAgentEvent(sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    kind: 'screened', payload: { reason: s.reason, original: text.slice(0, 4000) },
+  }).catch((err: unknown) => {
+    console.error(`worker: recordAgentEvent for screened reply failed: ${(err as Error).message}`)
+  })
+
+  await recordEscalation(sql, {
+    conversationId: claim.conversationId, userId: claim.userId, turnId: claim.turnId,
+    proposalId: null, reason: 'safety',
+  }).catch((err: unknown) => {
+    console.error(`worker: escalation for screened reply failed: ${(err as Error).message}`)
+  })
+
+  return SCREENED_REPLY
+}
+
 async function loop(
   deps: WorkerDeps, claim: Claim, turnSpend: { total: bigint },
 ): Promise<void> {
@@ -362,7 +406,8 @@ async function loop(
         })
         turnSpend.total += step.costMicros
         await completeTurn(sql, claim, {
-          state, agentMessage: step.text, parked: true, spendMicros: turnSpend.total,
+          state, agentMessage: await screenReply(sql, claim, step.text),
+          parked: true, spendMicros: turnSpend.total,
         })
         return
       }
@@ -375,11 +420,14 @@ async function loop(
           costMicros: step.costMicros,
         })
         turnSpend.total += step.costMicros
-        // `parked: true` moves the conversation to 'awaiting_user'. fail_reason
-        // stays null: parking is not a failure, and recording it as one would
-        // make "how often does the driver actually fail?" unanswerable.
+        // `parked: true` moves the conversation to 'awaiting_user' — unless
+        // `screenReply` just escalated it, in which case `completeTurn`'s own
+        // sticky guard keeps it 'escalated'. fail_reason stays null: parking
+        // is not a failure, and recording it as one would make "how often
+        // does the driver actually fail?" unanswerable.
         await completeTurn(sql, claim, {
-          state, agentMessage: step.message, parked: true, spendMicros: turnSpend.total,
+          state, agentMessage: await screenReply(sql, claim, step.message),
+          parked: true, spendMicros: turnSpend.total,
         })
         return
       }

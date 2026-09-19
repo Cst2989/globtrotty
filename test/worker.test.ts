@@ -10,6 +10,7 @@ import { sweep } from '../src/sweeper.js'
 import * as turnsRepo from '../src/repo/turns.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { recordSpend } from '../src/repo/spend.js'
+import { SCREENED_REPLY } from '../src/sanitize.js'
 import type { TurnState } from '../src/engine.js'
 
 const USER = '11111111-1111-1111-1111-111111111111'
@@ -630,6 +631,69 @@ describeDb('runTurn end to end', () => {
       // ...and she is not left with a blank thread. Spec section 8: "fails the turn
       // with words she can act on".
       expect(msg!.content).toContain('what you are trying to book')
+    })
+  })
+})
+
+/**
+ * Task 4: the outbound solicitation filter. `screenOutbound` (src/sanitize.ts)
+ * itself is a pure function, exhaustively tested in test/sanitize.test.ts —
+ * this end-to-end test pins the seam where a hit actually changes what
+ * reaches the traveller: the stored reply, the audit row, the page, and the
+ * conversation's terminal status.
+ */
+describeDb('runTurn: the outbound solicitation filter', () => {
+  it('replaces a screened reply, records the event, escalates, and sticks the conversation as escalated', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const soliciting: Agent = async () => ({
+        kind: 'message', text: 'Please send me a photo of your passport', costMicros: 200n,
+      })
+      await runTurn(workerDeps(sql, soliciting), r.turnId!)
+
+      const [agentMsg] = await sql<MessageRow[]>`
+        select role, content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'
+         order by created_at desc limit 1`
+      expect(agentMsg!.content).toBe(SCREENED_REPLY)
+
+      const events = await sql<{ kind: string; payload: { reason: string; original: string } }[]>`
+        select kind, payload from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(1)
+      expect(events[0]!.kind).toBe('screened')
+      expect(events[0]!.payload.reason).toBe('send a photo, scan, or copy of your')
+      expect(events[0]!.payload.original).toBe('Please send me a photo of your passport')
+
+      const escalations = await sql<{ reason: string; proposal_id: string | null }[]>`
+        select reason, proposal_id from escalations where conversation_id = ${r.conversationId}`
+      expect(escalations).toHaveLength(1)
+      expect(escalations[0]!.reason).toBe('safety')
+      expect(escalations[0]!.proposal_id).toBeNull()
+
+      const [conv] = await sql<ConversationRow[]>`
+        select status from conversations where id = ${r.conversationId}`
+      // Sticky: completeTurn's own guard (src/repo/turns.ts) keeps 'escalated'
+      // rather than overwriting it with 'awaiting_user' on this parked path.
+      expect(conv!.status).toBe('escalated')
+
+      const [turn] = await sql<TurnRow[]>`select status from turns where id = ${r.turnId}`
+      expect(turn!.status).toBe('done')
+    })
+  })
+
+  // Break/restore proof for the TDD step: this is the exact shape the test
+  // above must fail against once `screenOutbound` stops firing at all.
+  it('an agent step that returns clean text is stored unchanged', async () => {
+    await withTestDb(async (sql) => {
+      const r = await submit(sql, 'a week in Portugal')
+      const clean: Agent = async () => ({ kind: 'message', text: 'Here is your itinerary.', costMicros: 10n })
+      await runTurn(workerDeps(sql, clean), r.turnId!)
+      const [agentMsg] = await sql<MessageRow[]>`
+        select content from messages
+         where conversation_id = ${r.conversationId} and role = 'agent'`
+      expect(agentMsg!.content).toBe('Here is your itinerary.')
+      const events = await sql`select id from agent_events where conversation_id = ${r.conversationId}`
+      expect(events).toHaveLength(0)
     })
   })
 })
