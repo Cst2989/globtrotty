@@ -41,9 +41,12 @@
  * reads below happen over HTTP, in a separate Postgres session PostgREST
  * opens itself; a seed left uncommitted in a rolled-back transaction would
  * never be visible to that session at all, and every "0 rows" assertion
- * would pass for the wrong reason. Cleanup runs in a `finally`: delete A's
- * seeded conversation (every child row cascades from it — see the FKs in
- * migrations 0001/0004/0014), then delete B's discriminator conversation,
+ * would pass for the wrong reason. Cleanup runs in a `finally`: delete every
+ * conversation id this run created (A's seeded one and B's discriminator
+ * one, tracked in `createdConversationIds` as each insert resolves, not only
+ * once a whole seed succeeds — a later insert in the same seed can still
+ * throw, and that conversation must not be orphaned; every child row
+ * cascades from its conversation — see the FKs in migrations 0001/0004/0014),
  * then `auth.admin.deleteUser` both users.
  *
  * Run it explicitly, once, before relying on it:
@@ -84,8 +87,11 @@ const GRANTED_TABLES = [
 
 // Tables with RLS enabled (0003/0004) and NO grant to `authenticated` at
 // all — selecting is refused at the privilege level, before any policy (or
-// its absence) is even consulted.
-const DENIED_TABLES = ['daily_usage', 'model_calls'] as const
+// its absence) is even consulted. All six of migration 0016's ungranted
+// tables (see the file header above), not just two.
+const DENIED_TABLES = [
+  'daily_usage', 'model_calls', 'canary_runs', 'drift_alarms', 'conversions', 'tool_calls',
+] as const
 
 type SeededRows = {
   conversationId: string
@@ -99,13 +105,30 @@ type SeededRows = {
   escalationId: string
 }
 
-/** One row in every granted table, owned by `userId`. Owner connection; commits immediately (no transaction). */
-async function seedGrantedTables(sql: postgres.Sql, userId: string): Promise<SeededRows> {
+/**
+ * One row in every granted table, owned by `userId`. Owner connection;
+ * commits immediately (no transaction) — each `insert` below is visible,
+ * and orphanable, the moment it resolves.
+ *
+ * `createdConversationIds` is pushed the moment the `conversations` insert
+ * itself resolves, BEFORE any of the eight inserts that follow (which all
+ * hang off that same conversation id) get a chance to throw. Without this,
+ * a `finally` that only knew about a fully-populated `SeededRows` (returned
+ * only after every insert below succeeds) would skip cleanup entirely on a
+ * partial-seed failure, orphaning the conversation — and every child row
+ * already inserted before the throw — in the shared hosted project;
+ * `conversations.user_id` has no FK to `auth.users`, so
+ * `auth.admin.deleteUser` does not cascade and clean it up either.
+ */
+async function seedGrantedTables(
+  sql: postgres.Sql, userId: string, createdConversationIds: string[],
+): Promise<SeededRows> {
   const tag = randomUUID()
 
   const [conv] = await sql<{ id: string }[]>`
     insert into conversations (user_id) values (${userId}) returning id`
   const conversationId = conv!.id
+  createdConversationIds.push(conversationId)
 
   const [turn] = await sql<{ id: string }[]>`
     insert into turns (conversation_id, user_id, idempotency_key, status)
@@ -202,6 +225,12 @@ describeLive('RLS: two-user isolation against the live Supabase project (migrati
       let userIdB: string | null = null
       let seedA: SeededRows | null = null
       let discriminatorConversationId: string | null = null
+      // Every conversation id created below, pushed the moment its insert
+      // resolves — not only once a full `SeededRows` (or the discriminator
+      // insert) succeeds. See seedGrantedTables' doc comment for why: this
+      // is what lets `finally` clean up a conversation (and its cascaded
+      // children) even when a LATER insert in the same seed throws.
+      const createdConversationIds: string[] = []
 
       try {
         // --- Setup: two real auth.users, one seeded conversation for A ---
@@ -217,7 +246,7 @@ describeLive('RLS: two-user isolation against the live Supabase project (migrati
         if (errB || !dataB.user) throw new Error(`auth.admin.createUser(B) failed: ${errB?.message}`)
         userIdB = dataB.user.id
 
-        seedA = await seedGrantedTables(ownerSql, userIdA)
+        seedA = await seedGrantedTables(ownerSql, userIdA, createdConversationIds)
 
         // --- Sign in as both, over the anon key — real HTTP, real GoTrue sessions ---
         const clientA = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -268,7 +297,7 @@ describeLive('RLS: two-user isolation against the live Supabase project (migrati
         // "column daily_usage.id does not exist" — a real error, but the wrong
         // one, and not proof of anything about the grant this assertion exists
         // to check. `select('*')` needs no column to exist up front and is
-        // refused on privileges alone, for both tables, the same way.
+        // refused on privileges alone, for all six tables, the same way.
         for (const client of [clientA, clientB]) {
           for (const table of DENIED_TABLES) {
             const { error } = await client.from(table).select('*')
@@ -284,20 +313,29 @@ describeLive('RLS: two-user isolation against the live Supabase project (migrati
         const [discRow] = await ownerSql<{ id: string }[]>`
           insert into conversations (user_id) values (${userIdB}) returning id`
         discriminatorConversationId = discRow!.id
+        createdConversationIds.push(discriminatorConversationId)
 
         const { ids: bConversationIds, errorMessage: bConvError } = await selectIds(clientB, 'conversations')
         expect(bConvError).toBeNull()
         expect(bConversationIds).toEqual([discriminatorConversationId])
       } finally {
         // Cleanup, best-effort but every step attempted even if an earlier one fails.
-        try {
-          if (seedA) await ownerSql`delete from conversations where id = ${seedA.conversationId}`
-        } catch { /* already gone, or setup never got this far */ }
-        try {
-          if (discriminatorConversationId) {
-            await ownerSql`delete from conversations where id = ${discriminatorConversationId}`
-          }
-        } catch { /* already gone */ }
+        // Deletes by `createdConversationIds`, not by `seedA`/
+        // `discriminatorConversationId` alone — those two are only set once
+        // their WHOLE seed (nine inserts, or the one-row discriminator
+        // insert) succeeds, so on a partial-seed throw (see
+        // seedGrantedTables' doc comment) they would still be `null` here
+        // and cleanup would skip the very conversation (and its cascaded
+        // children — the FKs in migrations 0001/0004/0014) that failure
+        // left behind. `createdConversationIds` is pushed to at insert time,
+        // before any later insert in the same seed gets a chance to throw,
+        // so every conversation this test created — fully seeded or not —
+        // is deleted here.
+        for (const id of createdConversationIds) {
+          try {
+            await ownerSql`delete from conversations where id = ${id}`
+          } catch { /* already gone, or setup never got this far */ }
+        }
         try {
           if (userIdA) await admin.auth.admin.deleteUser(userIdA)
         } catch { /* best-effort */ }

@@ -6,6 +6,22 @@
 // `seed` is not exported, and duplicating a small DB fixture here is cheaper
 // than exporting test-only surface from a production module).
 import { expect, it, vi } from 'vitest'
+
+// Fix round 3 (Task 9 review, Important #2). `decideProposal` is a direct
+// import in web/decideRoute.ts, not part of `DecideRouteDeps` — so the only
+// way to drive `makeDecide`'s narrowed catch (web/decideRoute.ts: only
+// `/already decided/i` maps to 409; anything else must propagate) through a
+// non-"already decided" `decideProposal` throw is to intercept the real
+// module. This wraps the ACTUAL implementation in a `vi.fn` so every other
+// test below still gets the real, DB-backed `decideProposal` — only the one
+// test that needs a different throw swaps in a one-shot fake via
+// `mockImplementationOnce`, which self-reverts to the real implementation
+// immediately after.
+vi.mock('../src/repo/proposals.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/repo/proposals.js')>()
+  return { ...actual, decideProposal: vi.fn(actual.decideProposal) }
+})
+
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { makeDecide, type DecideRouteDeps } from '../web/decideRoute.js'
@@ -18,6 +34,7 @@ import { money } from '../src/money.js'
 import { emptyNotebook, type Notebook } from '../src/notebook.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { parseAction } from '../src/actions.js'
+import { decideProposal } from '../src/repo/proposals.js'
 import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
 
 const NOW = new Date('2026-09-13T12:00:00Z')
@@ -151,6 +168,31 @@ describeDb('POST /api/proposals/[id]/decide', () => {
 
       const [proposal] = await sql`select decision from proposals where id = ${s.proposalId}`
       expect(proposal!.decision).toBe('accept')
+    })
+  })
+
+  // Fix round 3 (Task 9 review, Important #2). The catch above only
+  // recognises `decideProposal`'s own "already decided" message (proven by
+  // the 409 assertion in the test above); anything else — a bug in
+  // `onFreshTurn`, or in `submitAction` itself — must propagate rather than
+  // fold into the same misleading 409. Drives that via the one-shot fake
+  // `decideProposal` set up by the `vi.mock` above (not reachable through
+  // `DecideRouteDeps`: `decideProposal` is a direct import in
+  // web/decideRoute.ts, unlike `sql`/`invoke`).
+  it("an unrecognised decideProposal error (not the 'already decided' message) propagates rather than becoming 409", async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '16')
+      const invoke = vi.fn()
+      const handler = makeDecide({ sql, invoke })
+
+      vi.mocked(decideProposal).mockImplementationOnce(async () => {
+        throw new Error('decideProposal: proposal p-1 not found in this conversation')
+      })
+
+      await expect(
+        handler(USER, req({ decision: 'accept' }), ctx(s.proposalId)),
+      ).rejects.toThrow(/not found/)
+      expect(invoke).not.toHaveBeenCalled()
     })
   })
 
