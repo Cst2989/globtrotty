@@ -154,6 +154,30 @@ export type ProposalCardLiveProps = {
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
 const BUSY_ERROR = 'The desk is already working on this proposal — please try again shortly.'
+/**
+ * Final review, M3. A 429 from decide/revise is the spend ceiling:
+ * `submitAction` returns `limit_reached` BEFORE its transaction, so nothing
+ * was written — correctly — but the generic copy's "Please try again" is
+ * advice that cannot work today, however many times she follows it.
+ *
+ * Borrowed from `MessageBox`'s `messageForStatus`, which already says the
+ * right thing for the same status, minus its "Your message is saved": the
+ * message box's 429 DID store her text and this one stored nothing, so the
+ * card has to say what it will take instead of implying something is queued.
+ */
+const LIMIT_ERROR = "Today's spending limit is reached — the desk will pick this up tomorrow."
+
+/**
+ * The card's error copy for a non-OK response, extracted as a pure function
+ * for the same reason `MessageBox`'s `messageForStatus` is one: it makes the
+ * status-to-copy mapping testable without a fetch mock. See
+ * `test/web-render.test.ts`.
+ */
+export function errorForStatus(status: number): string {
+  if (status === 409) return BUSY_ERROR
+  if (status === 429) return LIMIT_ERROR
+  return GENERIC_ERROR
+}
 
 /**
  * The client island: owns the fetch calls to `/api/proposals/[id]/decide`
@@ -179,7 +203,7 @@ export function ProposalCardLive({ proposal, alternatives }: ProposalCardLivePro
         body: JSON.stringify(body),
       })
       if (!res.ok) {
-        setError(res.status === 409 ? BUSY_ERROR : GENERIC_ERROR)
+        setError(errorForStatus(res.status))
         return
       }
       router.refresh()

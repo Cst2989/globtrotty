@@ -10,7 +10,7 @@ import { MessageBubble } from '../web/components/MessageBubble.js'
 import { StatusLine } from '../web/components/StatusLine.js'
 import { ThreadView } from '../web/components/Thread.js'
 import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
-import { ProposalCard } from '../web/components/ProposalCard.js'
+import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
 import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
@@ -239,6 +239,34 @@ describe('ProposalCard', () => {
       createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
     )
     expect(html).toContain('2026-09-12 → 2026-09-19')
+  })
+
+  /**
+   * Final review, M3. A 429 from decide/revise is the spend ceiling —
+   * `submitAction` returns `limit_reached` before its transaction, so nothing
+   * was written — and the old mapping sent it to the generic "Please try
+   * again", advice that cannot work today however many times she takes it.
+   * `MessageBox.messageForStatus` already gets this right for the message
+   * box; this is the card's version, minus that one's "Your message is
+   * saved", which would be false here.
+   */
+  it('maps 409 to the busy copy, 429 to the spend-ceiling copy, and everything else to the generic one', () => {
+    expect(errorForStatus(409)).toContain('already working on this proposal')
+    expect(errorForStatus(429)).toContain("Today's spending limit is reached")
+    expect(errorForStatus(429)).not.toMatch(/try again/i)
+    expect(errorForStatus(429)).not.toMatch(/saved/i)
+    expect(errorForStatus(500)).toBe('That could not be sent. Please try again.')
+    expect(errorForStatus(404)).toBe('That could not be sent. Please try again.')
+  })
+
+  it('renders whatever error copy it is given, as plain text', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, {
+        proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS,
+        error: errorForStatus(429),
+      }),
+    )
+    expect(html).toContain('Today&#x27;s spending limit is reached')
   })
 
   // Task 8 review, Minor #6: Accept/Reject/Shift and the SwapPicker's own
