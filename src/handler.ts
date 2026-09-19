@@ -54,6 +54,17 @@ export type SubmitActionInput = {
    * expired. Folding the write into the same transaction as the turn that
    * is supposed to act on it means a decision is recorded if and only if a
    * turn was actually queued to read it.
+   *
+   * MUST use the `tx` handle it is given — never close over the root `sql`
+   * (or any other connection) instead. `tx` is the same transaction that
+   * just won the insert against `turns_one_active_per_conversation` (the
+   * partial unique index the whole "one turn in flight" guarantee rests
+   * on); that lock is held until `tx` commits or rolls back. A query run on
+   * a DIFFERENT connection inside this callback — even a read of the same
+   * conversation's own rows — can block behind a lock this very
+   * transaction holds, and since nothing can make `tx` itself proceed until
+   * that other connection's query returns, the two wait on each other
+   * forever. Every statement `onFreshTurn` needs must run on `tx`.
    */
   onFreshTurn?: (tx: postgres.TransactionSql) => Promise<void>
 }

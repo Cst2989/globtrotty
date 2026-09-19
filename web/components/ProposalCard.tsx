@@ -6,6 +6,7 @@ import { formatMoney, money } from '@/src/money'
 import { SLOT_KINDS } from '@/src/gates/checks'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '@/web/data'
 import { SwapPicker } from './SwapPicker'
+import { ageText } from './age'
 
 export type ProposalCardProps = {
   proposal: ProposalRowLite & { links: LinkLite[] }
@@ -18,17 +19,6 @@ export type ProposalCardProps = {
   onReject: (reason: string) => void
   onSwap: (slot: string, sourceId: string) => void
   onShift: (days: -2 | 2) => void
-}
-
-/**
- * "found 12 min ago" — same rounding rule as `src/tools/cashier.ts` and
- * `src/agents/reviewer.ts`. Exported (Task 8 review, Minor #4) so
- * `SwapPicker` can show the same age text for each alternative it offers,
- * rather than duplicating the rounding rule a second time.
- */
-export function ageText(fetchedAt: string, now: Date): string {
-  const ageMin = Math.max(0, Math.round((now.getTime() - new Date(fetchedAt).getTime()) / 60_000))
-  return `found ${ageMin} min ago`
 }
 
 /**

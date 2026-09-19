@@ -69,7 +69,16 @@ export type DecideRouteDeps = {
  * — INSIDE the same transaction as the turn insert, after the turn is
  * actually won: a `busy`/`limit_reached` result never reaches it at all, and
  * an "already decided" throw rolls the turn insert back with it, surfacing
- * to this route as a rejected promise it maps to 409.
+ * to this route as a rejected promise — see the narrowed catch below.
+ *
+ * Fix round 2 (Task 8 re-review, carried item 1): that catch used to map
+ * EVERY throw from `submitAction` to 409, `decideProposal`'s "already
+ * decided" included but not distinguished from anything else — a bug in
+ * `onFreshTurn`, or in `submitAction` itself, would surface as the same
+ * misleading 409 rather than the 500 an unexpected error should be. The
+ * catch now only recognises `decideProposal`'s own message; anything else
+ * propagates, and `withUser` (`web/session.ts`) turns an uncaught throw
+ * into a 500.
  */
 export function makeDecide(deps: DecideRouteDeps) {
   return async (user: SessionUser, req: Request, ctx: RouteContext): Promise<Response> => {
@@ -127,9 +136,27 @@ export function makeDecide(deps: DecideRouteDeps) {
 
       if (result.status === 'busy') return NextResponse.json({ error: 'busy' }, { status: 409 })
       if (result.status === 'limit_reached') return NextResponse.json({ error: 'limit_reached' }, { status: 429 })
-      return NextResponse.json({ turnId: result.turnId })
-    } catch {
-      return NextResponse.json({ error: 'already_decided' }, { status: 409 })
+      // Fix round 2 (carried item 5), 'duplicate' named explicitly rather
+      // than falling into the same line as 'queued' below: this route's
+      // `idempotencyKey` is a fresh `randomUUID()` on every call, so
+      // `submitAction` can only report 'duplicate' when it read back a
+      // turn some OTHER, already-committed call to this same conversation
+      // won. Either way a turn exists for this decision — 200 with its id,
+      // same shape as 'queued', because the decision was already recorded
+      // by whichever request actually won it, not by this one.
+      if (result.status === 'duplicate') return NextResponse.json({ turnId: result.turnId })
+      return NextResponse.json({ turnId: result.turnId })   // status === 'queued'
+    } catch (err) {
+      // Only `decideProposal`'s own "already decided"/"not found" throw (see
+      // its doc comment in src/repo/proposals.ts) maps to 409 here. Anything
+      // else — a bug in `onFreshTurn`, or in `submitAction` itself — must not
+      // be swallowed into the same misleading 409; it propagates and
+      // `withUser` turns it into a 500, per carried item 1 of the Task 8
+      // re-review.
+      if (err instanceof Error && /already decided/i.test(err.message)) {
+        return NextResponse.json({ error: 'already_decided' }, { status: 409 })
+      }
+      throw err
     }
   }
 }

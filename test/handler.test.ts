@@ -244,6 +244,31 @@ describeDb('submitAction', () => {
     })
   })
 
+  // Task 9 re-review, carried item 2: `onFreshTurn` runs INSIDE the same
+  // transaction as the turn insert (see its doc comment in src/handler.ts).
+  // A throw from it must roll that whole transaction back — the turn row
+  // included, not just the action/note rows that come after it — and the
+  // rejection must reach the caller unchanged (`web/decideRoute.ts` inspects
+  // its message to decide 409 vs. 500).
+  it("rolls back the whole transaction, turn row included, when onFreshTurn rejects", async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await insertConversation(sql, 'planning')
+      const invoke = vi.fn()
+      const boom = new Error('decideProposal: proposal already decided')
+      await expect(
+        submitAction(deps(sql, invoke), {
+          userId: USER, conversationId, action: HAND_OFF, idempotencyKey: 'a1',
+          onFreshTurn: () => { throw boom },
+        }),
+      ).rejects.toBe(boom)
+      expect(invoke).not.toHaveBeenCalled()
+      const turns = await sql`select id from turns where conversation_id = ${conversationId}`
+      expect(turns).toHaveLength(0)
+      const msgs = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(msgs).toHaveLength(0)
+    })
+  })
+
   // Plan 4a, Task 8: the decide route's reject-with-a-reason path. Her typed
   // reason is stored as an ordinary 'user' message, BEFORE the action row, in
   // the same fresh-turn transaction — never folded into the action's own JSON

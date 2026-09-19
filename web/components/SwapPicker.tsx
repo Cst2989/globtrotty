@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { formatMoney, money } from '@/src/money'
 import type { AlternativeLite } from '@/web/data'
-import { ageText } from './ProposalCard'
+import { ageText } from './age'
 
 export type SwapPickerProps = {
   /**
@@ -27,7 +27,8 @@ export type SwapPickerProps = {
  * Spec §2's per-item "swap" control. Collapsed to a single "Swap" button
  * until opened; open, it is a `<select>` over the OTHER corpus results for
  * this slot's kind — each option showing its price AND its own age, via
- * `ProposalCard`'s exported `ageText` — plus a confirm button, which calls
+ * `./age`'s `ageText` (shared with `ProposalCard`, not imported from it —
+ * see that module's header) — plus a confirm button, which calls
  * `onPick`. The caller (`ProposalCard`) is the one that POSTs to
  * `/api/proposals/[id]/revise`; this component only ever reads props and
  * reports a choice back up.
