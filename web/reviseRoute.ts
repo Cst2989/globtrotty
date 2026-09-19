@@ -10,6 +10,7 @@ import { submitAction } from '@/src/handler'
 import { loadProposalForUser } from '@/src/repo/proposals'
 import { DEFAULT_LIMITS } from '@/src/limits'
 import { SLOT_NAMES } from '@/src/gates/rehydrateGate'
+import { SLOT_KINDS } from '@/src/gates/checks'
 
 /**
  * `POST /api/proposals/[id]/revise`'s real logic — kept out of
@@ -43,6 +44,17 @@ export type ReviseRouteDeps = {
  * `loadProposalForUser` on the owner connection, before `submitAction` ever
  * runs — a proposal id from another traveller's account 404s, never 500s or
  * silently acts.
+ *
+ * Fix round 1 (Task 8 review, Important #3): a `swap`'s `sourceId` is
+ * checked against `tool_results` (owner connection, scoped to THIS
+ * conversation and the slot's own kind) before `submitAction` ever runs —
+ * without this, the card could hand the model a `revise_component` call
+ * naming a `sourceId` that either belongs to another conversation entirely
+ * or is the wrong kind for the slot (a hotel id for `outbound`), which
+ * `buildRevisedRefs` (`src/tools/revise.ts`) has no way to catch until the
+ * NEXT gate run — by which point a whole turn (and a model call) has
+ * already been spent discovering it. 404 here, matching every other
+ * "does this id exist for you" check in these two routes.
  */
 export function makeRevise(deps: ReviseRouteDeps) {
   return async (user: SessionUser, req: Request, ctx: RouteContext): Promise<Response> => {
@@ -68,6 +80,18 @@ export function makeRevise(deps: ReviseRouteDeps) {
     const proposal = await loadProposalForUser(deps.sql, proposalId, user.id)
     if (!proposal) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    }
+
+    if (parsed.data.kind === 'swap') {
+      const wantKind = SLOT_KINDS[parsed.data.slot]
+      const corpus = await deps.sql`
+        select 1 from tool_results
+         where conversation_id = ${proposal.conversationId}
+           and source_id = ${parsed.data.sourceId}
+           and kind = ${wantKind}`
+      if (corpus.length === 0) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 })
+      }
     }
 
     const result = await submitAction(

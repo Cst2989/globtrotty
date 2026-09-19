@@ -170,6 +170,69 @@ describeDb('POST /api/proposals/[id]/decide', () => {
       expect(res.status).toBe(400)
     })
   })
+
+  it('a rejectReason sent alongside decision: accept is 400', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '05b')
+      const handler = makeDecide({ sql, invoke: vi.fn() })
+      const res = await handler(USER, req({ decision: 'accept', rejectReason: 'not applicable' }), ctx(s.proposalId))
+      expect(res.status).toBe(400)
+    })
+  })
+
+  // Fix round 1 (Task 8 review, Critical). Before this fix, `decideProposal`
+  // ran BEFORE `submitAction` — a turn already in flight failed AFTER the
+  // decision was already durable, leaving an accepted proposal with no
+  // hand-off turn and no buttons (the card loses them once `decision` is
+  // set). `decideProposal` now runs as `submitAction`'s `onFreshTurn` hook,
+  // inside the SAME transaction as the turn insert, so it only ever runs
+  // once a turn is actually won.
+  it('a turn already in flight leaves the decision unrecorded (409, not silently accepted)', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '11')
+      // A turn in flight for this conversation AT decide-time — the seed's
+      // own turn is already marked 'done', so this simulates a traveller
+      // pressing Accept while some other message/turn is still running.
+      await sql`insert into turns (conversation_id, user_id, idempotency_key, status)
+                values (${s.conversationId}, ${USER.id}, 'in-flight', 'running')`
+      const invoke = vi.fn()
+      const handler = makeDecide({ sql, invoke })
+
+      const res = await handler(USER, req({ decision: 'accept' }), ctx(s.proposalId))
+
+      expect(res.status).toBe(409)
+      expect(invoke).not.toHaveBeenCalled()
+      const [proposal] = await sql`select decision from proposals where id = ${s.proposalId}`
+      expect(proposal!.decision).toBeNull()
+      const actionRows = await sql`select id from messages where conversation_id = ${s.conversationId} and role = 'action'`
+      expect(actionRows).toHaveLength(0)
+    })
+  })
+
+  it('the account spend ceiling leaves the decision unrecorded (429, not silently accepted)', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '12')
+      // `on conflict … do update`, not a bare insert: `seed`'s own
+      // `runProposalPath` call already spends (and upserts `daily_usage` for
+      // this exact user+day) via the reviewer's model call, so a bare insert
+      // here would hit the same `(user_id, day)` primary key seed itself just
+      // created and fail outright rather than exercising the ceiling.
+      await sql`insert into daily_usage (user_id, day, cost_micros)
+                values (${USER.id}, (now() at time zone 'utc')::date, ${DEFAULT_LIMITS.dailyCeilingMicros.toString()})
+                on conflict (user_id, day) do update set cost_micros = excluded.cost_micros, updated_at = now()`
+      const invoke = vi.fn()
+      const handler = makeDecide({ sql, invoke })
+
+      const res = await handler(USER, req({ decision: 'accept' }), ctx(s.proposalId))
+
+      expect(res.status).toBe(429)
+      expect(invoke).not.toHaveBeenCalled()
+      const [proposal] = await sql`select decision from proposals where id = ${s.proposalId}`
+      expect(proposal!.decision).toBeNull()
+      const actionRows = await sql`select id from messages where conversation_id = ${s.conversationId} and role = 'action'`
+      expect(actionRows).toHaveLength(0)
+    })
+  })
 })
 
 describeDb('POST /api/proposals/[id]/revise', () => {
@@ -242,6 +305,40 @@ describeDb('POST /api/proposals/[id]/revise', () => {
       const handler = makeRevise({ sql, invoke: vi.fn() })
       const res = await handler(USER, req({ kind: 'swap', slot: 'bogus', sourceId: 'X' }), ctx(s.proposalId))
       expect(res.status).toBe(400)
+    })
+  })
+
+  // Fix round 1 (Task 8 review, Important #3): a swap's sourceId is checked
+  // against `tool_results` (owner connection, this conversation, the slot's
+  // own kind) before submitAction ever runs.
+  it('a swap sourceId from another conversation is 404, and writes nothing', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '13')
+      const other = await seed(sql, USER.id, '14')
+      const handler = makeRevise({ sql, invoke: vi.fn() })
+
+      const res = await handler(
+        USER, req({ kind: 'swap', slot: 'stay', sourceId: other.hi[0]!.sourceId }), ctx(s.proposalId),
+      )
+
+      expect(res.status).toBe(404)
+      const msgs = await sql`select id from messages where conversation_id = ${s.conversationId}`
+      expect(msgs).toHaveLength(0)
+    })
+  })
+
+  it('a hotel sourceId sent for the outbound (flight) slot is 404', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, USER.id, '15')
+      const handler = makeRevise({ sql, invoke: vi.fn() })
+
+      const res = await handler(
+        USER, req({ kind: 'swap', slot: 'outbound', sourceId: s.hi[0]!.sourceId }), ctx(s.proposalId),
+      )
+
+      expect(res.status).toBe(404)
+      const msgs = await sql`select id from messages where conversation_id = ${s.conversationId}`
+      expect(msgs).toHaveLength(0)
     })
   })
 })

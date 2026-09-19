@@ -131,9 +131,19 @@ export async function loadProposal(
  * Her decision, recorded once. Not a tool: the plan 4 route handler and the
  * demo both call this, so the cashier's 30-minute window has one clock.
  * `now` is injectable for tests; production passes nothing.
+ *
+ * Fix round 1 (Task 8 review, Critical): `sql` accepts a `TransactionSql`
+ * handle too, not only the root `Sql` connection — `web/decideRoute.ts` now
+ * calls this from inside `submitAction`'s own transaction (via its
+ * `onFreshTurn` hook), so the decision and the action/turn row it authorises
+ * commit or roll back together. This function never calls `sql.begin` itself
+ * (confirmed: every statement below is a plain tagged-template query on
+ * whichever handle it is given), which is what makes accepting either handle
+ * safe — a `TransactionSql` has no `.begin` of its own, but nothing here
+ * needs one.
  */
 export async function decideProposal(
-  sql: postgres.Sql,
+  sql: postgres.Sql | postgres.TransactionSql,
   args: {
     proposalId: string; conversationId: string
     decision: 'accept' | 'reject'; rejectReason?: string | null; now?: Date

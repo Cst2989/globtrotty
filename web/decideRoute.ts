@@ -24,10 +24,20 @@ import type { ActionPayload } from '@/src/actions'
  * field. It travels as `submitAction`'s `userNote` instead, which stores it
  * as an ordinary `role = 'user'` message the model reads through the normal
  * transcript, in the SAME transaction as the action row.
+ *
+ * Fix round 1 (Task 8 review, Minor #7): `superRefine` rejects a
+ * `rejectReason` sent alongside `decision: 'accept'` — a reason only makes
+ * sense on a rejection, and silently ignoring it (the previous shape) would
+ * let a client believe an accept-time note was recorded somewhere when
+ * nothing downstream ever reads it.
  */
 const Body = z.strictObject({
   decision: z.enum(['accept', 'reject']),
   rejectReason: z.string().min(1).max(2000).optional(),
+}).superRefine((value, ctx) => {
+  if (value.decision === 'accept' && value.rejectReason !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['rejectReason'], message: 'rejectReason is only valid with decision: "reject"' })
+  }
 })
 
 export type DecideRouteDeps = {
@@ -37,15 +47,29 @@ export type DecideRouteDeps = {
 
 /**
  * Builds the inner `(user, req, ctx)` handler `route.ts`'s `POST` wraps with
- * `withUser`. `test/api-proposals.test.ts` calls this directly with
+ * `withUser`. `test/web-api-proposals.test.ts` calls this directly with
  * `withTestDb`'s `sql`, a `vi.fn()` invoke, and a fixed session user.
  *
  * Ownership is checked EXPLICITLY on the owner connection
- * (`loadProposalForUser`) before `decideProposal` ever runs — that function
+ * (`loadProposalForUser`) before `submitAction` ever runs — that function
  * runs on `deps.sql`, which bypasses RLS entirely, so without this lookup a
  * signed-in traveller could decide (or probe the existence of) any proposal
  * id by guessing uuids. A proposal that doesn't exist and one that exists
  * under someone else's account look identical here — 404 either way.
+ *
+ * Fix round 1 (Task 8 review, Critical): `decideProposal` is no longer
+ * called ahead of `submitAction`. The original shape recorded the decision
+ * FIRST and only then tried to win a fresh turn for the hand-off/rejected
+ * action — a turn already in flight (`busy`) or the account's spend ceiling
+ * (`limit_reached`) both fail AFTER the decision was already durable, which
+ * left an accepted proposal with no hand-off turn, no buttons (the card
+ * loses them once `decision` is set), and no way back once the cashier's
+ * own 30-minute acceptance window (`src/tools/cashier.ts`) had since
+ * expired. `decideProposal` now runs as `submitAction`'s `onFreshTurn` hook
+ * — INSIDE the same transaction as the turn insert, after the turn is
+ * actually won: a `busy`/`limit_reached` result never reaches it at all, and
+ * an "already decided" throw rolls the turn insert back with it, surfacing
+ * to this route as a rejected promise it maps to 409.
  */
 export function makeDecide(deps: DecideRouteDeps) {
   return async (user: SessionUser, req: Request, ctx: RouteContext): Promise<Response> => {
@@ -73,38 +97,40 @@ export function makeDecide(deps: DecideRouteDeps) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 })
     }
 
-    // `decideProposal` throws on not-found (impossible here, already scoped
-    // above) or already-decided — a second decide lands here as 409, per
-    // the brief's own test ("second decide → 409").
-    try {
-      await decideProposal(deps.sql, {
-        proposalId,
-        conversationId: proposal.conversationId,
-        decision: parsed.data.decision,
-        rejectReason: parsed.data.decision === 'reject' ? parsed.data.rejectReason ?? null : null,
-      })
-    } catch {
-      return NextResponse.json({ error: 'already_decided' }, { status: 409 })
-    }
-
     const action: ActionPayload = parsed.data.decision === 'accept'
       ? { action: 'hand_off', proposalId }
       : { action: 'rejected', proposalId }
 
-    const result = await submitAction(
-      { sql: deps.sql, limits: DEFAULT_LIMITS, invoke: deps.invoke },
-      {
-        userId: user.id,
-        conversationId: proposal.conversationId,
-        action,
-        idempotencyKey: randomUUID(),
-        userNote: parsed.data.decision === 'reject' ? parsed.data.rejectReason : undefined,
-      },
-    )
+    // `decideProposal` throws on not-found (impossible here, already scoped
+    // above) or already-decided — thrown from inside `onFreshTurn`, which
+    // rolls the whole transaction back (the fresh turn included) and
+    // rejects this call. A second decide lands here as 409, per the
+    // brief's own test ("second decide → 409") — now via this catch rather
+    // than a standalone `decideProposal` call ahead of `submitAction`.
+    try {
+      const result = await submitAction(
+        { sql: deps.sql, limits: DEFAULT_LIMITS, invoke: deps.invoke },
+        {
+          userId: user.id,
+          conversationId: proposal.conversationId,
+          action,
+          idempotencyKey: randomUUID(),
+          userNote: parsed.data.decision === 'reject' ? parsed.data.rejectReason : undefined,
+          onFreshTurn: (tx) => decideProposal(tx, {
+            proposalId,
+            conversationId: proposal.conversationId,
+            decision: parsed.data.decision,
+            rejectReason: parsed.data.decision === 'reject' ? parsed.data.rejectReason ?? null : null,
+          }),
+        },
+      )
 
-    if (result.status === 'busy') return NextResponse.json({ error: 'busy' }, { status: 409 })
-    if (result.status === 'limit_reached') return NextResponse.json({ error: 'limit_reached' }, { status: 429 })
-    return NextResponse.json({ turnId: result.turnId })
+      if (result.status === 'busy') return NextResponse.json({ error: 'busy' }, { status: 409 })
+      if (result.status === 'limit_reached') return NextResponse.json({ error: 'limit_reached' }, { status: 429 })
+      return NextResponse.json({ turnId: result.turnId })
+    } catch {
+      return NextResponse.json({ error: 'already_decided' }, { status: 409 })
+    }
   }
 }
 

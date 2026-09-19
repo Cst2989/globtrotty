@@ -38,7 +38,13 @@ export type LatestTurn = {
   fail_reason: string | null
 }
 
-/** One itinerary line, trimmed from `proposals.itinerary` for the card. */
+/**
+ * One itinerary line, trimmed from `proposals.itinerary` for the card.
+ * `dates` (Task 8 review, Minor #9) is a human string built from the stored
+ * `detail` — a flight's outbound departure date, and its inbound departure
+ * date too when one exists; a hotel's check-in → check-out — or `null` when
+ * `detail` does not carry a recognisable shape for its `kind`.
+ */
 export type ProposalItemLite = {
   slot: string
   sourceId: string
@@ -47,6 +53,7 @@ export type ProposalItemLite = {
   priceMinor: string
   currency: string
   fetchedAt: string
+  dates: string | null
 }
 
 export type ProposalRowLite = {
@@ -66,13 +73,20 @@ export type LinkLite = {
   currency: string
 }
 
-/** One corpus row from `tool_results`, trimmed for the swap picker. */
+/**
+ * One corpus row from `tool_results`, trimmed for the swap picker.
+ * `ttlSeconds` travels alongside `fetchedAt` (Task 8 review, Minor #4) so
+ * `dropExpiredAlternatives` can filter out ids past their own ttl, and so
+ * `SwapPicker` can show each option's own "found N min ago" age — the same
+ * information the card already shows for the item it might replace.
+ */
 export type AlternativeLite = {
   sourceId: string
   name: string
   priceMinor: string
   currency: string
   fetchedAt: string
+  ttlSeconds: number
 }
 
 export type Thread = {
@@ -246,13 +260,48 @@ export async function loadThread(sb: SupabaseClient, id: string): Promise<Thread
 type StoredItineraryLike = { items?: unknown }
 type StoredItineraryItemLike = {
   slot?: unknown; sourceId?: unknown; kind?: unknown; name?: unknown
-  priceMinor?: unknown; currency?: unknown; fetchedAt?: unknown
+  priceMinor?: unknown; currency?: unknown; fetchedAt?: unknown; detail?: unknown
+}
+type UnknownRecord = Record<string, unknown>
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return typeof v === 'object' && v !== null
+}
+
+/**
+ * Task 8 review, Minor #9. Reads straight off `StoredItineraryItem.detail`
+ * (`src/repo/proposals.ts`'s `FlightDetail | HotelDetail`, as jsonb — hence
+ * `unknown` here, same posture as `itineraryItemsLite` around it) rather than
+ * importing those harness types: this only ever needs three or four string
+ * fields, and duplicating that much structural checking is cheaper than
+ * trusting a jsonb column's shape at the type level. `departureLocal` is a
+ * naive ISO string with no offset (`src/supplier/types.ts`'s own comment) —
+ * `.slice(0, 10)` reads its date portion without ever parsing it into a
+ * `Date`, which is the one thing this codebase never does to that field.
+ * Returns `null` (never throws) when `detail` doesn't carry a recognisable
+ * shape for `kind`.
+ */
+function datesFromDetail(kind: 'flight' | 'hotel', detail: unknown): string | null {
+  if (!isRecord(detail)) return null
+  if (kind === 'flight') {
+    const outbound = detail.outbound
+    const inbound = detail.inbound
+    const outboundDate = isRecord(outbound) && typeof outbound.departureLocal === 'string'
+      ? outbound.departureLocal.slice(0, 10) : null
+    if (!outboundDate) return null
+    const inboundDate = isRecord(inbound) && typeof inbound.departureLocal === 'string'
+      ? inbound.departureLocal.slice(0, 10) : null
+    return inboundDate ? `${outboundDate} → ${inboundDate}` : outboundDate
+  }
+  const { checkIn, checkOut } = detail
+  if (typeof checkIn !== 'string' || typeof checkOut !== 'string') return null
+  return `${checkIn} → ${checkOut}`
 }
 
 /**
  * Trims `proposals.itinerary` (the REHYDRATED snapshot `src/repo/proposals.ts`
  * wrote — never the model's own version, see that module's doc comment) down
- * to the five fields the card renders. Never throws: a shape this reader does
+ * to the fields the card renders. Never throws: a shape this reader does
  * not recognise (a future schema version, a hand-edited row) yields an empty
  * item list rather than a 500 — the card still shows the total, the gate
  * outcome and the buttons even if an individual line cannot be read.
@@ -262,13 +311,13 @@ export function itineraryItemsLite(itinerary: unknown): ProposalItemLite[] {
   if (!Array.isArray(items)) return []
   const out: ProposalItemLite[] = []
   for (const raw of items as StoredItineraryItemLike[]) {
-    const { slot, sourceId, kind, name, priceMinor, currency, fetchedAt } = raw
+    const { slot, sourceId, kind, name, priceMinor, currency, fetchedAt, detail } = raw
     if (
       typeof slot !== 'string' || typeof sourceId !== 'string' || typeof name !== 'string'
       || typeof priceMinor !== 'string' || typeof currency !== 'string' || typeof fetchedAt !== 'string'
       || (kind !== 'flight' && kind !== 'hotel')
     ) continue
-    out.push({ slot, sourceId, kind, name, priceMinor, currency, fetchedAt })
+    out.push({ slot, sourceId, kind, name, priceMinor, currency, fetchedAt, dates: datesFromDetail(kind, detail) })
   }
   return out
 }
@@ -281,7 +330,7 @@ export function itineraryItemsLite(itinerary: unknown): ProposalItemLite[] {
  * ordering on `fetched_at` descending before calling this.
  */
 export function newestAlternativePerSourceId(
-  rows: { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string }[],
+  rows: { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string; ttl_seconds: number }[],
 ): AlternativeLite[] {
   const seen = new Set<string>()
   const out: AlternativeLite[] = []
@@ -290,10 +339,22 @@ export function newestAlternativePerSourceId(
     seen.add(r.source_id)
     out.push({
       sourceId: r.source_id, name: r.name, priceMinor: String(r.price_minor),
-      currency: r.currency, fetchedAt: r.fetched_at,
+      currency: r.currency, fetchedAt: r.fetched_at, ttlSeconds: r.ttl_seconds,
     })
   }
   return out
+}
+
+/**
+ * Fix round 1 (Task 8 review, Minor #4). Same rule `src/repo/toolResults.ts`'s
+ * `listExpiredSourceIds` applies for the gate's freshness warning, extracted
+ * here as a pure function over the already-trimmed `AlternativeLite` shape so
+ * it is testable without a live DB. An id whose newest fetch is already past
+ * its own ttl is not a real swap option — offering it would let her pick a
+ * price that is already known to be stale.
+ */
+export function dropExpiredAlternatives(rows: AlternativeLite[], now: Date): AlternativeLite[] {
+  return rows.filter((r) => new Date(r.fetchedAt).getTime() + r.ttlSeconds * 1000 >= now.getTime())
 }
 
 /**
@@ -302,6 +363,15 @@ export function newestAlternativePerSourceId(
  * spec §2: "After accept, the card shows the links from `link_clicks` as the
  * only anchors on the page" — a decided-`'reject'`-or-undecided proposal
  * gets an empty `links` array rather than a wasted query.
+ *
+ * Fix round 1 (Task 8 review, Minor #8): `.limit(20)` — a bound in the same
+ * spirit as `listConversations`'s `.limit(50)` and `loadThread`'s
+ * `.limit(500)` above; a conversation that has been revised dozens of times
+ * has no reason to render every superseded card. The `select` names exactly
+ * the columns the card uses: `itinerary` is selected WHOLE (never a partial
+ * jsonb projection) because `itineraryItemsLite` needs every item's full
+ * shape, not a column subset — nothing is dropped from it silently, the
+ * trimming happens in that function, after the fetch, not in this query.
  */
 export async function loadProposals(
   sb: SupabaseClient, conversationId: string,
@@ -311,6 +381,7 @@ export async function loadProposals(
     .select('id, itinerary, total_minor, currency, gate_outcome, review_issues, decision, created_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
+    .limit(20)
   if (error) throw error
   if (!rows || rows.length === 0) return []
 
@@ -348,27 +419,36 @@ export async function loadProposals(
 
 /**
  * The swap picker's corpus reads: the newest `tool_results` row per
- * `source_id`, for one conversation and one kind. `tool_results` is
- * append-only (`src/repo/toolResults.ts`'s own doc comment), so a `source_id`
- * can have several rows across separate fetches; `.limit(200)` plus the
- * newest-first ordering bounds the read the same way `listConversations`
- * above bounds its own first-message lookup, and `newestAlternativePerSourceId`
- * does the dedup client-side for the same reason given there: no live test
- * here confirms a PostgREST `distinct on`-equivalent shape, so this takes the
- * flat-query-plus-JS-dedup fallback instead.
+ * `source_id`, for one conversation and one kind, with ids past their own
+ * ttl dropped. `tool_results` is append-only (`src/repo/toolResults.ts`'s own
+ * doc comment), so a `source_id` can have several rows across separate
+ * fetches; `.limit(200)` plus the newest-first ordering bounds the read the
+ * same way `listConversations` above bounds its own first-message lookup,
+ * and `newestAlternativePerSourceId` does the dedup client-side for the same
+ * reason given there: no live test here confirms a PostgREST
+ * `distinct on`-equivalent shape, so this takes the flat-query-plus-JS-dedup
+ * fallback instead.
+ *
+ * Fix round 1 (Task 8 review, Minor #4): PostgREST cannot filter on
+ * `fetched_at + ttl_seconds * interval '1 second' > now()` — a computed
+ * comparison across two columns — in its own query-string filter syntax, so
+ * `ttl_seconds` is selected alongside `fetched_at` and the expiry check
+ * (`dropExpiredAlternatives`) runs in JS after the fetch instead, same as the
+ * dedup itself. `now` is injectable for tests; production passes nothing.
  */
 export async function loadAlternatives(
-  sb: SupabaseClient, conversationId: string, kind: 'flight' | 'hotel',
+  sb: SupabaseClient, conversationId: string, kind: 'flight' | 'hotel', now: Date = new Date(),
 ): Promise<AlternativeLite[]> {
   const { data, error } = await sb
     .from('tool_results')
-    .select('source_id, name, price_minor, currency, fetched_at')
+    .select('source_id, name, price_minor, currency, fetched_at, ttl_seconds')
     .eq('conversation_id', conversationId)
     .eq('kind', kind)
     .order('fetched_at', { ascending: false })
     .limit(200)
   if (error) throw error
-  return newestAlternativePerSourceId(
-    (data ?? []) as { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string }[],
+  const deduped = newestAlternativePerSourceId(
+    (data ?? []) as { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string; ttl_seconds: number }[],
   )
+  return dropExpiredAlternatives(deduped, now)
 }

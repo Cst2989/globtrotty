@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
-  type ThreadMessage,
+  dropExpiredAlternatives, type ThreadMessage, type AlternativeLite,
 } from '../web/data.js'
 
 const PROPOSAL_ID = '44444444-4444-4444-8444-444444444444'
@@ -72,7 +72,7 @@ describe('firstMessagePerConversation', () => {
 })
 
 describe('itineraryItemsLite', () => {
-  it('trims a real StoredItinerary down to the five card fields', () => {
+  it('trims a real StoredItinerary down to the card fields, with detail: {} yielding dates: null', () => {
     const itinerary = {
       schemaVersion: 1,
       items: [
@@ -89,9 +89,42 @@ describe('itineraryItemsLite', () => {
       ],
     }
     expect(itineraryItemsLite(itinerary)).toEqual([
-      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z' },
-      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z' },
+      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z', dates: null },
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z', dates: null },
     ])
+  })
+
+  // Task 8 review, Minor #9: a real FlightDetail/HotelDetail shape yields
+  // a human date range, read straight off `detail` rather than the model's
+  // (or anyone else's) prose.
+  it('reads dates off a real FlightDetail (one-way and round-trip) and HotelDetail', () => {
+    const oneWay = itineraryItemsLite({
+      items: [{
+        slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
+        detail: { kind: 'flight', outbound: { departureLocal: '2026-09-12T08:00:00' }, inbound: null },
+      }],
+    })
+    expect(oneWay[0]!.dates).toBe('2026-09-12')
+
+    const roundTrip = itineraryItemsLite({
+      items: [{
+        slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
+        detail: {
+          kind: 'flight',
+          outbound: { departureLocal: '2026-09-12T08:00:00' },
+          inbound: { departureLocal: '2026-09-19T14:30:00' },
+        },
+      }],
+    })
+    expect(roundTrip[0]!.dates).toBe('2026-09-12 → 2026-09-19')
+
+    const hotel = itineraryItemsLite({
+      items: [{
+        slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
+        detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19' },
+      }],
+    })
+    expect(hotel[0]!.dates).toBe('2026-09-12 → 2026-09-19')
   })
 
   it('never throws on a shape it does not recognise; drops unreadable items instead', () => {
@@ -105,7 +138,7 @@ describe('itineraryItemsLite', () => {
         { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
       ],
     })).toEqual([
-      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't', dates: null },
     ])
   })
 })
@@ -113,17 +146,40 @@ describe('itineraryItemsLite', () => {
 describe('newestAlternativePerSourceId', () => {
   it('keeps the first (newest, given newest-first input) row per source_id', () => {
     const rows = [
-      { source_id: 'A', name: 'newer A', price_minor: '100', currency: 'EUR', fetched_at: 't2' },
-      { source_id: 'B', name: 'B', price_minor: '200', currency: 'EUR', fetched_at: 't2' },
-      { source_id: 'A', name: 'older A, must be ignored', price_minor: '999', currency: 'EUR', fetched_at: 't1' },
+      { source_id: 'A', name: 'newer A', price_minor: '100', currency: 'EUR', fetched_at: 't2', ttl_seconds: 900 },
+      { source_id: 'B', name: 'B', price_minor: '200', currency: 'EUR', fetched_at: 't2', ttl_seconds: 600 },
+      { source_id: 'A', name: 'older A, must be ignored', price_minor: '999', currency: 'EUR', fetched_at: 't1', ttl_seconds: 900 },
     ]
     const out = newestAlternativePerSourceId(rows)
     expect(out).toHaveLength(2)
-    expect(out[0]).toEqual({ sourceId: 'A', name: 'newer A', priceMinor: '100', currency: 'EUR', fetchedAt: 't2' })
-    expect(out[1]).toEqual({ sourceId: 'B', name: 'B', priceMinor: '200', currency: 'EUR', fetchedAt: 't2' })
+    expect(out[0]).toEqual({ sourceId: 'A', name: 'newer A', priceMinor: '100', currency: 'EUR', fetchedAt: 't2', ttlSeconds: 900 })
+    expect(out[1]).toEqual({ sourceId: 'B', name: 'B', priceMinor: '200', currency: 'EUR', fetchedAt: 't2', ttlSeconds: 600 })
   })
 
   it('returns an empty list for no rows', () => {
     expect(newestAlternativePerSourceId([])).toEqual([])
+  })
+})
+
+describe('dropExpiredAlternatives', () => {
+  const NOW = new Date('2026-09-13T12:00:00.000Z')
+  const alt = (overrides: Partial<AlternativeLite> = {}): AlternativeLite => ({
+    sourceId: 'A', name: 'n', priceMinor: '1', currency: 'EUR',
+    fetchedAt: '2026-09-13T11:50:00.000Z', ttlSeconds: 900, // fetched 10 min ago, ttl 15 min → fresh
+    ...overrides,
+  })
+
+  it('keeps an id still inside its own ttl', () => {
+    expect(dropExpiredAlternatives([alt()], NOW)).toEqual([alt()])
+  })
+
+  it('drops an id past its own ttl', () => {
+    const expired = alt({ fetchedAt: '2026-09-13T11:40:00.000Z', ttlSeconds: 300 }) // 20 min ago, ttl 5 min
+    expect(dropExpiredAlternatives([expired], NOW)).toEqual([])
+  })
+
+  it('keeps an id exactly at the boundary', () => {
+    const boundary = alt({ fetchedAt: '2026-09-13T11:45:00.000Z', ttlSeconds: 900 }) // fetched+ttl === now
+    expect(dropExpiredAlternatives([boundary], NOW)).toEqual([boundary])
   })
 })

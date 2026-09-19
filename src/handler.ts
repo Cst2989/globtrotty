@@ -36,6 +36,26 @@ export type SubmitActionInput = {
    * to a turn that never runs.
    */
   userNote?: string
+  /**
+   * Fix round 1 (Task 8 review, Critical). Runs INSIDE the fresh turn's own
+   * transaction, right after the turn row is inserted and before the
+   * note/action rows — so it only ever runs when a turn was actually WON,
+   * never on a `busy`/`duplicate` result, and any throw inside it rolls back
+   * the whole transaction (the turn insert included; postgres.js rolls back
+   * `sql.begin`'s callback on an uncaught throw and rethrows to the caller).
+   *
+   * The decide route uses this to make `decideProposal` atomic with the
+   * hand-off/rejected action turn it authorises: recording the decision
+   * BEFORE calling `submitAction` (the original shape) could leave an
+   * accepted proposal with `decision = 'accept'` but no hand-off turn ever
+   * queued — a turn already in flight, or the account's spend ceiling,
+   * both fail AFTER the decision would already have been written, with no
+   * way back once the cashier's own 30-minute acceptance window has since
+   * expired. Folding the write into the same transaction as the turn that
+   * is supposed to act on it means a decision is recorded if and only if a
+   * turn was actually queued to read it.
+   */
+  onFreshTurn?: (tx: postgres.TransactionSql) => Promise<void>
 }
 
 /**
@@ -241,12 +261,27 @@ export async function submitAction(
     if (inserted.length === 0) return null
 
     const turnId = inserted[0]!.id as string
+
+    // The turn is WON at this point — `onFreshTurn` (if given) runs now, not
+    // before the insert above, so a throw here (e.g. `decideProposal`'s
+    // "already decided") rolls back the turn along with it: see this
+    // input field's own doc comment.
+    if (input.onFreshTurn) await input.onFreshTurn(tx)
+
     if (input.userNote && input.userNote.trim().length > 0) {
       await tx`insert into messages (conversation_id, user_id, role, content)
                 values (${conversationId}, ${input.userId}, 'user', ${input.userNote})`
     }
-    await tx`insert into messages (conversation_id, user_id, role, content)
-              values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)})`
+    // Fix round 1 (Task 8 review, Important): `created_at` is explicitly
+    // `clock_timestamp()`, not the column's own `now()` default, so the
+    // action row's timestamp is always strictly later than the note's —
+    // `now()` is fixed for the whole transaction in Postgres, so the note
+    // (inserted just above, with the column default) and the action would
+    // otherwise share the exact same `created_at`, leaving their read-back
+    // order to depend on an untested tiebreak (insertion order/id) rather
+    // than the timestamp a reader actually sorts by.
+    await tx`insert into messages (conversation_id, user_id, role, content, created_at)
+              values (${conversationId}, ${input.userId}, 'action', ${JSON.stringify(input.action)}, clock_timestamp())`
     await tx`update conversations set status = 'working', updated_at = now()
                where id = ${conversationId} and user_id = ${input.userId}`
     return turnId

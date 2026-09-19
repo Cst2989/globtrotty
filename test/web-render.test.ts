@@ -159,10 +159,14 @@ describe('ThreadView', () => {
 })
 
 const BASE_ITEMS = [
-  { slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString() },
-  { slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString() },
+  { slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString(), dates: '2026-09-12 → 2026-09-19' },
+  { slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString(), dates: '2026-09-12 → 2026-09-19' },
 ]
 const NO_ALTERNATIVES = { flight: [], hotel: [] }
+const ONE_ALTERNATIVE = {
+  flight: [{ sourceId: 'F2', name: 'BER→FAO (alt)', priceMinor: '11000', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 }],
+  hotel: [],
+}
 
 function proposal(overrides: Partial<ProposalRowLite & { links: LinkLite[] }> = {}): ProposalRowLite & { links: LinkLite[] } {
   return {
@@ -226,5 +230,29 @@ describe('ProposalCard', () => {
       }),
     )
     expect(html).toContain('the stay is far from the beach')
+  })
+
+  // Task 8 review, Minor #9.
+  it('shows each item\'s dates, read from the stored detail', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
+    )
+    expect(html).toContain('2026-09-12 → 2026-09-19')
+  })
+
+  // Task 8 review, Minor #6: Accept/Reject/Shift and the SwapPicker's own
+  // "Swap" button are all disabled while a request from this card is in
+  // flight.
+  it('disables Accept, Reject, Shift and Swap while pending', () => {
+    const html = renderToStaticMarkup(
+      createElement(ProposalCard, {
+        proposal: proposal(), alternatives: ONE_ALTERNATIVE, ...NOOP_HANDLERS, pending: true,
+      }),
+    )
+    const buttons = [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const [tag] of buttons) {
+      expect(tag).toContain('disabled')
+    }
   })
 })

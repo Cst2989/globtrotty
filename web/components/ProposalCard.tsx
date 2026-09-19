@@ -20,8 +20,13 @@ export type ProposalCardProps = {
   onShift: (days: -2 | 2) => void
 }
 
-/** "found 12 min ago" — same rounding rule as `src/tools/cashier.ts` and `src/agents/reviewer.ts`. */
-function ageText(fetchedAt: string, now: Date): string {
+/**
+ * "found 12 min ago" — same rounding rule as `src/tools/cashier.ts` and
+ * `src/agents/reviewer.ts`. Exported (Task 8 review, Minor #4) so
+ * `SwapPicker` can show the same age text for each alternative it offers,
+ * rather than duplicating the rounding rule a second time.
+ */
+export function ageText(fetchedAt: string, now: Date): string {
   const ageMin = Math.max(0, Math.round((now.getTime() - new Date(fetchedAt).getTime()) / 60_000))
   return `found ${ageMin} min ago`
 }
@@ -57,12 +62,20 @@ export function ProposalCard({
     <div className="proposal-card" data-decision={proposal.decision ?? 'pending'}>
       <ul className="proposal-items">
         {proposal.items.map((item) => {
-          const kind = SLOT_KINDS[item.slot as keyof typeof SLOT_KINDS] ?? item.kind
+          // Fix round 1 (Task 8 review, Minor #5): `Object.hasOwn` before
+          // indexing `SLOT_KINDS` — the repo's own documented rule
+          // (`src/gates/checks.ts`'s header comment on `SLOT_KINDS`) for a
+          // closed-vocabulary lookup keyed by a value that ultimately
+          // originated in stored data, not a literal.
+          const kind = Object.hasOwn(SLOT_KINDS, item.slot)
+            ? SLOT_KINDS[item.slot as keyof typeof SLOT_KINDS]
+            : item.kind
           const slotAlternatives = kind === 'flight' ? alternatives.flight : alternatives.hotel
           return (
             <li key={item.slot} className="proposal-item">
               <span className="proposal-item-slot">{item.slot}</span>{' '}
               <span className="proposal-item-name">{item.name}</span>{' '}
+              {item.dates ? <span className="proposal-item-dates">{item.dates}</span> : null}{' '}
               <span className="proposal-item-price">
                 {formatMoney(money(BigInt(item.priceMinor), item.currency))}
               </span>{' '}
@@ -72,6 +85,8 @@ export function ProposalCard({
                   alternatives={slotAlternatives}
                   selectedSourceId={item.sourceId}
                   open={openSwapSlot === item.slot}
+                  pending={pending}
+                  now={clock}
                   onToggle={() => setOpenSwapSlot(openSwapSlot === item.slot ? null : item.slot)}
                   onPick={(sourceId) => {
                     setOpenSwapSlot(null)
