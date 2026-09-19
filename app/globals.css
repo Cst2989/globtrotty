@@ -42,11 +42,23 @@ body {
 .main {
   flex: 1;
   padding: 1.5rem;
+  /* Leaves room for the fixed footer bar so it never overlaps content. */
+  padding-bottom: 3.5rem;
 }
 
 .footer {
+  /* Fixed, not a normal-flow sibling: `position: fixed` takes it out of
+     `.app-shell`'s flex layout (row direction), so nesting it there doesn't
+     turn it into a third column — it always pins to the bottom of the
+     viewport instead, visible without scrolling regardless of content
+     length. */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   padding: 0.75rem 1.5rem;
   font-size: 0.8rem;
   color: var(--gt-muted);
   border-top: 1px solid var(--gt-border);
+  background: var(--gt-bg);
 }

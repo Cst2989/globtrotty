@@ -5,10 +5,17 @@ import { cspFor } from './web/csp'
 // the browser) so the CSP's `connect-src` can be scoped to the real project
 // host instead of a wildcard. `.env.local` (and Netlify's env in Task 10)
 // carries the same value already used for `SUPABASE_URL`.
+//
+// `NEXT_PUBLIC_SUPABASE_ANON_KEY` isn't used by the CSP itself, but is
+// guarded here too (fix round 1, Minor): both vars are required for the app
+// to function at all (the browser client throws on the first Supabase call
+// otherwise), and failing the build loudly beats shipping a build that only
+// breaks once a user opens `/login`.
 const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-if (!projectUrl) {
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+if (!projectUrl || !anonKey) {
   throw new Error(
-    'NEXT_PUBLIC_SUPABASE_URL is required at build time to scope the Content-Security-Policy header',
+    'NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are both required at build time',
   )
 }
 

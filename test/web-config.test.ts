@@ -61,6 +61,25 @@ describe('cspFor', () => {
     expect(csp).toContain("base-uri 'self'")
     expect(csp).toContain("form-action 'self'")
   })
+
+  it('sets a self-only default-src', () => {
+    expect(csp).toContain("default-src 'self'")
+  })
+})
+
+// Fix round 1 (Minor): `next.config.ts` can't be imported here (it throws
+// without `NEXT_PUBLIC_SUPABASE_URL`/`_ANON_KEY` and pulls in Next's config
+// loader — see the header above), so this checks its *source text* for the
+// three headers `headers()` is supposed to set, instead of the built config
+// object.
+describe('next.config.ts', () => {
+  const source = readFileSync(path.join(REPO_ROOT, 'next.config.ts'), 'utf8')
+
+  it('sets Content-Security-Policy, Referrer-Policy, and X-Content-Type-Options', () => {
+    expect(source).toContain('Content-Security-Policy')
+    expect(source).toContain('Referrer-Policy')
+    expect(source).toContain('X-Content-Type-Options')
+  })
 })
 
 describe('tsconfig split (Deviation 2)', () => {
@@ -84,18 +103,23 @@ const ALLOWED_NEXT_PUBLIC = new Set(['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SU
 const FORBIDDEN_NEEDLES = ['SUPABASE_SERVICE_ROLE_KEY', 'sk-ant-', 'DATABASE_URL', 'dangerouslySetInnerHTML']
 
 describe('web/app sentinel', () => {
+  // Fix round 1 (Minor): `.filter()` + `toHaveLength(1)` rather than
+  // `.find()` + truthy — this fails loudly if a stray copy of the OTHER
+  // convention's file ever gets committed alongside the one in use (e.g. a
+  // future rename that forgets to `git rm` the old file), instead of
+  // silently picking whichever `.find()` happens to see first.
   const middlewareCandidates = ['middleware.ts', 'proxy.ts'].map((f) => path.join(REPO_ROOT, f))
-  const middlewareFile = middlewareCandidates.find(exists)
+  const middlewareFiles = middlewareCandidates.filter(exists)
 
   it('ships exactly one of middleware.ts / proxy.ts', () => {
-    expect(middlewareFile).toBeTruthy()
+    expect(middlewareFiles).toHaveLength(1)
   })
 
   const targets = [
     ...filesUnder(path.join(REPO_ROOT, 'app')),
     ...filesUnder(path.join(REPO_ROOT, 'web')),
     path.join(REPO_ROOT, 'next.config.ts'),
-    ...(middlewareFile ? [middlewareFile] : []),
+    ...middlewareFiles,
   ]
 
   it('scans at least the expected app/ and web/ files', () => {

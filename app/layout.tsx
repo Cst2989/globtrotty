@@ -14,8 +14,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <div className="app-shell">
           <aside className="sidebar" aria-label="Conversations" />
           <main className="main">{children}</main>
+          {/* Fix round 1 (Minor): moved inside .app-shell and pinned with
+              position: fixed (see globals.css) so it's visible without
+              scrolling, instead of trailing below the fold as a normal
+              flow sibling. */}
+          <footer className="footer">We never ask for payment or passport details.</footer>
         </div>
-        <footer className="footer">We never ask for payment or passport details.</footer>
       </body>
     </html>
   )

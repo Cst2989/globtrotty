@@ -16,5 +16,9 @@
     "src",
     "test",
     "netlify"
+  ],
+  "exclude": [
+    "test/web-session.test.ts",
+    "test/web-middleware.test.ts"
   ]
 }
