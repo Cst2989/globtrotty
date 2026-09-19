@@ -11,7 +11,8 @@ import { StatusLine } from '../web/components/StatusLine.js'
 import { ThreadView } from '../web/components/Thread.js'
 import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
 import { ProposalCard } from '../web/components/ProposalCard.js'
-import type { ProposalRowLite, LinkLite } from '../web/data.js'
+import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
+import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
   it('renders an agent message as escaped plain text — no markdown, no script', () => {
@@ -254,5 +255,65 @@ describe('ProposalCard', () => {
     for (const [tag] of buttons) {
       expect(tag).toContain('disabled')
     }
+  })
+})
+
+/**
+ * Final review, M2. `SwapPicker`'s `choice` is `useState`, initialised once,
+ * and the component stays mounted across `router.refresh()` — so a card that
+ * first rendered with NO alternatives for its slot seeded `choice` with the
+ * item's own `selectedSourceId`, and kept it after a later search added real
+ * alternatives. "Confirm swap" then POSTed the item's own id, which passes
+ * `reviseRoute`'s corpus pre-check and burns a turn on a no-op swap.
+ *
+ * A static render always produces a CONSISTENT first frame — state and props
+ * agree by construction — which is exactly why a render test could not see
+ * this. So the stale combination is pinned on the pure `effectiveChoice`
+ * (state and props as two separate inputs, the shape the second render
+ * actually has), and the render tests pin that whatever the `<select>` shows
+ * as selected is always one of the options it rendered.
+ */
+describe('SwapPicker', () => {
+  const ALTS: AlternativeLite[] = [
+    { sourceId: 'F2', name: 'BER→FAO (alt)', priceMinor: '11000', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 },
+    { sourceId: 'F3', name: 'BER→FAO (alt 2)', priceMinor: '10500', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 },
+  ]
+  const PICKER = {
+    selectedSourceId: 'F1', open: true, pending: false, now: new Date(),
+    onToggle: () => {}, onPick: () => {},
+  }
+
+  it('keeps a choice that is still among the alternatives', () => {
+    expect(effectiveChoice('F3', ALTS)).toBe('F3')
+  })
+
+  it('falls back to the first alternative when the choice is no longer one of them', () => {
+    // The real stale case: seeded with the item's own id while the corpus had
+    // no alternative for this slot, then alternatives arrived.
+    expect(effectiveChoice('F1', ALTS)).toBe('F2')
+    // And the same for an alternative that has since expired out of the list
+    // (`loadAlternatives` drops expired ids — see web/data.ts).
+    expect(effectiveChoice('F9', ALTS)).toBe('F2')
+  })
+
+  it('is undefined — never the item\'s own id — when there is nothing to swap to', () => {
+    expect(effectiveChoice('F1', [])).toBeUndefined()
+  })
+
+  it('marks a rendered option as selected, and only one', () => {
+    const html = renderToStaticMarkup(
+      createElement(SwapPicker, { ...PICKER, alternatives: ALTS }),
+    )
+    const selected = [...html.matchAll(/<option value="([^"]+)" selected=""/g)].map((m) => m[1])
+    expect(selected).toEqual(['F2'])
+  })
+
+  it('disables Confirm swap when there is nothing to swap to', () => {
+    // `value === undefined` — not `others.length === 0` at one call site and
+    // `choice` at another, which is how the stale id got through before.
+    const html = renderToStaticMarkup(
+      createElement(SwapPicker, { ...PICKER, alternatives: [] }),
+    )
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Confirm swap<\/button>/)
   })
 })
