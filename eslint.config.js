@@ -56,6 +56,15 @@
 import babelParser from '@babel/eslint-parser'
 
 export default [
+  // Plan 4a, Task 6: the Next.js app (app/**, web/**) and its generated/config
+  // files use React JSX and Next's own conventions, which this repo's
+  // Babel-syntax-only parser (no JSX preset, see the header above) is not set
+  // up to parse. Linting them is left to `next build`'s own type/lint pass
+  // (and a future dedicated config if one is added) rather than this harness
+  // config, which stays scoped to src/test/netlify.
+  {
+    ignores: ['app/**', 'web/**', '.next/**', 'next-env.d.ts', 'proxy.ts', 'next.config.ts'],
+  },
   {
     files: ['src/repo/**/*.ts'],
     languageOptions: {
