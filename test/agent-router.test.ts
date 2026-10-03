@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { makeRouter, routeMessage } from '../src/agents/router.js'
+import { runTurn } from '../src/worker.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { LogNotifier } from '../src/notify.js'
@@ -59,7 +60,18 @@ function jevResponse(body: unknown) {
 
 function driverResponse(text: string) {
   return {
-    content: [{ type: 'text', text }], stop_reason: 'end_turn', model: 'claude-sonnet-5', _request_id: 'r1',
+    content: [{ type: 'text', text }], stop_reason: 'end_turn', model: 'claude-opus-5', _request_id: 'r1',
+    usage: { input_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 40 },
+  }
+}
+
+function driverToolResponse(name: string, input: unknown) {
+  return {
+    content: [
+      { type: 'thinking', thinking: 'deciding', signature: 'sig' },
+      { type: 'tool_use', id: 'toolu_1', name, input },
+    ],
+    stop_reason: 'tool_use', model: 'claude-opus-5', _request_id: 'r2',
     usage: { input_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 40 },
   }
 }
@@ -472,6 +484,63 @@ describeDb('makeRouter', () => {
 
       expect(fetchImpl).not.toHaveBeenCalled()
       expect(create).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // I5: `withExtraCost` folded the router's own Jev cost into `step.costMicros`, but
+  // `src/worker.ts`'s `case 'tool'` only calls `recordSpend(step.costMicros)` in the FRESH
+  // branch — `replayed` skips it (the first attempt already paid for that tool call) and
+  // `ambiguous` `failTurn`s without it. On a resumed turn the router makes a genuinely NEW Jev
+  // call, with its own `model_calls` row and a real `cost_micros`, that never reached
+  // `conversations.spend_usd_micros`. The invariant asserted here is the one that matters: every
+  // `model_calls` row's cost reaches the conversation and turn totals.
+  it('I5: the router\'s Jev cost reaches the totals even when the driver\'s tool step is replayed', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '12')
+      await insertMessage(sql, s, 'user', 'what is the weather like in Tokyo in November?', true)
+      // A tool call this turn already finished before it was killed: `beginToolCall` reports
+      // `replayed` for it, so the worker takes the branch that skips `recordSpend`.
+      await sql`
+        insert into tool_calls (turn_id, call_id, name, status, result)
+        values (${s.turnId}, ${'toolu_1'}, ${'explore_flights'}, 'done', ${JSON.stringify({ items: [] })})`
+      // `claimTurn` takes a 'queued' turn, or a 'running' one whose heartbeat has gone stale —
+      // and `now()` is frozen inside `withTestDb`'s transaction, so staleness is unreachable
+      // here. A requeued turn is exactly the shape this test is about.
+      await sql`update turns set status = 'queued' where id = ${s.turnId}`
+
+      const CHAT_ANSWERS = { intent: { type: 'choice', choice: 'chat', confidence: 0.95, probabilities: {} } }
+      const fetchImpl = vi.fn().mockResolvedValue(jevResponse({
+        model: 'jev-test', answers: CHAT_ANSWERS, usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+      // Step 0: the driver asks for a tool (replayed). Step 1: it answers in words, ending the turn.
+      const create = vi.fn()
+        .mockResolvedValueOnce(driverToolResponse('explore_flights', {
+          from: 'BCN', to: 'TYO', departureDate: '2026-11-19', adults: 1,
+        }))
+        .mockResolvedValue(driverResponse('November in Tokyo is mild and dry.'))
+
+      await runTurn({
+        sql, limits: DEFAULT_LIMITS,
+        agent: makeRouter(deps(sql, fetchImpl, create, new MockSupplier({ kind: 'flight' }))),
+        now: () => Date.now(), deadlineMs: () => Date.now() + 600_000,
+        reinvoke: async () => {}, notifier: new LogNotifier(() => {}),
+      }, s.turnId)
+
+      const calls = await sql<{ seat: string; cost_micros: string }[]>`
+        select seat, cost_micros from model_calls where conversation_id = ${s.conversationId}`
+      // Two router Jev calls (one per step) and two driver calls.
+      expect(calls.filter((r) => r.seat === 'router')).toHaveLength(2)
+      expect(calls.filter((r) => r.seat === 'driver')).toHaveLength(2)
+      const billed = calls.reduce((sum, r) => sum + BigInt(r.cost_micros), 0n)
+      expect(billed).toBeGreaterThan(0n)
+
+      const [conv] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from conversations where id = ${s.conversationId}`
+      const [turn] = await sql<{ spend_usd_micros: string }[]>`
+        select spend_usd_micros from turns where id = ${s.turnId}`
+      // Before the fix the FIRST router call's cost was missing from both.
+      expect(BigInt(conv!.spend_usd_micros)).toBe(billed)
+      expect(BigInt(turn!.spend_usd_micros)).toBe(billed)
     })
   })
 })

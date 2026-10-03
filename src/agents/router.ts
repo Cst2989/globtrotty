@@ -178,14 +178,26 @@ function lastUserText(state: TurnState): string {
 /** Adds spend the router's own Jev call has not yet been debited for onto a step some OTHER
  * handler (intake's re-run, the driver) already built — never double-charging, since every
  * `AgentStep` kind already separates "owed" (`costMicros`) from "already debited"
- * (`recordedMicros`); a `fail` step has neither to add to, so its share is debited directly,
- * exactly the way `runIntakeTurn`'s own supplier-failure branch debits the intake call it already
- * made. */
+ * (`recordedMicros`).
+ *
+ * `fail` and `tool` are debited HERE and reported on `recordedMicros`; every other kind rides
+ * on `costMicros` and is debited once by the worker.
+ *
+ * `fail` because it has no `costMicros` field at all to add to — exactly the way
+ * `runIntakeTurn`'s own supplier-failure branch debits the intake call it already made.
+ *
+ * `tool` is the final review's I5, and the reason is less obvious: `src/worker.ts`'s
+ * `case 'tool'` only calls `recordSpend(step.costMicros)` in the FRESH branch. A `replayed`
+ * branch skips it (the original attempt already paid for that tool call) and `ambiguous`
+ * `failTurn`s without it. But on a resumed turn the router makes a genuinely NEW Jev call — a new
+ * `model_calls` row with a real `cost_micros` — and folding it into `costMicros` meant it never
+ * reached `conversations.spend_usd_micros`. `recordedMicros` is added to the turn total BEFORE
+ * the switch, on every path, so it is the field that survives a replay. */
 async function withExtraCost(
   sql: postgres.Sql, ctx: AgentContext, step: AgentStep, extra: bigint,
 ): Promise<AgentStep> {
   if (extra === 0n) return step
-  if (step.kind === 'fail') {
+  if (step.kind === 'fail' || step.kind === 'tool') {
     await recordSpend(sql, { userId: ctx.userId, conversationId: ctx.conversationId, costMicros: extra })
     return { ...step, recordedMicros: (step.recordedMicros ?? 0n) + extra }
   }
