@@ -78,6 +78,9 @@ const METRO_PLACES = [
   { code: 'CHI', city: 'Chicago', country: 'US', region: 'north_america', sampleAirport: 'ORD' },
   { code: 'WAS', city: 'Washington', country: 'US', region: 'north_america', sampleAirport: 'IAD' },
   { code: 'MOW', city: 'Moscow', country: 'RU', region: 'europe', sampleAirport: 'SVO' },
+  // transcontinental; travel convention: Istanbul straddles Europe/Asia at the Bosphorus, but
+  // flight-search and travel-industry convention files it under Europe (same convention this
+  // script applies to Moscow above), so region is 'europe' rather than split by airport.
   { code: 'IST', city: 'Istanbul', country: 'TR', region: 'europe', sampleAirport: 'IST' },
   { code: 'BJS', city: 'Beijing', country: 'CN', region: 'asia', sampleAirport: 'PEK' },
   { code: 'SHA', city: 'Shanghai', country: 'CN', region: 'asia', sampleAirport: 'PVG' },
@@ -279,6 +282,15 @@ const ALIASES_BY_CITY = {
   'Hong Kong': ['hk'],
 }
 
+// Fix round 1, ruling F: two entries share the display name "San Jose" (SJC, US; SJO, Costa
+// Rica). ALIAS_MAP in places.ts keeps the first one encountered in places.json's sorted-by-code
+// order -- SJC sorts before SJO -- so plain "san jose" always resolves to SJC; SJO needs its own
+// disambiguating alias since it can never win the bare name. Keyed by `code` (not `city`, which
+// collides) for exactly this reason.
+const ALIASES_BY_CODE = {
+  SJO: ['san jose costa rica', 'san josé costa rica'],
+}
+
 async function main() {
   console.log(`Downloading ${AIRPORTS_CSV_URL} ...`)
   const res = await fetch(AIRPORTS_CSV_URL)
@@ -317,7 +329,9 @@ async function main() {
   // metro code, per ledger ruling 3.
   places.push({ code: 'OSA', city: 'Kyoto', country: 'JP', region: 'asia', hotelName: 'Kyoto', aliases: ['kioto', 'kyōto'] })
 
-  for (const p of places) p.aliases = [...new Set([...p.aliases, ...(ALIASES_BY_CITY[p.city] ?? [])])]
+  for (const p of places) {
+    p.aliases = [...new Set([...p.aliases, ...(ALIASES_BY_CITY[p.city] ?? []), ...(ALIASES_BY_CODE[p.code] ?? [])])]
+  }
 
   if (warnings.length > 0) {
     console.warn(`\n${warnings.length} warning(s):`)

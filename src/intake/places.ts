@@ -48,7 +48,16 @@ export function normalise(s: string): string {
     .replace(/\s+/g, ' ')
 }
 
-/** normalised alias/city string -> the place it resolves to. Built once from PLACES. */
+/**
+ * normalised alias/city string -> the place it resolves to. Built once from PLACES, first
+ * occurrence wins (places.json's sort-by-code order). This matters whenever two places share a
+ * `city` string: San Jose, US (`SJC`) sorts before San Jose, Costa Rica (`SJO`), so the bare key
+ * "san jose" resolves to SJC and SJO is otherwise unreachable by name -- which is why SJO carries
+ * its own disambiguating aliases ("san jose costa rica", "san josé costa rica") in places.json,
+ * added by `ALIASES_BY_CODE` in scripts/build-places.mjs rather than the city-keyed alias list
+ * (keying by city would collide with SJC's entry). A future second collision needs the same
+ * treatment: give the entry that loses the bare name a code-keyed alias that disambiguates it.
+ */
 export const ALIAS_MAP: Map<string, Place> = (() => {
   const map = new Map<string, Place>()
   for (const p of PLACES) {

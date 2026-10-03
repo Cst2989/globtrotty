@@ -55,4 +55,80 @@ describe('candidates', () => {
     const far = datePartCandidates('i booked 15 tickets for the whole group, unrelated to any date')
     expect(far.days).not.toContain(15)
   })
+
+  // --- Fix round 1: cue and stoplist guards ---
+
+  describe('fix round 1: exact/fuzzy place matches no longer fire on ordinary English words', () => {
+    it.each([
+      'nice to visit',
+      'two male passengers',
+      'split the bill',
+      'bought some cologne',
+      'la la la',
+    ])('%s -> no place candidate', (text) => {
+      expect(placeCandidates(text)).toEqual([])
+    })
+
+    it('parks on vacation -> no place candidate (fuzzy "parks"/"Paris" is one edit apart)', () => {
+      expect(placeCandidates('parks on vacation')).toEqual([])
+    })
+
+    it('a cue word before the ambiguous name still resolves it', () => {
+      expect(placeCandidates('to Nice').map((x) => x.code)).toContain('NCE')
+      expect(placeCandidates('flying to Split').map((x) => x.code)).toContain('SPU')
+    })
+
+    it('a cued fuzzy misspelling still resolves', () => {
+      expect(placeCandidates('to Barcelna').map((x) => x.code)).toContain('BCN')
+    })
+  })
+
+  describe('fix round 1: month/weekday abbreviations no longer fire on ordinary English words', () => {
+    it.each([
+      'sun and warmth',
+      'sat at the gate',
+      'got wed',
+    ])('%s -> no weekday', (text) => {
+      expect(datePartCandidates(text).weekdays).toEqual([])
+    })
+
+    it('it may rain -> no month', () => {
+      expect(datePartCandidates('it may rain').months).toEqual([])
+    })
+
+    it('we may visit 10 museums -> no month and no day', () => {
+      const d = datePartCandidates('we may visit 10 museums')
+      expect(d.months).toEqual([])
+      expect(d.days).toEqual([])
+    })
+
+    it('a month abbreviation adjacent to a day number counts, in either order', () => {
+      expect(datePartCandidates('nov 20').months).toContain('november')
+      expect(datePartCandidates('20 nov').months).toContain('november')
+    })
+
+    it('a weekday abbreviation followed by a day number counts', () => {
+      expect(datePartCandidates('sat 6th').weekdays).toContain('saturday')
+    })
+  })
+
+  describe('fix round 1: upper-case codes that are also ordinary English words need a cue', () => {
+    it('I WAS THERE -> no place candidate (shouted, uncued)', () => {
+      expect(placeCandidates('I WAS THERE')).toEqual([])
+    })
+
+    it('fly to WAS -> resolves (cued)', () => {
+      expect(placeCandidates('fly to WAS').map((x) => x.code)).toContain('WAS')
+    })
+  })
+
+  describe('fix round 1: San Jose, Costa Rica is reachable by name', () => {
+    it('plain "san jose" still resolves to the US airport (SJC)', () => {
+      expect(placeCandidates('flying to san jose').map((x) => x.code)).toContain('SJC')
+    })
+
+    it('"san jose costa rica" resolves to SJO', () => {
+      expect(placeCandidates('san jose costa rica').map((x) => x.code)).toContain('SJO')
+    })
+  })
 })
