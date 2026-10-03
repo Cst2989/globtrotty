@@ -17,6 +17,13 @@ import type { ResultItemLite } from '@/web/data'
  * hotel item has no leg to judge those against, so it passes through
  * unaffected. `maxPriceMinor` applies to both kinds — it compares the
  * item's own total price, not anything inside `.flight`/`.hotel`.
+ *
+ * This module MIRRORS `src/intake/filter.ts` field for field, and the
+ * ledger's deferred reconciliation is now closed on both: the departure
+ * windows (Task 10) and the stops rule (the final review's I3 — every leg,
+ * see `worstLegStops`). `test/web-filters.test.ts` pins the two modules
+ * against the same items for both. A change to either rule belongs in both
+ * files, in the same commit.
  */
 export function applyFilterLite(items: ResultItemLite[], filter: Filter): ResultItemLite[] {
   return items.filter((item) => matchesFilter(item, filter))
@@ -30,8 +37,9 @@ function matchesFilter(item: ResultItemLite, filter: Filter): boolean {
   const flight = item.flight
   if (!flight) return true // nothing else below applies to a hotel item
 
-  if (filter.nonstop && flight.stops !== 0) return false
-  if (filter.maxStops !== undefined && flight.stops > filter.maxStops) return false
+  const stops = worstLegStops(flight)
+  if (filter.nonstop && stops !== 0) return false
+  if (filter.maxStops !== undefined && stops > filter.maxStops) return false
 
   if (filter.departure) {
     const hour = departureHour(flight.outbound.departureLocal)
@@ -43,6 +51,21 @@ function matchesFilter(item: ResultItemLite, filter: Filter): boolean {
   }
 
   return true
+}
+
+/**
+ * The stops of the WORSE leg — `src/intake/filter.ts`'s rule stated for the
+ * lite shape: "`nonstop`: BOTH legs (outbound, and inbound when the item has
+ * one) must be `stops === 0`. `maxStops`: both legs must be at or under it."
+ *
+ * The final review's I3. `ResultItemLite.flight.stops` is the OUTBOUND leg
+ * alone (it is what `FlightList` prints beside `outbound.via`), so judging
+ * `nonstop` on it let through a flight whose RETURN leg has two stops —
+ * which typing "only direct flights" then removed. Same ids, two answers.
+ * A one-way (`inboundStops === null`) has only the one leg to judge.
+ */
+export function worstLegStops(flight: NonNullable<ResultItemLite['flight']>): number {
+  return flight.inboundStops === null ? flight.stops : Math.max(flight.stops, flight.inboundStops)
 }
 
 /**

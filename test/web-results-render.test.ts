@@ -25,6 +25,7 @@ const FLIGHT_ITEM: ResultItemLite = {
     outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'] },
     inbound: null,
     stops: 1,
+    inboundStops: null,
     durationMinutes: 855,
     airlines: ['QR'],
     bags: { cabin: 1, checked: 1 },
@@ -300,6 +301,40 @@ describe('ResultsPane', () => {
     expect(html).toContain('Choose')
   })
 })
+
+  // M4: `ResultsPane` ignored `ResultsView.filter`, so after a TYPED filter the chips rendered
+  // unselected while the list below them was narrowed — two stories about the same list.
+  it('starts the chips from the results row\'s own filter, and narrows the list to match', () => {
+    const nonstopItem: ResultItemLite = {
+      ...FLIGHT_ITEM, sourceId: 'F0',
+      flight: { ...FLIGHT_ITEM.flight!, stops: 0 },
+    }
+    const html = renderToStaticMarkup(
+      createElement(ResultsPane, {
+        results: [resultsView({ filter: { nonstop: true }, items: [nonstopItem, FLIGHT_ITEM] })],
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+      }),
+    )
+    // The Nonstop chip is pressed...
+    expect(html).toContain('aria-pressed="true"')
+    expect(/aria-pressed="true"[^>]*>\s*Nonstop/.test(html)).toBe(true)
+    // ...and FLIGHT_ITEM (one stop, via DOH) is filtered out of the list below it, leaving
+    // only the nonstop row. Source ids are not rendered, so the rows are counted and the
+    // excluded item is identified by its own "1 stop via DOH" meta line.
+    expect(html.match(/class="result-row"/g)).toHaveLength(1)
+    expect(html).toContain('Nonstop ·')
+    expect(html).not.toContain('via DOH')
+  })
+
+  it('leaves every chip unpressed when the row carries no filter', () => {
+    const html = renderToStaticMarkup(
+      createElement(ResultsPane, {
+        results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
+        onChoose: () => {}, onGetLinks: () => {},
+      }),
+    )
+    expect(html).not.toContain('aria-pressed="true"')
+  })
 
 describe('MessageBubble (plan 5 roles)', () => {
   it('renders a results marker row with the message-action styling hook', () => {

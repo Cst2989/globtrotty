@@ -265,11 +265,42 @@ describe('newestResultItemPerSourceId', () => {
     })
     expect(item.flight!.inbound).toBeNull()
     expect(item.flight!.stops).toBe(1)
+    expect(item.flight!.inboundStops).toBeNull()   // a one-way has only the outbound leg
     expect(item.flight!.airlines).toEqual(['QR'])
     expect(item.flight!.bags).toEqual({ cabin: 1, checked: 1 })
     expect(item.flight!.durationMinutes).toBe(855)
     expect(item.flight!.selfTransfer).toBe(false)
     expect(item.hotel).toBeUndefined()
+  })
+
+  // Final review, I3: `inboundStops` is what lets `web/filters.ts` judge every leg the way
+  // `src/intake/filter.ts` does. `stops` stays the OUTBOUND leg (what `FlightList` prints
+  // beside `outbound.via`), so the two are read separately.
+  it('reads the inbound leg\'s own stops for a return flight, keeping stops on the outbound', () => {
+    const out = newestResultItemPerSourceId([row({
+      payload: {
+        ...flightPayload,
+        inbound: {
+          from: 'HND', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00',
+          stops: 2, route: ['HND', 'DOH', 'MAD', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
+        },
+      },
+    })])
+    expect(out[0]!.flight!.stops).toBe(1)
+    expect(out[0]!.flight!.inboundStops).toBe(2)
+  })
+
+  it('defaults an unreadable inbound stops count to 0 rather than dropping the leg', () => {
+    const out = newestResultItemPerSourceId([row({
+      payload: {
+        ...flightPayload,
+        inbound: {
+          from: 'HND', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00',
+          route: ['HND', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
+        },
+      },
+    })])
+    expect(out[0]!.flight!.inboundStops).toBe(0)
   })
 
   // A supplier name containing a script-shaped string passes through

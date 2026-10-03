@@ -23,6 +23,7 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
       outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'] },
       inbound: null,
       stops: 1,
+      inboundStops: null,
       durationMinutes: 855,
       airlines: ['QR'],
       bags: { cabin: 1, checked: 1 },
@@ -194,5 +195,75 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
       expect(storedHits).toHaveLength(1)
       expect(liteHits).toEqual(storedHits)
     }
+  })
+})
+
+/**
+ * Final review, I3 — the ledger's deferred item, now closed. `web/data.ts`'s `flightLite` set
+ * `stops` from the OUTBOUND leg only and `web/filters.ts` judged `nonstop`/`maxStops` on that
+ * single number, while `src/intake/filter.ts` requires EVERY leg: she clicked "Nonstop" and got
+ * a flight whose return leg had two stops, then typed "only direct flights" and watched it go.
+ * Same ids, two answers. This pins both modules against the same three items, the same shape as
+ * the departure-window block above.
+ */
+describe('stops reconciliation (web/filters.ts vs src/intake/filter.ts)', () => {
+  /** A return flight, outbound and inbound stops given separately. */
+  function liteReturn(sourceId: string, out: number, back: number): ResultItemLite {
+    return flight({
+      sourceId,
+      flight: {
+        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [] },
+        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [] },
+        stops: out,
+        inboundStops: back,
+      },
+    })
+  }
+
+  function storedReturn(sourceId: string, out: number, back: number): StoredItem {
+    const base = storedFlight(sourceId, 9)
+    if (base.detail.kind !== 'flight') throw new Error('unreachable')
+    return {
+      ...base,
+      detail: {
+        ...base.detail,
+        outbound: { ...base.detail.outbound, stops: out },
+        inbound: {
+          from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00',
+          stops: back, route: ['TYO', 'BCN'], cabinClass: 'Economy', carriers: ['ZZ'], flightNumbers: ['ZZ2'],
+        },
+      },
+    }
+  }
+
+  // A: direct both ways. B: direct out, two stops back — the exact item I3 names. C: one stop
+  // each way.
+  const CASES: Array<[string, number, number]> = [['A', 0, 0], ['B', 0, 2], ['C', 1, 1]]
+  const lite = CASES.map(([id, out, back]) => liteReturn(id, out, back))
+  const stored = CASES.map(([id, out, back]) => storedReturn(id, out, back))
+
+  it('nonstop agrees on all three items — B is excluded by its RETURN leg', () => {
+    const liteIds = applyFilterLite(lite, { nonstop: true }).map((i) => i.sourceId)
+    const storedIds = applyFilter(stored, { nonstop: true }).map((i) => i.sourceId)
+    expect(liteIds).toEqual(['A'])
+    expect(liteIds).toEqual(storedIds)
+  })
+
+  it('maxStops agrees on all three items at every bound from 0 to 2', () => {
+    for (const maxStops of [0, 1, 2]) {
+      const liteIds = applyFilterLite(lite, { maxStops }).map((i) => i.sourceId)
+      const storedIds = applyFilter(stored, { maxStops }).map((i) => i.sourceId)
+      expect(liteIds, `maxStops ${maxStops}`).toEqual(storedIds)
+    }
+    expect(applyFilterLite(lite, { maxStops: 0 }).map((i) => i.sourceId)).toEqual(['A'])
+    expect(applyFilterLite(lite, { maxStops: 1 }).map((i) => i.sourceId)).toEqual(['A', 'C'])
+    expect(applyFilterLite(lite, { maxStops: 2 }).map((i) => i.sourceId)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('a one-way is judged on its single leg in both modules', () => {
+    const liteOneWay = flight({ sourceId: 'OW', flight: { inbound: null, stops: 0, inboundStops: null } })
+    const storedOneWay = storedFlight('OW', 9)   // inbound null, outbound stops 0
+    expect(applyFilterLite([liteOneWay], { nonstop: true })).toHaveLength(1)
+    expect(applyFilter([storedOneWay], { nonstop: true })).toHaveLength(1)
   })
 })

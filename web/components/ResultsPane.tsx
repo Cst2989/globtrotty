@@ -93,6 +93,16 @@ function newestOfKind(results: ResultsView[], kind: 'flights' | 'hotels'): Resul
 }
 
 /**
+ * The chip state for one kind, tagged with the `results` row it was derived from — see the
+ * reset in `ResultsPane` for why the tag is needed.
+ */
+type KindFilter = { messageId: string | null; filter: Filter }
+
+function chipsFor(view: ResultsView | null): KindFilter {
+  return { messageId: view?.messageId ?? null, filter: view?.filter ?? {} }
+}
+
+/**
  * Spec §5's results pane: assumption chips at the top, then the pinned
  * summary once anything is chosen, then the newest hotels list (if any),
  * then the newest flights list — in that order. Every piece here is pure
@@ -105,11 +115,29 @@ function newestOfKind(results: ResultsView[], kind: 'flights' | 'hotels'): Resul
  * is safe under static rendering (no router, no effects).
  */
 export function ResultsPane({ results, proposal, now, pending, error, onChoose, onGetLinks }: ResultsPaneProps) {
-  const [flightFilter, setFlightFilter] = useState<Filter>({})
-  const [hotelFilter, setHotelFilter] = useState<Filter>({})
-
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
+
+  // M4: the chips used to start empty whatever the row said, so after a TYPED filter the chips
+  // rendered unselected while the list below them was narrowed — two different stories about
+  // the same list. `ResultsView.filter` is the row's own filter, so the chips start from it.
+  //
+  // Tracked against the row's `messageId` and reset during render (React's documented
+  // adjust-state-when-props-change pattern) rather than with `useState`'s initializer alone: a
+  // typed filter arrives through `router.refresh()`, which re-renders this instance instead of
+  // remounting it, so an initializer-only version would keep showing the PREVIOUS row's chips.
+  // Her own chip clicks are kept while the row is unchanged, which is the whole point of the
+  // state. No effect is involved, so `renderToStaticMarkup` is unaffected.
+  const [flightChips, setFlightChips] = useState<KindFilter>(() => chipsFor(newestFlights))
+  const [hotelChips, setHotelChips] = useState<KindFilter>(() => chipsFor(newestHotels))
+  if (flightChips.messageId !== (newestFlights?.messageId ?? null)) setFlightChips(chipsFor(newestFlights))
+  if (hotelChips.messageId !== (newestHotels?.messageId ?? null)) setHotelChips(chipsFor(newestHotels))
+  const flightFilter = flightChips.filter
+  const hotelFilter = hotelChips.filter
+  const setFlightFilter = (filter: Filter) =>
+    setFlightChips({ messageId: newestFlights?.messageId ?? null, filter })
+  const setHotelFilter = (filter: Filter) =>
+    setHotelChips({ messageId: newestHotels?.messageId ?? null, filter })
 
   const assumptions = dedupeAssumptions(results.flatMap((r) => r.assumptions))
 

@@ -559,7 +559,22 @@ export type ResultItemLite = {
   flight?: {
     outbound: LegLite
     inbound: LegLite | null
+    /**
+     * The OUTBOUND leg's stops. `FlightList` prints it next to
+     * `outbound.via`, so it stays per-leg rather than becoming "the worse
+     * leg" — a return flight's connections have no business changing the
+     * words under the outbound leg.
+     */
     stops: number
+    /**
+     * The INBOUND leg's stops, or `null` for a one-way. The final review's
+     * I3: `web/filters.ts` judged `nonstop`/`maxStops` on the outbound
+     * number alone while `src/intake/filter.ts` requires EVERY leg, so
+     * clicking "Nonstop" could keep a flight whose return leg has two stops
+     * and typing "only direct flights" would then remove it — same ids, two
+     * answers. `worstLegStops` (web/filters.ts) is what the filters read.
+     */
+    inboundStops: number | null
     durationMinutes: number
     airlines: string[]
     bags: { cabin: number; checked: number }
@@ -627,6 +642,13 @@ function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefine
   const outboundRaw = isRecord(payload.outbound) ? payload.outbound : {}
   const inboundRaw = isRecord(payload.inbound) ? payload.inbound : {}
   const stops = typeof outboundRaw.stops === 'number' ? outboundRaw.stops : 0
+  // `null` for a one-way; 0 for a return leg whose payload has no readable
+  // `stops` — the same fail-permissive default as the outbound above, and the
+  // same one `src/intake/filter.ts` gets for free by reading a typed
+  // `LegSummary`.
+  const inboundStops = payload.inbound === null
+    ? null
+    : (typeof inboundRaw.stops === 'number' ? inboundRaw.stops : 0)
   const carriersOf = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').map(maskUntrustedText) : []
   const airlines = [...new Set([...carriersOf(outboundRaw.carriers), ...carriersOf(inboundRaw.carriers)])]
@@ -635,7 +657,7 @@ function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefine
   const checked = typeof baggage.checkedBag === 'number' ? baggage.checkedBag : 0
   const durationSeconds = typeof payload.totalDurationSeconds === 'number' ? payload.totalDurationSeconds : 0
   return {
-    outbound, inbound, stops,
+    outbound, inbound, stops, inboundStops,
     durationMinutes: Math.round(durationSeconds / 60),
     airlines,
     bags: { cabin, checked },
