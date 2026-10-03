@@ -81,4 +81,36 @@ describe('actions', () => {
   it('describes for the UI without ids', () => {
     expect(describeActionForUi({ action: 'hand_off', proposalId: P })).toBe('You accepted the proposal')
   })
+
+  it('parses choose and choice, and refuses user text in optionId', () => {
+    expect(parseAction(JSON.stringify({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a' })))
+      .toEqual({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a' })
+    expect(parseAction(JSON.stringify({ action: 'choice', questionId: 'origin', optionId: 'BCN' })))
+      .toEqual({ action: 'choice', questionId: 'origin', optionId: 'BCN' })
+    // A traveller's typed words are not an id/enum the operator channel carries.
+    expect(parseAction(JSON.stringify({
+      action: 'choice', questionId: 'origin', optionId: 'Tokyo please',
+    }))).toBeNull()
+  })
+
+  it('renders choose and choice without a `"` character, masking the sourceId', () => {
+    expect(renderActionMessage({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a "x"' })).toBe(
+      'Operator: the traveller chose flight kiwi:a--x- from the list. '
+      + 'The office has recorded it and is searching the next step; do not ask her to confirm.',
+    )
+    expect(renderActionMessage({ action: 'choice', questionId: 'origin', optionId: 'BCN' })).toBe(
+      'Operator: to the question origin she chose BCN.',
+    )
+    const texts = [
+      renderActionMessage({ action: 'choose', kind: 'hotel', sourceId: 'booking:"y"' }),
+      renderActionMessage({ action: 'choice', questionId: 'destination', optionId: 'TYO' }),
+    ]
+    for (const t of texts) expect(t).not.toContain('"')
+  })
+
+  it('describes choose and choice for the UI', () => {
+    expect(describeActionForUi({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a' })).toBe('You chose a flight')
+    expect(describeActionForUi({ action: 'choose', kind: 'hotel', sourceId: 'booking:y' })).toBe('You chose a hotel')
+    expect(describeActionForUi({ action: 'choice', questionId: 'origin', optionId: 'BCN' })).toBe('You answered a question')
+  })
 })
