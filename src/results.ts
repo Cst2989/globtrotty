@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { maskIdChars, maskControlChars } from './sanitize.js'
+import { maskIdChars, maskControlChars, maskUntrustedText } from './sanitize.js'
 import type { Cabin, Assumption } from './intake/brief.js'
 
 /**
@@ -71,7 +71,16 @@ const FilterSchema = z.strictObject({
   maxStops: z.number().int().min(0).max(10).optional(),
   departure: z.enum(['morning', 'afternoon', 'evening']).optional(),
   maxPriceMinor: z.string().regex(/^\d{1,12}$/).optional(),
-  airlines: z.array(z.string().min(1).max(8)).optional(),
+  // M5: 8 characters was an IATA-code-shaped guess. `matchAirlines`
+  // (src/agents/router.ts) builds this from the carrier strings a SUPPLIER
+  // put in the corpus, so a longer one — matched as a whole word against her
+  // message, then written here — used to fail `ResultsContentSchema.parse`
+  // inside `buildAttachmentRows` and fail the turn. 64 is the same cap every
+  // other supplier-origin short string in this file carries, and
+  // `maskUntrustedText` is applied because this IS supplier-authored text
+  // (the same reason `describeFilter` masks each entry before rendering it);
+  // the schema is the boundary, so the masking belongs here too.
+  airlines: z.array(z.string().min(1).max(64).transform(maskUntrustedText)).optional(),
 })
 
 /**

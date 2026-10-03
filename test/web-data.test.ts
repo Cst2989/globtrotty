@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
-  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems, loadChosen,
+  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -352,66 +352,5 @@ describe('dropExpiredResultItems', () => {
   it('drops an id past its own ttl', () => {
     const expired = item({ fetchedAt: '2026-09-13T11:40:00.000Z', ttlSeconds: 300 }) // 20 min ago, ttl 5 min
     expect(dropExpiredResultItems([expired], NOW)).toEqual([])
-  })
-})
-
-/**
- * Plan 5, Task 7. `loadChosen` needs only the `.from().select().eq().order()
- * .limit()` chain `postgrest-js` builds — a minimal fake stands in for a
- * real, authenticated, RLS-scoped client for exactly the reason this file's
- * own header comment gives for not hitting a live DB here. `itineraryItemsLite`
- * (the trimming `loadChosen` builds on) already has its own coverage above;
- * these tests pin `loadChosen`'s own logic — the newest-row read and the
- * flight/hotel split — not the trimming itself.
- */
-function fakeProposalsClient(rows: { id: string; itinerary: unknown }[]): SupabaseClient {
-  return {
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: async () => ({ data: rows, error: null }),
-          }),
-        }),
-      }),
-    }),
-  } as unknown as SupabaseClient
-}
-
-describe('loadChosen', () => {
-  const flightItem = {
-    slot: 'flight', sourceId: 'F1', kind: 'flight', name: 'BCN to TYO',
-    priceMinor: '150000', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z',
-    detail: { outbound: { departureLocal: '2026-11-19T10:00:00' }, inbound: null },
-  }
-  const hotelItem = {
-    slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Tokyo hotel',
-    priceMinor: '90000', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z',
-    detail: { checkIn: '2026-11-19', checkOut: '2026-12-06' },
-  }
-
-  it('splits the newest proposal into its flight and hotel lines', async () => {
-    const sb = fakeProposalsClient([{ id: 'p1', itinerary: { items: [flightItem, hotelItem] } }])
-
-    const result = await loadChosen(sb, 'c1')
-
-    expect(result.proposalId).toBe('p1')
-    expect(result.flight?.sourceId).toBe('F1')
-    expect(result.hotel?.sourceId).toBe('H1')
-  })
-
-  it('a flights-only proposal (before a hotel is chosen) carries a null hotel', async () => {
-    const sb = fakeProposalsClient([{ id: 'p1', itinerary: { items: [flightItem] } }])
-
-    const result = await loadChosen(sb, 'c1')
-
-    expect(result.flight?.sourceId).toBe('F1')
-    expect(result.hotel).toBeNull()
-  })
-
-  it('returns all nulls when nothing has been proposed yet', async () => {
-    const sb = fakeProposalsClient([])
-
-    expect(await loadChosen(sb, 'c1')).toEqual({ flight: null, hotel: null, proposalId: null })
   })
 })

@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseAction, describeActionForUi } from '@/src/actions'
 import {
-  parseResults, parseChoices,
-  type ResultsContent, type ChoicesContent, type Filter, type Assumption,
+  parseResults,
+  type ResultsContent, type Filter, type Assumption,
 } from '@/src/results'
 import { maskUntrustedText } from '@/src/sanitize'
 
@@ -489,36 +489,6 @@ export async function loadAlternatives(
   return dropExpiredAlternatives(deduped, now)
 }
 
-/**
- * Plan 5 Task 7: the newest proposal recorded for a conversation, split
- * into its flight and hotel lines — the shape the pinned summary needs once
- * something has been chosen via the Choose button. `proposalId` is `null`
- * when nothing has been proposed yet (no row at all), in which case `flight`
- * and `hotel` are both `null` too. Reuses `itineraryItemsLite`'s trimming —
- * same "never throw on a shape this reader doesn't recognise" posture as
- * `loadProposals` above.
- */
-export async function loadChosen(
-  sb: SupabaseClient, conversationId: string,
-): Promise<{ flight: ProposalItemLite | null; hotel: ProposalItemLite | null; proposalId: string | null }> {
-  const { data, error } = await sb
-    .from('proposals')
-    .select('id, itinerary')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-  if (error) throw error
-  const row = data?.[0]
-  if (!row) return { flight: null, hotel: null, proposalId: null }
-
-  const items = itineraryItemsLite(row.itinerary)
-  return {
-    flight: items.find((i) => i.kind === 'flight') ?? null,
-    hotel: items.find((i) => i.kind === 'hotel') ?? null,
-    proposalId: row.id as string,
-  }
-}
-
 /* ---------- Plan 5: results and choices ---------- */
 
 /**
@@ -597,7 +567,6 @@ export type ResultsView = {
   items: ResultItemLite[]
 }
 
-export type ChoicesView = ChoicesContent & { messageId: string }
 
 type ToolResultRow = {
   source_id: string
@@ -780,41 +749,4 @@ export async function loadResults(
       .map((id) => bySourceId.get(id))
       .filter((i): i is ResultItemLite => i !== undefined),
   }))
-}
-
-/**
- * The newest `choices` row nothing has answered yet: none of the rows after
- * it is an `action` row parsing to `{ action: 'choice', questionId: <its
- * own questionId> }`. `null` when every `choices` row has a matching answer,
- * or none exist. Scans `choices` rows newest-first and, for each, checks the
- * (already fetched, same bounded read) rows that came after it — cheaper
- * than a second round trip per candidate, and correct regardless of how many
- * `choices` rows this conversation has accumulated.
- */
-export async function loadChoices(
-  sb: SupabaseClient, conversationId: string,
-): Promise<ChoicesView | null> {
-  const { data, error } = await sb
-    .from('messages')
-    .select('id, role, content, created_at')
-    .eq('conversation_id', conversationId)
-    .in('role', ['choices', 'action'])
-    .order('created_at', { ascending: true })
-    .limit(500)
-  if (error) throw error
-  const rows = (data ?? []) as { id: string; role: 'choices' | 'action'; content: string; created_at: string }[]
-
-  const choicesRows = rows.filter((r) => r.role === 'choices')
-  for (let i = choicesRows.length - 1; i >= 0; i--) {
-    const row = choicesRows[i]!
-    const parsed = parseChoices(row.content)
-    if (!parsed) continue
-    const answered = rows.some((r) => {
-      if (r.role !== 'action' || r.created_at <= row.created_at) return false
-      const action = parseAction(r.content)
-      return action?.action === 'choice' && action.questionId === parsed.questionId
-    })
-    if (!answered) return { ...parsed, messageId: row.id }
-  }
-  return null
 }
