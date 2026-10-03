@@ -10,8 +10,9 @@
  * uses) and, once that lands, searches hotels for the destination and
  * window the chosen flight itself implies. Choosing a HOTEL records the
  * combined `[flight, stay]` proposal through the same gates/reviewer path
- * and accepts it; the pinned summary (web/components/PinnedSummary.tsx,
- * Task 10) then offers the existing `hand_off` card.
+ * and leaves it UNDECIDED: "Get booking links" is the acceptance, not the
+ * hotel click (ledger ruling on the final review's C4 — spec section 9
+ * wins over plan Task 9's wiring). See `handleChooseHotel` for why.
  *
  * Trust boundary: nothing here embeds a supplier string into the message
  * she reads — `cityLabel`/`hotelQueryName` read only the bundled place
@@ -207,10 +208,30 @@ async function handleChooseFlight(
 
 /**
  * Choosing a hotel: the combined `[flight, stay]` proposal through the same
- * gates/reviewer path, accepted. The flight half of the refs is recovered
- * from the newest ACCEPTED proposal for this conversation — the one a prior
- * `choose: 'flight'` turn just saved — never from anything the traveller's
- * message could name.
+ * gates/reviewer path, left UNDECIDED. The flight half of the refs is
+ * recovered from the newest ACCEPTED proposal for this conversation — the one
+ * a prior `choose: 'flight'` turn just saved — never from anything the
+ * traveller's message could name.
+ *
+ * The final review's C4: this used to `decideProposal(... 'accept')` here, and
+ * that made the whole hand-off unreachable.
+ * `web/components/PinnedSummary.tsx` renders "Get booking links" ONLY while
+ * `decision === null`, and the links branch needs `links.length > 0`, which
+ * only `hand_off_to_booking`/the cashier ever populates; `ResultsPaneLive`'s
+ * `onGetLinks` early-returns on a non-null decision too, and `POST /decide`
+ * would throw `decideProposal: ... already decided` anyway. So she saw a
+ * summary with a total, no button and no links, and the cashier, the price
+ * re-check and the tracked links were dead code for the entire plan-5 flow.
+ *
+ * Spec section 9 settles it ("Choose is acceptance; 'Get booking links' is the
+ * hand-off") against plan Task 9 Step 2's wiring of the button to
+ * `/decide { decision: 'accept' }`: the button IS the acceptance. Undecided
+ * here means `/decide` accepts it inside `submitAction`'s `onFreshTurn`, the
+ * `hand_off` action reaches the driver, and the cashier mints the links.
+ *
+ * The FLIGHTS-ONLY proposal stays accepted in `handleChooseFlight`:
+ * `loadNewestAcceptedItinerary` is how this function recovers the flight half,
+ * and it reads only accepted rows.
  */
 async function handleChooseHotel(
   deps: IntakeDeps, ctx: AgentContext, sourceId: string,
@@ -247,13 +268,9 @@ async function handleChooseHotel(
     }
   }
 
-  await decideProposal(sql, {
-    proposalId: saved.id, conversationId: ctx.conversationId, decision: 'accept', now: new Date(deps.now()),
-  })
-
   return {
     kind: 'park',
-    message: 'Trip summary ready. Use "Get booking links" when you want the links.',
+    message: 'Trip summary ready. Use "Get booking links" when you want to book.',
     costMicros: 0n,
     recordedMicros: spent.micros,
   }

@@ -113,7 +113,7 @@ describeDb('handleChoose', () => {
     })
   })
 
-  it('choosing a hotel afterwards records the combined proposal through the gates and reviewer', async () => {
+  it('choosing a hotel afterwards records the combined proposal through the gates and reviewer, UNDECIDED', async () => {
     await withTestDb(async (sql) => {
       const s0 = await seed(sql, '02')
       const flightSupplier = new MockSupplier({ kind: 'flight', now: () => NOW })
@@ -137,7 +137,7 @@ describeDb('handleChoose', () => {
 
       expect(hotelStep.kind).toBe('park')
       if (hotelStep.kind !== 'park') throw new Error('unreachable')
-      expect(hotelStep.message).toBe('Trip summary ready. Use "Get booking links" when you want the links.')
+      expect(hotelStep.message).toBe('Trip summary ready. Use "Get booking links" when you want to book.')
       expect(hotelStep.attachments).toBeUndefined()
 
       const allProposals = await sql`select 1 from proposals where conversation_id = ${s0.conversationId}`
@@ -149,8 +149,18 @@ describeDb('handleChoose', () => {
       expect(saved).not.toBeNull()
       const [combined] = await sql<{ decision: string | null; itinerary: { items: { slot: string }[] } }[]>`
         select decision, itinerary from proposals where id = ${saved!.id}`
-      expect(combined!.decision).toBe('accept')
+      // C4: the combined proposal stays UNDECIDED. `PinnedSummary` renders "Get booking links"
+      // only while `decision === null`, and `/decide` is what queues the `hand_off` action the
+      // cashier needs to mint links — accepting here made the whole hand-off unreachable.
+      expect(combined!.decision).toBeNull()
       expect(combined!.itinerary.items.map((i) => i.slot).sort()).toEqual(['flight', 'stay'])
+
+      // The FLIGHTS-ONLY proposal stays accepted: `loadNewestAcceptedItinerary` is how the
+      // hotel turn recovers the flight half, and it reads only accepted rows.
+      const flightsOnly = await loadNewestProposalForTurn(sql, s0.turnId)
+      const [flightProposal] = await sql<{ decision: string | null }[]>`
+        select decision from proposals where id = ${flightsOnly!.id}`
+      expect(flightProposal!.decision).toBe('accept')
 
       const gateRows = await sql`
         select gate from gate_results where turn_id = ${s1.turnId} and round = 0`
