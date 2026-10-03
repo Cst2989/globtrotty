@@ -14,7 +14,9 @@ import {
   askJev, choiceQ, noulQ, type JevAnswer, type JevDeps, type JevQuestion, type JevRequest, type JevResponse,
 } from '../jev/client.js'
 import { recordJevCall } from '../jev/record.js'
-import { readNewestMessage, readLatestResults, readLatestChoices } from '../repo/messages.js'
+import {
+  readNewestMessage, readLatestResults, readLatestChoices, readNewestUserTextBefore,
+} from '../repo/messages.js'
 import { rehydrate } from '../repo/toolResults.js'
 import { readLastOrigin } from '../repo/conversations.js'
 import { loadNotebook } from '../repo/notebook.js'
@@ -209,16 +211,30 @@ export function makeRouter(deps: IntakeDeps): Agent {
         // at confidence 1. Checked BEFORE any Jev call, so a refusal here costs nothing.
         const latestChoices = await readLatestChoices(sql, ctx.conversationId, ctx.userId)
         const offered = latestChoices !== null
-          && latestChoices.questionId === action.questionId
-          && latestChoices.options.some((o) => o.id === action.optionId)
-        if (!offered) {
+          && latestChoices.choices.questionId === action.questionId
+          && latestChoices.choices.options.some((o) => o.id === action.optionId)
+        if (latestChoices === null || !offered) {
           return { kind: 'park', message: 'That option is no longer available. Tell me in your own words.', costMicros: 0n }
         }
         const overrides: Partial<Record<'origin' | 'destination' | 'outbound', string>> = {}
         if (action.questionId === 'origin' || action.questionId === 'destination' || action.questionId === 'outbound') {
           overrides[action.questionId] = action.optionId
         }
-        return runIntakeTurn(deps, ctx, { text: lastUserText(ctx.state), overrides })
+        // C3: NOT `lastUserText(ctx.state)`. `submitAction` writes her click as a `user` row
+        // (the option's label) immediately before the `action` row, and `loop()` hydrates every
+        // `user` row into the transcript, so the newest `user` entry is "Barcelona" — not "a
+        // week somewhere, flying from where I usually do". Ruling 2 says intake re-runs on the
+        // ORIGINAL message with the override applied, and the card's own `created_at` is the
+        // line between what she typed and what she clicked.
+        //
+        // `?? lastUserText(...)` is a shape production cannot reach (`submitMessage` writes the
+        // first `user` row of every conversation, and intake only offers a card after reading
+        // it), so the fallback is there to keep a malformed transcript from re-running intake on
+        // an empty string rather than because it is expected to fire.
+        const original = await readNewestUserTextBefore(
+          sql, ctx.conversationId, ctx.userId, latestChoices.createdAt,
+        )
+        return runIntakeTurn(deps, ctx, { text: original ?? lastUserText(ctx.state), overrides })
       }
       if (action?.action === 'choose') {
         return handleChoose(deps, ctx, { kind: action.kind, sourceId: action.sourceId })

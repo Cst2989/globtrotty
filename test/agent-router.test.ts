@@ -187,7 +187,7 @@ describeDb('makeRouter', () => {
     })
   })
 
-  it('a choice action re-runs intake on the hydrated original message with the override, and records only seat intake (no router call)', async () => {
+  it('a choice action re-runs intake on her ORIGINAL message with the override, and records only seat intake (no router call)', async () => {
     await withTestDb(async (sql) => {
       const s = await seedConversation(sql, '04')
       const original = 'a week somewhere, not sure where from or to'
@@ -197,6 +197,12 @@ describeDb('makeRouter', () => {
         options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
       }
       await insertMessage(sql, s, 'choices', JSON.stringify(choices), true)
+      // C3: the rows `submitAction` ACTUALLY writes for a click — the option's label as a `user`
+      // row (`ChoiceCardLive` always sends `text: label`), then the action row, both on
+      // `clock_timestamp()` so the action is strictly later. The previous version of this test
+      // never wrote the note, so it asserted a transcript production never produces: the newest
+      // `user` entry in a real turn is "Barcelona", and intake used to re-run on THAT.
+      await insertMessage(sql, s, 'user', 'Barcelona', true)
       const action: ActionPayload = { action: 'choice', questionId: 'origin', optionId: 'BCN' }
       await insertMessage(sql, s, 'action', JSON.stringify(action), true)
 
@@ -214,10 +220,16 @@ describeDb('makeRouter', () => {
       const flights = new MockSupplier({ kind: 'flight' })
       const searchSpy = vi.spyOn(flights, 'search')
 
-      // The DB holds the real newest row (the action); `ctx.state.messages` is what a real
-      // claimed turn's hydrated transcript would carry — her ORIGINAL message as the newest
-      // `user` entry (the action/choices rows between them all hydrate to `system`).
-      const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, original))
+      // `ctx.state.messages` carries what `loop()` would really hydrate: the newest `user`
+      // entry is the CLICK, not the request. If the router still read the transcript, intake
+      // would run on "Barcelona" and the assertion below would fail.
+      const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, 'Barcelona'))
+
+      // The text intake actually ran on, read off the Jev request body.
+      const sent = JSON.parse((fetchImpl.mock.calls[0]![1] as { body: string }).body) as {
+        state: { message: string }
+      }
+      expect(sent.state.message).toBe(original)
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
@@ -230,6 +242,50 @@ describeDb('makeRouter', () => {
 
       const calls = await sql`select seat from model_calls where conversation_id = ${s.conversationId}`
       expect(calls.map((r) => r.seat)).toEqual(['intake'])
+    })
+  })
+
+  it('C3: a SECOND card in the chain still re-runs on her original message, not the first click', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '09')
+      const original = 'a week somewhere, not sure where from or to'
+      await insertMessage(sql, s, 'user', original, true)
+      // Card 1 (origin) -> she clicks Barcelona -> intake re-runs and asks for the destination
+      // -> card 2 -> she clicks Tokyo. Every `user` row before card 2 except her request is a
+      // click note, which is why `readNewestUserTextBefore` skips a `user` row whose next row
+      // is an `action`: taking simply "the newest user row before the card" would hand intake
+      // "Barcelona" here — the same bug, one card further along.
+      const originCard: ChoicesContent = {
+        questionId: 'origin', question: 'Which city are you flying from?',
+        options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
+      }
+      await insertMessage(sql, s, 'choices', JSON.stringify(originCard), true)
+      await insertMessage(sql, s, 'user', 'Barcelona', true)
+      await insertMessage(sql, s, 'action', JSON.stringify({ action: 'choice', questionId: 'origin', optionId: 'BCN' } satisfies ActionPayload), true)
+      const destCard: ChoicesContent = {
+        questionId: 'destination', question: 'Where is the trip to?',
+        options: [{ id: 'TYO', label: 'Tokyo' }, { id: 'OSA', label: 'Osaka' }],
+      }
+      await insertMessage(sql, s, 'choices', JSON.stringify(destCard), true)
+      await insertMessage(sql, s, 'user', 'Tokyo', true)
+      await insertMessage(sql, s, 'action', JSON.stringify({ action: 'choice', questionId: 'destination', optionId: 'TYO' } satisfies ActionPayload), true)
+
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: {
+          origin: { type: 'choice', choice: 'none', confidence: 0.3, probabilities: { none: 0.3, BCN: 0.2 } },
+          destination: { type: 'choice', choice: 'none', confidence: 0.3, probabilities: { none: 0.3, TYO: 0.4 } },
+        },
+        usage: { input_tokens: 500, output_tokens: 150 },
+      }))
+      const flights = new MockSupplier({ kind: 'flight' })
+
+      await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(ctx(s, 'Tokyo'))
+
+      const sent = JSON.parse((fetchImpl.mock.calls[0]![1] as { body: string }).body) as {
+        state: { message: string }
+      }
+      expect(sent.state.message).toBe(original)
     })
   })
 

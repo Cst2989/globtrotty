@@ -43,22 +43,71 @@ export async function readLatestResults(
 }
 
 /**
- * The newest `choices` row's own content for this conversation — fix round 1 (Important):
- * `makeRouter`'s `choice` dispatch (src/agents/router.ts) must check her click against what was
- * ACTUALLY offered, never trust `ActionPayload`'s `questionId`/`optionId` on their own (both are
- * just id-shaped strings the client sent; nothing upstream of this read proves they came from a
- * card this office actually rendered). `null` when she has no choice card at all, or the newest
- * one fails `parseChoices` (a garbled write — never something our own writer produces), either of
- * which `makeRouter` treats as "nothing was offered", same as a genuine mismatch.
+ * The newest `choices` row for this conversation, with the moment it was written.
+ *
+ * The content is fix round 1 (Important): `makeRouter`'s `choice` dispatch (src/agents/router.ts)
+ * must check her click against what was ACTUALLY offered, never trust `ActionPayload`'s
+ * `questionId`/`optionId` on their own (both are just id-shaped strings the client sent; nothing
+ * upstream of this read proves they came from a card this office actually rendered). `null` when
+ * she has no choice card at all, or the newest one fails `parseChoices` (a garbled write — never
+ * something our own writer produces), either of which `makeRouter` treats as "nothing was
+ * offered", same as a genuine mismatch.
+ *
+ * `createdAt` is the final review's C3: the card is the dividing line between what she TYPED and
+ * what she CLICKED, so it is what `readNewestUserTextBefore` needs to recover the request intake
+ * should re-run on.
  */
+export type StoredChoices = { choices: ChoicesContent; createdAt: Date }
+
 export async function readLatestChoices(
   sql: postgres.Sql, conversationId: string, userId: string,
-): Promise<ChoicesContent | null> {
-  const rows = await sql<{ content: string }[]>`
-    select content from messages
+): Promise<StoredChoices | null> {
+  const rows = await sql<{ content: string; created_at: Date }[]>`
+    select content, created_at from messages
      where conversation_id = ${conversationId} and user_id = ${userId} and role = 'choices'
      order by created_at desc, id desc
      limit 1`
   const row = rows[0]
-  return row ? parseChoices(row.content) : null
+  if (!row) return null
+  const choices = parseChoices(row.content)
+  return choices === null ? null : { choices, createdAt: row.created_at }
+}
+
+/**
+ * The newest TYPED `user` message strictly older than `before`, or `null` when there is none.
+ *
+ * The final review's C3. `src/handler.ts`'s `submitAction` writes her click as a `user` row
+ * (`userNote` — `ChoiceCardLive` always sends the option's label) immediately before the `action`
+ * row, and `loop()` hydrates every `user` row into the transcript, so the newest `user` entry
+ * `ctx.state.messages` can offer is the label "Barcelona", not the trip request. Re-running
+ * intake on that loses the trip: "a week somewhere, flying from where I usually do" becomes
+ * "Barcelona", the destination and dates vanish, and she gets another card.
+ *
+ * `before` is the choice card's own `created_at` (`readLatestChoices`), which is strictly older
+ * than any click on it.
+ *
+ * A click note is also EXCLUDED outright, not just by being newer than the card: a `userNote` is
+ * always the row immediately before an `action` row (that is the only thing that writes the
+ * pair, and `clock_timestamp()` orders them that way on purpose), so "the next row is an action"
+ * identifies one exactly. Without that, a second card in the same chain — she clicks the origin
+ * card, intake re-runs and asks for the destination, she clicks that too — would re-run on the
+ * FIRST click's label instead of her request, which is the same bug one card further along.
+ * `lead(...)` over the whole conversation is cheap here: these transcripts are tens of rows.
+ */
+export async function readNewestUserTextBefore(
+  sql: postgres.Sql, conversationId: string, userId: string, before: Date,
+): Promise<string | null> {
+  const rows = await sql<{ content: string }[]>`
+    with ordered as (
+      select role, content, created_at, id,
+             lead(role) over (order by created_at, id) as next_role
+        from messages
+       where conversation_id = ${conversationId} and user_id = ${userId}
+    )
+    select content from ordered
+     where role = 'user' and created_at < ${before} and coalesce(next_role, '') <> 'action'
+     order by created_at desc, id desc
+     limit 1`
+  const row = rows[0]
+  return row && row.content.length > 0 ? row.content : null
 }
