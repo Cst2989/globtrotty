@@ -4,6 +4,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { loadPrompt } from '../src/agents/prompts/load.js'
+import { renderDriverPrompt } from '../src/agents/driver.js'
+import { NOTEBOOK_KEYS } from '../src/notebook.js'
 
 describe('loadPrompt', () => {
   it('returns the driver prompt text', () => {
@@ -40,5 +42,22 @@ describe('loadPrompt', () => {
     } finally {
       process.chdir(realCwd)
     }
+  })
+})
+
+describe('renderDriverPrompt', () => {
+  it('replaces {{NOTEBOOK_KEYS}} with every allowed notebook key', () => {
+    const rendered = renderDriverPrompt()
+    expect(rendered).not.toContain('{{NOTEBOOK_KEYS}}')
+    expect(NOTEBOOK_KEYS.length).toBeGreaterThan(0)
+    for (const key of NOTEBOOK_KEYS) {
+      expect(rendered).toContain(key)
+    }
+  })
+
+  it('leaves the raw file untouched — only the rendered copy is substituted', () => {
+    // loadPrompt stays a pure file read: the placeholder survives there, and
+    // only renderDriverPrompt resolves it.
+    expect(loadPrompt('driver')).toContain('{{NOTEBOOK_KEYS}}')
   })
 })

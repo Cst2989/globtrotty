@@ -11,6 +11,11 @@ import { classifyError } from './errors.js'
 import { recordSpend, readSpendFailClosed } from './repo/spend.js'
 import { beginToolCall, finishToolCall } from './repo/toolCalls.js'
 import { parseAction, renderActionMessage } from './actions.js'
+import {
+  parseResults, parseChoices, renderResultsNote, renderChoicesNote,
+  ResultsContentSchema, ChoicesContentSchema,
+  type ResultsContent, type ChoicesContent,
+} from './results.js'
 import { screenOutbound, SCREENED_REPLY } from './sanitize.js'
 import { recordAgentEvent } from './repo/agentEvents.js'
 import { recordEscalation, markNotified } from './repo/escalations.js'
@@ -32,6 +37,17 @@ export type AgentContext = {
 export type AgentStep =
   | {
       kind: 'message'; text: string; costMicros: bigint
+      /**
+       * Plan 5: a `results` or `choices` row (src/results.ts) written right
+       * after this step's `message` row, in `created_at` order — so a
+       * results card or a question card follows the agent's own prose rather
+       * than preceding it. `loop()` validates each `content` against its zod
+       * schema before writing (`ResultsContentSchema` / `ChoicesContentSchema`)
+       * and throws on a schema failure: only our own code builds these, so a
+       * failure here is a bug in that code, never traveller or supplier input
+       * to tolerate.
+       */
+      attachments?: { role: 'results' | 'choices'; content: ResultsContent | ChoicesContent }[]
       /**
        * Spend the AGENT has already debited (src/repo/reservation.ts, Task 4).
        *
@@ -91,7 +107,11 @@ export type AgentStep =
    * branch by accident: a question and an answer are not the same event, even
    * though both end the turn.
    */
-  | { kind: 'park'; message: string; costMicros: bigint; recordedMicros?: bigint }
+  | {
+      kind: 'park'; message: string; costMicros: bigint; recordedMicros?: bigint
+      /** Same contract as the `message` arm's `attachments` above. */
+      attachments?: { role: 'results' | 'choices'; content: ResultsContent | ChoicesContent }[]
+    }
   | {
       kind: 'tool'; callId: string; name: string
       run: () => Promise<unknown>
@@ -239,7 +259,7 @@ async function withHeartbeat<T>(
   }
 }
 
-type MessageRow = { role: 'user' | 'agent' | 'action'; content: string }
+type MessageRow = { role: 'user' | 'agent' | 'action' | 'results' | 'choices'; content: string }
 
 /**
  * Said when an `action` row's `content` fails `parseAction` — a garbled
@@ -272,6 +292,30 @@ const UNREADABLE_ACTION_TEXT =
  * her, and the turn must still finish, even if the page itself fails to
  * send or to stamp.
  */
+/**
+ * Validates and serializes a `message`/`park` step's `attachments` into the
+ * row shape `completeTurn` writes. Each `content` is validated against its
+ * own zod schema (`ResultsContentSchema` / `ChoicesContentSchema`,
+ * src/results.ts) BEFORE it is stringified — `.parse` (not `.safeParse`), so
+ * a schema failure throws rather than silently writing a row nothing can
+ * read back: only our own code builds an `AgentStep.attachments` entry, so a
+ * failure here is a bug in that code, never traveller- or supplier-origin
+ * input to tolerate.
+ */
+function buildAttachmentRows(
+  attachments: { role: 'results' | 'choices'; content: ResultsContent | ChoicesContent }[] | undefined,
+): { role: 'results' | 'choices'; content: string }[] {
+  if (!attachments) return []
+  return attachments.map((a) => {
+    if (a.role === 'results') {
+      ResultsContentSchema.parse(a.content)
+    } else {
+      ChoicesContentSchema.parse(a.content)
+    }
+    return { role: a.role, content: JSON.stringify(a.content) }
+  })
+}
+
 async function screenReply(
   sql: postgres.Sql, notifier: Notifier, claim: Claim, text: string,
 ): Promise<string> {
@@ -330,6 +374,24 @@ async function loop(
             content: [{ type: 'text', text: parsed ? renderActionMessage(parsed) : UNREADABLE_ACTION_TEXT }],
           }
         }
+        // Plan 5: `results` and `choices` rows (src/results.ts) hydrate the
+        // same way `action` does — a `system` message via their own
+        // renderer, falling back to the same unreadable-row text on a parse
+        // failure (a garbled write, never something our own writer produces).
+        if (r.role === 'results') {
+          const parsed = parseResults(r.content)
+          return {
+            role: 'system',
+            content: [{ type: 'text', text: parsed ? renderResultsNote(parsed) : UNREADABLE_ACTION_TEXT }],
+          }
+        }
+        if (r.role === 'choices') {
+          const parsed = parseChoices(r.content)
+          return {
+            role: 'system',
+            content: [{ type: 'text', text: parsed ? renderChoicesNote(parsed) : UNREADABLE_ACTION_TEXT }],
+          }
+        }
         return {
           role: r.role === 'agent' ? 'assistant' : 'user',
           content: [{ type: 'text', text: r.content }],
@@ -369,7 +431,7 @@ async function loop(
         return
       case 'park':
         // NOT the same gap as the AgentStep 'park' below, which is now
-        // implemented and is the path `ask_user` uses. decideNext returns this
+        // implemented and is the path `offer_choices` uses. decideNext returns this
         // only for a PENDING USER MESSAGE that needs answering mid-turn, which
         // nothing in this plan wires. Kept as a throw rather than a silent
         // fall-through so the plan that wires it must replace real behaviour
@@ -430,6 +492,7 @@ async function loop(
         await completeTurn(sql, claim, {
           state, agentMessage: await screenReply(sql, deps.notifier, claim, step.text),
           parked: true, spendMicros: turnSpend.total,
+          attachments: buildAttachmentRows(step.attachments),
         })
         return
       }
@@ -450,6 +513,7 @@ async function loop(
         await completeTurn(sql, claim, {
           state, agentMessage: await screenReply(sql, deps.notifier, claim, step.message),
           parked: true, spendMicros: turnSpend.total,
+          attachments: buildAttachmentRows(step.attachments),
         })
         return
       }

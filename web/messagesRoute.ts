@@ -5,7 +5,7 @@ import { withUser, type RouteContext, type SessionUser } from '@/web/session'
 import { readInvokeEnv } from '@/web/invoke'
 import { ownerSql } from '@/src/db/owner'
 import { invokeBackground } from '@/src/invoke'
-import { submitMessage } from '@/src/handler'
+import { submitMessage, submitAction, ActionRefused } from '@/src/handler'
 import { DEFAULT_LIMITS } from '@/src/limits'
 
 /**
@@ -26,9 +26,20 @@ import { DEFAULT_LIMITS } from '@/src/limits'
 // below; there is no code path that reads it off the body at all, and this
 // schema makes sure a body that tries anyway is refused outright rather than
 // accepted-with-the-field-ignored.
+// Plan 5: the optional `choice` arm mirrors `ActionPayload`'s own `choice`
+// regexes (src/actions.ts) exactly — `questionId`/`optionId` are ids/enums
+// WE generated (a `ChoicesContent` row's own fields), never her free text, so
+// a body that puts typed words in either one fails this shape before it ever
+// reaches `submitAction`.
+const ChoiceBody = z.strictObject({
+  questionId: z.string().regex(/^[a-z_]{1,32}$/),
+  optionId: z.string().regex(/^[A-Za-z0-9_:-]{1,64}$/),
+})
+
 const Body = z.strictObject({
   text: z.string().min(1).max(4000),
   idempotencyKey: z.string().min(8).max(64),
+  choice: ChoiceBody.optional(),
 })
 
 export type MessagesRouteDeps = {
@@ -95,6 +106,45 @@ export function makePost(deps: MessagesRouteDeps) {
     const parsed = Body.safeParse(raw)
     if (!parsed.success) {
       return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
+    }
+
+    // Plan 5: a `ChoiceCard` click. `conversationId` is required here — unlike
+    // every other card action, `submitAction` never creates a conversation
+    // (see its own doc comment), and there is nothing to answer a choice
+    // card about in one that does not exist yet.
+    if (parsed.data.choice) {
+      if (conversationId === null) {
+        return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
+      }
+      try {
+        const result = await submitAction(
+          { sql: deps.sql, limits: DEFAULT_LIMITS, invoke: deps.invoke },
+          {
+            userId: user.id,
+            conversationId,
+            action: {
+              action: 'choice',
+              questionId: parsed.data.choice.questionId,
+              optionId: parsed.data.choice.optionId,
+            },
+            idempotencyKey: parsed.data.idempotencyKey,
+            // The clicked option's label, as her own words — spec §3: "A
+            // click posts the option label as an ordinary user message" —
+            // on the SAME fresh turn as the action row (submitAction's own
+            // note-then-action ordering).
+            userNote: parsed.data.text,
+          },
+        )
+        const payload = { conversationId: result.conversationId, turnId: result.turnId, status: result.status }
+        if (result.status === 'busy') return NextResponse.json(payload, { status: 409 })
+        if (result.status === 'limit_reached') return NextResponse.json(payload, { status: 429 })
+        return NextResponse.json(payload)
+      } catch (err) {
+        if (err instanceof ActionRefused) {
+          return NextResponse.json({ error: 'not_planning' }, { status: 409 })
+        }
+        throw err
+      }
     }
 
     const result = await submitMessage(

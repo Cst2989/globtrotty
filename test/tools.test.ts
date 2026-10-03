@@ -14,7 +14,7 @@ describe('registry', () => {
     // model will call and get an error from. The cashier IS: hand_off_to_booking
     // is how the model reaches it.
     expect([...DESK_TOOLS.planning].sort()).toEqual(
-      ['ask_user', 'explore_flights', 'explore_hotels', 'escalate_to_human', 'hand_off_to_booking',
+      ['offer_choices', 'explore_flights', 'explore_hotels', 'escalate_to_human', 'hand_off_to_booking',
        'propose_itinerary', 'research_destination', 'revise_component', 'update_requirements'].sort(),
     )
   })
@@ -61,7 +61,10 @@ describe('provenance is assigned by the harness, never by the model', () => {
   // update_requirements) means a future code-door tool is covered for free.
   const VALID_INPUT: Record<string, unknown> = {
     update_requirements: { patch: { destination: 'Lisbon' } },
-    ask_user: { questions: ['When do you want to travel?'] },
+    offer_choices: {
+      question: 'When do you want to travel?',
+      options: [{ id: 'soon', label: 'Soon' }, { id: 'later', label: 'Later' }],
+    },
     propose_itinerary: { refs: [{ sourceId: 'KIWI-1', quantity: 1, slot: 'outbound' }] },
     revise_component: { proposalId: '00000000-0000-4000-8000-000000000001', change: { kind: 'swap', slot: 'stay', sourceId: 'KIWI-1' } },
     hand_off_to_booking: { proposalId: '00000000-0000-4000-8000-000000000001' },
@@ -120,11 +123,11 @@ describe('provenance is assigned by the harness, never by the model', () => {
 
 describe('validateToolCall', () => {
   it('rejects a tool the desk does not carry, as a readable result not a throw', () => {
-    const out = validateToolCall('front', 'ask_user', {})
+    const out = validateToolCall('front', 'offer_choices', {})
     expect(out.ok).toBe(false)
     if (out.ok) throw new Error('unreachable')
     expect(out.reason).toBe('not_allowed')
-    expect(out.content).toContain('ask_user')
+    expect(out.content).toContain('offer_choices')
   })
 
   it('rejects a tool that does not exist, naming what IS available', () => {
@@ -136,11 +139,11 @@ describe('validateToolCall', () => {
   })
 
   it('rejects input that fails zod, naming the field so the model can fix it', () => {
-    const out = validateToolCall('planning', 'ask_user', { questions: 'not an array' })
+    const out = validateToolCall('planning', 'offer_choices', { question: 'x', options: 'not an array' })
     expect(out.ok).toBe(false)
     if (out.ok) throw new Error('unreachable')
     expect(out.reason).toBe('bad_input')
-    expect(out.content).toContain('questions')
+    expect(out.content).toContain('options')
   })
 
   it('returns the PARSED input, not the raw input', () => {
@@ -174,7 +177,7 @@ describe('fenceResult', () => {
   })
 
   it('leaves a code-door result alone — it is ours', () => {
-    expect(fenceResult('ask_user', 'code', 'plain text')).toBe('plain text')
+    expect(fenceResult('offer_choices', 'code', 'plain text')).toBe('plain text')
   })
 
   it('escapes a payload that tries to close the fence and keep writing', () => {

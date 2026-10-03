@@ -22,6 +22,15 @@ export const SYSTEM_CACHE_TTL: CacheTtl = '1h'
  */
 const MIN_CACHEABLE_TOKENS: Record<string, number> = {
   'claude-opus-5': 512,
+  // Task 8 fix round 1: corrected from 512 (Opus 5's own minimum, wrongly
+  // assumed for Sonnet 5 too) to 1,024. Sonnet 5 is in the 1,024-token tier
+  // with Opus 4.8 and Sonnet 4.6; Opus 5 and the Fable/Mythos line are the
+  // 512 tier. Source: Anthropic prompt-caching docs, 2026-10-03.
+  // Kept after the C1 revert (the driver is Opus 5 again) because the figure
+  // is correct: the same docs page records that mid-conversation system
+  // messages are not available on Claude Sonnet 5, which is why it cannot be
+  // the driver here; Sonnet 5.5 is the future candidate, pending a price.
+  'claude-sonnet-5': 1_024,
   'claude-haiku-4-5-20251001': 4_096,
 }
 /**

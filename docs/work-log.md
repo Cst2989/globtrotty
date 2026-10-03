@@ -1,6 +1,6 @@
 # Work log
 
-Last updated: **2026-09-19**. Written to be picked up cold after a break.
+Last updated: **2026-10-03**. Written to be picked up cold after a break.
 
 ---
 
@@ -15,94 +15,104 @@ Last updated: **2026-09-19**. Written to be picked up cold after a break.
 | **Pre-3b clearance** | Migrations 0011–0013; cashier and drift-monitor blockers cleared | Merged 2026-08-30 |
 | 3b | Reviewer seat, `revise_component`, the cashier (`hand_off_to_booking`), `escalate_to_human` | Merged |
 | 3c | Front desk, scouts, drift monitor, CI, `trimForContext`'s price half | Merged 2026-09-14; CI still unproven until the first PR run |
-| **4a** | Next.js chat on Netlify, magic-link sign-in, RLS policies, the operator channel, the proposal card, the outbound filter, deploy | **On branch `feat/plan-4-chat`, ready to merge — deployed to https://globtrotty.netlify.app** |
-| 4b | Token streaming with the redactor on deltas, GDPR export/delete, memory across conversations, shift-dates UI beyond ±2, account management | Not started — next (spec 4a's own "Out" line) |
+| 4a | Next.js chat on Netlify, magic-link sign-in, RLS policies, the operator channel, the proposal card, the outbound filter, deploy | Merged — deployed to https://globtrotty.netlify.app |
+| **5** | Jev intake agent (places, dates, choices) answers the first message and any later filter/new-search with a direct flight search before any generative model call; instant client-side filters; hotels after Choose; new `results`/`choices` message rows; the Kayak split UI; the driver steps back to Opus 5 for `question`/`chat`/hand-off/escalation only | **On branch `feat/plan-5-results`, ready to merge** |
+| 4b | Token streaming with the redactor on deltas, GDPR export/delete, memory across conversations, shift-dates UI beyond ±2, account management | Not started — plan 5 was inserted ahead of it (spec 4a's own "Out" line still applies) |
 
-**991 tests passing, 13 skipped** (live external-API and `LIVE_SUPABASE` suites, gated). Typecheck
-clean across all three passes, lint clean with `.netlify/` present, `pnpm build` clean. Migrations
-0001–**0017** applied to the live Supabase project.
+**1181 tests passing, 14 skipped** (live external-API suites, gated). Typecheck clean across all
+three passes, lint clean with `.netlify/` present, `pnpm build` clean (`ƒ /api/conversations/[id]/choose`
+in the route list). Migrations **0001–0018** applied to the live Supabase project.
 
-**The system has made real model calls.** `LIVE_MODEL=1 pnpm demo` runs one driver turn against the live API; the conversation spend delta matched `model_calls.cost_micros` to the micro ($0.030420 both sides).
+**The system has made real model calls.** `LIVE_MODEL=1 pnpm demo` runs one driver turn against the live API; the conversation spend delta matched `model_calls.cost_micros` to the micro ($0.030420 both sides). This predates plan 5; plan 5's own operator-channel probe on the reverted Opus 5 driver seat has not been run live (backlog 5.12 — no Anthropic credit).
 
-**It is deployed.** https://globtrotty.netlify.app — the Next.js app, its `/api/*` routes, the
-`proxy.ts` edge handler, and three Netlify functions (`run-turn-background`, `sweep`,
-`drift-monitor`). Deploys are Netlify CLI only (`netlify deploy --build --prod`), by hand, from a
-machine with `.env.local`; the runbook is **[docs/deploy.md](deploy.md)**. Two things are still
-open on the deploy: `supabase config push` has not been run (the auth redirect URLs in
-`supabase/config.toml` may not match the live project, which makes a magic link fall back to the
-stored `site_url`), and the **sign-in smoke has not been done** — nobody has yet signed in on the
-deployed site and watched a turn run. Both are user actions; see Next steps.
+**It is deployed, but not yet with plan 5.** https://globtrotty.netlify.app — the Next.js app, its
+`/api/*` routes, the `proxy.ts` edge handler, and three Netlify functions (`run-turn-background`,
+`sweep`, `drift-monitor`) — currently serves plan 4a. Deploys are Netlify CLI only
+(`netlify deploy --build --prod`), by hand, from a machine with `.env.local`; the runbook is
+**[docs/deploy.md](deploy.md)**. Migration 0018 (plan 5) is already applied to the live Supabase
+project (Task 1 ran it independently of the deploy), but the branch itself has not been deployed —
+that is plan 5's own Task 11 Steps 1–2 (controller-run smoke test), not done in this docs-only
+pass. Two things were still open on the plan 4a deploy as of the last update and have not been
+revisited since: `supabase config push` and the sign-in smoke. Both are user actions; see Next
+steps.
 
 ---
 
 ## What the last session did
 
-Built plan 4a — the chat — on branch `feat/plan-4-chat`, 11 tasks, each reviewed individually
-(seven took one fix round) plus a whole-branch final review and one fix wave. Full rulings and
-rationale are in `superpowers/2026-09-19-plan-4-chat-decisions.md`; this is the short version.
+Built plan 5 — results first — on branch `feat/plan-5-results`, 10 code tasks (Tasks 5, 6, 7, 8
+individually reviewed; Tasks 3, 4, 9, 10 controller-spot-checked per a pace ruling) plus a
+whole-branch final review and one fix wave (12 commits, one per finding). Full rulings and
+rationale are in `superpowers/2026-10-03-plan-5-results-first-decisions.md`; this is the short
+version.
 
-- **Migration 0016** widens `messages.role` to `user | agent | action` and `agent_events.kind` with
-  `'screened'`, adds `conversations`/`messages` to the `supabase_realtime` publication, and grants
-  `authenticated` **select only** on the nine user-owned tables with per-user policies.
-  **Migration 0017** narrows the `agent_events` policy to `kind <> 'screened'`.
-- **The operator channel.** Button presses are never user text: they are `messages.role = 'action'`
-  JSON rows, written only by route handlers, hydrated by `loop()` into mid-conversation `system`
-  messages whose wording is built server-side from fixed fragments plus a uuid and an enum. The
-  payload is a `z.strictObject` discriminated union; `rejected` carries no `reason` at all (her
-  reason is written as her own `role='user'` message in the same transaction).
-- **The Next.js app** (`app/`, `web/`, `proxy.ts`, `next.config.ts`) — magic-link sign-in, thread,
-  sidebar, status line, message box, and the proposal card with Accept / Reject / per-item swap /
-  shift ±2. Reads go through Supabase RLS on her cookie; writes go through the existing repo
-  functions on the owner connection in route handlers, with `user_id` from the verified session and
-  an explicit ownership select per write.
-- **The outbound solicitation filter** (`screenOutbound`, `src/sanitize.ts`) — a 20-rule
-  deterministic table applied to every model-authored outbound string in both the `message` and
-  `park` branches. A hit replaces the reply, writes the original to `agent_events`
-  (`kind: 'screened'`), and pages a human through `recordEscalation` — **never** rate-limited
-  against the driver's daily escalation budget.
-- **The production agent.** `run-turn-background.mts` now builds the real `routeAgent` with the SDK
-  transport, `KiwiSupplier` and `SearchApiHotels`, replacing `echoAgent` (backlog 3c.6, cleared).
-  Prompt files are loaded through `loadPrompt`, which survives esbuild bundling.
-- **Deploy** — site created and linked, every env name pushed (secrets context-scoped), the Next
-  plugin and `included_files` in `netlify.toml`, and `docs/deploy.md`.
-- **One Critical from the final review, fixed:** `buildRequest` ran `normalizeOperatorTurns` before
-  `withSuffix`, so on the accept path the operator instruction landed two turns from the end of the
-  request, ahead of the assistant message presenting the very proposal it referred to. The ruling
-  had said "after the suffix"; the build did the opposite and no test caught it, because the one
-  test covering that transcript used an empty suffix. Also fixed in the wave: the screened-original
-  policy hole (0017), `.netlify/**` breaking `pnpm lint`, the non-planning desk 500ing instead of
-  409ing, a stale `SwapPicker` selection that could post a no-op swap, and the card's 429 copy.
-- **The `route.test.ts` flake, reported three times, is understood and fixed in the assertion:**
-  `withTestDb` runs the whole test in one transaction, so `now()` is frozen and rows tie on
-  `created_at`. `order by created_at` over a tie has no guaranteed order.
+- **Migration 0018** widens `messages.role` to add `results`/`choices` and `model_calls.seat` to
+  add `intake`/`rerank`/`router` (the three Jev seats).
+- **The Jev intake agent** (`src/agents/intake.ts`) answers the first message, and any later
+  message the new Jev router classifies as a new search: code-found candidates (places, date
+  parts, counts) go to Jev as structured Choice/Score/Noul questions, never free text; a complete
+  brief triggers a direct flight search (no model in the loop) and a Jev re-rank of the top 20;
+  low-confidence fields become a 2-to-4-option choice card instead of a question. **The first turn
+  has zero generative-model calls.**
+- **The router** (`src/agents/router.ts`) replaces the Haiku front desk for every later message: one
+  Jev call classifies `filter` (instant, client-/code-side, no search) / `new_search` (intake
+  re-runs) / `question`/`chat` (the driver) / `faq` (fixed table, no model).
+- **New `results` and `choices` message rows** carry ids, enums and masked labels only — never raw
+  supplier strings or free text — and hydrate into the model transcript as a `system`-role
+  operator note, the same trust boundary the existing `action` rows already keep.
+- **Choose and hotels.** Choosing a flight accepts a flights-only proposal and triggers a hotel
+  search; choosing a hotel builds a combined flight+hotel proposal through the existing gates and
+  reviewer but leaves it undecided — "Get booking links" is the acceptance (spec §9), not Choose.
+- **The driver steps back.** It is now reached only for `question`/`chat`, the hand-off and
+  escalation, with a new `offer_choices` tool replacing `ask_user`.
+- **The Kayak split UI** — a collapsible rail, a chat column and a results pane with filter chips,
+  flight/hotel lists, a choice card and a pinned summary, plus optimistic send.
+- **Four Criticals from the final review, all fixed:** the driver's Sonnet 5 seat cannot carry a
+  mid-conversation operator note (reverted to Opus 5 — see the Careful entry below); a choice card
+  with 0 or 1 options threw and failed the turn (both option-builders now top up to 2–4, enforced
+  by the schema); a clicked choice card re-ran intake on the clicked label instead of her original
+  message; "Get booking links" was permanently unreachable because Choose on a hotel already
+  accepted the combined proposal. Also fixed in the same wave: five Important findings (typed
+  filters compounding destructively, a dropped reviewer-spend on a throw, the chip filter and the
+  typed filter disagreeing on flight stops, an undebited router cost on a replayed step, an origin
+  card that could offer the destination as its own answer) and the Task 10 gap that left every
+  choice card inert in production (`ThreadView` never forwarded `conversationId`).
+- **The pace ruling's cost, paid once:** two of the four Criticals and the LOAD-BEARING gap
+  originated in the four tasks the pace ruling only spot-checked (Tasks 9 and 10), surfacing only
+  at the final review instead of at a task gate — recorded as the ruling's own named risk, and it
+  landed exactly there.
 
-**991 tests passing, 13 skipped** at merge — up from 793/11 at the last update.
+**1181 tests passing, 14 skipped** at this point — up from 1154/14 at the final review and 996/13
+at Task 1.
 
 ---
 
 ## Next steps, in order
 
-1. **Run `supabase config push`** (or set the two URLs in the dashboard: Authentication → URL
-   Configuration). Read the diff before answering `y` — it pushes the whole `[auth]` section.
-   `supabase/config.toml` is the source of truth and was aligned with the live project first, so
-   the diff should be only `site_url` and `additional_redirect_urls`. Until this runs, a magic link
-   silently falls back to the project's stored `site_url`.
-2. **Do the sign-in smoke** on https://globtrotty.netlify.app: sign in by magic link, send "a week
-   in Portugal in September for two", watch `conversations.status` go `working` →
-   (`awaiting_user` | `failed`). With no Anthropic credit the turn fails `provider_rejected` /
-   `provider_down` with the reason shown in the status line — that still proves the chain end to end.
-3. **Top up the Anthropic account's credit balance.** Still blocking, now for a fourth thing: the
-   live operator-channel pin (backlog 4a.14), the L1 front-desk/scout pins, CI's live suites, and
-   the nightly drift monitor in production. The operator pin is the one to run first — it is the
-   only check on the transcript shape the accept path now sends.
-4. **Add the two repo secrets** (`ANTHROPIC_API_KEY`, `GOOGLE_SEARCH_API`) so CI can run, open the
-   PR for `feat/plan-3c-seats`'s successor work and merge once green. CI's own acceptance criterion
-   — the workflow running green on a PR — still has not happened.
-5. **Merge `feat/plan-4-chat`.**
-6. **Plan 4b** — token streaming with the price redactor applied to deltas, GDPR export/delete,
+1. **Merge `feat/plan-5-results`.**
+2. **Deploy it and run the smoke** (plan 5's own Task 11, Steps 1–2, controller-run, not done in
+   this docs-only pass): confirm `netlify env:list --context production` shows `JEV_KEY`,
+   `netlify deploy --build --prod`, then send the Tokyo message on the live site and check the
+   first-results, filter, Choose-flight, Choose-hotel and (credit permitting) "Get booking links"
+   timings against `model_calls.latency_ms`/`turns`.
+3. **Top up the Anthropic account's credit balance.** Still blocking, now for a fifth thing: the
+   `LIVE_MODEL=1` probe of the operator channel on the reverted Opus 5 driver seat (backlog 5.12,
+   carried from 4a.14/3c.17) — the first live check of the exact transcript shape the accept and
+   hand-off paths depend on — plus the L1 front-desk/scout pins, CI's live suites, and the nightly
+   drift monitor in production.
+4. **Run `supabase config push`** (or set the two URLs in the dashboard: Authentication → URL
+   Configuration) if it has not already been done since the last update — read the diff before
+   answering `y`, since it pushes the whole `[auth]` section.
+5. **Add the two repo secrets** (`ANTHROPIC_API_KEY`, `GOOGLE_SEARCH_API`) so CI can run, open a PR
+   and merge once green. CI's own acceptance criterion — the workflow running green on a PR — still
+   has not happened.
+6. **Close the plan 5 carried debt that is cheapest first** (`docs/backlog-plan.md`'s "Plan 5 —
+   carried debt" table): the `.env.example` gap for `JEV_KEY` (5.17), the `new_search` notebook
+   merge beyond origin (5.2), side-trip hotels (5.4).
+7. **Plan 4b** — token streaming with the price redactor applied to deltas, GDPR export/delete,
    memory across conversations, shift-dates UI beyond ±2, account management (spec 4a's own "Out"
    line). Completes spec slice 1.
-7. **Slice 2** — golden trips, simulated user, trajectory checks, calibrated judges (spec §12).
+8. **Slice 2** — golden trips, simulated user, trajectory checks, calibrated judges (spec §12).
 
 ---
 
@@ -170,6 +180,66 @@ rationale are in `superpowers/2026-09-19-plan-4-chat-decisions.md`; this is the 
 **`SITE_URL` is a different value in every environment, and three places must agree.** It is `http://localhost:3000` locally and `https://globtrotty.netlify.app` on Netlify. The functions call each other through it (`web/invoke.ts` and `src/invoke.ts` both POST to `${SITE_URL}/.netlify/functions/run-turn-background`), the CSP's `connect-src` is built from the Supabase project URL alongside it, and `supabase/config.toml`'s `site_url`/`additional_redirect_urls` must list the same origin or a magic link silently redirects to whatever the project has stored. A custom domain is those three plus a redeploy plus a config push (backlog 4a.11).
 
 **`/.netlify/` bypasses the session proxy on purpose — and that is what the shared secret is for.** `proxy.ts`'s matcher excludes it and `decide()` treats it as public, because the first production deploy answered the background function's own URL with a `307 → /login`: the app's session guard was standing in front of a machine-to-machine endpoint that never had a session. `run-turn-background` has a real `timingSafeEqual` check on `x-worker-secret` and that is the only door on those paths. Note also that a Netlify **background** function always answers `202` regardless of what the handler returns — the real 401 is in the function log, and "202" is not evidence the secret check passed. Related and sharper: **never remove a `schedule` key from `netlify.toml`** — `sweep` has no auth check at all and `drift-monitor` accepts a forgeable `next_run` body, and both are safe only because Netlify does not expose scheduled functions over a URL (backlog 4a.13).
+
+**The first turn has no generative-model call, and the same is true of a typed filter.** Plan 5's
+intake agent (`src/agents/intake.ts`) is candidates → one Jev call → a direct flight search → one
+Jev re-rank → `park`: zero Opus/Sonnet/Haiku calls before she sees her first flights list. A typed
+filter after results exist is one Jev `router` call, pure `applyFilter`, `park` — no model call, no
+supplier call (`test/agent-router.test.ts` pins both: the search spy is never called, `create` is
+never called). The driver (Opus 5) is reached only for `question`/`chat` routes, the hand-off and
+escalation — never on the critical path to her first list.
+
+**`results` and `choices` message rows hydrate into the model transcript as a masked `system`-role
+operator note, never raw JSON or a supplier string.** `src/worker.ts` renders them through
+`renderResultsNote`/`renderChoicesNote` (`src/results.ts`) — ids and option labels only, ids
+through `maskIdChars`, labels through `maskControlChars` — the same trust boundary the existing
+`action` rows already keep. This is also why the driver is reached with an operator note in the
+transcript on effectively every planning turn past the first; see the Sonnet 5 entry below.
+
+**Three Jev seats (`intake`, `rerank`, `router`) carry `effort: null`, `maxTokens: 0`, and a
+`model` string starting with `jev-`.** `src/monitor/drift.ts`'s canary enumeration skips any seat
+whose model starts with `jev-` — Jev (`api.typesafe.ai/v1/systemone`, model `jev-latest`) answers
+Choice/Score/Noul questions over candidates code already found; it is not a chat completion
+endpoint and has no aliased-model drift to canary the way a Claude seat does. `src/jev/record.ts`'s
+`recordJevCall` is the only writer of a Jev `model_calls` row, at `ceil(input_tokens * 0.042)`
+micro-dollars; the cost is always reported on exactly one of a step's `costMicros`/`recordedMicros`,
+never both, including on the router's own hand-debit path for a replayed tool step (fix wave
+item 9, I5).
+
+**`JEV_KEY` must be set on Netlify before any plan-5 code path runs in production, and
+`.env.example` does not list it yet.** `run-turn-background.mts` throws at construction if it is
+absent — the same hard-fail pattern as a missing `DATABASE_URL` — and it is read only by
+`loadOptionalEnv` in the harness; `test/web-config.test.ts`'s `FORBIDDEN_NEEDLES` sentinel fails
+the suite if the literal string ever appears under `app/` or `web/`. `docs/deploy.md` §3 now sets
+it in the secrets loop, but `.env.example` itself was never updated to list it (backlog 5.17) even
+though that same doc says every name in `.env.example` must exist on the site — set it by hand
+until the example file catches up.
+
+**Sonnet 5 cannot be the driver while the operator channel exists — this shipped wrong once and
+was caught at the final review, not a task gate.** `normalizeOperatorTurns` puts every operator
+note into a mid-conversation `{ role: "system" }` entry inside `messages[]`; that shape is
+supported on Opus 5, Opus 4.8, Fable and Mythos but **not** on `claude-sonnet-5` (Anthropic's
+prompt-caching reference). Plan 5's own spec and Task 8 put the driver on Sonnet 5 at medium
+effort to get it off Opus rates; the final review's C1 reverted it to Opus 5 (medium, 4k thinking,
+`driver@4`, unchanged otherwise), because plan 5 means the driver is reached with an operator note
+already in the transcript on effectively every turn that reaches it at all (a `results`/`choices`/
+`action` row hydrates into one on every planning turn). Sonnet 5's `src/pricing.ts` ($2/$10) and
+`src/model/cache.ts` (1,024-token minimum) entries stay, correct and commented, for whenever
+Sonnet 5.5 (which does carry the channel) gets a price recorded and becomes the candidate seat
+(backlog 5.1). **No live model call has exercised the operator channel on either seat** (backlog
+5.12, carried from 4a.14/3c.17 — no Anthropic credit); the revert restores the designed transcript
+shape, it does not prove the model's behaviour on it.
+
+**Choose accepts the flight; it does not accept the combined flight+hotel proposal — "Get booking
+links" does.** `handleChooseFlight` (`src/agents/choose.ts`) calls `decideProposal(..., 'accept')`
+immediately, because `loadNewestAcceptedItinerary` depends on that to recover the chosen flight
+later. `handleChooseHotel` deliberately does not: it leaves the combined proposal's `decision`
+null so `PinnedSummary`'s "Get booking links" button can render (it renders only while
+`decision === null`), and that button — not Choose — is what calls `/decide` and reaches the
+`hand_off` action → driver → cashier chain. Spec §9 states this rule plainly ("Choose is
+acceptance; 'Get booking links' is the hand-off") and the branch shipped both halves contradicting
+it until the final review's C4. Any future third Choose-able item needs this same line drawn
+before its reply text is written.
 
 **`withTestDb` freezes `now()`, so rows inserted in one DB test can tie on `created_at`.** `test/helpers/db.ts` wraps the whole test in ONE transaction (a nested `sql.begin` is shimmed to a savepoint), and Postgres' `now()` is the *transaction* start time — verified directly: `now()` identical across statements in one tx, `clock_timestamp()` not. So `order by created_at` over rows written by two different calls in the same test is a total tie, and Postgres guarantees nothing about tie order: the plan flips between an index scan and an unstable sort as statistics move under full-suite load. This produced three separate "flaky test" reports across three tasks, each dismissed because it passed in isolation. **Assert order-independently (or by role), never add a secondary sort key** — `role` sorts `agent` before `user` and would pin the wrong answer. Where order genuinely matters in the product, the row gets an explicit `clock_timestamp()` (as `submitAction`'s action row does, so the reject note sorts ahead of it).
 

@@ -44,6 +44,20 @@ export const PRICES: Record<string, Price> = {
     inMicrosPerToken: 5, outMicrosPerToken: 25,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
   },
+  // $2/MTok in, $10/MTok out — per docs/backlog-plan.md line 345 ("Sonnet 5
+  // $2/$10"), not the $3/$15 this entry originally shipped with (Task 8 fix
+  // round 1). Same cache-rate convention as every other Claude seat here.
+  // Kept after the C1 revert even though no seat uses it today: the figures
+  // are verified and correct, and the reason Sonnet 5 is not the driver is
+  // the operator channel, not the price — this repo's operator notes are
+  // mid-conversation `{ role: 'system' }` messages, which are not available
+  // on Claude Sonnet 5 (Anthropic prompt-caching docs, 2026-10-03). Sonnet
+  // 5.5 does carry them and is the future driver candidate; it is absent here
+  // because its price is not yet in this repo's pricing source.
+  'claude-sonnet-5': {
+    inMicrosPerToken: 2, outMicrosPerToken: 10,
+    cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
+  },
   'claude-haiku-4-5-20251001': {
     inMicrosPerToken: 1, outMicrosPerToken: 5,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,

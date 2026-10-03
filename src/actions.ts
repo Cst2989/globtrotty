@@ -33,6 +33,24 @@ export const ActionPayload = z.discriminatedUnion('action', [
       z.strictObject({ kind: z.literal('shift'), days: z.union([z.literal(-2), z.literal(2)]) }),
     ]),
   }),
+  // Plan 5: the traveller picked a card out of a `results` row
+  // (src/results.ts). `sourceId` is supplier-origin, same as `revise`'s swap
+  // above, and gets the same `maskIdChars` treatment in `renderActionMessage`.
+  z.strictObject({
+    action: z.literal('choose'), kind: z.enum(['flight', 'hotel']),
+    sourceId: z.string().min(1).max(512),
+  }),
+  // Plan 5: the traveller answered a `choices` row (src/results.ts) by
+  // clicking one of its options. Both fields are ids/enums we generated
+  // ourselves — `questionId` matches `ChoicesContent.questionId`'s shape,
+  // `optionId` matches one of its `options[].id` — never free text, so a
+  // traveller cannot smuggle her own words ("Tokyo please") through this
+  // channel; the regex rejects anything that is not already id-shaped.
+  z.strictObject({
+    action: z.literal('choice'),
+    questionId: z.string().regex(/^[a-z_]{1,32}$/),
+    optionId: z.string().regex(/^[A-Za-z0-9_:-]{1,64}$/),
+  }),
 ])
 export type ActionPayload = z.infer<typeof ActionPayload>
 
@@ -88,6 +106,11 @@ export function renderActionMessage(a: ActionPayload): string {
         + `by ${a.change.days} days. Call revise_component with { kind: 'shift', days: `
         + `${a.change.days} }; if the corpus lacks those dates it will tell you to search `
         + 'them first — do so, then revise.'
+    case 'choose':
+      return `Operator: the traveller chose ${a.kind} ${maskIdChars(a.sourceId)} from the list. `
+        + 'The office has recorded it and is searching the next step; do not ask her to confirm.'
+    case 'choice':
+      return `Operator: to the question ${a.questionId} she chose ${a.optionId}.`
   }
 }
 
@@ -100,5 +123,9 @@ export function describeActionForUi(a: ActionPayload): string {
       return 'You rejected the proposal'
     case 'revise':
       return 'You asked to revise the proposal'
+    case 'choose':
+      return a.kind === 'flight' ? 'You chose a flight' : 'You chose a hotel'
+    case 'choice':
+      return 'You answered a question'
   }
 }

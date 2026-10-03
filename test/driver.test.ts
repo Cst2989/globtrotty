@@ -86,14 +86,17 @@ describeDb('driver', () => {
       // must not charge it again. Both halves are asserted, because either one
       // alone would pass against a driver that charged twice.
       expect(step.costMicros).toBe(0n)
-      expect(step.recordedMicros!).toBe(6_250n)   // 1000 in * 5 + 50 out * 25
+      // Fix wave (C1): the driver's seat is Opus 5 again — $5/$25 per
+      // src/pricing.ts, so 1000 in * 5 + 50 out * 25 = 5,000 + 1,250 = 6,250.
+      // It was 2,500 while the seat was Sonnet 5 at $2/$10.
+      expect(step.recordedMicros!).toBe(6_250n)
       const [row] = await sql`
         select seat, capture_policy, cost_micros, thinking_mode, prompt_version
           from model_calls where conversation_id = ${s.conversationId}`
       expect(row!.seat).toBe('driver')
       expect(row!.capture_policy).toBe('full')   // the driver is never sampled out
       expect(row!.thinking_mode).toBe('adaptive')
-      expect(row!.prompt_version).toBe('driver@3')
+      expect(row!.prompt_version).toBe('driver@4')
       expect(BigInt(row!.cost_micros as string)).toBe(step.recordedMicros!)
     })
   })
@@ -230,20 +233,30 @@ describeDb('driver', () => {
     })
   })
 
-  it('parks on ask_user, with her questions in the message', async () => {
+  it('parks on offer_choices, with the question in the message and a choices attachment', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '05')
       const create = vi.fn().mockResolvedValue(
-        toolResponse('ask_user', { questions: ['Which week?', 'How many of you?'] }))
+        toolResponse('offer_choices', {
+          question: 'Which week?',
+          options: [{ id: 'sep', label: 'September' }, { id: 'oct', label: 'October' }],
+        }))
       const step = await makeDriver(deps(sql, create))(ctx(s))
-      // ask_user is terminal by construction: there is nothing to hand back to
-      // the model, because the answer comes from her.
+      // offer_choices is terminal by construction: there is nothing to hand
+      // back to the model, because the answer comes from her.
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
       expect(step.message).toContain('Which week?')
-      expect(step.message).toContain('How many of you?')
       expect(step.costMicros).toBe(0n)
       expect(step.recordedMicros).toBe(6_250n)
+      expect(step.attachments).toEqual([{
+        role: 'choices',
+        content: {
+          questionId: 'driver',
+          question: 'Which week?',
+          options: [{ id: 'sep', label: 'September' }, { id: 'oct', label: 'October' }],
+        },
+      }])
     })
   })
 
@@ -284,7 +297,8 @@ describeDb('driver', () => {
       const create = vi.fn().mockResolvedValue({
         content: [
           { type: 'thinking', thinking: 'deciding', signature: 'sig' },
-          { type: 'tool_use', id: 'toolu_1', name: 'ask_user', input: { questions: ['Which week?'] } },
+          { type: 'tool_use', id: 'toolu_1', name: 'offer_choices',
+            input: { question: 'Which week?', options: [{ id: 'sep', label: 'September' }, { id: 'oct', label: 'October' }] } },
           { type: 'tool_use', id: 'toolu_2', name: 'explore_hotels',
             input: { query: 'Faro', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2 } },
         ],
@@ -323,14 +337,14 @@ describeDb('driver', () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '07')
       const create = vi.fn().mockResolvedValue(
-        toolResponse('ask_user', { questions: 'not an array' }))
+        toolResponse('offer_choices', { question: 'Which week?', options: 'not an array' }))
       const step = await makeDriver(deps(sql, create))(ctx(s))
       // A rejection travels the same durable path as a result: it is a tool step
       // whose run() resolves to text, so tool_calls records the attempt and the
       // model gets one round trip to fix it.
       expect(step.kind).toBe('tool')
       if (step.kind !== 'tool') throw new Error('unreachable')
-      expect(String(await step.run())).toContain('questions')
+      expect(String(await step.run())).toContain('options')
     })
   })
 
@@ -515,7 +529,9 @@ describeDb('driver', () => {
       // prompt-size difference can move.
       await expect(makeDriver(deps(sql, create))(ctx(s))).rejects.toThrow()
       const floor = estimateMicros(SEATS.driver, 0)
-      expect(floor).toBe(400_000n)                 // 16,000 max_tokens * 25 micros
+      // Fix wave (C1): Opus 5 again, so 4,000 max_tokens * 25 micros/token =
+      // 100,000 (it was 40,000 at Sonnet 5's $10/MTok output rate).
+      expect(floor).toBe(100_000n)
       const [conv] = await sql`
         select spend_usd_micros from conversations where id = ${s.conversationId}`
       expect(BigInt(conv!.spend_usd_micros as string)).toBeGreaterThanOrEqual(floor)
@@ -624,9 +640,13 @@ describeDb('driver', () => {
       const lastBlock = messages.at(-1)!.content.at(-1)!
       const text = String(lastBlock.text)
       expect(text).not.toContain('## Expired results')
-      // With nothing expired, the suffix block is the rendered notebook alone.
+      // With nothing expired, the suffix block is today's date line followed
+      // by the rendered notebook alone. The date line itself is not a fixed
+      // string here (deps.now() is the real clock), so it is matched by
+      // shape, not by exact value.
+      expect(text).toMatch(/^Today is \d{4}-\d{2}-\d{2}\.\n\n/)
       const notebook = await loadNotebook(sql, s.conversationId, s.userId)
-      expect(text).toBe(renderNotebook(notebook))
+      expect(text.endsWith(`\n\n${renderNotebook(notebook)}`)).toBe(true)
     })
   })
 

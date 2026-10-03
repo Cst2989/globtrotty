@@ -166,6 +166,18 @@ export async function completeTurn(
     agentMessage: string | null
     parked: boolean
     spendMicros: bigint
+    /**
+     * Plan 5: `results`/`choices` step attachments (src/results.ts), already
+     * validated and JSON-stringified by the caller (`buildAttachmentRows`,
+     * src/worker.ts) — this function trusts `content` as a plain string and
+     * writes it verbatim. Each row gets its OWN `created_at = clock_timestamp()`
+     * rather than the `agentMessage` insert's implicit `now()` default, so it
+     * sorts strictly after the agent's text within this same transaction
+     * (`now()` is frozen for the whole transaction; `clock_timestamp()` is
+     * not). Written only when `agentMessage` is non-null — an attachment with
+     * no agent message to follow is not a shape this plan produces.
+     */
+    attachments?: { role: 'results' | 'choices'; content: string }[]
   },
 ): Promise<void> {
   await sql.begin(async (tx) => {
@@ -182,6 +194,12 @@ export async function completeTurn(
       await tx`insert into messages (conversation_id, user_id, turn_id, role, content)
                values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
                        'agent', ${opts.agentMessage})`
+
+      for (const a of opts.attachments ?? []) {
+        await tx`insert into messages (conversation_id, user_id, turn_id, role, content, created_at)
+                 values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                         ${a.role}, ${a.content}, clock_timestamp())`
+      }
     }
 
     // `case when status = 'escalated' then 'escalated' else ...`: an escalation

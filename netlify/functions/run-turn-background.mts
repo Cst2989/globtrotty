@@ -29,8 +29,9 @@ import { MockSupplier } from '../../src/supplier/mock.js'
  * against `runTurn` directly. There is no Netlify-hosted test harness in this repo, so this
  * file itself is exercised only by manual/staging verification, never by `pnpm test`.
  *
- * `routeAgent` (src/agents/route.ts) is the real agent fleet as of plan 4a Task 5 — front desk
- * then driver, wired to the real Anthropic transport and the real flight/hotel suppliers.
+ * `routeAgent` (src/agents/route.ts) is the real agent fleet — intake (plan 5 Task 5, replacing
+ * the old front desk) then driver, wired to the real Anthropic/Jev transports and the real
+ * flight/hotel suppliers.
  * `echoAgent` stays exported from `worker.ts`, unused here, purely so `test/worker.test.ts`
  * keeps exercising the harness without a model; this handler never imports it.
  */
@@ -54,6 +55,18 @@ function secretsMatch(provided: string | null, expected: string): boolean {
   const b = Buffer.from(expected)
   if (a.length !== b.length) return false
   return timingSafeEqual(a, b)
+}
+
+/**
+ * `JEV_KEY` goes through the same optional door `GOOGLE_SEARCH_API` does
+ * (`loadOptionalEnv`, src/env.ts) because that function's contract is "this key may be ABSENT
+ * from the environment without that being a config error" — but unlike search, which degrades
+ * to a mock, intake (src/agents/intake.ts) is now the front door for every first message and has
+ * no fallback without it. So a missing key fails loudly HERE, at construction, exactly like a
+ * missing `DATABASE_URL` does in `loadEnv` — never silently inside the first real conversation.
+ */
+function throwMissing(key: string): never {
+  throw new Error(`run-turn: ${key} is not set — intake cannot run without it`)
 }
 
 export default async (req: Request): Promise<Response> => {
@@ -101,6 +114,7 @@ export default async (req: Request): Promise<Response> => {
           notifier: new LogNotifier(),
           flights: new KiwiSupplier(),
           hotels: searchKey ? new SearchApiHotels(searchKey) : new MockSupplier({ kind: 'hotel' }),
+          jev: { apiKey: loadOptionalEnv(process.env, 'JEV_KEY') ?? throwMissing('JEV_KEY') },
         }),
         now: () => Date.now(),
         deadlineMs: () => startedMs + BACKGROUND_BUDGET_MS,

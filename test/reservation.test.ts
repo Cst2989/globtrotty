@@ -11,10 +11,12 @@ describe('estimateMicros', () => {
     'prices input at the 1h cache-WRITE rate, not list — every driver call writes '
     + 'system+tools at that TTL, so that is the worst case, not list price',
     () => {
-      // driver: opus-5 at 5 micros/input-token * 2 (cacheWrite1hMult) = 10/token,
-      // 25/output-token, maxTokens 16000.
-      // 1000 input => 10000, plus 16000 * 25 = 400000 => 410000.
-      expect(estimateMicros(SEATS.driver, 1000)).toBe(410_000n)
+      // driver (fix wave C1: Opus 5 again — Sonnet 5 cannot carry this repo's
+      // mid-conversation operator `system` messages): opus-5 at 5
+      // micros/input-token * 2 (cacheWrite1hMult) = 10/token, 25/output-token,
+      // maxTokens 4000. 1000 input => 10,000, plus 4000 * 25 = 100,000 =>
+      // 110,000. It was 44,000 while the seat was Sonnet 5 at $2/$10.
+      expect(estimateMicros(SEATS.driver, 1000)).toBe(110_000n)
     },
   )
 
@@ -66,7 +68,7 @@ describe('estimateMicros', () => {
     }
   })
 
-  it('prices a Haiku seat lower than an Opus seat for the same input', () => {
+  it('prices a Haiku seat lower than the driver seat for the same input', () => {
     expect(estimateMicros(SEATS.scout, 1000)).toBeLessThan(estimateMicros(SEATS.driver, 1000))
   })
 

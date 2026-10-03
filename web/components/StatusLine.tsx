@@ -3,9 +3,17 @@ export type StatusLineProps = {
   failReason: string | null
 }
 
-/** `conversations.status` (supabase/migrations/0001_harness.sql) → plain words. */
+/**
+ * `conversations.status` (supabase/migrations/0001_harness.sql) → plain
+ * words. `sending` (Task 10) is not a real stored status: `ThreadView`
+ * substitutes it in while an optimistic message is in flight and the real
+ * status has not yet flipped to `working`, so she sees "Sending" then
+ * "Thinking" instead of the stale "Ready for your next message" the server
+ * still reports for that instant.
+ */
 const STATUS_WORDS: Record<string, string> = {
   active: 'Ready for your next message',
+  sending: 'Sending',
   working: 'Thinking',
   awaiting_user: 'Waiting for your reply',
   limit_reached: "Today's limit has been reached",
@@ -28,7 +36,7 @@ const FAIL_REASON_WORDS: Record<string, string> = {
 
 /** Colour tone for the line; the CSS keys on `data-tone`. */
 function toneFor(status: string): 'working' | 'failed' | 'limit' | 'neutral' {
-  if (status === 'working') return 'working'
+  if (status === 'working' || status === 'sending') return 'working'
   if (status === 'failed') return 'failed'
   if (status === 'limit_reached' || status === 'escalated') return 'limit'
   return 'neutral'
@@ -52,7 +60,7 @@ export function StatusLine({ status, failReason }: StatusLineProps) {
         {words}
         {detail ? `: ${detail}.` : ''}
       </span>
-      {status === 'working' ? (
+      {status === 'working' || status === 'sending' ? (
         <span className="thinking" aria-hidden="true">
           <i />
           <i />

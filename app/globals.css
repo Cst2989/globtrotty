@@ -358,11 +358,19 @@ select {
 }
 
 .rail {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
   border-right: 1px solid var(--line);
+}
+
+.rail-collapse {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 2;
 }
 
 .rail-top {
@@ -515,6 +523,82 @@ select {
   .composer-region {
     min-width: 0;
   }
+
+  /* The desktop collapse feature below has no meaning for an off-canvas drawer. */
+  .rail-collapse {
+    display: none;
+  }
+}
+
+/*
+ * Task 10: the desktop rail collapse. `data-rail-collapsed` (set by
+ * `AppShell`) shrinks the rail to a 56px icon strip — just the wordmark
+ * mark, the "New trip" icon and this toggle, via `.rail-label` (the text
+ * `Sidebar` wraps each of those two in) and the trip list/footer being
+ * hidden outright. Hovering or focusing the collapsed rail re-expands it as
+ * an absolutely-positioned overlay — the same drawer mechanics as mobile,
+ * just triggered by `:hover`/`:focus-within` instead of `data-rail='open'`
+ * — without moving the main column underneath it.
+ */
+@media (min-width: 901px) {
+  .shell[data-rail-collapsed='true'] {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .shell[data-rail-collapsed='true'] .rail {
+    overflow: hidden;
+  }
+
+  .shell[data-rail-collapsed='true'] .rail-label,
+  .shell[data-rail-collapsed='true'] .rail-heading,
+  .shell[data-rail-collapsed='true'] .rail-list,
+  .shell[data-rail-collapsed='true'] .rail-empty,
+  .shell[data-rail-collapsed='true'] .rail-bottom {
+    display: none;
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover,
+  .shell[data-rail-collapsed='true'] .rail:focus-within {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--rail-width);
+    overflow: visible;
+    z-index: 25;
+    box-shadow: var(--shadow);
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-label,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-label {
+    display: inline;
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-heading,
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-empty,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-heading,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-empty {
+    display: block;
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-list,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-list {
+    display: block;
+    width: var(--rail-width);
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-bottom,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-bottom {
+    display: flex;
+    width: var(--rail-width);
+  }
+
+  .shell[data-rail-collapsed='true'] .rail-new {
+    justify-content: center;
+  }
+
+  .shell[data-rail-collapsed='true'] .rail:hover .rail-new,
+  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-new {
+    justify-content: flex-start;
+  }
 }
 
 /* ---------- thread ---------- */
@@ -597,6 +681,11 @@ select {
 
 .message-row[data-role='action'] {
   justify-content: center;
+}
+
+/* Task 10: the optimistic bubble, shown ahead of the real server row (see `ThreadLive`/`mergePending`). */
+.message-row[data-pending='true'] .message {
+  opacity: 0.6;
 }
 
 .message {
@@ -1027,6 +1116,396 @@ select {
 
 .link-button:hover {
   text-decoration: underline;
+}
+
+/* ---------- results ---------- */
+
+.results-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.results-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.assumption-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assumption-chip {
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+/* ---------- filter chips ---------- */
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 180ms var(--ease),
+    border-color 180ms var(--ease),
+    color 180ms var(--ease);
+}
+
+.chip:hover {
+  background: var(--surface-2);
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.chip-select {
+  display: inline-flex;
+}
+
+.chip-select select {
+  min-height: 40px;
+  padding: 0 0.75rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+/* ---------- flight / hotel lists ---------- */
+
+.flight-list,
+.hotel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.result-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.result-row[data-chosen='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.result-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.result-row-airlines,
+.result-row-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.result-row-times {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.result-row-meta,
+.result-row-age {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.result-row-bags {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.result-row-bags svg {
+  flex-shrink: 0;
+}
+
+.result-row-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.result-row-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result-row-chosen {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ok);
+}
+
+@media (max-width: 600px) {
+  .result-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .result-row-side {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+/* ---------- choice card ---------- */
+
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  max-width: 85%;
+}
+
+.choice-question {
+  margin: 0;
+  font-weight: 500;
+}
+
+.choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ---------- pinned summary ---------- */
+
+.pinned-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.pinned-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pinned-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pinned-item-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.pinned-item-dates {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  margin-right: auto;
+}
+
+.pinned-item-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pinned-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.pinned-total span:last-child {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pinned-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pinned-links a.btn:hover {
+  text-decoration: none;
+}
+
+/* ---------- split shell (Task 10) ---------- */
+
+/*
+ * `SplitShell` renders `chat` and `results` exactly ONCE each (see that
+ * component's own doc comment for why); these rules only ever choose which
+ * of the two is VISIBLE. At >=1024px both panes sit side by side and the
+ * tabs are hidden; below that, `data-tab` (the active tab) picks the one
+ * pane shown and `.split-tabs` becomes the mobile tab bar.
+ */
+.split-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.split-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.split-tab {
+  position: relative;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+}
+
+.split-tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.split-tab-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.split-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-pane-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.split-pane-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.5rem 1rem;
+}
+
+@media (max-width: 1023px) {
+  .split-shell {
+    position: relative;
+  }
+
+  .split-pane {
+    display: none;
+  }
+
+  .split-shell[data-tab='chat'] .split-pane-chat {
+    display: flex;
+  }
+
+  .split-shell[data-tab='results'] .split-pane-results {
+    display: block;
+  }
+}
+
+@media (min-width: 1024px) {
+  .split-shell {
+    flex-direction: row;
+  }
+
+  .split-tabs {
+    display: none;
+  }
+
+  .split-pane-chat {
+    flex: 0 0 25%;
+    min-width: 320px;
+    border-right: 1px solid var(--line);
+  }
+
+  .split-pane-results {
+    flex: 1;
+  }
 }
 
 /* ---------- landing hero (photo wall) ---------- */

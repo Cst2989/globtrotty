@@ -45,6 +45,15 @@ const PatchSchema = z.object({
 
 export const NotebookSchema = PatchSchema
 
+/**
+ * The allowed notebook keys, in schema-declaration order. Plan 5 Task 8: this
+ * is the single source of truth both the driver prompt (`{{NOTEBOOK_KEYS}}` in
+ * driver.md, rendered by `renderDriverPrompt`) and `update_requirements`'s tool
+ * description are generated from, so a field added or removed here reaches
+ * both without a second edit.
+ */
+export const NOTEBOOK_KEYS: readonly string[] = Object.keys(PatchSchema.shape)
+
 export function emptyNotebook(): Notebook {
   return {
     budget: null, destination: null, originCity: null, departureDate: null,

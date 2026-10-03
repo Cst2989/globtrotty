@@ -21,6 +21,22 @@ export type MessageBoxProps = {
   variant?: 'inline' | 'hero'
   /** Shows the when / who / budget pickers inside the box; their values are appended to the message. */
   quickOptions?: boolean
+  /**
+   * Task 10: called with the fully-assembled text (quick options already
+   * appended) the instant a send is attempted, before the POST — this is
+   * what lets `ThreadLive` show the bubble and clear the box right away
+   * rather than waiting on the round trip. Injected by `ThreadLive` via
+   * `cloneElement`; the landing box (`conversationId === 'new'`, no thread
+   * to show a bubble in) is never given one.
+   */
+  onOptimistic?: (text: string) => void
+  /**
+   * Called with that same text if the POST then fails outright (not the
+   * 409/429 cases — see `messageForStatus`'s doc comment — both of which DID
+   * write her message, so the optimistic bubble is left for the next
+   * refresh to match and drop instead of being torn down here).
+   */
+  onOptimisticError?: (text: string) => void
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -109,6 +125,7 @@ function blockedPlaceholder(status: string | undefined): string | null {
  */
 export function MessageBox({
   conversationId, status, suggestions, placeholder, variant = 'inline', quickOptions = false,
+  onOptimistic, onOptimisticError,
 }: MessageBoxProps) {
   const router = useRouter()
   const [text, setText] = useState('')
@@ -127,6 +144,12 @@ export function MessageBox({
     if (!typed || disabled) return
     const trimmed = quickOptions ? withQuickOptions(typed, { when, who, budget }) : typed
 
+    // Task 10: the bubble renders and the box clears before the POST even
+    // starts — `pending` below still disables the composer against a
+    // double-click, but it no longer gates how fast she SEES her own
+    // message land.
+    onOptimistic?.(trimmed)
+    setText('')
     setPending(true)
     setError(null)
 
@@ -140,24 +163,30 @@ export function MessageBox({
       if (!res.ok) {
         setError(messageForStatus(res.status))
         // 409 and 429 both still wrote her message (see messageForStatus),
-        // so the box clears and she is sent to wherever that message lives.
+        // so she is sent to wherever that message lives; the optimistic
+        // bubble stays put for the next refresh to match by text and drop.
         if (res.status === 409 || res.status === 429) {
-          setText('')
           const body = (await res.json()) as { conversationId: string }
           const location = nextLocation(conversationId, res.status, body)
           if (location.type === 'push') router.push(location.url)
           else router.refresh()
+          return
         }
+        // A genuine failure: nothing was written, so the optimistic bubble
+        // is wrong and so is an empty box — undo both.
+        onOptimisticError?.(trimmed)
+        setText(trimmed)
         return
       }
 
       const body = (await res.json()) as { conversationId: string }
-      setText('')
       const location = nextLocation(conversationId, res.status, body)
       if (location.type === 'push') router.push(location.url)
       else router.refresh()
     } catch {
       setError(messageForStatus(0))
+      onOptimisticError?.(trimmed)
+      setText(trimmed)
     } finally {
       setPending(false)
     }

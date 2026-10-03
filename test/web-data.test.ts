@@ -8,9 +8,11 @@
 // mapping) and `firstMessagePerConversation` (the sidebar's first-line
 // dedup rule).
 import { describe, expect, it } from 'vitest'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
-  dropExpiredAlternatives, type ThreadMessage, type AlternativeLite,
+  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems,
+  type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
 const PROPOSAL_ID = '44444444-4444-4444-8444-444444444444'
@@ -48,6 +50,50 @@ describe('toThreadView', () => {
     ]
 
     expect(toThreadView(rows)).toEqual(rows)
+  })
+
+  // Plan 5, Task 9.
+  it('turns a results row into a plain "N shown" marker, never the sourceIds', () => {
+    const content = JSON.stringify({
+      kind: 'flights',
+      query: { from: 'BCN', to: 'HND', outbound: '2026-11-19', inbound: null, adults: 1 },
+      sourceIds: ['F1', 'F2', 'F3'],
+      assumptions: [],
+    })
+    const rows: ThreadMessage[] = [{ id: 'm1', role: 'results', content, created_at: 't1' }]
+
+    const view = toThreadView(rows)
+
+    expect(view[0]!.content).toBe('3 flights shown')
+    expect(view[0]!.content).not.toContain('F1')
+  })
+
+  it('singularises the results marker for exactly one item', () => {
+    const content = JSON.stringify({
+      kind: 'hotels',
+      query: { place: 'Lisbon', outbound: '2026-11-19', inbound: '2026-11-26', adults: 1 },
+      sourceIds: ['H1'],
+      assumptions: [],
+    })
+    const rows: ThreadMessage[] = [{ id: 'm1', role: 'results', content, created_at: 't1' }]
+
+    expect(toThreadView(rows)[0]!.content).toBe('1 hotel shown')
+  })
+
+  it('falls back to a fixed sentence for a malformed results row, never the raw text', () => {
+    const rows: ThreadMessage[] = [{ id: 'm1', role: 'results', content: 'not json', created_at: 't1' }]
+
+    expect(toThreadView(rows)[0]!.content).toBe('Results were recorded')
+  })
+
+  it('leaves a choices row unchanged — MessageBubble needs its JSON client-side', () => {
+    const content = JSON.stringify({
+      questionId: 'destination', question: 'Which city?',
+      options: [{ id: 'TYO', label: 'Tokyo' }, { id: 'OSA', label: 'Osaka' }],
+    })
+    const rows: ThreadMessage[] = [{ id: 'm1', role: 'choices', content, created_at: 't1' }]
+
+    expect(toThreadView(rows)[0]!.content).toBe(content)
   })
 })
 
@@ -181,5 +227,130 @@ describe('dropExpiredAlternatives', () => {
   it('keeps an id exactly at the boundary', () => {
     const boundary = alt({ fetchedAt: '2026-09-13T11:45:00.000Z', ttlSeconds: 900 }) // fetched+ttl === now
     expect(dropExpiredAlternatives([boundary], NOW)).toEqual([boundary])
+  })
+})
+
+// Plan 5, Task 9.
+describe('newestResultItemPerSourceId', () => {
+  const flightPayload = {
+    kind: 'flight',
+    outbound: {
+      from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
+      stops: 1, route: ['BCN', 'DOH', 'HND'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR123', 'QR456'],
+    },
+    inbound: null,
+    baggage: { personalItem: 1, cabinBag: 1, checkedBag: 1 },
+    totalDurationSeconds: 51_300, // 14h 15m
+    selfTransfer: false,
+  }
+  const hotelPayload = {
+    kind: 'hotel', checkIn: '2026-11-19', checkOut: '2026-11-26', nights: 7, rating: 4,
+    coordinates: null, offerSource: null,
+  }
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    source_id: 'F1', name: 'Qatar Airways', price_minor: '45600', currency: 'EUR',
+    fetched_at: '2026-10-01T10:00:00.000Z', ttl_seconds: 900, payload: flightPayload,
+    ...overrides,
+  })
+
+  it('maps a flight payload into ResultItemLite, reading stops/airlines/bags/duration/via off it', () => {
+    const out = newestResultItemPerSourceId([row()])
+    expect(out).toHaveLength(1)
+    const item = out[0]!
+    expect(item.sourceId).toBe('F1')
+    expect(item.name).toBe('Qatar Airways')
+    expect(item.flight).toBeDefined()
+    expect(item.flight!.outbound).toEqual({
+      from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'],
+    })
+    expect(item.flight!.inbound).toBeNull()
+    expect(item.flight!.stops).toBe(1)
+    expect(item.flight!.inboundStops).toBeNull()   // a one-way has only the outbound leg
+    expect(item.flight!.airlines).toEqual(['QR'])
+    expect(item.flight!.bags).toEqual({ cabin: 1, checked: 1 })
+    expect(item.flight!.durationMinutes).toBe(855)
+    expect(item.flight!.selfTransfer).toBe(false)
+    expect(item.hotel).toBeUndefined()
+  })
+
+  // Final review, I3: `inboundStops` is what lets `web/filters.ts` judge every leg the way
+  // `src/intake/filter.ts` does. `stops` stays the OUTBOUND leg (what `FlightList` prints
+  // beside `outbound.via`), so the two are read separately.
+  it('reads the inbound leg\'s own stops for a return flight, keeping stops on the outbound', () => {
+    const out = newestResultItemPerSourceId([row({
+      payload: {
+        ...flightPayload,
+        inbound: {
+          from: 'HND', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00',
+          stops: 2, route: ['HND', 'DOH', 'MAD', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
+        },
+      },
+    })])
+    expect(out[0]!.flight!.stops).toBe(1)
+    expect(out[0]!.flight!.inboundStops).toBe(2)
+  })
+
+  it('defaults an unreadable inbound stops count to 0 rather than dropping the leg', () => {
+    const out = newestResultItemPerSourceId([row({
+      payload: {
+        ...flightPayload,
+        inbound: {
+          from: 'HND', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00',
+          route: ['HND', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
+        },
+      },
+    })])
+    expect(out[0]!.flight!.inboundStops).toBe(0)
+  })
+
+  // A supplier name containing a script-shaped string passes through
+  // unchanged here: `maskUntrustedText` only neutralises non-printable-ASCII
+  // control characters, not `<`/`>`; what actually keeps it from rendering
+  // as markup is React's own escaping (pinned in test/web-results-render.test.ts).
+  it('does not strip or escape printable-ASCII supplier text (that is the render layer\'s job)', () => {
+    const out = newestResultItemPerSourceId([row({ name: '<script>alert(1)</script>' })])
+    expect(out[0]!.name).toBe('<script>alert(1)</script>')
+  })
+
+  it('keeps the newest row per source_id, given newest-first input', () => {
+    const out = newestResultItemPerSourceId([
+      row({ source_id: 'A', price_minor: '100', fetched_at: 't2' }),
+      row({ source_id: 'A', price_minor: '999', fetched_at: 't1' }),
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.priceMinor).toBe('100')
+  })
+
+  it('drops a row whose payload is neither a recognisable flight nor hotel shape', () => {
+    expect(newestResultItemPerSourceId([row({ payload: { kind: 'bogus' } })])).toEqual([])
+  })
+
+  it('maps a hotel payload into ResultItemLite', () => {
+    const out = newestResultItemPerSourceId([row({ source_id: 'H1', payload: hotelPayload })])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.hotel).toEqual({ rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' })
+    expect(out[0]!.flight).toBeUndefined()
+  })
+
+  it('returns an empty list for no rows', () => {
+    expect(newestResultItemPerSourceId([])).toEqual([])
+  })
+})
+
+describe('dropExpiredResultItems', () => {
+  const NOW = new Date('2026-09-13T12:00:00.000Z')
+  const item = (overrides: Partial<ResultItemLite> = {}): ResultItemLite => ({
+    sourceId: 'A', name: 'n', priceMinor: '1', currency: 'EUR',
+    fetchedAt: '2026-09-13T11:50:00.000Z', ttlSeconds: 900, // fetched 10 min ago, ttl 15 min → fresh
+    ...overrides,
+  })
+
+  it('keeps an id still inside its own ttl', () => {
+    expect(dropExpiredResultItems([item()], NOW)).toEqual([item()])
+  })
+
+  it('drops an id past its own ttl', () => {
+    const expired = item({ fetchedAt: '2026-09-13T11:40:00.000Z', ttlSeconds: 300 }) // 20 min ago, ttl 5 min
+    expect(dropExpiredResultItems([expired], NOW)).toEqual([])
   })
 })

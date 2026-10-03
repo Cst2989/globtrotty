@@ -19,6 +19,7 @@ import { toolsForDesk } from '../tools/registry.js'
 import { FRONT_SCHEMA } from '../agents/frontDesk.js'
 import { REVIEW_SCHEMA, renderOfferForReview } from '../agents/reviewer.js'
 import { WEB_SEARCH_TOOL, SCOUT_MAX_SEARCHES, SCOUT_SEARCH_RESULT_TOKENS } from '../agents/scout.js'
+import { renderDriverPrompt } from '../agents/driver.js'
 import { addMoney, money, type Money } from '../money.js'
 import type { RehydratedItem } from '../gates/types.js'
 import type { StoredItem } from '../supplier/types.js'
@@ -29,7 +30,10 @@ export { OPS_USER_ID }
 
 /** The four seats the nightly canary calls, one fixed golden request each. */
 export type CanarySeat = 'driver' | 'reviewer' | 'front_desk' | 'scout'
-const CANARY_SEATS: readonly CanarySeat[] = ['driver', 'reviewer', 'front_desk', 'scout']
+// Defensive: a Jev seat (model starts with 'jev-') has no golden request of its
+// own and is never canaried, even if one is ever added to this list.
+const CANARY_SEATS: readonly CanarySeat[] =
+  (['driver', 'reviewer', 'front_desk', 'scout'] as const).filter((s) => !SEATS[s].model.startsWith('jev-'))
 
 /** F2: a drift already alarmed on stays suppressed (not re-paged) for a week. */
 const ALARM_DEDUPE_DAYS = 7
@@ -50,7 +54,14 @@ const SHAPE_SEATS: readonly ('driver' | 'reviewer' | 'front_desk')[] = ['driver'
 
 // See src/agents/prompts/load.ts: resolves beside that module, or from the process cwd for
 // the esbuild-bundled Netlify function where import.meta.url no longer neighbours prompts/.
-const DRIVER_SYSTEM = loadPrompt('driver')
+//
+// Driver uses `renderDriverPrompt`, not a bare `loadPrompt('driver')`: that
+// function's own `SYSTEM` is what every real driver call sends, with
+// `{{NOTEBOOK_KEYS}}` already resolved. The golden request below must send
+// the IDENTICAL text, or the shape check (`system` is part of `reduceShape`'s
+// output, never stripped) would alarm on every real driver call forever —
+// comparing an always-unresolved placeholder against always-resolved keys.
+const DRIVER_SYSTEM = renderDriverPrompt()
 const REVIEWER_SYSTEM = loadPrompt('reviewer')
 const FRONT_DESK_SYSTEM = loadPrompt('front_desk')
 const SCOUT_SYSTEM = loadPrompt('scout')
