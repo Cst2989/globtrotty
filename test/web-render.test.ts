@@ -224,6 +224,52 @@ describe('ThreadView', () => {
     expect(html.toLowerCase()).toContain('thinking')
     expect(html).not.toContain('Sending')
   })
+  // The fix wave's Task-10 gap: `ThreadView` never passed `conversationId` to
+  // `MessageBubble`, so `MessageBubble` always took its inert `ChoiceCard` branch and no
+  // choice card in production could POST.
+  //
+  // Asserted on the ELEMENT TREE, not on rendered markup: `ChoiceCardLive` calls
+  // `useRouter()`, which has no app-router context under `renderToStaticMarkup`, so a static
+  // render of the live branch would throw (and mocking next/navigation to get past that would
+  // test the mock, not the wiring). `ThreadView` has no hooks of its own, so calling it
+  // directly gives the tree it would render, and the prop it forwards is exactly the thing in
+  // question. The static markup cases above stay untouched, which is the point of
+  // `conversationId` being its own optional prop.
+  it('forwards conversationId to every MessageBubble so a choices row can POST', () => {
+    const findBubbles = (node: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] => {
+      if (Array.isArray(node)) {
+        for (const child of node) findBubbles(child, out)
+        return out
+      }
+      if (node === null || typeof node !== 'object') return out
+      const el = node as { type?: unknown; props?: Record<string, unknown> }
+      if (el.type === MessageBubble && el.props) out.push(el.props)
+      if (el.props && 'children' in el.props) findBubbles(el.props.children, out)
+      return out
+    }
+
+    const messages = [
+      { id: 'm1', role: 'user' as const, content: 'a week somewhere', created_at: '' },
+      {
+        id: 'm2', role: 'choices' as const, created_at: '',
+        content: JSON.stringify({
+          questionId: 'origin', question: 'Which city are you flying from?',
+          options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
+        }),
+      },
+    ]
+    const conversation = { id: 'c1', title: 'Trip', status: 'active' as const, updated_at: '' }
+
+    const live = findBubbles(ThreadView({ conversation, conversationId: 'c1', latestTurn: null, messages }))
+    expect(live).toHaveLength(2)
+    expect(live.every((p) => p.conversationId === 'c1')).toBe(true)
+
+    // Without the prop the bubbles are inert, which is what every static-markup case above
+    // relies on — and what used to be true of the live thread too.
+    const inert = findBubbles(ThreadView({ conversation, latestTurn: null, messages }))
+    expect(inert).toHaveLength(2)
+    expect(inert.every((p) => p.conversationId === undefined)).toBe(true)
+  })
 })
 
 describe('mergePending (Task 10)', () => {

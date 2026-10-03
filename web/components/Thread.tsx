@@ -29,6 +29,21 @@ export type ThreadViewProps = {
    * `StatusLine`'s own `sending` entry.
    */
   sending?: boolean
+  /**
+   * Task 10's LOAD-BEARING gap, closed by the final review's fix wave: without
+   * this, `MessageBubble` always took its inert `ChoiceCard` branch with
+   * `onPick={() => {}}`, so every choice card in production — intake's and the
+   * driver's `offer_choices` alike — rendered as buttons that did nothing.
+   * `ThreadLive` passes `conversation.id`.
+   *
+   * Deliberately a SEPARATE prop rather than read off `conversation.id` inside
+   * the function: `ThreadView` is rendered with `renderToStaticMarkup` in
+   * test/web-render.test.ts, and reading it from `conversation` would make
+   * every one of those pure cases start mounting `ChoiceCardLive`, which calls
+   * `useRouter()`. Leaving it optional keeps the static renders static and
+   * makes the live wiring an explicit choice at exactly one call site.
+   */
+  conversationId?: string
 }
 
 /**
@@ -40,7 +55,7 @@ export type ThreadViewProps = {
  * `ThreadLive` below, but `ThreadView` takes only props, which is what lets
  * `test/web-render.test.ts` render it with `renderToStaticMarkup`.
  */
-export function ThreadView({ conversation, messages, latestTurn, children, composer, tail, sending }: ThreadViewProps) {
+export function ThreadView({ conversation, messages, latestTurn, children, composer, tail, sending, conversationId }: ThreadViewProps) {
   const effectiveStatus = sending && conversation.status !== 'working' ? 'sending' : conversation.status
 
   return (
@@ -54,7 +69,12 @@ export function ThreadView({ conversation, messages, latestTurn, children, compo
           <ul className="thread-messages">
             {messages.map((m) => (
               <li key={m.id}>
-                <MessageBubble role={m.role} content={m.content} pending={'pending' in m ? m.pending : undefined} />
+                <MessageBubble
+                  role={m.role}
+                  content={m.content}
+                  conversationId={conversationId}
+                  pending={'pending' in m ? m.pending : undefined}
+                />
               </li>
             ))}
           </ul>
@@ -191,6 +211,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
   return (
     <ThreadView
       conversation={conversation}
+      conversationId={conversation.id}
       messages={mergedMessages}
       latestTurn={latestTurn}
       composer={liveComposer}
