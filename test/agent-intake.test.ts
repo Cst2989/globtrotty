@@ -7,6 +7,7 @@ import { MockSupplier } from '../src/supplier/mock.js'
 import { LogNotifier } from '../src/notify.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { loadNotebook } from '../src/repo/notebook.js'
+import { emptyNotebook } from '../src/notebook.js'
 
 // The author's own message, re-recorded as test/fixtures/jev/tokyo.json (task 5, LIVE_JEV=1) —
 // see test/intake-brief.test.ts and task-5-report.md.
@@ -90,6 +91,12 @@ describeDb('makeIntake', () => {
       const stored = new Set(rows.map((r) => r.source_id))
       for (const id of content.sourceIds) expect(stored.has(id)).toBe(true)
 
+      // Fix round 1, spec §1.4: the direct supplier search still writes a tool_calls row, under
+      // the same name the driver's own door uses, so it counts against the same per-turn budget.
+      const toolCalls = await sql<{ name: string; status: string }[]>`
+        select name, status from tool_calls where turn_id = ${s.turnId}`
+      expect(toolCalls).toEqual([{ name: 'explore_flights', status: 'done' }])
+
       // Desk flipped to planning.
       const [c] = await sql`select desk from conversations where id = ${s.conversationId}`
       expect(c!.desk).toBe('planning')
@@ -152,6 +159,13 @@ describeDb('makeIntake', () => {
       const [mc] = await sql<{ cost_micros: string }[]>`
         select cost_micros from model_calls where conversation_id = ${s.conversationId}`
       expect(step.costMicros).toBe(BigInt(mc!.cost_micros))
+
+      // Fix round 1: a choice card never reaches the supplier at all — zero tool_results rows,
+      // and the notebook (which `writeBrief` only touches on the brief path) is untouched.
+      const results = await sql`select 1 from tool_results where conversation_id = ${s.conversationId}`
+      expect(results).toHaveLength(0)
+      const nb = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(nb).toEqual(emptyNotebook())
     })
   })
 
@@ -175,9 +189,82 @@ describeDb('makeIntake', () => {
       expect(BigInt(mc!.cost_micros)).toBe(step.recordedMicros)
       const [c] = await sql`select spend_usd_micros, desk from conversations where id = ${s.conversationId}`
       expect(BigInt(c!.spend_usd_micros as string)).toBe(step.recordedMicros)
-      // Desk still flips to planning: intake itself ran to completion (choices/brief decided
-      // before the search), only the supplier call after it failed.
-      expect(c!.desk).toBe('planning')
+      // Fix round 1: desk stays 'front' on any throw after the intake call — a retry of the
+      // SAME message must see the same front door, not a conversation stranded at 'planning'
+      // with no notebook and no results.
+      expect(c!.desk).toBe('front')
+      // No corpus row for a search that never actually returned anything usable.
+      const results = await sql`select 1 from tool_results where conversation_id = ${s.conversationId}`
+      expect(results).toHaveLength(0)
+      // The attempt itself still left its mark: `beginToolCall` ran before the search threw, and
+      // nothing ever reached `finishToolCall` to mark it done.
+      const toolCalls = await sql<{ status: string }[]>`select status from tool_calls where turn_id = ${s.turnId}`
+      expect(toolCalls).toEqual([{ status: 'pending' }])
+    })
+  })
+
+  it('a rank fixture that throws fails the turn as fetch_failed, desk still front, zero results rows, cost carried', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '04')
+      const flights = new MockSupplier({ kind: 'flight' }) // default count: 5, so rerank runs
+      const searchSpy = vi.spyOn(flights, 'search')
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(jevResponse(tokyo))
+        .mockRejectedValueOnce(new Error('jev: 529'))
+      const step = await makeIntake(deps(sql, fetchImpl, flights))(ctx(s, MSG))
+
+      expect(step.kind).toBe('fail')
+      if (step.kind !== 'fail') throw new Error('unreachable')
+      expect(step.reason).toBe('fetch_failed')
+      expect(step.recordedMicros).toBeGreaterThan(0n)
+      expect(searchSpy).toHaveBeenCalledTimes(1) // the search itself succeeded; the RERANK call failed
+
+      // Only the intake call ever recorded (the rerank call threw before recordJevCall for that
+      // seat could run) — cost carried is exactly that one call's cost.
+      const calls = await sql<{ seat: string; cost_micros: string }[]>`
+        select seat, cost_micros from model_calls where conversation_id = ${s.conversationId}`
+      expect(calls.map((r) => r.seat)).toEqual(['intake'])
+      expect(step.recordedMicros).toBe(BigInt(calls[0]!.cost_micros))
+      const [c] = await sql`select spend_usd_micros, desk from conversations where id = ${s.conversationId}`
+      expect(BigInt(c!.spend_usd_micros as string)).toBe(step.recordedMicros)
+      expect(c!.desk).toBe('front')
+
+      // recordResults is the LAST write on the success path, after the rerank succeeds — a
+      // throw in the rerank call must leave the corpus exactly as empty as it started.
+      const results = await sql`select 1 from tool_results where conversation_id = ${s.conversationId}`
+      expect(results).toHaveLength(0)
+      const nb = await loadNotebook(sql, s.conversationId, s.userId)
+      expect(nb).toEqual(emptyNotebook())
+      // The search's own tool_calls row IS done (the search succeeded); only what happened
+      // after it is undone.
+      const toolCalls = await sql<{ status: string }[]>`select status from tool_calls where turn_id = ${s.turnId}`
+      expect(toolCalls).toEqual([{ status: 'done' }])
+    })
+  })
+
+  it('a conversation at the per-turn supplier cap fails as limit_reached without calling the supplier', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '05')
+      for (let i = 0; i < DEFAULT_LIMITS.maxSupplierCallsPerTurn; i++) {
+        await sql`insert into tool_calls (turn_id, call_id, name, status)
+                  values (${s.turnId}, ${'seed-' + i}, 'explore_flights', 'done')`
+      }
+      const flights = new MockSupplier({ kind: 'flight' })
+      const searchSpy = vi.spyOn(flights, 'search')
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse(tokyo))
+      const step = await makeIntake(deps(sql, fetchImpl, flights))(ctx(s, MSG))
+
+      expect(step.kind).toBe('fail')
+      if (step.kind !== 'fail') throw new Error('unreachable')
+      expect(step.reason).toBe('limit_reached')
+      expect(step.recordedMicros).toBeGreaterThan(0n)
+      expect(searchSpy).not.toHaveBeenCalled()
+
+      const [c] = await sql`select spend_usd_micros, desk from conversations where id = ${s.conversationId}`
+      expect(BigInt(c!.spend_usd_micros as string)).toBe(step.recordedMicros)
+      expect(c!.desk).toBe('front')
+      const results = await sql`select 1 from tool_results where conversation_id = ${s.conversationId}`
+      expect(results).toHaveLength(0)
     })
   })
 })

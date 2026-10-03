@@ -17,11 +17,27 @@ const MAX_SCORED = 20
 const SCORE_LEVELS = ['Violates a stated preference', 'Acceptable', 'Good fit', 'Best possible fit']
 
 /**
- * Numbers and enum-like strings only — never a sourceId, never an unmasked airline name. `stops`
- * takes the WORSE of the two legs (a round trip that is nonstop out and two-stop back is not a
- * nonstop round trip); `bags`/`selfTransfer` are already whole-item properties, not per-leg, so
- * there is nothing to combine. `departLocal`/`arriveLocal` describe the outbound leg, the one her
- * preferences (`arriveBy`, cabin) are stated against.
+ * Kiwi's own cabin vocabulary (src/supplier/kiwi.ts echoes `cabinClass` back on every leg as a
+ * raw string). A value outside this set is not trusted enum-like data — it could be anything a
+ * compromised or buggy upstream decided to put there — so it never reaches Jev's state at all;
+ * `'unknown'` stands in for it instead of the raw string.
+ */
+const KNOWN_KIWI_CABINS = new Set(['Economy', 'PremiumEconomy', 'Business', 'First'])
+
+/**
+ * Numbers and enum-like strings only — never a sourceId, never an unmasked supplier-origin
+ * string. `stops` takes the WORSE of the two legs (a round trip that is nonstop out and two-stop
+ * back is not a nonstop round trip); `bags`/`selfTransfer` are already whole-item properties, not
+ * per-leg, so there is nothing to combine. `departLocal`/`arriveLocal` describe the outbound leg,
+ * the one her preferences (`arriveBy`, cabin) are stated against.
+ *
+ * Fix round 1: `cabinClass`, `departureLocal` and `arrivalLocal` are every bit as supplier-origin
+ * as the airline names already masked below — a review found them passing through unmasked,
+ * which is exactly the prompt-injection surface `maskUntrustedText` exists to close. `cabin` gets
+ * the STRONGER treatment (validate against a known vocabulary, not just mask) because it is meant
+ * to be a pure enum; masking an unexpected value would still hand Jev a string it has never seen
+ * and has no reason to trust, where `'unknown'` is an honest answer that fits the vocabulary Jev
+ * is actually asked to reason over.
  */
 function summary(item: SupplierItem) {
   if (item.detail.kind !== 'flight') throw new TypeError('rankItems: flight items only')
@@ -31,10 +47,10 @@ function summary(item: SupplierItem) {
     price: Number(item.price.minor) / 10 ** exp,
     airlines: d.outbound.carriers.map(maskUntrustedText),
     stops: Math.max(d.outbound.stops, d.inbound?.stops ?? 0),
-    departLocal: d.outbound.departureLocal,
-    arriveLocal: d.outbound.arrivalLocal,
+    departLocal: maskUntrustedText(d.outbound.departureLocal),
+    arriveLocal: maskUntrustedText(d.outbound.arrivalLocal),
     durationHours: Math.round((d.totalDurationSeconds / 3600) * 10) / 10,
-    cabin: d.outbound.cabinClass,
+    cabin: KNOWN_KIWI_CABINS.has(d.outbound.cabinClass) ? d.outbound.cabinClass : 'unknown',
     selfTransfer: d.selfTransfer,
     bags: d.baggage.checkedBag,
   }
