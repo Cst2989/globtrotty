@@ -43,6 +43,17 @@ done
 netlify env:list --context production   # names only; values are masked
 ```
 
+**`DATABASE_URL` on Netlify must be the Supabase *session pooler* URL**, not the direct
+`db.<ref>.supabase.co` host: the direct host resolves only to IPv6 and Netlify functions have no
+IPv6 egress, so every query fails and the app answers 500 (found 2026-10-03). Shape:
+
+```
+postgresql://postgres.<ref>:<password>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres
+```
+
+(Dashboard → Connect → Session pooler; the `aws-N` prefix is per project.) Your local
+`.env.local` can keep the direct host.
+
 `SUPABASE_SERVICE_ROLE_KEY` is only read by the harness's tests and tooling — nothing under
 `app/` or `web/` imports it. Keep it on the site anyway so the functions' `loadEnv` passes.
 

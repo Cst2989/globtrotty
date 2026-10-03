@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowUp } from '@phosphor-icons/react'
+import { ArrowUp, CalendarBlank, UsersThree, Wallet } from '@phosphor-icons/react'
 
 export type MessageBoxProps = {
   /** The conversation to post to, or `'new'` for the landing box. */
@@ -17,6 +17,27 @@ export type MessageBoxProps = {
   suggestions?: string[]
   /** Overrides the default placeholder. */
   placeholder?: string
+  /** `'hero'` is the landing layout: text on top, options and send on a row below. */
+  variant?: 'inline' | 'hero'
+  /** Shows the when / who / budget pickers inside the box; their values are appended to the message. */
+  quickOptions?: boolean
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const WHO = ['Just me', 'Two of us', 'Family', 'Friends']
+const BUDGET = ['Keep it cheap', 'Mid-range', 'Treat ourselves']
+
+/**
+ * The quick options are appended to her words as one plain sentence, so the
+ * desk receives them in the same free-text channel as everything else (the
+ * message route takes `{ text }` only). Pure so it can be unit-tested.
+ */
+export function withQuickOptions(text: string, picks: { when?: string; who?: string; budget?: string }): string {
+  const parts: string[] = []
+  if (picks.when) parts.push(`When: ${picks.when}`)
+  if (picks.who) parts.push(`Who: ${picks.who}`)
+  if (picks.budget) parts.push(`Budget: ${picks.budget}`)
+  return parts.length === 0 ? text : `${text}\n\n${parts.join('. ')}.`
 }
 
 const SENDABLE_STATUSES = new Set(['active', 'awaiting_user'])
@@ -86,9 +107,14 @@ function blockedPlaceholder(status: string | undefined): string | null {
  * second row. `pending` only guards a double-click while a request is in
  * flight.
  */
-export function MessageBox({ conversationId, status, suggestions, placeholder }: MessageBoxProps) {
+export function MessageBox({
+  conversationId, status, suggestions, placeholder, variant = 'inline', quickOptions = false,
+}: MessageBoxProps) {
   const router = useRouter()
   const [text, setText] = useState('')
+  const [when, setWhen] = useState('')
+  const [who, setWho] = useState('')
+  const [budget, setBudget] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -97,8 +123,9 @@ export function MessageBox({ conversationId, status, suggestions, placeholder }:
   const canSend = !disabled && text.trim().length > 0
 
   async function send() {
-    const trimmed = text.trim()
-    if (!trimmed || disabled) return
+    const typed = text.trim()
+    if (!typed || disabled) return
+    const trimmed = quickOptions ? withQuickOptions(typed, { when, who, budget }) : typed
 
     setPending(true)
     setError(null)
@@ -150,48 +177,113 @@ export function MessageBox({ conversationId, status, suggestions, placeholder }:
 
   const effectivePlaceholder = blockedPlaceholder(status) ?? placeholder ?? 'Message the travel desk'
 
+  const textarea = (
+    <textarea
+      id="message-box-text"
+      name="text"
+      rows={variant === 'hero' ? 2 : 1}
+      value={text}
+      maxLength={4000}
+      disabled={disabled}
+      placeholder={effectivePlaceholder}
+      onChange={(event) => {
+        setText(event.target.value)
+        // Grow with the content (Safari has no `field-sizing: content` yet).
+        event.target.style.height = 'auto'
+        event.target.style.height = `${event.target.scrollHeight}px`
+      }}
+      onKeyDown={handleKeyDown}
+    />
+  )
+
+  const sendButton = (
+    <button type="submit" className="btn composer-send" disabled={!canSend} aria-label={pending ? 'Sending' : 'Send'}>
+      <ArrowUp size={18} weight="bold" aria-hidden="true" />
+    </button>
+  )
+
+  const chips = suggestions && suggestions.length > 0 ? (
+    <div className="suggestions" aria-label="Ideas to start with">
+      {suggestions.map((s) => (
+        <button key={s} type="button" className="suggestion" onClick={() => setText(s)}>
+          {s}
+        </button>
+      ))}
+    </div>
+  ) : null
+
+  const hint = error ? (
+    <p className="alert" role="alert">
+      {error}
+    </p>
+  ) : (
+    <p className="composer-hint">Prices come from live searches. Globetrotty never asks for payment or passport details.</p>
+  )
+
+  if (variant === 'hero') {
+    return (
+      <form onSubmit={handleSubmit} className="message-box message-box-hero">
+        <div className="composer composer-hero">
+          <label htmlFor="message-box-text" className="visually-hidden">
+            Describe the trip
+          </label>
+          {textarea}
+          <div className="composer-row">
+            {quickOptions ? (
+              <div className="quick-options">
+                <label className="quick-option" data-set={when ? 'yes' : 'no'}>
+                  <CalendarBlank size={18} aria-hidden="true" />
+                  <span className="visually-hidden">When</span>
+                  <select value={when} onChange={(event) => setWhen(event.target.value)} disabled={disabled}>
+                    <option value="">When</option>
+                    <option value="Flexible">Flexible</option>
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="quick-option" data-set={who ? 'yes' : 'no'}>
+                  <UsersThree size={18} aria-hidden="true" />
+                  <span className="visually-hidden">Who</span>
+                  <select value={who} onChange={(event) => setWho(event.target.value)} disabled={disabled}>
+                    <option value="">Who</option>
+                    {WHO.map((w) => (
+                      <option key={w} value={w}>{w}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="quick-option" data-set={budget ? 'yes' : 'no'}>
+                  <Wallet size={18} aria-hidden="true" />
+                  <span className="visually-hidden">Budget</span>
+                  <select value={budget} onChange={(event) => setBudget(event.target.value)} disabled={disabled}>
+                    <option value="">Budget</option>
+                    {BUDGET.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : <span />}
+            {sendButton}
+          </div>
+        </div>
+        {chips}
+        {hint}
+      </form>
+    )
+  }
+
   return (
     <form onSubmit={handleSubmit} className="message-box">
-      {suggestions && suggestions.length > 0 ? (
-        <div className="suggestions" aria-label="Ideas to start with">
-          {suggestions.map((s) => (
-            <button key={s} type="button" className="suggestion" onClick={() => setText(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {chips}
       <div className="composer">
         <label htmlFor="message-box-text" className="visually-hidden">
           Message
         </label>
-        <textarea
-          id="message-box-text"
-          name="text"
-          rows={1}
-          value={text}
-          maxLength={4000}
-          disabled={disabled}
-          placeholder={effectivePlaceholder}
-          onChange={(event) => {
-            setText(event.target.value)
-            // Grow with the content (Safari has no `field-sizing: content` yet).
-            event.target.style.height = 'auto'
-            event.target.style.height = `${event.target.scrollHeight}px`
-          }}
-          onKeyDown={handleKeyDown}
-        />
-        <button type="submit" className="btn composer-send" disabled={!canSend} aria-label={pending ? 'Sending' : 'Send'}>
-          <ArrowUp size={18} weight="bold" aria-hidden="true" />
-        </button>
+        {textarea}
+        {sendButton}
       </div>
-      {error ? (
-        <p className="alert" role="alert">
-          {error}
-        </p>
-      ) : (
-        <p className="composer-hint">Prices come from live searches. Globetrotty never asks for payment or passport details.</p>
-      )}
+      {hint}
     </form>
   )
 }

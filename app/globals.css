@@ -1047,3 +1047,230 @@ select {
 .link-button:hover {
   text-decoration: underline;
 }
+
+/* ---------- landing hero (photo wall) ---------- */
+
+.hero {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  overflow: hidden;
+  background: #0b1118;
+  color: #f4f6f9;
+}
+
+.hero-wall {
+  position: absolute;
+  inset: -2%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 10px;
+  pointer-events: none;
+}
+
+.hero-wall img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 20px;
+  filter: saturate(0.85) brightness(0.55);
+}
+
+.hero-wall::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(70% 60% at 50% 55%, rgba(11, 17, 24, 0.55), rgba(11, 17, 24, 0.85) 100%);
+}
+
+.hero-inner {
+  position: relative;
+  width: 100%;
+  max-width: 44rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1.1rem;
+}
+
+.hero-inner h1 {
+  font-size: clamp(2.6rem, 5.5vw, 4.25rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #ffffff;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+}
+
+.hero-inner > p {
+  margin: 0;
+  max-width: 40ch;
+  font-size: 1.1rem;
+  color: rgba(244, 246, 249, 0.85);
+}
+
+.message-box-hero {
+  margin-top: 0.75rem;
+  width: 100%;
+}
+
+.composer-hero {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  padding: 1rem 1rem 0.75rem 1.25rem;
+  border-radius: 24px;
+  border-color: transparent;
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7);
+  color: #15202b;
+  background: #ffffff;
+  text-align: left;
+}
+
+.composer-hero textarea {
+  font-size: 1.05rem;
+  min-height: 3.2rem;
+  color: #15202b;
+}
+
+.composer-hero textarea::placeholder {
+  color: #7b8794;
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.quick-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.quick-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  background: #15202b;
+  color: #ffffff;
+  font-weight: 500;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: background-color 160ms var(--ease);
+}
+
+.quick-option:hover {
+  background: #2a3645;
+}
+
+.quick-option[data-set='yes'] {
+  background: #2f5bc7;
+}
+
+.quick-option select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  padding: 0;
+  cursor: pointer;
+  max-width: 11rem;
+}
+
+.quick-option select:focus-visible {
+  outline: none;
+}
+
+.quick-option:focus-within {
+  outline: 2px solid #7fa3f0;
+  outline-offset: 2px;
+}
+
+.quick-option select option {
+  color: #15202b;
+  background: #ffffff;
+}
+
+.message-box-hero .suggestions {
+  justify-content: center;
+}
+
+.message-box-hero .suggestion {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+.message-box-hero .suggestion:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+}
+
+.message-box-hero .composer-hint {
+  color: rgba(244, 246, 249, 0.6);
+}
+
+.message-box-hero .alert {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+@media (max-width: 700px) {
+  .hero-wall {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .hero-wall img {
+    border-radius: 12px;
+  }
+
+  .composer-hero {
+    padding: 0.85rem 0.75rem 0.65rem 1rem;
+  }
+
+  .quick-option {
+    padding: 0 0.7rem;
+    font-size: 0.85rem;
+  }
+
+  .quick-option select {
+    max-width: 6.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-wall img {
+    animation: wall-in 900ms var(--ease) both;
+  }
+
+  @keyframes wall-in {
+    from {
+      opacity: 0;
+      transform: scale(1.03);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
