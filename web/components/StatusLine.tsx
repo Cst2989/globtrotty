@@ -6,7 +6,7 @@ export type StatusLineProps = {
 /** `conversations.status` (supabase/migrations/0001_harness.sql) → plain words. */
 const STATUS_WORDS: Record<string, string> = {
   active: 'Ready for your next message',
-  working: 'Thinking…',
+  working: 'Thinking',
   awaiting_user: 'Waiting for your reply',
   limit_reached: "Today's limit has been reached",
   escalated: 'A person from the office is looking at this',
@@ -26,21 +26,39 @@ const FAIL_REASON_WORDS: Record<string, string> = {
   stalled: 'the agent stopped responding',
 }
 
+/** Colour tone for the line; the CSS keys on `data-tone`. */
+function toneFor(status: string): 'working' | 'failed' | 'limit' | 'neutral' {
+  if (status === 'working') return 'working'
+  if (status === 'failed') return 'failed'
+  if (status === 'limit_reached' || status === 'escalated') return 'limit'
+  return 'neutral'
+}
+
 /**
  * Maps `conversations.status` + the latest turn's `fail_reason` to plain
- * words for the traveller — never the raw status/reason codes. An
- * unrecognised code (a future status this component hasn't been taught yet)
- * falls back to showing the code itself rather than hiding the state
- * silently.
+ * words for the traveller, never the raw codes. An unrecognised code (a
+ * future status this component hasn't been taught yet) falls back to the
+ * code itself rather than hiding the state silently. While `working`, the
+ * words are followed by the three-dot thinking indicator every chat product
+ * uses for "the other side is typing".
  */
 export function StatusLine({ status, failReason }: StatusLineProps) {
   const words = STATUS_WORDS[status] ?? status
   const detail = status === 'failed' && failReason ? (FAIL_REASON_WORDS[failReason] ?? failReason) : null
 
   return (
-    <p className="status-line" role="status">
-      {words}
-      {detail ? ` — because ${detail}.` : ''}
+    <p className="status-line" role="status" data-tone={toneFor(status)}>
+      <span>
+        {words}
+        {detail ? `: ${detail}.` : ''}
+      </span>
+      {status === 'working' ? (
+        <span className="thinking" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null}
     </p>
   )
 }
