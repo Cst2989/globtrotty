@@ -29,7 +29,10 @@ export { OPS_USER_ID }
 
 /** The four seats the nightly canary calls, one fixed golden request each. */
 export type CanarySeat = 'driver' | 'reviewer' | 'front_desk' | 'scout'
-const CANARY_SEATS: readonly CanarySeat[] = ['driver', 'reviewer', 'front_desk', 'scout']
+// Defensive: a Jev seat (model starts with 'jev-') has no golden request of its
+// own and is never canaried, even if one is ever added to this list.
+const CANARY_SEATS: readonly CanarySeat[] =
+  (['driver', 'reviewer', 'front_desk', 'scout'] as const).filter((s) => !SEATS[s].model.startsWith('jev-'))
 
 /** F2: a drift already alarmed on stays suppressed (not re-paged) for a week. */
 const ALARM_DEDUPE_DAYS = 7

@@ -32,7 +32,7 @@ export function loadEnv(source: Record<string, string | undefined>): Env {
  * deleted) must read as "not configured", not as a present-but-useless key.
  */
 export function loadOptionalEnv(
-  source: Record<string, string | undefined>, key: 'GOOGLE_SEARCH_API',
+  source: Record<string, string | undefined>, key: 'GOOGLE_SEARCH_API' | 'JEV_KEY',
 ): string | null {
   const value = source[key]
   return value ? value : null

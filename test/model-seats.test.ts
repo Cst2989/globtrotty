@@ -11,8 +11,11 @@ describe('SEATS', () => {
     expect(SEATS.scout.model).toBe('claude-haiku-4-5-20251001')
   })
 
-  it('prices every seat it declares — an unpriced seat would charge zero', () => {
+  it('prices every Claude seat it declares — an unpriced seat would charge zero', () => {
+    // Jev seats (model 'jev-latest') are costed by src/jev/client.ts's
+    // jevCostMicros, not PRICES — PRICES is Claude token pricing only.
     for (const [name, seat] of Object.entries(SEATS)) {
+      if (seat.model.startsWith('jev-')) continue
       expect(PRICES[seat.model], `seat ${name} has no price`).toBeDefined()
     }
   })
@@ -28,9 +31,9 @@ describe('SEATS', () => {
     expect(SEATS.driver.modelConfigId).toContain(String(SEATS.driver.maxTokens))
   })
 
-  it('declares all seven seats the model_calls constraint allows', () => {
+  it('declares all ten seats the model_calls constraint allows', () => {
     expect(Object.keys(SEATS).sort()).toEqual(
-      ['driver', 'front_desk', 'monitor', 'reviewer', 'scout', 'sim_user', 'titler'],
+      ['driver', 'front_desk', 'intake', 'monitor', 'rerank', 'reviewer', 'router', 'scout', 'sim_user', 'titler'],
     )
   })
 })
