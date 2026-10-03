@@ -9,24 +9,25 @@
  * covers them without a font-src exception.
  */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 
-  --paper: #f5f7fa;
-  --surface: #ffffff;
-  --surface-2: #eceff4;
-  --ink: #15202b;
-  --ink-2: #4a5665;
-  --ink-3: #7b8794;
-  --line: #dde2e9;
-  --line-strong: #c3cad4;
-  --accent: #2f5bc7;
-  --accent-ink: #ffffff;
-  --accent-soft: #e4ebfa;
-  --user-bubble: #e4ebfa;
-  --danger: #b4372f;
-  --danger-soft: #fbe9e7;
-  --ok: #2a7a4b;
-  --shadow: 0 1px 2px rgba(21, 32, 43, 0.06), 0 8px 24px -12px rgba(21, 32, 43, 0.18);
+  --paper: #171615;
+  --surface: #1e1d1b;
+  --surface-2: #2a2826;
+  --surface-3: #35322f;
+  --ink: #ece9e4;
+  --ink-2: #b7b1aa;
+  --ink-3: #847e77;
+  --line: #2c2a27;
+  --line-strong: #403c38;
+  --accent: #8fb0f5;
+  --accent-ink: #12141a;
+  --accent-soft: #263349;
+  --user-bubble: #2b2927;
+  --danger: #f09a92;
+  --danger-soft: #3b2522;
+  --ok: #8fd3a7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -16px rgba(0, 0, 0, 0.8);
 
   --r-control: 12px;
   --r-card: 16px;
@@ -35,27 +36,6 @@
   --thread-width: 46rem;
   --rail-width: 272px;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #0f151d;
-    --surface: #171f2a;
-    --surface-2: #1f2937;
-    --ink: #e8ecf1;
-    --ink-2: #aab4c0;
-    --ink-3: #7b8794;
-    --line: #28323f;
-    --line-strong: #3a4656;
-    --accent: #7fa3f0;
-    --accent-ink: #0f151d;
-    --accent-soft: #1d2a45;
-    --user-bubble: #1f2b40;
-    --danger: #ef8a82;
-    --danger-soft: #3a2220;
-    --ok: #7ccb98;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
-  }
 }
 
 * {
@@ -250,7 +230,7 @@ select {
   gap: 3rem;
   border-right: 1px solid var(--line);
   background:
-    radial-gradient(60rem 30rem at -10% 110%, var(--accent-soft), transparent 60%),
+    radial-gradient(60rem 30rem at -10% 110%, var(--accent-soft), transparent 65%),
     var(--surface);
 }
 
@@ -439,6 +419,7 @@ select {
 }
 
 .rail-empty {
+  flex: 1;
   margin: 0.4rem 1.1rem;
   color: var(--ink-3);
   font-size: 0.9rem;
@@ -515,7 +496,7 @@ select {
     position: fixed;
     inset: 0;
     z-index: 10;
-    background: rgba(21, 32, 43, 0.4);
+    background: rgba(0, 0, 0, 0.55);
     border: 0;
     padding: 0;
   }
@@ -1059,8 +1040,8 @@ select {
   justify-content: center;
   padding: 2rem 1rem;
   overflow: hidden;
-  background: #0b1118;
-  color: #f4f6f9;
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .hero-wall {
@@ -1078,7 +1059,7 @@ select {
   height: 100%;
   object-fit: cover;
   border-radius: 20px;
-  filter: saturate(0.85) brightness(0.55);
+  filter: saturate(0.8) brightness(0.5);
 }
 
 .hero-wall::after {
@@ -1086,7 +1067,7 @@ select {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(70% 60% at 50% 55%, rgba(11, 17, 24, 0.55), rgba(11, 17, 24, 0.85) 100%);
+    radial-gradient(70% 60% at 50% 55%, rgba(23, 22, 21, 0.6), rgba(23, 22, 21, 0.9) 100%);
 }
 
 .hero-inner {
@@ -1105,14 +1086,14 @@ select {
   font-weight: 700;
   letter-spacing: -0.035em;
   color: #ffffff;
-  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.5);
 }
 
 .hero-inner > p {
   margin: 0;
   max-width: 40ch;
   font-size: 1.1rem;
-  color: rgba(244, 246, 249, 0.85);
+  color: var(--ink-2);
 }
 
 .message-box-hero {
@@ -1126,21 +1107,17 @@ select {
   gap: 0.75rem;
   padding: 1rem 1rem 0.75rem 1.25rem;
   border-radius: 24px;
-  border-color: transparent;
-  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.7);
-  color: #15202b;
-  background: #ffffff;
+  border-color: var(--line-strong);
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+  color: var(--ink);
+  background: rgba(30, 29, 27, 0.92);
+  backdrop-filter: blur(10px);
   text-align: left;
 }
 
 .composer-hero textarea {
   font-size: 1.05rem;
   min-height: 3.2rem;
-  color: #15202b;
-}
-
-.composer-hero textarea::placeholder {
-  color: #7b8794;
 }
 
 .composer-row {
@@ -1164,8 +1141,8 @@ select {
   min-height: 40px;
   padding: 0 0.95rem;
   border-radius: 999px;
-  background: #15202b;
-  color: #ffffff;
+  background: var(--surface-2);
+  color: var(--ink);
   font-weight: 500;
   font-size: 0.92rem;
   cursor: pointer;
@@ -1173,11 +1150,12 @@ select {
 }
 
 .quick-option:hover {
-  background: #2a3645;
+  background: var(--surface-3);
 }
 
 .quick-option[data-set='yes'] {
-  background: #2f5bc7;
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 .quick-option select {
@@ -1198,13 +1176,13 @@ select {
 }
 
 .quick-option:focus-within {
-  outline: 2px solid #7fa3f0;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .quick-option select option {
-  color: #15202b;
-  background: #ffffff;
+  color: var(--ink);
+  background: var(--surface);
 }
 
 .message-box-hero .suggestions {
@@ -1225,11 +1203,7 @@ select {
 }
 
 .message-box-hero .composer-hint {
-  color: rgba(244, 246, 249, 0.6);
-}
-
-.message-box-hero .alert {
-  background: rgba(255, 255, 255, 0.95);
+  color: var(--ink-3);
 }
 
 @media (max-width: 700px) {
