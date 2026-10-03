@@ -291,7 +291,11 @@ describeDb('makeRouter', () => {
     })
   })
 
-  it('a choose action dispatches straight to the Task 7 stub, no Jev call at all', async () => {
+  // Plan 5 Task 7 replaced the stub `handleChoose` (src/agents/choose.ts) with the real
+  // handler — this id names no corpus row for this conversation, so it reaches the same
+  // "no longer available" park `handleChoose` returns for any card id that doesn't
+  // resolve, never a model or Jev call either way.
+  it('a choose action dispatches straight to handleChoose, no Jev call at all', async () => {
     await withTestDb(async (sql) => {
       const s = await seedConversation(sql, '05')
       const action: ActionPayload = { action: 'choose', kind: 'flight', sourceId: 'F1' }
@@ -303,7 +307,9 @@ describeDb('makeRouter', () => {
 
       const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, 'irrelevant'))
 
-      expect(step).toEqual({ kind: 'park', message: 'Noted.', costMicros: 0n })
+      expect(step).toEqual({
+        kind: 'park', message: 'That flight is no longer available. Pick another.', costMicros: 0n,
+      })
       expect(fetchImpl).not.toHaveBeenCalled()
       expect(create).not.toHaveBeenCalled()
     })

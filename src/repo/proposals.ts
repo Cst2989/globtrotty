@@ -107,6 +107,46 @@ export async function loadProposalForUser(
   return r ? { id: r.id, conversationId: r.conversation_id } : null
 }
 
+/**
+ * The newest proposal row `saveProposal` wrote FOR THIS TURN — Task 7's
+ * `handleChoose` (src/agents/choose.ts) calls `runProposalPath` outside the
+ * model loop, so there is no `tool_use` text for it to parse a `proposal_id`
+ * back out of (the way `propose_itinerary`'s own caller, the driver, never
+ * has to: the MODEL reads that text). A gate rejection or a reviewer
+ * "Revise:" verdict under the round bound both return text with no row
+ * saved at all (see `runProposalPath`'s own doc comment) — this reads
+ * `null` in exactly that case, which is how the caller tells "rejected" from
+ * "saved" without parsing prose. Scoped to `turn_id`, never the
+ * conversation, because a `choose` action's turn calls `runProposalPath` at
+ * most once, and an older turn's own proposal must never be mistaken for
+ * this one's.
+ */
+export async function loadNewestProposalForTurn(
+  sql: postgres.Sql, turnId: string,
+): Promise<{ id: string } | null> {
+  const rows = await sql<{ id: string }[]>`
+    select id from proposals where turn_id = ${turnId} order by created_at desc limit 1`
+  const r = rows[0]
+  return r ? { id: r.id } : null
+}
+
+/**
+ * The newest ACCEPTED proposal's itinerary for a conversation — Task 7's
+ * `handleChoose` uses this to recover the flight she already chose (and
+ * accepted, via a prior `choose` turn) when she goes on to choose a hotel,
+ * so the combined proposal's refs carry both the flight and the stay rather
+ * than the stay alone. `null` when nothing has been accepted yet.
+ */
+export async function loadNewestAcceptedItinerary(
+  sql: postgres.Sql, conversationId: string,
+): Promise<StoredItinerary | null> {
+  const rows = await sql<{ itinerary: StoredItinerary }[]>`
+    select itinerary from proposals
+     where conversation_id = ${conversationId} and decision = 'accept'
+     order by created_at desc limit 1`
+  return rows[0]?.itinerary ?? null
+}
+
 /** Scoped to the conversation: a proposal id from another conversation is "not found", never "forbidden". */
 export async function loadProposal(
   sql: postgres.Sql, conversationId: string, proposalId: string,

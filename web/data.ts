@@ -489,6 +489,36 @@ export async function loadAlternatives(
   return dropExpiredAlternatives(deduped, now)
 }
 
+/**
+ * Plan 5 Task 7: the newest proposal recorded for a conversation, split
+ * into its flight and hotel lines — the shape the pinned summary needs once
+ * something has been chosen via the Choose button. `proposalId` is `null`
+ * when nothing has been proposed yet (no row at all), in which case `flight`
+ * and `hotel` are both `null` too. Reuses `itineraryItemsLite`'s trimming —
+ * same "never throw on a shape this reader doesn't recognise" posture as
+ * `loadProposals` above.
+ */
+export async function loadChosen(
+  sb: SupabaseClient, conversationId: string,
+): Promise<{ flight: ProposalItemLite | null; hotel: ProposalItemLite | null; proposalId: string | null }> {
+  const { data, error } = await sb
+    .from('proposals')
+    .select('id, itinerary')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  const row = data?.[0]
+  if (!row) return { flight: null, hotel: null, proposalId: null }
+
+  const items = itineraryItemsLite(row.itinerary)
+  return {
+    flight: items.find((i) => i.kind === 'flight') ?? null,
+    hotel: items.find((i) => i.kind === 'hotel') ?? null,
+    proposalId: row.id as string,
+  }
+}
+
 /* ---------- Plan 5: results and choices ---------- */
 
 /**
