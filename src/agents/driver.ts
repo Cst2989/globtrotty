@@ -23,9 +23,9 @@ import { handOff } from '../tools/cashier.js'
 import { escalate } from '../tools/escalate.js'
 import { listExpiredSourceIds, recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
-import { maskIdChars } from '../sanitize.js'
+import { maskControlChars, maskIdChars } from '../sanitize.js'
 import type { FlightSearch, HotelSearch, Supplier, SupplierItem } from '../supplier/types.js'
-import type { Notebook, Provenance } from '../notebook.js'
+import { NOTEBOOK_KEYS, type Notebook, type Provenance } from '../notebook.js'
 import type { EscalationReason, Notifier } from '../notify.js'
 import { loadPrompt } from './prompts/load.js'
 
@@ -35,8 +35,20 @@ import { loadPrompt } from './prompts/load.js'
  * beside the module (tsx, vitest, an unbundled server) or from the process cwd (the esbuild-
  * bundled Netlify function, whose `import.meta.url` no longer neighbours `prompts/` — see
  * that module's doc comment).
+ *
+ * `renderDriverPrompt` is the one place `{{NOTEBOOK_KEYS}}` is resolved, into a
+ * comma-separated list of `NOTEBOOK_KEYS` (src/notebook.ts) — the single source
+ * of truth for what `update_requirements` accepts. Exported so
+ * `src/monitor/drift.ts`'s golden driver request renders the SAME system text
+ * production sends: `loadPrompt('driver')` alone still carries the literal
+ * placeholder, and a drift comparison against that unresolved text would
+ * shape-alarm on every real driver call, forever.
  */
-const SYSTEM = loadPrompt('driver')
+export function renderDriverPrompt(): string {
+  return loadPrompt('driver').replace('{{NOTEBOOK_KEYS}}', NOTEBOOK_KEYS.join(', '))
+}
+
+const SYSTEM = renderDriverPrompt()
 
 const DESK = 'planning' as const
 
@@ -92,6 +104,11 @@ export function makeDriver(deps: DriverDeps): Agent {
       // the notebook it always sent.
       suffix: [renderNotebook(notebook), renderExpiredNotice(expired)]
         .filter((s) => s.length > 0).join('\n\n'),
+      // Spec section 4: "a date without a year is the next one in the
+      // future" only holds if she is told what today is, every call. UTC —
+      // the same clock `reserve`/`reconcile`'s `day` is bucketed on — not the
+      // traveller's local date, which this desk never learns.
+      today: new Date(deps.now()).toISOString().slice(0, 10),
     }
 
     // ---- 1. Reserve an upper bound BEFORE dispatch (spec section 8) ---------
@@ -281,16 +298,32 @@ export function makeDriver(deps: DriverDeps): Agent {
       return asToolStep(async () => check.content)
     }
 
-    if (check.def.name === 'ask_user') {
+    if (check.def.name === 'offer_choices') {
       // Terminal by construction: the answer comes from her, not from a tool.
       // `completeTurn` still writes `turns.state` unconditionally on the park
       // path — what is true is narrower: `loop()` returns from the park branch
       // before appending this step's content to `state.messages`, so the
       // `tool_use` the model just emitted never enters the saved transcript.
-      const { questions } = check.input as { questions: string[] }
+      //
+      // `maskControlChars`, not `maskIdChars` or a fence: this is OUR OWN
+      // model's prose (the question and the option labels it wrote), the same
+      // trust boundary as any other driver text answer — not supplier- or
+      // traveller-authored, and not an id.
+      const { question, options } = check.input as {
+        question: string; options: { id: string; label: string }[]
+      }
+      const maskedQuestion = maskControlChars(question)
       return {
-        kind: 'park', message: questions.join('\n\n'),
+        kind: 'park', message: maskedQuestion,
         costMicros: 0n, recordedMicros: actual,
+        attachments: [{
+          role: 'choices',
+          content: {
+            questionId: 'driver',
+            question: maskedQuestion,
+            options: options.map((o) => ({ id: o.id, label: maskControlChars(o.label) })),
+          },
+        }],
       }
     }
 

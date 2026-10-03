@@ -22,6 +22,11 @@ export const SYSTEM_CACHE_TTL: CacheTtl = '1h'
  */
 const MIN_CACHEABLE_TOKENS: Record<string, number> = {
   'claude-opus-5': 512,
+  // Plan 5 Task 8: the driver's new seat. No distinguishing figure is
+  // documented for it, so it takes Opus 5's minimum — both are frontier
+  // thinking models, unlike Haiku, which is the one line-up member this
+  // table singles out as higher.
+  'claude-sonnet-5': 512,
   'claude-haiku-4-5-20251001': 4_096,
 }
 /**

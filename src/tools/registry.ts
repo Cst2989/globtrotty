@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ProposalRefsSchema, SLOT_NAMES } from '../gates/rehydrateGate.js'
 import { ESCALATION_REASONS, type EscalationReason } from '../notify.js'
+import { NOTEBOOK_KEYS } from '../notebook.js'
 
 export type Desk = 'front' | 'planning'
 /** Where a tool's result comes from, which decides whether it must be fenced. */
@@ -13,8 +14,19 @@ export type ToolDef = {
   readonly description: string
 }
 
-const AskUser = z.strictObject({
-  questions: z.array(z.string().min(1).max(300)).min(1).max(3),
+/**
+ * Plan 5 Task 8: replaces `ask_user`. driver.md's "Never ask in free text"
+ * section is the reason — one question, 2 to 4 clickable options, never a
+ * free-text prompt. `options[].id` is narrower than `ChoicesContentSchema`'s
+ * own id pattern (src/results.ts) on purpose: this is what the MODEL may
+ * send, and a tighter pattern here still parses as that schema's superset.
+ */
+const OfferChoices = z.strictObject({
+  question: z.string().min(1).max(200),
+  options: z.array(z.strictObject({
+    id: z.string().regex(/^[a-z0-9_]{1,24}$/),
+    label: z.string().min(1).max(60),
+  })).min(2).max(4),
 })
 
 const FlightSearch = z.strictObject({
@@ -73,9 +85,9 @@ export const EscalateToHuman = z.strictObject({
 
 export const TOOLS: Record<string, ToolDef> = {
   update_requirements: { name: 'update_requirements', door: 'code', schema: UpdateRequirements,
-    description: 'Record what she has told you into the notebook. Never invent a value she did not state.' },
-  ask_user: { name: 'ask_user', door: 'code', schema: AskUser,
-    description: 'Ask her 1-3 questions and stop. Use when a missing fact blocks planning.' },
+    description: `Record what she has told you into the notebook. Allowed keys: ${NOTEBOOK_KEYS.join(', ')}. Never invent a value she did not state.` },
+  offer_choices: { name: 'offer_choices', door: 'code', schema: OfferChoices,
+    description: 'Ask ONE question with 2 to 4 clickable options and stop. Only when you cannot continue.' },
   explore_flights: { name: 'explore_flights', door: 'api', schema: FlightSearch,
     description: 'Search flights. ISO dates only. Returns references you may propose by id.' },
   explore_hotels: { name: 'explore_hotels', door: 'api', schema: HotelSearch,
@@ -99,7 +111,7 @@ export const TOOLS: Record<string, ToolDef> = {
  */
 export const DESK_TOOLS: Record<Desk, readonly string[]> = {
   front: [],
-  planning: ['update_requirements', 'ask_user', 'explore_flights', 'explore_hotels',
+  planning: ['update_requirements', 'offer_choices', 'explore_flights', 'explore_hotels',
              'propose_itinerary', 'revise_component', 'hand_off_to_booking', 'escalate_to_human',
              'research_destination'],
 }

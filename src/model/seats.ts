@@ -36,6 +36,10 @@ const seat = (
 
 // claude-opus-5 carries no date suffix — appending one 404s.
 const OPUS = 'claude-opus-5'
+// Plan 5 Task 8 (spec section 4): the driver's seat moves to Sonnet 5 at
+// effort medium — same dateless convention as Opus 5, no snapshot to resolve
+// to. Opus stays declared below as a config switch, not the default.
+const SONNET = 'claude-sonnet-5'
 // Haiku 4.5 is the only current model with a real dated snapshot, and it is the
 // highest-volume seat, so it is pinned exactly (spec section 7).
 const HAIKU = 'claude-haiku-4-5-20251001'
@@ -44,9 +48,11 @@ const HAIKU = 'claude-haiku-4-5-20251001'
 const JEV = 'jev-latest'
 
 // A prompt file edit is a version bump, always: driver.md gained the Scouts
-// section in Task 7 (plan 3c), so driver@2 -> driver@3.
+// section in Task 7 (plan 3c), driver@2 -> driver@3; Task 8 (plan 5) moved the
+// seat to Sonnet medium, replaced "When to ask" with "Never ask in free text"
+// and added the "Notebook keys" section, so driver@3 -> driver@4.
 export const SEATS: Record<SeatName, Seat> = {
-  driver:     seat(OPUS,  'high', 16_000, 'driver@3'),
+  driver:     seat(SONNET, 'medium', 4_000, 'driver@4'),
   reviewer:   seat(OPUS,  'high', 8_000,  'reviewer@1'),
   front_desk: seat(HAIKU, null,   1_024,  'front_desk@1'),
   scout:      seat(HAIKU, null,   2_048,  'scout@1'),

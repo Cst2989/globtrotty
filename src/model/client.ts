@@ -50,6 +50,16 @@ export type CallArgs = {
    * would throw the cache away whenever she stated a fact.
    */
   suffix?: string
+  /**
+   * Plan 5 Task 8: today's date (`YYYY-MM-DD`), threaded from the driver's
+   * `deps.now()`. `withSuffix` prepends `Today is YYYY-MM-DD.` ahead of the
+   * notebook suffix — still outside the cached prefix, so stating it never
+   * invalidates the cache and changes with the clock, never with a deploy.
+   * Optional and defaulting to nothing sent: every existing caller (the drift
+   * canary's golden requests, every `test/model-client.test.ts` fixture) asks
+   * for no date line and gets none, unchanged.
+   */
+  today?: string
   signal?: AbortSignal
   /**
    * Structured output. Sent as `output_config.format = {type: 'json_schema',
@@ -104,10 +114,22 @@ export type Transport = {
  * Exported and tested on its own, so it stays correct in isolation; inside
  * `buildRequest` it is followed by `normalizeOperatorTurns`, which then lifts
  * that trailing `system` run to the very end of the request.
+ *
+ * `today`, when given, is rendered as `Today is YYYY-MM-DD.` and prepended
+ * ahead of `suffix` (plan 5 Task 8, spec section 4: "a date without a year is
+ * the next one in the future" only works if she is told what today is, on
+ * every call, outside the cached prefix). A `today` with no `suffix` still
+ * produces a block — the date line alone is reason enough to open one.
  */
-export function withSuffix(messages: LoopMessage[], suffix: string | undefined): LoopMessage[] {
-  if (suffix === undefined || suffix.length === 0) return messages
-  const block: ContentBlock = { type: 'text', text: suffix }
+export function withSuffix(
+  messages: LoopMessage[], suffix: string | undefined, today?: string,
+): LoopMessage[] {
+  const dateLine = today === undefined ? '' : `Today is ${today}.`
+  const text = dateLine.length === 0
+    ? suffix
+    : (suffix === undefined || suffix.length === 0 ? dateLine : `${dateLine}\n\n${suffix}`)
+  if (text === undefined || text.length === 0) return messages
+  const block: ContentBlock = { type: 'text', text }
 
   let split = messages.length
   while (split > 0 && messages[split - 1]!.role === 'system') split--
@@ -221,7 +243,7 @@ export function buildRequest(args: CallArgs): Record<string, unknown> {
     // so both walks visit the same blocks in the same order either way. And
     // the suffix block still does not exist when breakpoints are placed, so
     // it still cannot carry one.
-    messages: normalizeOperatorTurns(withSuffix(placeBreakpoints(messages), args.suffix)),
+    messages: normalizeOperatorTurns(withSuffix(placeBreakpoints(messages), args.suffix, args.today)),
   }
   // `seat.effort === null` marks the Haiku seats (src/model/seats.ts) — see the
   // doc comment above for why they get no `thinking` block at all.

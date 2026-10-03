@@ -44,6 +44,12 @@ export const PRICES: Record<string, Price> = {
     inMicrosPerToken: 5, outMicrosPerToken: 25,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
   },
+  // Plan 5 Task 8: the driver's new seat. $3/MTok in, $15/MTok out; same
+  // cache-rate convention as every other Claude seat in this table.
+  'claude-sonnet-5': {
+    inMicrosPerToken: 3, outMicrosPerToken: 15,
+    cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
+  },
   'claude-haiku-4-5-20251001': {
     inMicrosPerToken: 1, outMicrosPerToken: 5,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,

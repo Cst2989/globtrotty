@@ -25,7 +25,7 @@ describe('buildRequest', () => {
   it('sends adaptive thinking and effort inside output_config, not top level', () => {
     const req = buildRequest(base)
     expect(req.thinking).toEqual({ type: 'adaptive' })
-    expect(req.output_config).toMatchObject({ effort: 'high' })
+    expect(req.output_config).toMatchObject({ effort: 'medium' })  // the driver's seat: Sonnet medium
     expect(req.effort).toBeUndefined()          // effort is NOT a top-level field
   })
 
@@ -49,7 +49,7 @@ describe('buildRequest', () => {
 
   it('pins the seat model and max_tokens onto the request', () => {
     const req = buildRequest(base)
-    expect(req.model).toBe('claude-opus-5')
+    expect(req.model).toBe('claude-sonnet-5')
     expect(req.max_tokens).toBe(SEATS.driver.maxTokens)
   })
 
@@ -57,7 +57,7 @@ describe('buildRequest', () => {
     const schema = { type: 'object', properties: { approved: { type: 'boolean' } },
                      required: ['approved'], additionalProperties: false }
     const req = buildRequest({ ...base, outputSchema: schema })
-    expect(req.output_config).toEqual({ effort: 'high', format: { type: 'json_schema', schema } })
+    expect(req.output_config).toEqual({ effort: 'medium', format: { type: 'json_schema', schema } })
     expect(req.output_format).toBeUndefined()          // the deprecated top-level name
   })
 
@@ -145,6 +145,34 @@ describe('buildRequest suffix', () => {
     })
     const roles = (req.messages as LoopMessage[]).map((m) => m.role)
     expect(roles).toEqual(['user', 'system'])
+  })
+
+  // Plan 5 Task 8: `today` is prepended ahead of the notebook suffix, still
+  // outside the cached prefix. Optional and defaulting to nothing sent, so
+  // every fixture above — none of which passes `today` — is unaffected.
+  it('prepends "Today is YYYY-MM-DD." ahead of the suffix', () => {
+    const out = withSuffix(msgs, '## The notebook\n\n- destination: Faro', '2026-10-03')
+    const last = out.at(-1)!.content.at(-1)!
+    expect(last).toEqual({
+      type: 'text',
+      text: 'Today is 2026-10-03.\n\n## The notebook\n\n- destination: Faro',
+    })
+  })
+
+  it('still opens a block for today alone, with no suffix to attach it to', () => {
+    const out = withSuffix(msgs, undefined, '2026-10-03')
+    expect(out.at(-1)!.content.at(-1)).toEqual({ type: 'text', text: 'Today is 2026-10-03.' })
+  })
+
+  it('with no `today`, sends exactly what it always sent', () => {
+    expect(withSuffix(msgs, 'NOTEBOOK')).toEqual(withSuffix(msgs, 'NOTEBOOK', undefined))
+  })
+
+  it('threads through buildRequest via args.today', () => {
+    const req = buildRequest({ ...base, suffix: '- destination: Faro', today: '2026-10-03' })
+    const sent = req.messages as LoopMessage[]
+    const last = sent.at(-1)!.content.at(-1)!
+    expect(last).toEqual({ type: 'text', text: 'Today is 2026-10-03.\n\n- destination: Faro' })
   })
 })
 
@@ -316,8 +344,15 @@ describe('estimateInputTokens', () => {
     // genuinely fractional, so ceil (73) and floor (72) still disagree; this
     // pinned value moved from 49 to 73 for that reason, not because the
     // ceil-vs-floor property this test checks changed.
+    // Plan 5 Task 8 note: the driver's seat (`base.seat`) moved to
+    // `claude-sonnet-5`/medium/4000 — three more bytes than `claude-opus-5`/
+    // high/16000 in the serialized request (+2 for "sonnet" vs "opus", +2 for
+    // "medium" vs "high", -1 for "4000" losing a digit against "16000") — so
+    // 218 became 221. 221 / 3 = 73.66..., still genuinely fractional, so this
+    // pinned value moved from 73 to 74 for that reason, not because the
+    // ceil-vs-floor property this test checks changed.
     const one = estimateInputTokens({ ...base, system: 'abcdefghij', messages: [], tools: [] })
-    expect(one).toBe(73)
+    expect(one).toBe(74)
   })
 
   it('includes the suffix — excluding it is an unbounded undercount of a money reservation', () => {
@@ -367,8 +402,12 @@ describe('estimateInputTokens', () => {
     // byte-based counts alike, so these two pinned values moved from 379/1045
     // to 403/1070. The ratio this test actually checks — byte-based well over
     // 2.5x code-unit-based for CJK-heavy text — is unaffected.
-    expect(codeUnitBased).toBe(403)  // verified with `node -e` before pinning
-    expect(byteBased).toBe(1070)     // verified with Buffer.byteLength, same way
+    // Plan 5 Task 8 note: the driver's seat moved to `claude-sonnet-5`/medium/
+    // 4000 — three more bytes in the serialized request than `claude-opus-5`/
+    // high/16000 (same accounting as estimateInputTokens's fractional-byte
+    // test above), so these moved from 403/1070 to 404/1071.
+    expect(codeUnitBased).toBe(404)  // verified with `node -e` before pinning
+    expect(byteBased).toBe(1071)     // verified with Buffer.byteLength, same way
     expect(byteBased).toBeGreaterThan(codeUnitBased * 2.5)
   })
 })

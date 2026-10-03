@@ -99,7 +99,7 @@ describeDb('recordModelCall', () => {
       expect(row!.seat).toBe('driver')
       expect(row!.model).toBe('claude-opus-5')
       expect(row!.model_config_id).toBe(SEATS.driver.modelConfigId)
-      expect(row!.effort).toBe('high')
+      expect(row!.effort).toBe('medium')   // plan 5 Task 8: the driver's seat is Sonnet medium
       // Spec section 7 names a silently changed provider DEFAULT as a drift
       // vector. Thinking is on by default on Opus 5, so a null here would make
       // that change invisible in the one table that records what we sent.
