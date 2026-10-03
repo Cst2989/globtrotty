@@ -69,7 +69,7 @@ export function buildIntakeQuestions(text: string, c: IntakeCandidates, today: D
     destination: choiceQ('Which place is the MAIN destination of the trip?', placeCriteria),
     side_trip: choiceQ('Which place, if any, is a SIDE TRIP from the main destination?', placeCriteria),
     outbound_month: choiceQ('The month of the OUTBOUND date (arrival or departure)', months),
-    outbound_day: choiceQ('The day of the month of the OUTBOUND date', days),
+    outbound_day: choiceQ('The day of the month of the OUTBOUND date (arrival or departure)', days),
     return_month: choiceQ('The month of the RETURN date', months),
     return_day: choiceQ('The day of the month of the RETURN date', days),
     outbound_year: choiceQ('The year of the outbound date', { [String(year)]: null, [String(year + 1)]: null, unstated: 'No year is stated' }),
@@ -81,7 +81,7 @@ export function buildIntakeQuestions(text: string, c: IntakeCandidates, today: D
     cabin_short: choiceQ('Cabin for the SHORT flights', { economy: null, premium_economy: null, business: null, first: null, unstated: 'Not stated' }),
     max_stops: choiceQ('Stops she will accept', { nonstop_only: 'Direct only', one_stop_ok: 'A connection is fine or not mentioned as a problem', unstated: 'Not stated' }),
     hotels_wanted: noulQ('Does she want accommodation arranged too?'),
-    arrive_by: noulQ('Is the outbound date the day she must BE THERE (an arrival deadline) rather than the day she leaves?'),
+    arrive_by: noulQ('Is the outbound date the day she must BE THERE (an arrival deadline)? The date itself is still the outbound date.'),
     fixed_commitment: noulQ('Does she name a dated event she must attend during the trip?'),
   }
 }

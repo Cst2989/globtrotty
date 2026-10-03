@@ -6,10 +6,10 @@
       "choice": "BCN",
       "confidence": 1,
       "probabilities": {
-        "OSA": 0,
         "none": 0,
+        "TYO": 0,
         "BCN": 1,
-        "TYO": 0
+        "OSA": 0
       }
     },
     "destination": {
@@ -17,10 +17,10 @@
       "choice": "TYO",
       "confidence": 1,
       "probabilities": {
-        "OSA": 0,
         "none": 0,
         "BCN": 0,
-        "TYO": 1
+        "TYO": 1,
+        "OSA": 0
       }
     },
     "side_trip": {
@@ -28,36 +28,36 @@
       "choice": "OSA",
       "confidence": 1,
       "probabilities": {
+        "none": 0,
         "BCN": 0,
         "TYO": 0,
-        "OSA": 1,
-        "none": 0
+        "OSA": 1
       }
     },
     "outbound_month": {
       "type": "choice",
       "choice": "november",
-      "confidence": 0.99,
+      "confidence": 1,
       "probabilities": {
-        "march": 0,
         "june": 0,
-        "october": 0.01,
-        "november": 0.98,
-        "september": 0,
-        "december": 0,
-        "may": 0,
-        "january": 0,
-        "july": 0,
-        "unstated": 0.01,
+        "march": 0,
+        "unstated": 0,
         "august": 0,
+        "january": 0,
+        "september": 0,
         "february": 0,
+        "october": 0,
+        "may": 0,
+        "july": 0,
+        "december": 0,
+        "november": 1,
         "april": 0
       }
     },
     "outbound_day": {
       "type": "choice",
       "choice": "20",
-      "confidence": 0.84,
+      "confidence": 1,
       "probabilities": {
         "1": 0,
         "2": 0,
@@ -77,8 +77,8 @@
         "16": 0,
         "17": 0,
         "18": 0,
-        "19": 0.02,
-        "20": 0.85,
+        "19": 0,
+        "20": 1,
         "21": 0,
         "22": 0,
         "23": 0,
@@ -90,7 +90,7 @@
         "29": 0,
         "30": 0,
         "31": 0,
-        "unstated": 0.13
+        "unstated": 0
       }
     },
     "return_month": {
@@ -98,19 +98,19 @@
       "choice": "december",
       "confidence": 1,
       "probabilities": {
-        "march": 0,
-        "october": 0,
-        "september": 0,
-        "december": 1,
-        "april": 0,
         "june": 0,
-        "may": 0,
-        "july": 0,
-        "january": 0,
+        "april": 0,
         "unstated": 0,
         "august": 0,
+        "january": 0,
+        "september": 0,
         "february": 0,
-        "november": 0
+        "october": 0,
+        "may": 0,
+        "march": 0,
+        "november": 0,
+        "july": 0,
+        "december": 1
       }
     },
     "return_day": {
@@ -155,50 +155,50 @@
     "outbound_year": {
       "type": "choice",
       "choice": "2026",
-      "confidence": 0.68,
+      "confidence": 0.53,
       "probabilities": {
-        "2026": 0.78,
-        "2027": 0.01,
-        "unstated": 0.21
+        "2026": 0.6799999999999999,
+        "2027": 0.03,
+        "unstated": 0.29
       }
     },
     "outbound_weekday": {
       "type": "choice",
       "choice": "none",
-      "confidence": 0.36,
+      "confidence": 0.2,
       "probabilities": {
-        "sunday": 0.07,
-        "none": 0.44,
-        "tuesday": 0.08,
-        "monday": 0.08,
-        "friday": 0.09,
-        "wednesday": 0.07,
-        "thursday": 0.1,
-        "saturday": 0.07
+        "thursday": 0.11,
+        "friday": 0.11,
+        "sunday": 0.09,
+        "monday": 0.1,
+        "none": 0.29,
+        "tuesday": 0.1,
+        "wednesday": 0.1,
+        "saturday": 0.1
       }
     },
     "outbound_relative": {
       "type": "choice",
       "choice": "absolute",
-      "confidence": 0.87,
+      "confidence": 1,
       "probabilities": {
-        "absolute": 0.92,
-        "none": 0.08,
-        "relative": 0
+        "none": 0,
+        "relative": 0,
+        "absolute": 1
       }
     },
     "party_adults": {
       "type": "choice",
       "choice": "2",
-      "confidence": 1,
+      "confidence": 0.95,
       "probabilities": {
         "1": 0,
-        "2": 1,
+        "2": 0.97,
         "3": 0,
         "4": 0,
         "5": 0,
         "6": 0,
-        "unstated": 0
+        "unstated": 0.03
       }
     },
     "trip_type": {
@@ -206,9 +206,9 @@
       "choice": "return",
       "confidence": 1,
       "probabilities": {
+        "return": 1,
         "unstated": 0,
-        "one_way": 0,
-        "return": 1
+        "one_way": 0
       }
     },
     "cabin_long": {
@@ -216,11 +216,11 @@
       "choice": "premium_economy",
       "confidence": 1,
       "probabilities": {
-        "unstated": 0,
-        "economy": 0,
-        "premium_economy": 1,
         "business": 0,
-        "first": 0
+        "unstated": 0,
+        "premium_economy": 1,
+        "first": 0,
+        "economy": 0
       }
     },
     "cabin_short": {
@@ -228,39 +228,39 @@
       "choice": "economy",
       "confidence": 1,
       "probabilities": {
-        "premium_economy": 0,
-        "economy": 1,
-        "unstated": 0,
         "business": 0,
-        "first": 0
+        "unstated": 0,
+        "premium_economy": 0,
+        "first": 0,
+        "economy": 1
       }
     },
     "max_stops": {
       "type": "choice",
       "choice": "unstated",
-      "confidence": 0.29,
+      "confidence": 0.5,
       "probabilities": {
-        "unstated": 0.53,
+        "unstated": 0.67,
         "nonstop_only": 0,
-        "one_stop_ok": 0.47
+        "one_stop_ok": 0.33
       }
     },
     "hotels_wanted": {
       "type": "noul",
-      "noul": 0.98
+      "noul": 0.87
     },
     "arrive_by": {
       "type": "noul",
-      "noul": 0.73
+      "noul": 0.61
     },
     "fixed_commitment": {
       "type": "noul",
-      "noul": 0.97
+      "noul": 0.87
     }
   },
   "usage": {
-    "input_tokens": 2299,
+    "input_tokens": 2337,
     "output_tokens": 1412
   },
-  "latencyMs": 337
+  "latencyMs": 400
 }
