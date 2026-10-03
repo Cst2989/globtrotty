@@ -100,7 +100,11 @@ describe('tsconfig split (Deviation 2)', () => {
 })
 
 const ALLOWED_NEXT_PUBLIC = new Set(['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY'])
-const FORBIDDEN_NEEDLES = ['SUPABASE_SERVICE_ROLE_KEY', 'sk-ant-', 'DATABASE_URL', 'dangerouslySetInnerHTML']
+// Fix round 1 (Important): 'JEV_KEY' added. It is harness-only — read via
+// `loadOptionalEnv` (src/env.ts) in server-side code, never shipped to the
+// browser — so its name must never appear under app/ or web/, same as the
+// other credential needles below.
+const FORBIDDEN_NEEDLES = ['SUPABASE_SERVICE_ROLE_KEY', 'sk-ant-', 'DATABASE_URL', 'dangerouslySetInnerHTML', 'JEV_KEY']
 
 describe('web/app sentinel', () => {
   // Fix round 1 (Minor): `.filter()` + `toHaveLength(1)` rather than

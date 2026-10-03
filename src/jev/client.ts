@@ -34,13 +34,24 @@ export async function askJev(deps: JevDeps, req: JevRequest, signal?: AbortSigna
   const started = Date.now()
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController()
-    const t = setTimeout(() => ctl.abort(), deps.timeoutMs ?? 3000)
+    // Fix round 1 (Minor): distinguish OUR timeout abort from the caller's own
+    // `signal` aborting (both go through `ctl.signal`, since the caller's
+    // abort is forwarded onto it below) — only the former becomes a JevError;
+    // a caller-initiated abort still surfaces as its own AbortError.
+    let timedOut = false
+    const t = setTimeout(() => { timedOut = true; ctl.abort() }, deps.timeoutMs ?? 3000)
     signal?.addEventListener('abort', () => ctl.abort(), { once: true })
     try {
-      const res = await fetchImpl(ENDPOINT, {
-        method: 'POST', body, signal: ctl.signal,
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${deps.apiKey}` },
-      })
+      let res: Response
+      try {
+        res = await fetchImpl(ENDPOINT, {
+          method: 'POST', body, signal: ctl.signal,
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${deps.apiKey}` },
+        })
+      } catch (err) {
+        if (timedOut) throw new JevError(0, 'jev: timeout')
+        throw err
+      }
       if (res.status === 429 || res.status === 529) {
         if (attempt === 0) { await new Promise((r) => setTimeout(r, deps.retryDelayMs ?? 300)); continue }
         throw new JevError(res.status, `jev ${res.status}`)

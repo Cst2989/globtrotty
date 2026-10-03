@@ -42,6 +42,22 @@ describe('askJev', () => {
     await expect(askJev({ apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch }, { state: 's', questions: { x: noulQ('?') } })).rejects.toBeInstanceOf(JevError)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
+
+  // Fix round 1 (Minor): a fetchImpl that never resolves on its own, but — like
+  // real fetch — rejects with an AbortError once the signal it was given
+  // aborts. With `timeoutMs: 10`, that abort comes from askJev's own internal
+  // controller, and must surface as a JevError, not the raw AbortError.
+  it('surfaces an internal timeout as a JevError, not the raw AbortError', async () => {
+    const fetchImpl = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    }))
+    const err = await askJev(
+      { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch, timeoutMs: 10 },
+      { state: 's', questions: { x: noulQ('?') } },
+    ).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(JevError)
+    expect((err as JevError).message).toBe('jev: timeout')
+  })
 })
 
 describe('recordJevCall', () => {
