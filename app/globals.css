@@ -1029,6 +1029,286 @@ select {
   text-decoration: underline;
 }
 
+/* ---------- results ---------- */
+
+.results-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.results-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.assumption-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assumption-chip {
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+/* ---------- filter chips ---------- */
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 180ms var(--ease),
+    border-color 180ms var(--ease),
+    color 180ms var(--ease);
+}
+
+.chip:hover {
+  background: var(--surface-2);
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.chip-select {
+  display: inline-flex;
+}
+
+.chip-select select {
+  min-height: 40px;
+  padding: 0 0.75rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+/* ---------- flight / hotel lists ---------- */
+
+.flight-list,
+.hotel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.result-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.result-row[data-chosen='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.result-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.result-row-airlines,
+.result-row-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.result-row-times {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.result-row-meta,
+.result-row-age {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.result-row-bags {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.result-row-bags svg {
+  flex-shrink: 0;
+}
+
+.result-row-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.result-row-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result-row-chosen {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ok);
+}
+
+@media (max-width: 600px) {
+  .result-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .result-row-side {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+/* ---------- choice card ---------- */
+
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  max-width: 85%;
+}
+
+.choice-question {
+  margin: 0;
+  font-weight: 500;
+}
+
+.choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ---------- pinned summary ---------- */
+
+.pinned-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.pinned-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pinned-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pinned-item-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.pinned-item-dates {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  margin-right: auto;
+}
+
+.pinned-item-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pinned-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.pinned-total span:last-child {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pinned-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pinned-links a.btn:hover {
+  text-decoration: none;
+}
+
 /* ---------- landing hero (photo wall) ---------- */
 
 .hero {

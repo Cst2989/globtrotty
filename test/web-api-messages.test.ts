@@ -9,9 +9,11 @@
 // `app/api/conversations/[id]/messages/route.ts` re-exports only `POST` —
 // see that module's own header comment for why `makePost` can't live there.
 import { describe, expect, it, vi } from 'vitest'
+import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { makePost, type MessagesRouteDeps } from '../web/messagesRoute.js'
 import type { SessionUser } from '../web/session.js'
+import { parseAction } from '../src/actions.js'
 
 const USER: SessionUser = { id: '11111111-1111-1111-1111-111111111111', email: 'a@b.com' }
 const OTHER = '22222222-2222-2222-2222-222222222222'
@@ -196,6 +198,97 @@ describeDb('POST /api/conversations/[id]/messages', () => {
       const body = (await res.json()) as PostBody
       expect(body.status).toBe('limit_reached')
       expect(invoke).not.toHaveBeenCalled()
+    })
+  })
+})
+
+// Plan 5, Task 9 Step 3. `choice` is a `ChoiceCard` click: the clicked
+// option's label travels as her own words (`text`, written as an ordinary
+// `role = 'user'` row) and the ids ride alongside on the operator channel
+// via `submitAction`'s `userNote` + `choice` action, on one fresh turn —
+// same note-then-action ordering `web/decideRoute.ts` already relies on.
+describeDb('POST /api/conversations/[id]/messages (choice)', () => {
+  async function seedPlanning(sql: postgres.Sql) {
+    const [c] = await sql`insert into conversations (user_id, desk) values (${USER.id}, 'planning') returning id`
+    return c!.id as string
+  }
+
+  it('writes a user-role note (the label) and an action row that parses to choice, on one fresh turn', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await seedPlanning(sql)
+      const invoke = vi.fn().mockResolvedValue(undefined)
+      const handler = makePost({ sql, invoke })
+
+      const res = await handler(
+        USER,
+        req({ text: 'Tokyo', idempotencyKey: 'choice-key-1', choice: { questionId: 'destination', optionId: 'TYO' } }),
+        ctx(conversationId),
+      )
+
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as PostBody
+      expect(body.status).toBe('queued')
+      expect(invoke).toHaveBeenCalledWith(body.turnId)
+
+      const rows = await sql`select role, content from messages where conversation_id = ${conversationId} order by created_at`
+      expect(rows).toHaveLength(2)
+      expect(rows[0]!.role).toBe('user')
+      expect(rows[0]!.content).toBe('Tokyo')
+      expect(rows[1]!.role).toBe('action')
+      expect(parseAction(rows[1]!.content as string)).toEqual({
+        action: 'choice', questionId: 'destination', optionId: 'TYO',
+      })
+    })
+  })
+
+  it('rejects a choice with her typed words standing in for optionId (400), writes nothing', async () => {
+    await withTestDb(async (sql) => {
+      const conversationId = await seedPlanning(sql)
+      const handler = makePost({ sql, invoke: vi.fn() })
+
+      const res = await handler(
+        USER,
+        req({
+          text: 'Tokyo please',
+          idempotencyKey: 'choice-key-2',
+          choice: { questionId: 'destination', optionId: 'Tokyo please' },
+        }),
+        ctx(conversationId),
+      )
+
+      expect(res.status).toBe(400)
+      const rows = await sql`select id from messages where conversation_id = ${conversationId}`
+      expect(rows).toHaveLength(0)
+    })
+  })
+
+  it('rejects a choice on a brand-new conversation (id=new) with 400', async () => {
+    await withTestDb(async (sql) => {
+      const handler = makePost({ sql, invoke: vi.fn() })
+
+      const res = await handler(
+        USER,
+        req({ text: 'Tokyo', idempotencyKey: 'choice-key-3', choice: { questionId: 'destination', optionId: 'TYO' } }),
+        ctx('new'),
+      )
+
+      expect(res.status).toBe(400)
+    })
+  })
+
+  it('a conversation not at the planning desk returns 409 not_planning', async () => {
+    await withTestDb(async (sql) => {
+      const [c] = await sql`insert into conversations (user_id, desk) values (${USER.id}, 'front') returning id`
+      const conversationId = c!.id as string
+      const handler = makePost({ sql, invoke: vi.fn() })
+
+      const res = await handler(
+        USER,
+        req({ text: 'Tokyo', idempotencyKey: 'choice-key-4', choice: { questionId: 'destination', optionId: 'TYO' } }),
+        ctx(conversationId),
+      )
+
+      expect(res.status).toBe(409)
     })
   })
 })

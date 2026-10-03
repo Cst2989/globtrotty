@@ -1,5 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseAction, describeActionForUi } from '@/src/actions'
+import {
+  parseResults, parseChoices,
+  type ResultsContent, type ChoicesContent, type Filter, type Assumption,
+} from '@/src/results'
+import { maskUntrustedText } from '@/src/sanitize'
 
 /**
  * Server-side reads for the chat UI, through the RLS-scoped client
@@ -26,9 +31,20 @@ export type ConversationHeader = {
   updated_at: string
 }
 
+/**
+ * Plan 5: `results` and `choices` join `action` as roles `loadThread` can see
+ * (migration 0018 widens `messages.role`). Both are hydrated server-side by
+ * `toThreadView` the same way `action` already is: `results` becomes a fixed
+ * one-line marker (ids never reach the RSC payload for this row — the real
+ * items reach the browser only through `loadResults`'s own RLS-scoped read
+ * of `tool_results`); `choices` is left as its raw JSON, which is already
+ * built entirely from our own masked prose plus ids/enums (src/results.ts's
+ * own doc comment) and is exactly what `MessageBubble` needs to render the
+ * live `ChoiceCard`.
+ */
 export type ThreadMessage = {
   id: string
-  role: 'user' | 'agent' | 'action'
+  role: 'user' | 'agent' | 'action' | 'results' | 'choices'
   content: string
   created_at: string
 }
@@ -191,11 +207,31 @@ export async function listConversations(sb: SupabaseClient): Promise<Conversatio
  * client bug) falls back to a fixed sentence rather than throwing or
  * leaking the unparseable text. `user`/`agent` rows pass through unchanged.
  */
+/**
+ * "10 flights shown" / "1 hotel shown" — the fixed marker a `results` row
+ * becomes in the thread. `sourceIds.length` only; nothing about any
+ * individual item (price, name) ever reaches this sentence, which is the
+ * point: the interactive list lives in `loadResults`'s own RLS-scoped read,
+ * never in this server-rendered thread text.
+ */
+export function describeResultsForUi(r: ResultsContent): string {
+  const n = r.sourceIds.length
+  const noun = r.kind === 'flights' ? (n === 1 ? 'flight' : 'flights') : (n === 1 ? 'hotel' : 'hotels')
+  return `${n} ${noun} shown`
+}
+
 export function toThreadView(rows: ThreadMessage[]): ThreadMessage[] {
   return rows.map((r) => {
-    if (r.role !== 'action') return r
-    const action = parseAction(r.content)
-    return { ...r, content: action ? describeActionForUi(action) : 'A card action was recorded' }
+    if (r.role === 'action') {
+      const action = parseAction(r.content)
+      return { ...r, content: action ? describeActionForUi(action) : 'A card action was recorded' }
+    }
+    if (r.role === 'results') {
+      const results = parseResults(r.content)
+      return { ...r, content: results ? describeResultsForUi(results) : 'Results were recorded' }
+    }
+    // `choices` passes through unchanged — see this type's own doc comment.
+    return r
   })
 }
 
@@ -451,4 +487,282 @@ export async function loadAlternatives(
     (data ?? []) as { source_id: string; name: string; price_minor: string; currency: string; fetched_at: string; ttl_seconds: number }[],
   )
   return dropExpiredAlternatives(deduped, now)
+}
+
+/* ---------- Plan 5: results and choices ---------- */
+
+/**
+ * One leg, trimmed from `LegSummary` (src/supplier/types.ts) for the
+ * results pane. `via` is the route's intermediate airports — `route` minus
+ * its own first and last entries — kept separately from `stops` (a count)
+ * because `FlightList`'s "1 stop, DOH" wording needs the airport, not just
+ * the number. Every string is run through `maskUntrustedText`: this is
+ * supplier-origin data reaching the browser, the same trust boundary
+ * `src/sanitize.ts` exists for, even though React's own escaping (this
+ * project never renders raw HTML) already makes it safe to render as text —
+ * this is defence in depth, not the only guard.
+ */
+export type LegLite = {
+  from: string
+  to: string
+  departureLocal: string
+  arrivalLocal: string
+  via: string[]
+}
+
+/**
+ * One `tool_results` row, trimmed for the results pane. `sourceId` is
+ * deliberately NOT masked (unlike every other string here): it round-trips
+ * through `onChoose`/`choose`'s `ActionPayload` and the worker's own
+ * `rehydrate` (`src/repo/toolResults.ts`), which looks it up by exact
+ * equality against `tool_results.source_id` — masking it here would silently
+ * break that lookup. The same posture `AlternativeLite` (above) already
+ * takes with its own `sourceId`.
+ */
+export type ResultItemLite = {
+  sourceId: string
+  name: string
+  priceMinor: string
+  currency: string
+  fetchedAt: string
+  ttlSeconds: number
+  flight?: {
+    outbound: LegLite
+    inbound: LegLite | null
+    stops: number
+    durationMinutes: number
+    airlines: string[]
+    bags: { cabin: number; checked: number }
+    selfTransfer: boolean
+  }
+  hotel?: {
+    rating: number | null
+    nights: number
+    checkIn: string
+    checkOut: string
+  }
+}
+
+export type ResultsView = {
+  messageId: string
+  kind: ResultsContent['kind']
+  query: ResultsContent['query']
+  assumptions: Assumption[]
+  filter: Filter | undefined
+  items: ResultItemLite[]
+}
+
+export type ChoicesView = ChoicesContent & { messageId: string }
+
+type ToolResultRow = {
+  source_id: string
+  name: string
+  price_minor: string
+  currency: string
+  fetched_at: string
+  ttl_seconds: number
+  payload: unknown
+}
+
+function stringOr(v: unknown, fallback: string): string {
+  return typeof v === 'string' ? maskUntrustedText(v) : fallback
+}
+
+function viaFromRoute(route: unknown): string[] {
+  if (!Array.isArray(route) || route.length <= 2) return []
+  return route.slice(1, -1).filter((v): v is string => typeof v === 'string').map(maskUntrustedText)
+}
+
+/** `null` when `raw` does not carry a recognisable `LegSummary` shape. */
+function legLite(raw: unknown): LegLite | null {
+  if (!isRecord(raw)) return null
+  const { from, to, departureLocal, arrivalLocal, route } = raw
+  if (
+    typeof from !== 'string' || typeof to !== 'string'
+    || typeof departureLocal !== 'string' || typeof arrivalLocal !== 'string'
+  ) return null
+  return {
+    from: maskUntrustedText(from), to: maskUntrustedText(to),
+    departureLocal: maskUntrustedText(departureLocal), arrivalLocal: maskUntrustedText(arrivalLocal),
+    via: viaFromRoute(route),
+  }
+}
+
+/** `undefined` when `payload` is not a `FlightDetail` (src/supplier/types.ts) this reader recognises. */
+function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefined {
+  if (payload.kind !== 'flight') return undefined
+  const outbound = legLite(payload.outbound)
+  if (!outbound) return undefined
+  const inbound = payload.inbound === null ? null : legLite(payload.inbound)
+  const outboundRaw = isRecord(payload.outbound) ? payload.outbound : {}
+  const inboundRaw = isRecord(payload.inbound) ? payload.inbound : {}
+  const stops = typeof outboundRaw.stops === 'number' ? outboundRaw.stops : 0
+  const carriersOf = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').map(maskUntrustedText) : []
+  const airlines = [...new Set([...carriersOf(outboundRaw.carriers), ...carriersOf(inboundRaw.carriers)])]
+  const baggage = isRecord(payload.baggage) ? payload.baggage : {}
+  const cabin = typeof baggage.cabinBag === 'number' ? baggage.cabinBag : 0
+  const checked = typeof baggage.checkedBag === 'number' ? baggage.checkedBag : 0
+  const durationSeconds = typeof payload.totalDurationSeconds === 'number' ? payload.totalDurationSeconds : 0
+  return {
+    outbound, inbound, stops,
+    durationMinutes: Math.round(durationSeconds / 60),
+    airlines,
+    bags: { cabin, checked },
+    selfTransfer: payload.selfTransfer === true,
+  }
+}
+
+/** `undefined` when `payload` is not a `HotelDetail` (src/supplier/types.ts) this reader recognises. */
+function hotelLite(payload: UnknownRecord): ResultItemLite['hotel'] | undefined {
+  if (payload.kind !== 'hotel') return undefined
+  if (typeof payload.checkIn !== 'string' || typeof payload.checkOut !== 'string') return undefined
+  return {
+    rating: typeof payload.rating === 'number' ? payload.rating : null,
+    nights: typeof payload.nights === 'number' ? payload.nights : 0,
+    checkIn: stringOr(payload.checkIn, ''),
+    checkOut: stringOr(payload.checkOut, ''),
+  }
+}
+
+/**
+ * `null` when the row's `payload` carries neither a recognisable flight nor
+ * hotel shape — a garbled write, never something `recordResults` itself
+ * produces. The caller drops a `null` rather than surfacing a broken row.
+ */
+function toResultItemLite(row: ToolResultRow): ResultItemLite | null {
+  if (!isRecord(row.payload)) return null
+  const flight = flightLite(row.payload)
+  const hotel = hotelLite(row.payload)
+  if (!flight && !hotel) return null
+  return {
+    sourceId: row.source_id,
+    name: maskUntrustedText(row.name),
+    priceMinor: String(row.price_minor),
+    currency: row.currency,
+    fetchedAt: row.fetched_at,
+    ttlSeconds: row.ttl_seconds,
+    ...(flight ? { flight } : {}),
+    ...(hotel ? { hotel } : {}),
+  }
+}
+
+/**
+ * Same newest-row-per-`source_id` rule as `newestAlternativePerSourceId`
+ * above, extracted so it is testable without a live DB. Correct only when
+ * `rows` already arrives newest-first.
+ */
+export function newestResultItemPerSourceId(rows: ToolResultRow[]): ResultItemLite[] {
+  const seen = new Set<string>()
+  const out: ResultItemLite[] = []
+  for (const r of rows) {
+    if (seen.has(r.source_id)) continue
+    seen.add(r.source_id)
+    const item = toResultItemLite(r)
+    if (item) out.push(item)
+  }
+  return out
+}
+
+/** Same rule as `dropExpiredAlternatives` above, over the richer `ResultItemLite` shape. */
+export function dropExpiredResultItems(items: ResultItemLite[], now: Date): ResultItemLite[] {
+  return items.filter((i) => new Date(i.fetchedAt).getTime() + i.ttlSeconds * 1000 >= now.getTime())
+}
+
+/**
+ * Every `results` row for one conversation, oldest first, each one's
+ * `sourceIds` rehydrated from `tool_results` (newest row per `source_id`,
+ * expired ids dropped) into `ResultItemLite`s — the same "newest row per id,
+ * then drop what's past its own ttl" shape `loadAlternatives` already uses,
+ * just over the richer flight/hotel payload instead of the swap picker's
+ * flat name/price. A `sourceId` the corpus no longer has fresh (or never
+ * had) is silently absent from that row's `items` rather than throwing.
+ *
+ * `.limit(50)` on `results` rows and `.limit(500)` on the `tool_results`
+ * lookup are the same bounding instinct as `loadThread`/`loadAlternatives`
+ * above — a conversation revised many times over has no reason to force an
+ * unbounded read.
+ */
+export async function loadResults(
+  sb: SupabaseClient, conversationId: string, now: Date = new Date(),
+): Promise<ResultsView[]> {
+  const { data: rows, error } = await sb
+    .from('messages')
+    .select('id, content, created_at')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'results')
+    .order('created_at', { ascending: true })
+    .limit(50)
+  if (error) throw error
+  if (!rows || rows.length === 0) return []
+
+  const parsed = rows
+    .map((r) => ({ id: r.id as string, content: parseResults(r.content as string) }))
+    .filter((r): r is { id: string; content: ResultsContent } => r.content !== null)
+  if (parsed.length === 0) return []
+
+  const allSourceIds = [...new Set(parsed.flatMap((r) => r.content.sourceIds))]
+
+  let bySourceId = new Map<string, ResultItemLite>()
+  if (allSourceIds.length > 0) {
+    const { data: toolRows, error: toolError } = await sb
+      .from('tool_results')
+      .select('source_id, name, price_minor, currency, fetched_at, ttl_seconds, payload')
+      .eq('conversation_id', conversationId)
+      .in('source_id', allSourceIds)
+      .order('fetched_at', { ascending: false })
+      .limit(500)
+    if (toolError) throw toolError
+    const deduped = newestResultItemPerSourceId((toolRows ?? []) as ToolResultRow[])
+    const fresh = dropExpiredResultItems(deduped, now)
+    bySourceId = new Map(fresh.map((i) => [i.sourceId, i]))
+  }
+
+  return parsed.map((r) => ({
+    messageId: r.id,
+    kind: r.content.kind,
+    query: r.content.query,
+    assumptions: r.content.assumptions,
+    filter: r.content.filter,
+    items: r.content.sourceIds
+      .map((id) => bySourceId.get(id))
+      .filter((i): i is ResultItemLite => i !== undefined),
+  }))
+}
+
+/**
+ * The newest `choices` row nothing has answered yet: none of the rows after
+ * it is an `action` row parsing to `{ action: 'choice', questionId: <its
+ * own questionId> }`. `null` when every `choices` row has a matching answer,
+ * or none exist. Scans `choices` rows newest-first and, for each, checks the
+ * (already fetched, same bounded read) rows that came after it — cheaper
+ * than a second round trip per candidate, and correct regardless of how many
+ * `choices` rows this conversation has accumulated.
+ */
+export async function loadChoices(
+  sb: SupabaseClient, conversationId: string,
+): Promise<ChoicesView | null> {
+  const { data, error } = await sb
+    .from('messages')
+    .select('id, role, content, created_at')
+    .eq('conversation_id', conversationId)
+    .in('role', ['choices', 'action'])
+    .order('created_at', { ascending: true })
+    .limit(500)
+  if (error) throw error
+  const rows = (data ?? []) as { id: string; role: 'choices' | 'action'; content: string; created_at: string }[]
+
+  const choicesRows = rows.filter((r) => r.role === 'choices')
+  for (let i = choicesRows.length - 1; i >= 0; i--) {
+    const row = choicesRows[i]!
+    const parsed = parseChoices(row.content)
+    if (!parsed) continue
+    const answered = rows.some((r) => {
+      if (r.role !== 'action' || r.created_at <= row.created_at) return false
+      const action = parseAction(r.content)
+      return action?.action === 'choice' && action.questionId === parsed.questionId
+    })
+    if (!answered) return { ...parsed, messageId: row.id }
+  }
+  return null
 }
