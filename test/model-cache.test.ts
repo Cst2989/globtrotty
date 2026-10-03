@@ -118,12 +118,31 @@ describe('expectsCacheReads', () => {
     expect(expectsCacheReads(SEATS.reviewer, 512)).toBe(true)
   })
 
-  // Fix round 1: the driver's seat is Sonnet 5, not Opus 5 — and Sonnet 5 is in
-  // the 1,024-token cache-minimum tier, not Opus 5's 512 (Anthropic
-  // prompt-caching docs, 2026-10-03; src/model/cache.ts's MIN_CACHEABLE_TOKENS).
-  it('pins Sonnet 5 (the driver) at 1,024 on both sides of the boundary', () => {
-    expect(expectsCacheReads(SEATS.driver, 1_023)).toBe(false)
-    expect(expectsCacheReads(SEATS.driver, 1_024)).toBe(true)
+  it('separates the tiers at all — a single global minimum would collapse them', () => {
+    // Guards the per-model table itself, now that the driver and the reviewer
+    // are both Opus 5: Haiku's 4,096 must still differ from Opus 5's 512.
+    expect(expectsCacheReads(SEATS.reviewer, 512)).toBe(true)
+    expect(expectsCacheReads(SEATS.scout, 512)).toBe(false)
+  })
+
+  // The driver's seat went to Sonnet 5 in Task 8 and back to Opus 5 in the fix
+  // wave (C1: Sonnet 5 cannot carry this repo's mid-conversation operator
+  // `system` messages), so the driver is back on Opus 5's own 512 minimum.
+  it('pins the driver (Opus 5) at 512 on both sides of the boundary', () => {
+    expect(expectsCacheReads(SEATS.driver, 511)).toBe(false)
+    expect(expectsCacheReads(SEATS.driver, 512)).toBe(true)
+  })
+
+  // Sonnet 5's 1,024 stays pinned through a synthetic seat even though nothing
+  // sits on it today: the entry is still in MIN_CACHEABLE_TOKENS because it is
+  // correct (Anthropic prompt-caching docs, 2026-10-03 — Sonnet 5 is in the
+  // 1,024 tier with Opus 4.8 and Sonnet 4.6), and the moment a Sonnet seat
+  // comes back the figure must not have quietly drifted to Opus 5's 512 or to
+  // the 4,096 fallback. It is deliberately NOT read off SEATS.driver any more.
+  it('pins Sonnet 5 at 1,024 on both sides of the boundary', () => {
+    const sonnet = { ...SEATS.driver, model: 'claude-sonnet-5' }
+    expect(expectsCacheReads(sonnet, 1_023)).toBe(false)
+    expect(expectsCacheReads(sonnet, 1_024)).toBe(true)
   })
 
   it('pins Haiku 4.5 at 4096 on both sides — the cheap seats barely cache at all', () => {

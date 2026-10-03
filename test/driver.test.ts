@@ -86,7 +86,10 @@ describeDb('driver', () => {
       // must not charge it again. Both halves are asserted, because either one
       // alone would pass against a driver that charged twice.
       expect(step.costMicros).toBe(0n)
-      expect(step.recordedMicros!).toBe(2_500n)   // 1000 in * 2 + 50 out * 10 (fix round 1: $2/$10)
+      // Fix wave (C1): the driver's seat is Opus 5 again — $5/$25 per
+      // src/pricing.ts, so 1000 in * 5 + 50 out * 25 = 5,000 + 1,250 = 6,250.
+      // It was 2,500 while the seat was Sonnet 5 at $2/$10.
+      expect(step.recordedMicros!).toBe(6_250n)
       const [row] = await sql`
         select seat, capture_policy, cost_micros, thinking_mode, prompt_version
           from model_calls where conversation_id = ${s.conversationId}`
@@ -140,7 +143,7 @@ describeDb('driver', () => {
       expect(spendDuringCall).not.toBeNull()
       expect(spendDuringCall!).toBeGreaterThan(finalSpend)
       // ...and the reconcile must refund down to the real figure, not accumulate.
-      expect(finalSpend).toBe(2_500n)
+      expect(finalSpend).toBe(6_250n)
       expect(finalSpend).toBe(step.recordedMicros!)
     })
   })
@@ -245,7 +248,7 @@ describeDb('driver', () => {
       if (step.kind !== 'park') throw new Error('unreachable')
       expect(step.message).toContain('Which week?')
       expect(step.costMicros).toBe(0n)
-      expect(step.recordedMicros).toBe(2_500n)
+      expect(step.recordedMicros).toBe(6_250n)
       expect(step.attachments).toEqual([{
         role: 'choices',
         content: {
@@ -268,7 +271,7 @@ describeDb('driver', () => {
       expect(step.callId).toBe('toolu_1')     // the PROVIDER's id, so replay works
       expect(step.name).toBe('explore_flights')
       expect(step.costMicros).toBe(0n)
-      expect(step.recordedMicros).toBe(2_500n)
+      expect(step.recordedMicros).toBe(6_250n)
       // The thinking + tool_use blocks must ride back into the transcript, or
       // the next request carries a tool_result with no matching tool_use.
       expect(step.assistantContent).toEqual([
@@ -526,7 +529,9 @@ describeDb('driver', () => {
       // prompt-size difference can move.
       await expect(makeDriver(deps(sql, create))(ctx(s))).rejects.toThrow()
       const floor = estimateMicros(SEATS.driver, 0)
-      expect(floor).toBe(40_000n)                   // 4,000 max_tokens * 10 micros (fix round 1: $2/$10)
+      // Fix wave (C1): Opus 5 again, so 4,000 max_tokens * 25 micros/token =
+      // 100,000 (it was 40,000 at Sonnet 5's $10/MTok output rate).
+      expect(floor).toBe(100_000n)
       const [conv] = await sql`
         select spend_usd_micros from conversations where id = ${s.conversationId}`
       expect(BigInt(conv!.spend_usd_micros as string)).toBeGreaterThanOrEqual(floor)
@@ -868,10 +873,10 @@ describeDb('driver', () => {
       // makeDriver(deps)(ctx) directly, so the worker's own recordSpend — which
       // performs the identical increment the driver's reserve/reconcile already
       // performed — was invisible, and every model call would have billed 2x.
-      expect(BigInt(call!.cost_micros as string)).toBe(2_500n)
-      expect(BigInt(conv!.spend_usd_micros as string)).toBe(2_500n)
-      expect(BigInt(turn!.spend_usd_micros as string)).toBe(2_500n)
-      expect(BigInt(daily!.cost_micros as string)).toBe(2_500n)
+      expect(BigInt(call!.cost_micros as string)).toBe(6_250n)
+      expect(BigInt(conv!.spend_usd_micros as string)).toBe(6_250n)
+      expect(BigInt(turn!.spend_usd_micros as string)).toBe(6_250n)
+      expect(BigInt(daily!.cost_micros as string)).toBe(6_250n)
     })
   })
 

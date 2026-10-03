@@ -11,10 +11,12 @@ describe('estimateMicros', () => {
     'prices input at the 1h cache-WRITE rate, not list — every driver call writes '
     + 'system+tools at that TTL, so that is the worst case, not list price',
     () => {
-      // driver: sonnet-5 at 2 micros/input-token * 2 (cacheWrite1hMult) = 4/token,
-      // 10/output-token, maxTokens 4000 (fix round 1: $2/$10, docs/backlog-plan.md:345).
-      // 1000 input => 4000, plus 4000 * 10 = 40000 => 44000.
-      expect(estimateMicros(SEATS.driver, 1000)).toBe(44_000n)
+      // driver (fix wave C1: Opus 5 again — Sonnet 5 cannot carry this repo's
+      // mid-conversation operator `system` messages): opus-5 at 5
+      // micros/input-token * 2 (cacheWrite1hMult) = 10/token, 25/output-token,
+      // maxTokens 4000. 1000 input => 10,000, plus 4000 * 25 = 100,000 =>
+      // 110,000. It was 44,000 while the seat was Sonnet 5 at $2/$10.
+      expect(estimateMicros(SEATS.driver, 1000)).toBe(110_000n)
     },
   )
 

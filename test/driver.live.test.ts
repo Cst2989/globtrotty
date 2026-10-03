@@ -99,13 +99,16 @@ live('driver against the real API', () => {
       () => Date.now(),
     )
     if (r.kind !== 'ok') throw new Error('refused')
-    // `claude-sonnet-5` is a DATELESS canonical id — there is no dated form for
+    // `claude-opus-5` is a DATELESS canonical id — there is no dated form for
     // it to resolve to — so it comes back verbatim and a string comparison
     // detects nothing across a weights change. (A genuine alias like
     // `claude-haiku-4-5` WOULD resolve to a dated snapshot, which is why Task 2
     // pins the dated Haiku.) If this ever returns a dated id, the drift
     // strategy can be revisited, and this test is where we would find out.
-    expect(r.model).toBe('claude-sonnet-5')
+    // The seat was `claude-sonnet-5` between Task 8 and the fix wave; C1 moved
+    // it back because Sonnet 5 cannot carry mid-conversation operator
+    // `system` messages, which every planning turn here sends.
+    expect(r.model).toBe('claude-opus-5')
   }, 120_000)
 
   it('the API accepts output_config.format and returns parseable JSON for the reviewer schema', async () => {

@@ -36,10 +36,20 @@ const seat = (
 
 // claude-opus-5 carries no date suffix — appending one 404s.
 const OPUS = 'claude-opus-5'
-// Plan 5 Task 8 (spec section 4): the driver's seat moves to Sonnet 5 at
-// effort medium — same dateless convention as Opus 5, no snapshot to resolve
-// to. Opus stays declared below as a config switch, not the default.
-const SONNET = 'claude-sonnet-5'
+// Plan 5 Task 8 (spec section 4) moved the driver to `claude-sonnet-5` at
+// effort medium. The final review reverted the MODEL (C1) and kept the effort
+// and output budget: this repo's operator channel is a mid-conversation
+// `{ role: 'system' }` entry inside `messages[]`
+// (`normalizeOperatorTurns`, src/model/client.ts), and a `results`, `choices`
+// or `action` row hydrates to exactly that on EVERY planning turn
+// (src/worker.ts). Mid-conversation system messages are not available on
+// Claude Sonnet 5 (Anthropic prompt-caching docs, 2026-10-03), so every
+// driver turn after intake would 400 and nothing in this repo catches it.
+// `claude-sonnet-5` keeps its src/pricing.ts and src/model/cache.ts entries —
+// both are correct and verified — so making it the seat again is a one-line
+// edit here. Sonnet 5.5 DOES carry the channel and is the future candidate,
+// but its price is not in this repo's pricing source (docs/backlog-plan.md's
+// "API drift" section), and PRICES refuses to charge zero; it is backlog.
 // Haiku 4.5 is the only current model with a real dated snapshot, and it is the
 // highest-volume seat, so it is pinned exactly (spec section 7).
 const HAIKU = 'claude-haiku-4-5-20251001'
@@ -48,11 +58,12 @@ const HAIKU = 'claude-haiku-4-5-20251001'
 const JEV = 'jev-latest'
 
 // A prompt file edit is a version bump, always: driver.md gained the Scouts
-// section in Task 7 (plan 3c), driver@2 -> driver@3; Task 8 (plan 5) moved the
-// seat to Sonnet medium, replaced "When to ask" with "Never ask in free text"
-// and added the "Notebook keys" section, so driver@3 -> driver@4.
+// section in Task 7 (plan 3c), driver@2 -> driver@3; Task 8 (plan 5) replaced
+// "When to ask" with "Never ask in free text" and added the "Notebook keys"
+// section, so driver@3 -> driver@4. The C1 revert changes no prompt text, so
+// driver@4 stands.
 export const SEATS: Record<SeatName, Seat> = {
-  driver:     seat(SONNET, 'medium', 4_000, 'driver@4'),
+  driver:     seat(OPUS,  'medium', 4_000, 'driver@4'),
   reviewer:   seat(OPUS,  'high', 8_000,  'reviewer@1'),
   // Retired (plan 5 Task 6 fix round 1): src/agents/router.ts's Jev classification replaced
   // this seat on the live routing path for every turn. Left declared because model_calls

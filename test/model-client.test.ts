@@ -25,7 +25,7 @@ describe('buildRequest', () => {
   it('sends adaptive thinking and effort inside output_config, not top level', () => {
     const req = buildRequest(base)
     expect(req.thinking).toEqual({ type: 'adaptive' })
-    expect(req.output_config).toMatchObject({ effort: 'medium' })  // the driver's seat: Sonnet medium
+    expect(req.output_config).toMatchObject({ effort: 'medium' })  // the driver's seat: Opus 5 medium
     expect(req.effort).toBeUndefined()          // effort is NOT a top-level field
   })
 
@@ -49,7 +49,7 @@ describe('buildRequest', () => {
 
   it('pins the seat model and max_tokens onto the request', () => {
     const req = buildRequest(base)
-    expect(req.model).toBe('claude-sonnet-5')
+    expect(req.model).toBe('claude-opus-5')
     expect(req.max_tokens).toBe(SEATS.driver.maxTokens)
   })
 
@@ -351,7 +351,14 @@ describe('estimateInputTokens', () => {
     // 218 became 221. 221 / 3 = 73.66..., still genuinely fractional, so this
     // pinned value moved from 73 to 74 for that reason, not because the
     // ceil-vs-floor property this test checks changed.
-    const one = estimateInputTokens({ ...base, system: 'abcdefghij', messages: [], tools: [] })
+    // Fix wave (C1) note: the seat reverted to `claude-opus-5`/medium/4000,
+    // two bytes shorter than the Sonnet id, so this fixture fell to 219 — and
+    // 219 / 3 = 73 EXACTLY, which would silently cost this test the only
+    // property it checks (ceil and floor agreeing on 73). The fixture's system
+    // string gained one character to restore the fraction: 220 / 3 = 73.33...,
+    // so ceil (74) and floor (73) genuinely disagree again. The pinned value
+    // stays 74; what moved is the input, deliberately.
+    const one = estimateInputTokens({ ...base, system: 'abcdefghijk', messages: [], tools: [] })
     expect(one).toBe(74)
   })
 
@@ -405,9 +412,11 @@ describe('estimateInputTokens', () => {
     // Plan 5 Task 8 note: the driver's seat moved to `claude-sonnet-5`/medium/
     // 4000 — three more bytes in the serialized request than `claude-opus-5`/
     // high/16000 (same accounting as estimateInputTokens's fractional-byte
-    // test above), so these moved from 403/1070 to 404/1071.
-    expect(codeUnitBased).toBe(404)  // verified with `node -e` before pinning
-    expect(byteBased).toBe(1071)     // verified with Buffer.byteLength, same way
+    // test above), so these moved from 403/1070 to 404/1071. Fix wave (C1):
+    // the seat reverted to `claude-opus-5`/medium/4000, two bytes shorter than
+    // the Sonnet id, so 404/1071 became 403/1070.
+    expect(codeUnitBased).toBe(403)  // verified with `node -e` before pinning
+    expect(byteBased).toBe(1070)     // verified with Buffer.byteLength, same way
     expect(byteBased).toBeGreaterThan(codeUnitBased * 2.5)
   })
 })
