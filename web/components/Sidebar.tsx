@@ -19,19 +19,26 @@ function labelFor(c: ConversationSummary): string {
  * Server component: the conversation rail. The list is what
  * `web/data.ts`'s `listConversations` returns, newest-first. This `<nav>` is
  * the only landmark named "Conversations".
+ *
+ * Task 10: the wordmark and "New trip" text sit in a `.rail-label` span
+ * (with a matching `title` on each link, so the meaning survives even with
+ * the text hidden) so `AppShell`'s collapsed, 56px rail can hide just the
+ * words and keep the icons — purely a CSS concern (`app/globals.css`'s
+ * `.shell[data-rail-collapsed]` rules): this component's own markup and
+ * props are unchanged between the collapsed and expanded rail.
  */
 export function Sidebar({ conversations, activeId, userEmail }: SidebarProps) {
   return (
     <nav aria-label="Conversations" style={{ display: 'contents' }}>
       <div className="rail-top">
-        <Link href="/" className="wordmark">
+        <Link href="/" className="wordmark" title="Globetrotty">
           <Compass size={20} weight="duotone" aria-hidden="true" />
-          Globetrotty
+          <span className="rail-label">Globetrotty</span>
         </Link>
       </div>
-      <Link href="/c/new" className="btn btn-ghost rail-new">
+      <Link href="/c/new" className="btn btn-ghost rail-new" title="New trip">
         <Plus size={16} weight="bold" aria-hidden="true" />
-        New trip
+        <span className="rail-label">New trip</span>
       </Link>
       <p className="rail-heading">Your trips</p>
       {conversations.length === 0 ? (

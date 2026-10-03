@@ -13,6 +13,8 @@ export type MessageBubbleProps = {
    * whatever mounts this component live is expected to pass it.
    */
   conversationId?: string
+  /** Task 10: an optimistic row `ThreadLive` has not yet matched to a server one — renders with `data-pending="true"`. */
+  pending?: boolean
 }
 
 /**
@@ -33,7 +35,7 @@ export type MessageBubbleProps = {
  * establishes that it is built entirely from our own masked prose plus
  * ids/enums.
  */
-export function MessageBubble({ role, content, conversationId }: MessageBubbleProps) {
+export function MessageBubble({ role, content, conversationId, pending }: MessageBubbleProps) {
   if (role === 'choices') {
     const parsed = parseChoices(content)
     if (!parsed) {
@@ -67,7 +69,7 @@ export function MessageBubble({ role, content, conversationId }: MessageBubblePr
 
   const isMarker = role === 'action' || role === 'results'
   return (
-    <div className="message-row" data-role={role}>
+    <div className="message-row" data-role={role} data-pending={pending ? 'true' : undefined}>
       <p className={isMarker ? 'message message-action' : 'message'} data-role={role}>
         {content}
       </p>

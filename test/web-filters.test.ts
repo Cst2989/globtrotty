@@ -3,6 +3,11 @@
 import { describe, expect, it } from 'vitest'
 import { applyFilterLite, priceSteps, priceRange } from '../web/filters.js'
 import type { ResultItemLite } from '../web/data.js'
+// Task 10: reconciling this module's departure windows with
+// `src/intake/filter.ts`'s own ones (see both files' `inWindow`).
+import { applyFilter } from '../src/intake/filter.js'
+import { money } from '../src/money.js'
+import type { StoredItem } from '../src/supplier/types.js'
 
 type FlightOverrides = {
   sourceId?: string; name?: string; priceMinor?: string; currency?: string; fetchedAt?: string; ttlSeconds?: number
@@ -127,5 +132,67 @@ describe('priceRange', () => {
 
   it('returns zero/zero for an empty list', () => {
     expect(priceRange([])).toEqual({ min: 0n, max: 0n })
+  })
+})
+
+/** A minimal one-way flight `StoredItem` at a given outbound hour — same pattern as test/intake-filter.test.ts's own `flight` helper. */
+function storedFlight(sourceId: string, outboundHour: number): StoredItem {
+  return {
+    sourceId, supplier: 'mock', kind: 'flight', name: `flight ${sourceId}`,
+    price: money(45_600n, 'EUR'), priceBasis: 'total',
+    fetchedAt: new Date('2026-10-03T12:00:00Z'), ttlSeconds: 900, bookingUrl: null, searchParams: null,
+    detail: {
+      kind: 'flight',
+      outbound: {
+        from: 'BCN', to: 'TYO',
+        departureLocal: `2026-11-19T${String(outboundHour).padStart(2, '0')}:00:00`,
+        arrivalLocal: '2026-11-19T20:00:00',
+        stops: 0, route: ['BCN', 'TYO'], cabinClass: 'Economy', carriers: ['ZZ'], flightNumbers: ['ZZ1'],
+      },
+      inbound: null,
+      baggage: { personalItem: 1, cabinBag: 1, checkedBag: 1 },
+      totalDurationSeconds: 12_600,
+      selfTransfer: false,
+    },
+  }
+}
+
+/**
+ * Task 10: `web/filters.ts`'s `inWindow` (used by `applyFilterLite`, the
+ * chip path) and `src/intake/filter.ts`'s own `inWindow` (used by
+ * `applyFilter`, the typed-filter path — src/agents/filter.ts, a different
+ * task) started life with slightly different boundaries. This pins both
+ * modules against the SAME three outbound hours — one clearly in each
+ * window — so a chip and a typed filter can never silently disagree on
+ * where morning ends and evening begins.
+ */
+describe('departure window reconciliation (web/filters.ts vs src/intake/filter.ts)', () => {
+  const HOURS: Record<'morning' | 'afternoon' | 'evening', number> = { morning: 9, afternoon: 14, evening: 20 }
+
+  it('both modules classify the morning (9), afternoon (14) and evening (20) hour the same way', () => {
+    for (const [window, hour] of Object.entries(HOURS) as ['morning' | 'afternoon' | 'evening', number][]) {
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const stored = storedFlight('X', hour)
+
+      const liteMatches = applyFilterLite([lite], { departure: window }).length === 1
+      const storedMatches = applyFilter([stored], { departure: window }).length === 1
+      expect(liteMatches).toBe(true)
+      expect(storedMatches).toBe(true)
+      expect(liteMatches).toBe(storedMatches)
+    }
+  })
+
+  it('each hour matches exactly one of the three windows in both modules', () => {
+    for (const hour of Object.values(HOURS)) {
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const stored = storedFlight('X', hour)
+      const windows: Array<'morning' | 'afternoon' | 'evening'> = ['morning', 'afternoon', 'evening']
+
+      const liteHits = windows.filter((w) => applyFilterLite([lite], { departure: w }).length === 1)
+      const storedHits = windows.filter((w) => applyFilter([stored], { departure: w }).length === 1)
+      expect(liteHits).toHaveLength(1)
+      expect(storedHits).toHaveLength(1)
+      expect(liteHits).toEqual(storedHits)
+    }
   })
 })

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { Assumption, Filter } from '@/src/results'
 import type { ResultsView, ProposalRowLite, LinkLite } from '@/web/data'
 import { applyFilterLite } from '@/web/filters'
@@ -8,6 +9,7 @@ import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
 import { FilterChips } from './FilterChips'
 import { PinnedSummary } from './PinnedSummary'
+import { errorForStatus } from './ProposalCard'
 
 export type ResultsPaneProps = {
   /** Every `results` row for this conversation, oldest first — `web/data.ts`'s `loadResults`. */
@@ -164,5 +166,70 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
         </section>
       ) : null}
     </div>
+  )
+}
+
+export type ResultsPaneLiveProps = {
+  conversationId: string
+  results: ResultsView[]
+  proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+}
+
+const GENERIC_ERROR = 'That could not be sent. Please try again.'
+
+/**
+ * Task 10: the client island for the results pane. `onChoose` POSTs
+ * `{ kind, sourceId }` to `/api/conversations/[id]/choose` (Task 7's route —
+ * `web/chooseRoute.ts`, a different task, in flight alongside this one; a
+ * 404 there falls through `errorForStatus`'s own default branch to the same
+ * generic copy as any other unhandled status, never a route-specific
+ * message). `onGetLinks` reuses the existing `/api/proposals/[id]/decide`
+ * endpoint with `{ decision: 'accept' }`, the same request
+ * `ProposalCardLive`'s Accept button makes, and only fires it while
+ * `proposal.decision` is still `null` — the button itself
+ * (`PinnedSummary`) already only renders in that state, this is just the
+ * same guard kept here too rather than trusted blindly. `router.refresh()`
+ * on success lets the RLS-scoped server read (`loadResults`/`loadProposals`)
+ * pick up the change, same pattern as every other `*Live` wrapper in this
+ * codebase.
+ */
+export function ResultsPaneLive({ conversationId, results, proposal }: ResultsPaneLiveProps) {
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function post(path: string, body: unknown) {
+    setPending(true)
+    setError(null)
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        setError(errorForStatus(res.status))
+        return
+      }
+      router.refresh()
+    } catch {
+      setError(GENERIC_ERROR)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <ResultsPane
+      results={results}
+      proposal={proposal}
+      pending={pending}
+      error={error}
+      onChoose={(kind, sourceId) => void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId })}
+      onGetLinks={() => {
+        if (!proposal || proposal.decision !== null) return
+        void post(`/api/proposals/${proposal.id}/decide`, { decision: 'accept' })
+      }}
+    />
   )
 }

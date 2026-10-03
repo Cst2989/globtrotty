@@ -59,14 +59,17 @@ function departureHour(departureLocal: string): number | null {
 }
 
 /**
- * Boundaries this module owns (see the file doc comment above for why they
- * are not imported from elsewhere): morning 05:00–11:59, afternoon
- * 12:00–17:59, evening 18:00–04:59 (covers a late departure past midnight).
+ * Boundaries this module owns, reconciled (Task 10) with
+ * `src/intake/filter.ts`'s own `inWindow` so a chip clicked here and a typed
+ * filter resolved there never disagree on the same outbound hour: morning
+ * < 12:00, afternoon 12:00–17:59, evening >= 18:00.
+ * `test/web-filters.test.ts`'s "departure window reconciliation" block pins
+ * both modules against the same three hours.
  */
 function inWindow(hour: number, window: 'morning' | 'afternoon' | 'evening'): boolean {
-  if (window === 'morning') return hour >= 5 && hour < 12
+  if (window === 'morning') return hour < 12
   if (window === 'afternoon') return hour >= 12 && hour < 18
-  return hour >= 18 || hour < 5
+  return hour >= 18
 }
 
 /**

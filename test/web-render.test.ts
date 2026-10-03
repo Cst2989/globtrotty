@@ -12,6 +12,8 @@ import { ThreadView } from '../web/components/Thread.js'
 import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
 import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
 import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
+import { mergePending } from '../web/components/pending.js'
+import { SplitShell } from '../web/components/SplitShell.js'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
@@ -59,12 +61,35 @@ describe('MessageBubble', () => {
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
+
+  // Task 10: the optimistic bubble `ThreadLive` shows ahead of the server's own row.
+  it('renders with data-pending="true" when told it is pending', () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, { role: 'user', content: 'a week in Lisbon', pending: true }),
+    )
+    expect(html).toContain('data-pending="true"')
+  })
+
+  it('omits the data-pending attribute entirely when not pending', () => {
+    const html = renderToStaticMarkup(createElement(MessageBubble, { role: 'user', content: 'a week in Lisbon' }))
+    expect(html).not.toContain('data-pending')
+  })
 })
 
 describe('StatusLine', () => {
   it('maps a working status to plain words', () => {
     const html = renderToStaticMarkup(createElement(StatusLine, { status: 'working', failReason: null }))
     expect(html.toLowerCase()).toContain('thinking')
+  })
+
+  // Task 10: `ThreadView` substitutes this synthetic status while an
+  // optimistic message is in flight and the real status has not yet
+  // flipped to `working` — see that component's own `sending` prop.
+  it('maps the synthetic "sending" status to "Sending", with the same working tone and dots', () => {
+    const html = renderToStaticMarkup(createElement(StatusLine, { status: 'sending', failReason: null }))
+    expect(html).toContain('Sending')
+    expect(html).toContain('data-tone="working"')
+    expect(html).toContain('class="thinking"')
   })
 
   it('maps a failed status with a fail_reason to a plain explanation', () => {
@@ -156,6 +181,132 @@ describe('ThreadView', () => {
     expect(html).toContain('a week in Lisbon')
     expect(html).toContain('You accepted the proposal')
     expect(html).not.toContain('<script>')
+  })
+
+  // Task 10: a pending (optimistic) message renders through MessageBubble with the attribute.
+  it('passes a message\'s own `pending` flag through to MessageBubble as data-pending', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [
+          { id: 'p1', role: 'user', content: 'a week in Lisbon', created_at: '', pending: true },
+        ],
+      }),
+    )
+    expect(html).toContain('data-pending="true"')
+  })
+
+  // Task 10: `sending` substitutes "Sending" for the status words ONLY while the
+  // real status has not yet flipped to `working` — once it has, "Thinking" wins.
+  it('shows "Sending" when sending is true and status is still active', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [],
+        sending: true,
+      }),
+    )
+    expect(html).toContain('Sending')
+    expect(html).not.toContain('Ready for your next message')
+  })
+
+  it('keeps showing "Thinking" once the real status has flipped to working, even while sending is still true', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'working', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [],
+        sending: true,
+      }),
+    )
+    expect(html.toLowerCase()).toContain('thinking')
+    expect(html).not.toContain('Sending')
+  })
+})
+
+describe('mergePending (Task 10)', () => {
+  const SERVER_NOW = [
+    { id: 's1', role: 'user' as const, content: 'a week in Lisbon', created_at: '2026-10-03T10:00:00.000Z' },
+  ]
+
+  it('appends a pending message that has no matching server row yet', () => {
+    const merged = mergePending([], [{ id: 'p1', content: 'a week in Lisbon' }])
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ id: 'p1', role: 'user', content: 'a week in Lisbon', pending: true })
+  })
+
+  it('drops a pending message once the server already has a user row with the same text', () => {
+    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a week in Lisbon' }])
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toEqual(SERVER_NOW[0])
+    expect((merged[0] as { pending?: boolean }).pending).toBeUndefined()
+  })
+
+  it('keeps a pending message whose text does not match any server row', () => {
+    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a different trip' }])
+    expect(merged.map((m) => m.content)).toEqual(['a week in Lisbon', 'a different trip'])
+  })
+
+  it('never matches a pending message against a non-user server row with the same text', () => {
+    const agentEcho = [{ id: 's1', role: 'agent' as const, content: 'a week in Lisbon', created_at: '2026-10-03T10:00:00.000Z' }]
+    const merged = mergePending(agentEcho, [{ id: 'p1', content: 'a week in Lisbon' }])
+    expect(merged).toHaveLength(2)
+    expect(merged[1]).toMatchObject({ pending: true })
+  })
+
+  it('preserves server order and appends still-pending entries in send order, after', () => {
+    const merged = mergePending(SERVER_NOW, [
+      { id: 'p1', content: 'first pending' },
+      { id: 'p2', content: 'second pending' },
+    ])
+    expect(merged.map((m) => m.id)).toEqual(['s1', 'p1', 'p2'])
+  })
+
+  it('returns an empty list for no server rows and no pending ones', () => {
+    expect(mergePending([], [])).toEqual([])
+  })
+})
+
+describe('SplitShell (Task 10)', () => {
+  it('defaults to the chat tab selected, with both panes rendered in the DOM', () => {
+    const html = renderToStaticMarkup(
+      createElement(SplitShell, {
+        conversationId: 'c1',
+        chat: createElement('p', null, 'the chat pane'),
+        results: createElement('p', null, 'the results pane'),
+        latestResultsId: null,
+      }),
+    )
+    expect(html).toContain('data-tab="chat"')
+    expect(html).toContain('the chat pane')
+    expect(html).toContain('the results pane')
+    expect(html).toMatch(/id="split-tab-chat"[^>]*aria-selected="true"/)
+  })
+
+  it('shows no badge when there are no results yet', () => {
+    const html = renderToStaticMarkup(
+      createElement(SplitShell, {
+        conversationId: 'c1',
+        chat: createElement('p', null, 'chat'),
+        results: createElement('p', null, 'results'),
+        latestResultsId: null,
+      }),
+    )
+    expect(html).not.toContain('split-tab-badge')
+  })
+
+  it('shows the badge on first render when a results row exists and nothing has been seen yet (no sessionStorage reachable during a static render)', () => {
+    const html = renderToStaticMarkup(
+      createElement(SplitShell, {
+        conversationId: 'c1',
+        chat: createElement('p', null, 'chat'),
+        results: createElement('p', null, 'results'),
+        latestResultsId: 'm1',
+      }),
+    )
+    expect(html).toContain('split-tab-badge')
   })
 })
 
