@@ -190,3 +190,92 @@ can resolve it without re-parsing. Two writers: intake (§1.2) and the driver's 
 - Budget is never asked; price is a filter after results.
 - "Arrive by" dates move the departure a day earlier for long-haul and say so.
 - Choose is acceptance; "Get booking links" is the hand-off. No separate accept step.
+
+## 10. Corrections after build (2026-10-03)
+
+Found and fixed during the whole-branch final review and its fix wave
+(`docs/superpowers/2026-10-03-plan-5-results-first-decisions.md` has the full findings and
+rulings); each line below is a correction to the text above, not a new requirement.
+
+- **§4 — the driver runs on Opus 5, effort medium, 4k thinking, not Sonnet 5.** This document's
+  original text named "Sonnet 5, effort medium, 4k thinking" as the default, with Opus "available
+  as a config switch." Built as written, then reverted at the final review's C1: Sonnet 5 cannot
+  carry a mid-conversation `role: "system"` message, and this product's operator channel
+  (`normalizeOperatorTurns`, src/model/client.ts) puts one in the transcript on every planning
+  turn that reaches the driver at all (a `results`, `choices` or `action` row hydrates to exactly
+  that shape). Opus 5, Opus 4.8, Fable and Mythos all support it; Sonnet 5 does not (Anthropic's
+  prompt-caching reference). The driver is therefore Opus 5 at effort medium, 4k thinking, prompt
+  version `driver@4`, unchanged from before this plan. Sonnet 5.5 does carry the channel and is
+  the candidate for a future switch, once its price is recorded in this repo's pricing source
+  (`docs/backlog-plan.md`'s "API drift" section) — see backlog 5.1. The `LIVE_MODEL=1` probe of
+  the operator channel on Opus 5 has not been run (no Anthropic credit); the fix restores the
+  designed transcript shape, it does not yet prove the model's behaviour on it.
+
+- **§2.4 — the combined flight+hotel proposal is accepted by "Get booking links", not by
+  Choose.** §2.4's text as written has Choose on a hotel immediately recording "a second proposal
+  (`stay`), gates and the reviewer run on the combination" with no further qualification, which
+  reads as acceptance happening at that Choose. As built, that call also ran `decideProposal(...,
+  'accept')` on the combined proposal immediately — which made "Get booking links" permanently
+  unreachable (the button renders only while `decision === null`), the exact conflict §9's own
+  ruling ("Choose is acceptance; 'Get booking links' is the hand-off") was meant to settle and did
+  not, because plan Task 9 Step 2 wired the button to accept-when-null while Task 7 built Choose
+  to accept unconditionally first. **§9 wins:** Choose on a hotel records the combined proposal
+  and runs gates and the reviewer, but leaves `decision` null; "Get booking links" is what accepts
+  it (`decide` → `hand_off` action → driver → cashier). The flights-only proposal from Choose
+  (flight) is unaffected and still accepts immediately — `loadNewestAcceptedItinerary` depends on
+  that to recover the chosen flight for the later hotel search.
+
+- **§1.1 — side trips are detected but not persisted; there are no side-trip hotels yet.** The
+  brief's `side_trip` Jev question and `TripBrief.sideTrip` both exist and are assembled
+  correctly (including the equality guard against the destination), but `writeBrief` never writes
+  `sideTrip` to the notebook, and `fixed_commitment` (also answered by Jev) is never read by
+  `assembleBrief` into any `TripBrief` field. Nothing in the notebook or in any `results`/`choices`
+  row carries a side trip or a fixed commitment today, so §2.4's "and the side trip for its own
+  window when `fixed_commitment` placed it" second hotel search has nothing to key on and is not
+  built. Backlog 5.4.
+
+- **§2.2 — the `new_search` notebook merge covers only the origin field.** The text says a
+  `new_search` message's brief "merges with the notebook: a field Jev marks unstated keeps the
+  notebook value" without naming which fields. As built, only `origin` has this fallback (via a
+  `lastOrigin` parameter preferring the notebook's own `originCity` over the cross-conversation
+  `readLastOrigin` lookup); destination, dates and party have none, so a `new_search` message that
+  leaves any of those unstated gets the same choice-card/default behaviour as a first message, not
+  the notebook's existing value. Accepted as a deliberate partial ruling during Task 6 (full merge
+  would widen `assembleBrief`'s signature, a larger and more speculative change than that task's
+  scope). Backlog 5.2.
+
+- **§3 — "2 to 4 options" is enforced by `ChoicesContentSchema` (`.min(2).max(4)`), with a
+  code-side top-up, not merely a convention the two option-building functions were trusted to
+  follow.** As originally built, `placeOptions`/`dateOptions` could legitimately return 0 or 1
+  option (no code-found candidates, or a single unambiguous one after excluding `none`), and the
+  schema was `.min(1)`, so a 0-option card threw inside `buildAttachmentRows` and failed the whole
+  turn — exactly the case this document's own §9 ruling says should "become a choice card, never a
+  wrong search." Fixed at the final review's C2: both builders top up to at least 2 options from a
+  fallback cascade (Jev's own ranking → her last origin → the code-found candidate list →
+  `busiestFor`'s fixed four, anchored on the place already known), capped at 4, and the schema now
+  enforces the range directly rather than leaving it to caller discipline. The origin card also
+  now excludes the already-resolved destination from its own options and `assembleBrief` refuses
+  `origin === destination` outright, which this document's §2.1/§1.2 text did not previously rule
+  on either way.
+
+- **Conversation titles are code-built from the brief, with no model call.** Not stated anywhere
+  in this document; the original design (per the parent spec and plan 4a) had the Haiku front desk
+  write `conversations.title`/`front_label`. Retiring the front desk for intake (§1.1, §4) dropped
+  that write with no replacement, so no conversation was titled after this plan landed, until the
+  final review's M2: `src/agents/intake.ts`'s `tripTitle(brief)` builds a fixed-format title
+  ("Barcelona to Tokyo, 19 Nov to 6 Dec", or "Barcelona to Tokyo, 19 Nov" for a one-way) from
+  place-table city names and ISO dates only — no model call, nothing of hers in it — written
+  alongside `writeBrief`/`setDesk` once a search has actually succeeded, and it overwrites rather
+  than preserves an older title on a `new_search`.
+
+- **The `front_desk` seat is retired from production use but stays declared.** This document's
+  §4 describes the driver taking over "question/chat routes, the hand-off and escalation," and §2.2
+  says the new Jev router "replaces the Haiku front desk" for the first-message triage that used to
+  live there — both true, and both leave the seat's actual disposition unstated. In practice:
+  `makeFrontDesk`/`parseFrontVerdict`/`FrontDeskDeps` are deleted, and `frontDesk.ts` no longer
+  calls `loadPrompt('front_desk')` for production routing. `FRONT_SCHEMA` stays exported (with a
+  doc comment explaining why), because `src/monitor/drift.ts` and `test/driver.live.test.ts` still
+  use it to run a `front_desk` drift canary independent of whether anything routes through that
+  seat in production, and `front_desk.md` stays on disk for the same reason. `FrontLabel`/
+  `FAQ_ANSWERS`/`faqAnswer` are unaffected, and `src/model/seats.ts` still declares the seat. See
+  backlog 5.8.

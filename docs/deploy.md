@@ -37,7 +37,7 @@ netlify env:set SITE_URL https://globtrotty.netlify.app
 netlify env:set SUPABASE_URL "$SUPABASE_URL"
 netlify env:set NEXT_PUBLIC_SUPABASE_URL "$SUPABASE_URL"
 netlify env:set NEXT_PUBLIC_SUPABASE_ANON_KEY "$SUPABASE_ANON_KEY"
-for k in DATABASE_URL SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY WORKER_SHARED_SECRET ANTHROPIC_API_KEY GOOGLE_SEARCH_API; do
+for k in DATABASE_URL SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY WORKER_SHARED_SECRET ANTHROPIC_API_KEY GOOGLE_SEARCH_API JEV_KEY; do
   netlify env:set "$k" "${!k}" --secret --context production --context deploy-preview --context branch-deploy
 done
 netlify env:list --context production   # names only; values are masked
