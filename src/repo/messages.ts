@@ -43,6 +43,37 @@ export async function readLatestResults(
 }
 
 /**
+ * The newest `results` row of this `kind` that is NOT itself the output of a filter — the CORPUS
+ * a typed filter should be applied over.
+ *
+ * The final review's I1: `readLatestResults` returns the newest row full stop, and after one
+ * typed filter that row IS a filtered row. A second typed filter then narrowed an
+ * already-narrowed set, and no typed message could ever widen it again ("show me all flights" ->
+ * `applyFilter(items, {})` over the narrowed list -> "Showing 2 of 2: all results"). Spec section
+ * 2.2 wants a typed filter applied "as chips" over the stored results, which is this row.
+ *
+ * Read in JS rather than with a jsonb predicate on `content` because `parseResults` is already
+ * the one authority on what a results row means, and a garbled row must be skipped here exactly
+ * as it is everywhere else. The 50-row window bounds the scan: it is the newest 50 `results`
+ * rows of ANY kind, and a conversation that has written 50 results rows since its last
+ * unfiltered search of this kind has long since moved on to a different trip.
+ */
+export async function readLatestUnfilteredResults(
+  sql: postgres.Sql, conversationId: string, userId: string, kind: ResultsContent['kind'],
+): Promise<ResultsContent | null> {
+  const rows = await sql<{ content: string }[]>`
+    select content from messages
+     where conversation_id = ${conversationId} and user_id = ${userId} and role = 'results'
+     order by created_at desc, id desc
+     limit 50`
+  for (const row of rows) {
+    const parsed = parseResults(row.content)
+    if (parsed !== null && parsed.kind === kind && parsed.filter === undefined) return parsed
+  }
+  return null
+}
+
+/**
  * The newest `choices` row for this conversation, with the moment it was written.
  *
  * The content is fix round 1 (Important): `makeRouter`'s `choice` dispatch (src/agents/router.ts)

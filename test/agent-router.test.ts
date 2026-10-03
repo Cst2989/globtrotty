@@ -139,6 +139,93 @@ describeDb('makeRouter', () => {
     })
   })
 
+  // I1: a typed filter must apply over the UNFILTERED corpus, not over whatever the newest
+  // results row happens to be. Before this, the second filter narrowed an already-narrowed set
+  // and no typed message could widen it again.
+  it('filter: a second typed filter applies over the unfiltered corpus, not the first filter\'s output', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '10')
+      // F1 nonstop, F2 one stop, F3 nonstop: "nonstop" keeps F1/F3, and a FOLLOWING
+      // "up to one stop" must come back to all three rather than re-filtering {F1, F3}.
+      const items: SupplierItem[] = [flightItem('F1', 20_000, 0), flightItem('F2', 20_000, 1), flightItem('F3', 20_000, 0)]
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, items,
+        params: {
+          kind: 'flight', from: 'BCN', to: 'TYO', departureDate: '2026-11-19', returnDate: null, flexDays: 0,
+          adults: 1, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+        },
+      })
+      const unfiltered: ResultsContent = {
+        kind: 'flights', query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+        sourceIds: ['F1', 'F2', 'F3'], assumptions: [],
+      }
+      await insertMessage(sql, s, 'results', JSON.stringify(unfiltered), true)
+      // The first filter's own output row, which is what `readLatestResults` would return.
+      await insertMessage(sql, s, 'results', JSON.stringify({
+        ...unfiltered, sourceIds: ['F1', 'F3'], filter: { nonstop: true },
+      }), true)
+      await insertMessage(sql, s, 'user', 'up to one stop is fine', true)
+
+      const flights = new MockSupplier({ kind: 'flight' })
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { ...FILTER_ANSWERS, nonstop: { type: 'noul', noul: 0.1 }, one_stop_ok: { type: 'noul', noul: 0.9 } },
+        usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(ctx(s, 'up to one stop is fine'))
+
+      if (step.kind !== 'park') throw new Error('unreachable')
+      const content = step.attachments![0]!.content as ResultsContent
+      expect(content.sourceIds).toEqual(['F1', 'F2', 'F3'])      // widened, not compounded
+      expect(content.filter?.maxStops).toBe(1)
+      expect(step.message).toBe('Showing 3 of 3: up to 1 stop.')
+    })
+  })
+
+  it('filter: "show me all flights" widens back to the full stored set (I1)', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '11')
+      const items: SupplierItem[] = [flightItem('F1', 20_000, 0), flightItem('F2', 20_000, 1), flightItem('F3', 20_000, 0)]
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, items,
+        params: {
+          kind: 'flight', from: 'BCN', to: 'TYO', departureDate: '2026-11-19', returnDate: null, flexDays: 0,
+          adults: 1, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+        },
+      })
+      const unfiltered: ResultsContent = {
+        kind: 'flights', query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+        sourceIds: ['F1', 'F2', 'F3'], assumptions: [],
+      }
+      await insertMessage(sql, s, 'results', JSON.stringify(unfiltered), true)
+      await insertMessage(sql, s, 'results', JSON.stringify({
+        ...unfiltered, sourceIds: ['F1', 'F3'], filter: { nonstop: true },
+      }), true)
+      await insertMessage(sql, s, 'user', 'show me all flights', true)
+
+      const flights = new MockSupplier({ kind: 'flight' })
+      // An empty filter: every signal off. "Showing 2 of 2: all results" was the old answer.
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: {
+          intent: { type: 'choice', choice: 'filter', confidence: 0.95, probabilities: {} },
+          nonstop: { type: 'noul', noul: 0.05 }, one_stop_ok: { type: 'noul', noul: 0.05 },
+          departure: { type: 'choice', choice: 'none', confidence: 0.9, probabilities: {} },
+          cheaper: { type: 'noul', noul: 0.05 },
+        },
+        usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(ctx(s, 'show me all flights'))
+
+      if (step.kind !== 'park') throw new Error('unreachable')
+      const content = step.attachments![0]!.content as ResultsContent
+      expect(content.sourceIds).toEqual(['F1', 'F2', 'F3'])
+      expect(step.message).toBe('Showing 3 of 3: all results.')
+    })
+  })
+
   it('question/chat: the driver runs, and the router\'s own Jev cost is added on top of the driver\'s', async () => {
     await withTestDb(async (sql) => {
       const s = await seedConversation(sql, '02')
@@ -409,6 +496,41 @@ describe('routeMessage', () => {
     const result = await routeMessage({ jev: { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch } },
       'show me something under 500', false)
     expect(result.filter?.maxPriceMinor).toBe('50000')
+  })
+
+  // Unrecorded deviation 5: `Filter.maxStops` was unreachable from any typed message.
+  it('reads "up to one stop" into maxStops 1, and nonstop still wins when both fire', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { ...FILTER_ANSWERS, nonstop: { type: 'noul', noul: 0.1 }, one_stop_ok: { type: 'noul', noul: 0.9 } },
+        usage: { input_tokens: 200, output_tokens: 50 },
+      }))
+      .mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { ...FILTER_ANSWERS, nonstop: { type: 'noul', noul: 0.9 }, one_stop_ok: { type: 'noul', noul: 0.9 } },
+        usage: { input_tokens: 200, output_tokens: 50 },
+      }))
+    const jev = { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch }
+
+    const one = await routeMessage({ jev }, 'up to one stop is fine', true)
+    expect(one.filter?.maxStops).toBe(1)
+    expect(one.filter?.nonstop).toBeUndefined()
+
+    const both = await routeMessage({ jev }, 'direct, or one stop at a push', true)
+    expect(both.filter?.nonstop).toBe(true)
+    expect(both.filter?.maxStops).toBeUndefined()
+  })
+
+  it('asks Jev about one stop at all — the question must exist for maxStops to be reachable', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+      model: 'jev-test', answers: FILTER_ANSWERS, usage: { input_tokens: 200, output_tokens: 50 },
+    }))
+    await routeMessage({ jev: { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch } }, 'anything', true)
+    const sent = JSON.parse((fetchImpl.mock.calls[0]![1] as { body: string }).body) as {
+      questions: Record<string, unknown>
+    }
+    expect(Object.keys(sent.questions)).toContain('one_stop_ok')
   })
 
   it('a non-filter intent carries no filter at all', async () => {

@@ -15,7 +15,8 @@ import {
 } from '../jev/client.js'
 import { recordJevCall } from '../jev/record.js'
 import {
-  readNewestMessage, readLatestResults, readLatestChoices, readNewestUserTextBefore,
+  readNewestMessage, readLatestResults, readLatestUnfilteredResults, readLatestChoices,
+  readNewestUserTextBefore,
 } from '../repo/messages.js'
 import { rehydrate } from '../repo/toolResults.js'
 import { readLastOrigin } from '../repo/conversations.js'
@@ -54,6 +55,12 @@ function buildRouterQuestions(): Record<string, JevQuestion> {
       faq: 'A question about the agency itself: payment, cancellations, visas, how prices are checked',
     }),
     nonstop: noulQ('She wants direct flights only'),
+    // Unrecorded deviation 5: `FilterChips` offers "Up to 1 stop" and both `applyFilter` and
+    // `applyFilterLite` implement `maxStops`, but no typed message could ever set it — spec
+    // section 2.2's typed "up to 1 stop" silently resolved to plain `nonstop` or to nothing at
+    // all. Kept as its own Noul rather than folded into `nonstop`'s criteria because the two
+    // say different things and she can say either; `nonstop` wins when both fire.
+    one_stop_ok: noulQ('She accepts at most one stop (a single connection is fine, two is not)'),
     departure: choiceQ('A departure time of day she asks for', { morning: null, afternoon: null, evening: null, none: 'None' }),
     cheaper: noulQ('She asks for cheaper options or a price cap'),
   }
@@ -134,6 +141,9 @@ export async function routeMessage(
 
   const filter: Filter = {}
   if (noulOf(answers, 'nonstop') > NOUL_GATE) filter.nonstop = true
+  // Only when she did NOT ask for direct only: `nonstop` is the stricter of the two, and
+  // `describeFilter` would otherwise print both.
+  else if (noulOf(answers, 'one_stop_ok') > NOUL_GATE) filter.maxStops = 1
 
   const departureAnswer = choiceOf(answers, 'departure')
   if (departureAnswer && departureAnswer.confidence >= CONFIDENCE_GATE && departureAnswer.choice !== 'none') {
@@ -248,10 +258,22 @@ export function makeRouter(deps: IntakeDeps): Agent {
     const text = lastUserText(ctx.state)
     const latest = await readLatestResults(sql, ctx.conversationId, ctx.userId)
 
+    // I1: the newest row tells us WHICH search she is looking at (its kind and query); the
+    // corpus a filter applies over is the newest UNFILTERED row of that kind, so two successive
+    // typed filters do not compound and "show me all flights" can widen back to everything.
+    // `?? latest` covers a conversation whose only row of this kind is itself filtered — not a
+    // shape this office writes (every search writes its unfiltered results first), so this
+    // preserves the old behaviour rather than losing the corpus entirely.
+    const base = latest === null
+      ? null
+      : (await readLatestUnfilteredResults(sql, ctx.conversationId, ctx.userId, latest.kind)) ?? latest
+
+    // Rehydrated from the BASE, which is also what `matchAirlines` wants: a carrier an earlier
+    // filter removed is still a carrier she can name.
     let storedItems: StoredItem[] = []
-    if (latest) {
-      const stored = await rehydrate(sql, ctx.conversationId, latest.sourceIds)
-      storedItems = latest.sourceIds.flatMap((id) => {
+    if (base) {
+      const stored = await rehydrate(sql, ctx.conversationId, base.sourceIds)
+      storedItems = base.sourceIds.flatMap((id) => {
         const item = stored.get(id)
         return item ? [item] : []
       })
@@ -275,7 +297,7 @@ export function makeRouter(deps: IntakeDeps): Agent {
         // `hasResults` was false whenever `latest` is null, and `routeMessage` has no reason to
         // answer 'filter' with nothing to filter — but Jev's answer is still a guess, never a
         // guarantee, so this falls back to the driver rather than crash on a missing results row.
-        if (!latest) return withExtraCost(sql, ctx, await driver(ctx), cost)
+        if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
         const filtered = applyFilter(storedItems, result.filter ?? {})
         return {
           kind: 'park',
@@ -283,7 +305,7 @@ export function makeRouter(deps: IntakeDeps): Agent {
           costMicros: cost,
           attachments: [{
             role: 'results',
-            content: { ...latest, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
+            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
           }],
         }
       }
