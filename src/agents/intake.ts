@@ -133,101 +133,121 @@ async function writeBrief(sql: postgres.Sql, ctx: AgentContext, b: TripBrief): P
 }
 
 /**
- * The planning desk's new front door: one Jev call turns her first message into a brief or a
- * choice card; a complete brief goes straight to the flight supplier and, if more than one item
- * came back, through one re-rank call before it is shown. Every run — brief or choices — ends
- * with `conversations.desk = 'planning'` (ledger ruling): the front desk's job of recognising a
- * trip request is gone, replaced by intake actually building one.
+ * One run of the intake agent, factored out of `makeIntake` so Task 6's router can call it a
+ * second time in the same turn — ledger ruling 2: a `choice` action re-runs intake on the
+ * original message with `overrides` forcing the questionId she just answered to the optionId she
+ * clicked, at confidence 1. `opts.text` is the message to run on (her first message for
+ * `makeIntake`'s own call, the ORIGINAL message — the newest `user` row before the `choice`
+ * action — for the router's re-run); `opts.overrides` is `runIntake`'s own parameter, threaded
+ * straight through. `opts.lastOrigin`, when given, REPLACES the `readLastOrigin` lookup below
+ * rather than falling back to it — the router's `new_search` path (src/agents/router.ts) prefers
+ * the notebook's own `originCity` over her past searches, since a follow-up in an existing
+ * conversation has a nearer answer than "the last time she searched anything".
  */
-export function makeIntake(deps: IntakeDeps): Agent {
-  return async (ctx: AgentContext): Promise<AgentStep> => {
-    const { sql } = deps
-    const text = lastUserText(ctx.state)
-    const today = new Date(deps.now())
-    const lastOrigin = await readLastOrigin(sql, ctx.userId)
-    const { outcome, request, response } = await runIntake({ jev: deps.jev }, text, today, lastOrigin)
+export async function runIntakeTurn(
+  deps: IntakeDeps, ctx: AgentContext,
+  opts: {
+    text: string
+    overrides?: Partial<Record<'origin' | 'destination' | 'outbound', string>>
+    lastOrigin?: string | null
+  },
+): Promise<AgentStep> {
+  const { sql } = deps
+  const text = opts.text
+  const today = new Date(deps.now())
+  const lastOrigin = opts.lastOrigin !== undefined ? opts.lastOrigin : await readLastOrigin(sql, ctx.userId)
+  const { outcome, request, response } = await runIntake({ jev: deps.jev }, text, today, lastOrigin, opts.overrides)
 
-    let cost = await recordJevCall(sql, {
-      conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
-      seat: 'intake', request, response,
-    })
+  let cost = await recordJevCall(sql, {
+    conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
+    seat: 'intake', request, response,
+  })
 
-    // Ledger ruling: desk flips to 'planning' at the end of EVERY run, brief or choices — a
-    // choice card is not a reason to keep seeing the front door again next turn. Task 6's router
-    // is what re-runs intake specifically for a choice-click action; this task only has to make
-    // that re-run possible, not wire it.
-    await setDesk(sql, ctx.conversationId, ctx.userId, 'planning')
+  // Ledger ruling: desk flips to 'planning' at the end of EVERY run, brief or choices — a
+  // choice card is not a reason to keep seeing the front door again next turn. Task 6's router
+  // re-runs intake specifically for a choice-click action and for a `new_search` message; both
+  // calls land here too, so this still only ever flips desk to the value it is already at.
+  await setDesk(sql, ctx.conversationId, ctx.userId, 'planning')
 
-    if (outcome.kind === 'choices') {
-      return {
-        kind: 'park', message: outcome.question, costMicros: cost,
-        attachments: [{
-          role: 'choices',
-          content: { questionId: outcome.questionId, question: outcome.question, options: outcome.options },
-        }],
-      }
-    }
-
-    const b = outcome.brief
-    const params: FlightSearch = {
-      kind: 'flight', from: b.origin, to: b.destination,
-      departureDate: b.outbound, returnDate: b.inbound, flexDays: 0,
-      adults: b.adults, children: 0, infants: 0,
-      cabinClass: kiwiCabin(b.cabinLong),
-      // Backlog: currency should follow the origin, not a fixed EUR — flagged in the task
-      // report rather than guessed at here.
-      currency: 'EUR',
-      maxStops: b.maxStops, allowSelfTransfer: false,
-    }
-
-    let items
-    try {
-      items = await deps.flights.search(params)
-    } catch {
-      // No `costMicros` on the `fail` arm (src/worker.ts): a failing step's spend must already be
-      // debited by the time `loop()` sees it. The Jev call above has not been — `recordJevCall`
-      // only writes the ledger row, it never touches `conversations.spend_usd_micros` — so it is
-      // debited here, by hand, exactly once, the same way the driver's reserve/reconcile debits
-      // its own call before a tool ever runs.
-      await recordSpend(sql, { userId: ctx.userId, conversationId: ctx.conversationId, costMicros: cost })
-      return {
-        kind: 'fail', reason: 'provider_down',
-        message: 'I could not reach the flight search just now. Please try again in a moment.',
-        recordedMicros: cost,
-      }
-    }
-
-    await recordResults(sql, {
-      conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
-    })
-
-    const ranked = items.length > 1
-      ? await rankItems({ jev: deps.jev }, b, items)
-      : { ordered: items, request: null, response: null }
-
-    if (ranked.response) {
-      cost += await recordJevCall(sql, {
-        conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
-        seat: 'rerank', request: ranked.request!, response: ranked.response,
-      })
-    }
-
-    await writeBrief(sql, ctx, b)
-
+  if (outcome.kind === 'choices') {
     return {
-      kind: 'park', message: replyText(b, ranked.ordered.length), costMicros: cost,
+      kind: 'park', message: outcome.question, costMicros: cost,
       attachments: [{
-        role: 'results',
-        content: {
-          kind: 'flights',
-          query: {
-            from: b.origin, to: b.destination, outbound: b.outbound, inbound: b.inbound,
-            adults: b.adults, cabin: b.cabinLong,
-          },
-          sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
-          assumptions: b.assumptions,
-        },
+        role: 'choices',
+        content: { questionId: outcome.questionId, question: outcome.question, options: outcome.options },
       }],
     }
   }
+
+  const b = outcome.brief
+  const params: FlightSearch = {
+    kind: 'flight', from: b.origin, to: b.destination,
+    departureDate: b.outbound, returnDate: b.inbound, flexDays: 0,
+    adults: b.adults, children: 0, infants: 0,
+    cabinClass: kiwiCabin(b.cabinLong),
+    // Backlog: currency should follow the origin, not a fixed EUR — flagged in the task
+    // report rather than guessed at here.
+    currency: 'EUR',
+    maxStops: b.maxStops, allowSelfTransfer: false,
+  }
+
+  let items
+  try {
+    items = await deps.flights.search(params)
+  } catch {
+    // No `costMicros` on the `fail` arm (src/worker.ts): a failing step's spend must already be
+    // debited by the time `loop()` sees it. The Jev call above has not been — `recordJevCall`
+    // only writes the ledger row, it never touches `conversations.spend_usd_micros` — so it is
+    // debited here, by hand, exactly once, the same way the driver's reserve/reconcile debits
+    // its own call before a tool ever runs.
+    await recordSpend(sql, { userId: ctx.userId, conversationId: ctx.conversationId, costMicros: cost })
+    return {
+      kind: 'fail', reason: 'provider_down',
+      message: 'I could not reach the flight search just now. Please try again in a moment.',
+      recordedMicros: cost,
+    }
+  }
+
+  await recordResults(sql, {
+    conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
+  })
+
+  const ranked = items.length > 1
+    ? await rankItems({ jev: deps.jev }, b, items)
+    : { ordered: items, request: null, response: null }
+
+  if (ranked.response) {
+    cost += await recordJevCall(sql, {
+      conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
+      seat: 'rerank', request: ranked.request!, response: ranked.response,
+    })
+  }
+
+  await writeBrief(sql, ctx, b)
+
+  return {
+    kind: 'park', message: replyText(b, ranked.ordered.length), costMicros: cost,
+    attachments: [{
+      role: 'results',
+      content: {
+        kind: 'flights',
+        query: {
+          from: b.origin, to: b.destination, outbound: b.outbound, inbound: b.inbound,
+          adults: b.adults, cabin: b.cabinLong,
+        },
+        sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
+        assumptions: b.assumptions,
+      },
+    }],
+  }
+}
+
+/**
+ * The planning desk's front door, for a fresh turn at `desk = 'front'`: one Jev call turns her
+ * first message into a brief or a choice card. `runIntakeTurn` above is the one that actually
+ * does it — this is a thin wrapper that supplies HER message (the newest `user` row) and no
+ * overrides, exactly `makeIntake`'s old behaviour before Task 6 split the two apart.
+ */
+export function makeIntake(deps: IntakeDeps): Agent {
+  return (ctx: AgentContext): Promise<AgentStep> => runIntakeTurn(deps, ctx, { text: lastUserText(ctx.state) })
 }

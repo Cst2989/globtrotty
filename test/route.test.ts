@@ -56,23 +56,25 @@ describeDb('routeAgent', () => {
     })
   })
 
-  it('a conversation already at planning never sees intake', async () => {
+  it('a conversation already at planning never sees intake — the router classifies, then the driver runs', async () => {
     await withTestDb(async (sql) => {
       const r = await submitMessage({ sql, limits: DEFAULT_LIMITS, invoke: async () => {} },
         { userId: USER, conversationId: null, message: 'hi', idempotencyKey: 'k4' })
       await sql`update conversations set desk = 'planning' where id = ${r.conversationId}`
       const create = vi.fn().mockResolvedValue(driverText('Hello. Where to?'))
-      const fetchImpl = vi.fn() as unknown as typeof fetch
+      const fetchImpl = jevFetch({
+        intent: { type: 'choice', choice: 'chat', confidence: 0.9, probabilities: {} },
+      }) as unknown as typeof fetch
       await runTurn({
         sql, limits: DEFAULT_LIMITS, agent: routeAgent(deps(sql, create, fetchImpl)), now: () => Date.now(),
         deadlineMs: () => Date.now() + 600_000, reinvoke: async () => {}, notifier: new LogNotifier(() => {}),
       }, r.turnId!)
-      const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId}`
-      expect(seats.map((s) => s.seat)).toEqual(['driver'])
-      // Intake's own Jev call never happened: the desk-based dispatch sent this straight to the
-      // driver, exactly as it would have sent it to the old front desk never again once planning
-      // had been reached.
-      expect(fetchImpl).not.toHaveBeenCalled()
+      const seats = await sql`select seat from model_calls where conversation_id = ${r.conversationId} order by seat`
+      // Task 6: Jev's own `router` call classifies the message BEFORE the driver ever runs — the
+      // Haiku front desk is gone from this path entirely (there is no `front_desk` seat here),
+      // but the planning desk itself is no longer a free pass straight to the driver either.
+      expect(seats.map((s) => s.seat)).toEqual(['driver', 'router'])
+      expect(create).toHaveBeenCalledTimes(1)
     })
   })
 })
