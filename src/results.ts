@@ -110,6 +110,16 @@ export const ResultsContentSchema = z.strictObject({
  * a `label` into what the model reads, only `maskControlChars(question)` and
  * the option ids, so a label is never a channel for traveller-authored text
  * either way.
+ *
+ * `options` is `.min(2).max(4)` — spec section 3's range, matching `OfferChoices`
+ * in src/tools/registry.ts, which has always enforced it on the driver's own
+ * cards. It was `.min(1)` until the final review's C2: `buildAttachmentRows`
+ * `.parse`s, so an intake card built from an empty option list threw inside the
+ * park arm AFTER the Jev call was paid for, and failed her first turn. This is
+ * now the backstop, not the contract: `placeOptions`/`dateOptions`
+ * (src/intake/brief.ts) guarantee the range by construction, and the driver's
+ * tool schema guarantees it for `offer_choices`. A violation here means a
+ * builder regressed, and failing the parse is the right answer.
  */
 export const ChoicesContentSchema = z.strictObject({
   questionId: z.string().regex(/^[a-z_]{1,32}$/),
@@ -117,7 +127,7 @@ export const ChoicesContentSchema = z.strictObject({
   options: z.array(z.strictObject({
     id: z.string().regex(/^[A-Za-z0-9_:-]{1,64}$/),
     label: z.string().min(1).max(200),
-  })).min(1),
+  })).min(2).max(4),
 }) satisfies z.ZodType<ChoicesContent>
 
 /**

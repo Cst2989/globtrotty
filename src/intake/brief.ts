@@ -7,7 +7,7 @@
  */
 import { askJev, choiceQ, noulQ, type JevAnswer, type JevDeps, type JevQuestion, type JevRequest, type JevResponse } from '../jev/client.js'
 import { placeCandidates, datePartCandidates, countCandidates, type PlaceCandidate, type DateParts } from './candidates.js'
-import { CODE_MAP, isLongHaul } from './places.js'
+import { CODE_MAP, isLongHaul, type Region } from './places.js'
 import { MONTHS, WEEKDAYS, addDays, resolveDate } from './dates.js'
 
 export type Cabin = 'economy' | 'premium_economy' | 'business' | 'first'
@@ -43,6 +43,55 @@ export type IntakeCandidates = { places: PlaceCandidate[]; dates: DateParts; cou
 
 const CONFIDENCE_GATE = 0.6
 const NOUL_GATE = 0.6
+
+/**
+ * Spec section 3: a choice card asks ONE question with 2 to 4 clickable options. Both ends are
+ * load-bearing, and the final review's C2 is what happens without the lower one: `placeOptions`
+ * and `dateOptions` could legitimately return `[]` (a message naming no place the table knows,
+ * with no stored last origin — "I want to go somewhere warm next month, just me"),
+ * `ChoicesContentSchema` accepted `.min(1)`, and `buildAttachmentRows` `.parse`s, so the park
+ * step THREW after the Jev call had already been paid for and her very first turn failed
+ * outright. One option is nearly as bad: there is nothing to choose, and clicking the only
+ * answer on offer re-runs intake on a value she never picked. So both builders below guarantee
+ * the range by construction, and `ChoicesContentSchema` now enforces `.min(2).max(4)` as the
+ * backstop rather than the contract.
+ */
+const MIN_OPTIONS = 2
+const MAX_OPTIONS = 4
+
+/**
+ * The last resort for a place card: the four busiest passenger metros of a region, by code.
+ * Reached only when Jev ranked nothing, she named nothing the place table recognises, and we
+ * have no stored origin for her — at which point the honest thing is to ask a question she can
+ * answer rather than fail the turn, and "the four biggest airports near where this trip is
+ * going" is the least-wrong guess available without a model call.
+ *
+ * Every code here is checked against `CODE_MAP` by `placeOptions` before it becomes an option,
+ * so a places.json edit that drops one degrades to a shorter list rather than an option with a
+ * raw code for a label.
+ */
+const BUSIEST_BY_REGION: Record<Region, readonly string[]> = {
+  europe:        ['LON', 'PAR', 'BCN', 'BER'],
+  north_america: ['NYC', 'LAX', 'CHI', 'YYZ'],
+  asia:          ['TYO', 'SEL', 'BKK', 'SIN'],
+  oceania:       ['SYD', 'MEL', 'AKL', 'BNE'],
+  africa:        ['CAI', 'JNB', 'CMN', 'NBO'],
+  south_america: ['SAO', 'BOG', 'BUE', 'LIM'],
+  middle_east:   ['DXB', 'DOH', 'RUH', 'TLV'],
+}
+
+/**
+ * Which region's busiest metros to offer. The anchor is the place we DO know on this card — the
+ * destination on an origin card, the origin on a destination card — because a flight has two
+ * ends and the one we are missing is nearly always near the one we have. With neither end known
+ * there is nothing in the message to go on, so Europe's four are the documented default
+ * (`['LON', 'PAR', 'BCN', 'BER']`): this product's traffic is European, and a wrong guess here
+ * costs her one extra click on a card that would otherwise have been empty.
+ */
+function busiestFor(anchor: string | null): readonly string[] {
+  const region = anchor === null ? undefined : CODE_MAP.get(anchor)?.region
+  return region === undefined ? BUSIEST_BY_REGION.europe : BUSIEST_BY_REGION[region]
+}
 
 /** Fixed sentences for the three fields a choice card can ask about (Step 4 of the brief). */
 const QUESTION_TEXT = {
@@ -102,25 +151,72 @@ function stated(answer: { choice: string; confidence: number } | null, sentinels
   return answer.choice
 }
 
-/** Top three non-sentinel probabilities, as choice-card options labelled from the place table — never her span, never the model's words. */
-function placeOptions(probabilities: Record<string, number>): { id: string; label: string }[] {
-  return Object.entries(probabilities)
-    .filter(([code]) => code !== 'none' && code !== 'unstated')
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([code]) => ({ id: code, label: CODE_MAP.get(code)?.city ?? code }))
+/**
+ * The options for a place card: 2 to 4 metro codes, labelled from the place table — never her
+ * span, never the model's words.
+ *
+ * `exclude` is the OTHER end of the flight when we already know it, and dropping it is the
+ * review's I4: "Flights to Tokyo in November" ranks the same candidate list for every place
+ * question, so the origin card used to offer "Tokyo" as the answer to "Which city are you
+ * flying from?", and clicking it produced a TYO -> TYO search.
+ *
+ * The four sources are tried in order of how much they reflect what she actually said, and each
+ * later one only fires while the list is still short of `MIN_OPTIONS`:
+ *   1. Jev's own ranking over the code-found candidates (what she wrote, best first);
+ *   2. her last origin, if we have one — a real fact about her, just not one in this message;
+ *   3. the code-found candidate list itself, for a candidate Jev gave no probability at all;
+ *   4. `busiestFor`'s fixed four, which involves no evidence and is the last resort.
+ */
+function placeOptions(
+  probabilities: Record<string, number>,
+  candidates: IntakeCandidates,
+  exclude: string | null,
+  lastOrigin: string | null,
+): { id: string; label: string }[] {
+  const picked: string[] = []
+  const add = (code: string): void => {
+    if (picked.length >= MAX_OPTIONS) return
+    if (code === 'none' || code === 'unstated') return
+    if (exclude !== null && code === exclude) return
+    if (!CODE_MAP.has(code)) return          // a label we cannot write is not an option
+    if (picked.includes(code)) return
+    picked.push(code)
+  }
+
+  for (const [code] of Object.entries(probabilities).sort((a, b) => b[1] - a[1])) add(code)
+  if (picked.length < MIN_OPTIONS && lastOrigin !== null) add(lastOrigin)
+  if (picked.length < MIN_OPTIONS) for (const p of candidates.places) add(p.code)
+  if (picked.length < MIN_OPTIONS) for (const code of busiestFor(exclude)) add(code)
+
+  return picked.map((code) => ({ id: code, label: CODE_MAP.get(code)!.city }))
 }
 
-/** When the outbound date itself can't be resolved, the card offers the candidate day/month combinations she actually wrote, as ISO labels. */
+/**
+ * The options for the outbound-date card: the candidate day/month combinations she actually
+ * wrote, as ISO labels, 2 to 4 of them.
+ *
+ * The top-up exists for the same reason `placeOptions`'s does (C2): a message with no date in it
+ * at all, or one whose only date does not resolve, left this empty and failed the turn. A
+ * fortnight out and then weekly is the fallback — far enough ahead that the fares are bookable,
+ * spread widely enough that the four options are meaningfully different, and anchored on
+ * `today` so the card never offers a date in the past.
+ */
 function dateOptions(c: IntakeCandidates, today: Date): { id: string; label: string }[] {
   const out: { id: string; label: string }[] = []
+  const push = (iso: string): void => {
+    if (out.length >= MAX_OPTIONS) return
+    if (out.some((o) => o.id === iso)) return
+    out.push({ id: iso, label: iso })
+  }
   for (const month of c.dates.months) {
     for (const day of c.dates.days) {
       const resolved = resolveDate({ month, day, year: null }, today)
-      if (resolved && !out.some((o) => o.id === resolved.iso)) out.push({ id: resolved.iso, label: resolved.iso })
-      if (out.length >= 3) return out
+      if (resolved) push(resolved.iso)
+      if (out.length >= MAX_OPTIONS) return out
     }
   }
+  const todayIso = today.toISOString().slice(0, 10)
+  for (let weeks = 2; out.length < MIN_OPTIONS && weeks <= 5; weeks++) push(addDays(todayIso, weeks * 7))
   return out
 }
 
@@ -139,21 +235,38 @@ export function assembleBrief(
 ): IntakeOutcome {
   const assumptions: Assumption[] = []
 
+  // The destination is read FIRST even though the origin card is offered first, because the
+  // origin card has to be able to exclude it (I4) — and because `origin === destination` is
+  // never a trip, however confident Jev was about either end.
+  const destAnswer = choiceOf(answers, 'destination')
+  const destination = stated(destAnswer)
+
   const originAnswer = choiceOf(answers, 'origin')
   let origin = stated(originAnswer)
+  // I4: refuse origin === destination rather than searching TYO -> TYO and telling her "I could
+  // not find flights for 1 adult, Tokyo to Tokyo". Dropping the origin falls through to the
+  // origin card below, whose options exclude the destination, so the click that caused this
+  // (an override at confidence 1) cannot be offered again and the loop cannot repeat.
+  if (origin !== null && origin === destination) origin = null
   if (!origin) {
-    if (lastOrigin) {
+    // The same equality rule applies to the stored default: a last origin that happens to be
+    // where she is going is not a usable origin either.
+    if (lastOrigin && lastOrigin !== destination) {
       origin = lastOrigin
       assumptions.push({ field: 'origin', value: lastOrigin, reason: 'defaulted' })
     } else {
-      return { kind: 'choices', questionId: 'origin', question: QUESTION_TEXT.origin, options: placeOptions(originAnswer?.probabilities ?? {}) }
+      return {
+        kind: 'choices', questionId: 'origin', question: QUESTION_TEXT.origin,
+        options: placeOptions(originAnswer?.probabilities ?? {}, candidates, destination, lastOrigin),
+      }
     }
   }
 
-  const destAnswer = choiceOf(answers, 'destination')
-  const destination = stated(destAnswer)
   if (!destination) {
-    return { kind: 'choices', questionId: 'destination', question: QUESTION_TEXT.destination, options: placeOptions(destAnswer?.probabilities ?? {}) }
+    return {
+      kind: 'choices', questionId: 'destination', question: QUESTION_TEXT.destination,
+      options: placeOptions(destAnswer?.probabilities ?? {}, candidates, origin, lastOrigin),
+    }
   }
 
   const sideRaw = stated(choiceOf(answers, 'side_trip'))

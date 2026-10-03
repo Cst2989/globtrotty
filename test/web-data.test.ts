@@ -88,7 +88,8 @@ describe('toThreadView', () => {
 
   it('leaves a choices row unchanged — MessageBubble needs its JSON client-side', () => {
     const content = JSON.stringify({
-      questionId: 'destination', question: 'Which city?', options: [{ id: 'TYO', label: 'Tokyo' }],
+      questionId: 'destination', question: 'Which city?',
+      options: [{ id: 'TYO', label: 'Tokyo' }, { id: 'OSA', label: 'Osaka' }],
     })
     const rows: ThreadMessage[] = [{ id: 'm1', role: 'choices', content, created_at: 't1' }]
 
