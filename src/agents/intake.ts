@@ -17,7 +17,7 @@ import { rankItems } from '../intake/rank.js'
 import type { JevDeps } from '../jev/client.js'
 import { recordJevCall } from '../jev/record.js'
 import { recordResults, rehydrate } from '../repo/toolResults.js'
-import { readLastOrigin, setDesk } from '../repo/conversations.js'
+import { readLastOrigin, setDesk, setTitle } from '../repo/conversations.js'
 import { recordSpend } from '../repo/spend.js'
 import { applyRequirementsPatch } from '../repo/notebook.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
@@ -120,6 +120,23 @@ export function replyText(b: TripBrief, resultCount: number): string {
   const phrases = [...new Set(b.assumptions.map(assumptionPhrase).filter((s): s is string => s !== null))]
   const assumed = phrases.length > 0 ? ` I assumed: ${phrases.join('; ')}.` : ''
   return `${head}${assumed} Change anything with the chips above the list or just tell me.`
+}
+
+/**
+ * The conversation's title, built in code from the brief: 'Barcelona to Tokyo, 19 Nov to 6 Dec'
+ * (M2's ruling, verbatim). A one-way has one date to name, so it reads 'Barcelona to Tokyo,
+ * 19 Nov'.
+ *
+ * No model call and nothing of hers in it — place-table city names and ISO dates only, exactly
+ * like `replyText` above. `conversations.title` is read by the sidebar and the page header
+ * (`web/data.ts`), and before this nothing had written it since the Haiku front desk was
+ * retired: both fell back to her first message or "New trip".
+ */
+export function tripTitle(b: TripBrief): string {
+  const dates = b.inbound
+    ? `${dateLabel(b.outbound)} to ${dateLabel(b.inbound)}`
+    : dateLabel(b.outbound)
+  return `${placeLabel(b.origin)} to ${placeLabel(b.destination)}, ${dates}`
 }
 
 /**
@@ -277,13 +294,14 @@ export async function runIntakeTurn(
       })
     }
 
-    // The three things that must land together, only once both the search AND the re-rank have
-    // actually succeeded: the corpus row, the notebook patch, and the desk flip. Any earlier
-    // throw leaves all three untouched (caught below).
+    // The four things that must land together, only once both the search AND the re-rank have
+    // actually succeeded: the corpus row, the notebook patch, the title and the desk flip. Any
+    // earlier throw leaves all four untouched (caught below).
     await recordResults(sql, {
       conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
     })
     await writeBrief(sql, ctx, b)
+    await setTitle(sql, { conversationId: ctx.conversationId, userId: ctx.userId, title: tripTitle(b) })
     await setDesk(sql, ctx.conversationId, ctx.userId, 'planning')
 
     return {

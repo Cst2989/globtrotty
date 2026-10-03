@@ -77,6 +77,33 @@ export async function routeToPlanning(
   }
 }
 
+/**
+ * Writes `conversations.title`, scoped by `user_id`.
+ *
+ * The final review's M2 and its ruling: `routeToPlanning`/`recordFrontLabel` lost their only
+ * production caller when the Haiku front desk was retired, so no conversation has been titled
+ * since. Intake now writes a title built in CODE from the brief — no model call, no traveller
+ * text: place-table city names and ISO dates only (`tripTitle`, src/agents/intake.ts).
+ *
+ * Its own function rather than a reuse of `routeToPlanning`, which also sets `desk` and
+ * `front_label`: intake has no `FrontLabel` to record, and the two writes are separate facts
+ * about the conversation that must not be forced to move together. It OVERWRITES rather than
+ * `coalesce`-ing, unlike `routeToPlanning`'s title: a `new_search` re-runs intake with a
+ * different trip, and the sidebar showing the old one would be worse than no title at all.
+ *
+ * Fails closed on zero rows touched, like every other writer here.
+ */
+export async function setTitle(
+  sql: postgres.Sql, args: { conversationId: string; userId: string; title: string },
+): Promise<void> {
+  const rows = await sql`update conversations set title = ${args.title}, updated_at = now()
+             where id = ${args.conversationId} and user_id = ${args.userId}
+            returning id`
+  if (rows.length === 0) {
+    throw new Error(`setTitle: conversation ${args.conversationId} not found for this user`)
+  }
+}
+
 /** M14: fails closed on zero rows touched — see routeToPlanning's doc comment. */
 export async function recordFrontLabel(
   sql: postgres.Sql, args: { conversationId: string; userId: string; label: FrontLabel },

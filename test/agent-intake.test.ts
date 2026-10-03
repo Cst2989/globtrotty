@@ -97,9 +97,12 @@ describeDb('makeIntake', () => {
         select name, status from tool_calls where turn_id = ${s.turnId}`
       expect(toolCalls).toEqual([{ name: 'explore_flights', status: 'done' }])
 
-      // Desk flipped to planning.
-      const [c] = await sql`select desk from conversations where id = ${s.conversationId}`
+      // Desk flipped to planning, and the title written from the brief (M2) — code-built from
+      // the place table and the ISO dates, never a model call and never her words.
+      const [c] = await sql<{ desk: string; title: string | null }[]>`
+        select desk, title from conversations where id = ${s.conversationId}`
       expect(c!.desk).toBe('planning')
+      expect(c!.title).toBe('Barcelona to Tokyo, 19 Nov to 6 Dec')
 
       // Exactly two model_calls rows, one per seat, and costMicros is their sum.
       const calls = await sql<{ seat: string; cost_micros: string }[]>`
@@ -151,8 +154,11 @@ describeDb('makeIntake', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(1) // no rerank call: the turn never reached a search
       expect(searchSpy).not.toHaveBeenCalled()
 
-      const [c] = await sql`select desk from conversations where id = ${s.conversationId}`
+      const [c] = await sql<{ desk: string; title: string | null }[]>`
+        select desk, title from conversations where id = ${s.conversationId}`
       expect(c!.desk).toBe('planning') // ledger ruling: every run, brief or choices
+      // No brief, no title: there is no trip to name yet.
+      expect(c!.title).toBeNull()
 
       const calls = await sql`select seat from model_calls where conversation_id = ${s.conversationId}`
       expect(calls.map((r) => r.seat)).toEqual(['intake'])

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import tokyo from './fixtures/jev/tokyo.json' with { type: 'json' }
 import { assembleBrief } from '../src/intake/brief.js'
+import { tripTitle } from '../src/agents/intake.js'
 import { placeCandidates, datePartCandidates, countCandidates } from '../src/intake/candidates.js'
 import type { JevAnswer } from '../src/jev/client.js'
 
@@ -178,5 +179,28 @@ describe('assembleBrief', () => {
       expect(new Set(out.options.map((o) => o.id)).size).toBe(out.options.length)   // no duplicates
     }
     expect(cards).toBeGreaterThan(4)   // the loop actually exercised cards, not just briefs
+  })
+})
+
+// M2: `conversations.title` had no writer at all after the Haiku front desk was retired, so the
+// sidebar fell back to her first message and the page header to "New trip". Built in code from
+// the brief — place-table city names and ISO dates, never a model call and never her words.
+describe('tripTitle', () => {
+  const base = {
+    origin: 'BCN', destination: 'TYO', sideTrip: null, outbound: '2026-11-19', inbound: '2026-12-06',
+    adults: 2, cabinLong: 'premium_economy' as const, cabinShort: 'economy' as const,
+    maxStops: null, hotels: true, arriveBy: true, assumptions: [],
+  }
+
+  it('names both ends and both dates — the ruling\'s own example, verbatim', () => {
+    expect(tripTitle(base)).toBe('Barcelona to Tokyo, 19 Nov to 6 Dec')
+  })
+
+  it('names one date for a one-way', () => {
+    expect(tripTitle({ ...base, inbound: null })).toBe('Barcelona to Tokyo, 19 Nov')
+  })
+
+  it('uses the place table\'s city names, so an unknown code degrades to the code itself', () => {
+    expect(tripTitle({ ...base, origin: 'ZZZ' })).toBe('ZZZ to Tokyo, 19 Nov to 6 Dec')
   })
 })
