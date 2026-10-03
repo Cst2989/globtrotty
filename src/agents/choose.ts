@@ -45,6 +45,19 @@ export type ChooseAction = { kind: 'flight' | 'hotel'; sourceId: string }
  * reaching HER directly from a card press. */
 const REJECTED_MESSAGE = 'That option no longer passes our checks (price moved or expired). Pick another.'
 
+/**
+ * Returned when `runProposalPath` itself THREW rather than returning a verdict — the final
+ * review's I2. `reviewOffer` refunds on its own throw, but `spent.micros` has already
+ * accumulated the reviewer's cost by the time `countReviewerVerdicts`/`saveProposal` run
+ * (src/agents/proposalPath.ts:43), and a throw there used to propagate out of `handleChoose` to
+ * `runTurn`'s catch, where `failTurn(turnSpend.total)` never sees it. This is the same F4 bug
+ * the driver's tool path fixed with a `finally` (src/worker.ts); the `choose` path had no
+ * equivalent, so the fail arm below reports `spent.micros` on `recordedMicros`.
+ *
+ * Fixed text, same reason as `REJECTED_MESSAGE`: never the thrown error's own message.
+ */
+const PATH_FAILED_MESSAGE = 'I could not finish checking that option just now. Please try again in a moment.'
+
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /** 'D Mon' — e.g. '2026-11-20' -> '20 Nov'. Same shape as src/agents/intake.ts's own `dateLabel`
@@ -101,9 +114,16 @@ async function handleChooseFlight(
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
   const spent = { micros: 0n }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-flight')
-  await runProposalPath(deps, ctx, spent, {
-    refs: [{ sourceId, quantity: 1, slot: 'flight' }], notebook, round, parentProposalId: null,
-  })
+  try {
+    await runProposalPath(deps, ctx, spent, {
+      refs: [{ sourceId, quantity: 1, slot: 'flight' }], notebook, round, parentProposalId: null,
+    })
+  } catch {
+    // I2: `spent.micros` already carries the reviewer's Opus call, debited by `reviewOffer`'s
+    // own reserve/reconcile. Reporting it on `recordedMicros` is what gets it into the turn
+    // total; letting the throw escape loses it.
+    return { kind: 'fail', reason: 'fetch_failed', message: PATH_FAILED_MESSAGE, recordedMicros: spent.micros }
+  }
 
   // `runProposalPath`'s own text is never read back here — a DB read of the
   // newest proposal FOR THIS TURN is what tells "saved" from "rejected"
@@ -252,13 +272,18 @@ async function handleChooseHotel(
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
   const spent = { micros: 0n }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-hotel')
-  await runProposalPath(deps, ctx, spent, {
-    refs: [
-      { sourceId: flightSourceId, quantity: 1, slot: 'flight' },
-      { sourceId, quantity: 1, slot: 'stay' },
-    ],
-    notebook, round, parentProposalId: null,
-  })
+  try {
+    await runProposalPath(deps, ctx, spent, {
+      refs: [
+        { sourceId: flightSourceId, quantity: 1, slot: 'flight' },
+        { sourceId, quantity: 1, slot: 'stay' },
+      ],
+      notebook, round, parentProposalId: null,
+    })
+  } catch {
+    // I2, same as the flight arm above.
+    return { kind: 'fail', reason: 'fetch_failed', message: PATH_FAILED_MESSAGE, recordedMicros: spent.micros }
+  }
 
   const saved = await loadNewestProposalForTurn(sql, ctx.turnId)
   if (!saved) {

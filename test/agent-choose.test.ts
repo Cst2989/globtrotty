@@ -1,10 +1,22 @@
 import { expect, it, vi } from 'vitest'
+
+// Final review, I2. `saveProposal` is a direct import in src/agents/proposalPath.js, so the
+// only way to make `runProposalPath` throw AFTER `spent.micros` has taken on the reviewer's
+// Opus call is to intercept the real module. This wraps the ACTUAL implementation in a `vi.fn`
+// so every other test in this file still gets the real, DB-backed one; the single test that
+// needs a throw swaps in a one-shot fake with `mockImplementationOnce`, which self-reverts.
+// Same pattern (and same reasoning) as test/web-api-proposals.test.ts's `decideProposal` mock.
+vi.mock('../src/repo/proposals.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/repo/proposals.js')>()
+  return { ...actual, saveProposal: vi.fn(actual.saveProposal) }
+})
+
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
 import { handleChoose } from '../src/agents/choose.js'
 import { applyRequirementsPatch } from '../src/repo/notebook.js'
 import { recordResults } from '../src/repo/toolResults.js'
-import { loadNewestProposalForTurn } from '../src/repo/proposals.js'
+import { loadNewestProposalForTurn, saveProposal } from '../src/repo/proposals.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { LogNotifier } from '../src/notify.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -166,6 +178,48 @@ describeDb('handleChoose', () => {
         select gate from gate_results where turn_id = ${s1.turnId} and round = 0`
       expect(gateRows.length).toBeGreaterThan(0)
       expect(gateRows.every((r) => typeof r.gate === 'string')).toBe(true)
+    })
+  })
+
+  // I2: `runProposalPath` was called outside any `try`. `reviewOffer` refunds on its own throw,
+  // but `spent.micros` has already accumulated the reviewer's cost by the time `saveProposal`
+  // runs, and a throw there propagated out of `handleChoose` to `runTurn`'s catch, where
+  // `failTurn(turnSpend.total)` never saw it. Same shape as the F4 bug the driver's tool path
+  // fixed with a `finally`.
+  it('a throw inside runProposalPath still reports the reviewer spend on the fail step', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '07')
+      const flightSupplier = new MockSupplier({ kind: 'flight', now: () => NOW })
+      const flightItems = await flightSupplier.search(flightParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: flightParams, items: flightItems,
+      })
+
+      // The reviewer call itself SUCCEEDS — it reserves, reconciles and records, so
+      // `spent.micros` is non-zero — and only the row write afterwards throws.
+      const create = vi.fn().mockResolvedValue(approve())
+      vi.mocked(saveProposal).mockImplementationOnce(async () => {
+        throw new Error('saveProposal: simulated write failure')
+      })
+
+      const step = await handleChoose(
+        makeDeps(sql, create, new MockSupplier({ kind: 'hotel', now: () => NOW })),
+        ctx(s), { kind: 'flight', sourceId: flightItems[0]!.sourceId },
+      )
+
+      expect(step.kind).toBe('fail')
+      if (step.kind !== 'fail') throw new Error('unreachable')
+      expect(step.reason).toBe('fetch_failed')
+      expect(step.message).toBe('I could not finish checking that option just now. Please try again in a moment.')
+      // The reviewer's Opus call: 1000 in * 5 + 40 out * 25 = 5,000 + 1,000 = 6,000 micros
+      // (src/pricing.ts, Opus 5 $5/$25). Zero here would be the I2 bug.
+      expect(step.recordedMicros).toBe(6_000n)
+      const [call] = await sql<{ cost_micros: string }[]>`
+        select cost_micros from model_calls where turn_id = ${s.turnId} and seat = 'reviewer'`
+      expect(BigInt(call!.cost_micros)).toBe(step.recordedMicros!)
+
+      const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
+      expect(proposals).toHaveLength(0)
     })
   })
 
