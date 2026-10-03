@@ -44,10 +44,12 @@ export const PRICES: Record<string, Price> = {
     inMicrosPerToken: 5, outMicrosPerToken: 25,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
   },
-  // Plan 5 Task 8: the driver's new seat. $3/MTok in, $15/MTok out; same
-  // cache-rate convention as every other Claude seat in this table.
+  // Plan 5 Task 8: the driver's new seat. $2/MTok in, $10/MTok out — per
+  // docs/backlog-plan.md line 345 ("Sonnet 5 $2/$10"), not the $3/$15 this
+  // entry originally shipped with (fix round 1). Same cache-rate convention
+  // as every other Claude seat in this table.
   'claude-sonnet-5': {
-    inMicrosPerToken: 3, outMicrosPerToken: 15,
+    inMicrosPerToken: 2, outMicrosPerToken: 10,
     cacheWrite5mMult: 1.25, cacheWrite1hMult: 2, cacheReadMult: 0.1,
   },
   'claude-haiku-4-5-20251001': {

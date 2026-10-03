@@ -22,11 +22,12 @@ export const SYSTEM_CACHE_TTL: CacheTtl = '1h'
  */
 const MIN_CACHEABLE_TOKENS: Record<string, number> = {
   'claude-opus-5': 512,
-  // Plan 5 Task 8: the driver's new seat. No distinguishing figure is
-  // documented for it, so it takes Opus 5's minimum — both are frontier
-  // thinking models, unlike Haiku, which is the one line-up member this
-  // table singles out as higher.
-  'claude-sonnet-5': 512,
+  // Plan 5 Task 8 fix round 1: corrected from 512 (Opus 5's own minimum,
+  // wrongly assumed for Sonnet 5 too) to 1,024. Sonnet 5 is in the
+  // 1,024-token tier with Opus 4.8 and Sonnet 4.6; Opus 5 and the
+  // Fable/Mythos line are the 512 tier. Source: Anthropic prompt-caching
+  // docs, 2026-10-03.
+  'claude-sonnet-5': 1_024,
   'claude-haiku-4-5-20251001': 4_096,
 }
 /**

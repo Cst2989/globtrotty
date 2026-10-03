@@ -11,10 +11,10 @@ describe('estimateMicros', () => {
     'prices input at the 1h cache-WRITE rate, not list — every driver call writes '
     + 'system+tools at that TTL, so that is the worst case, not list price',
     () => {
-      // driver: sonnet-5 at 3 micros/input-token * 2 (cacheWrite1hMult) = 6/token,
-      // 15/output-token, maxTokens 4000.
-      // 1000 input => 6000, plus 4000 * 15 = 60000 => 66000.
-      expect(estimateMicros(SEATS.driver, 1000)).toBe(66_000n)
+      // driver: sonnet-5 at 2 micros/input-token * 2 (cacheWrite1hMult) = 4/token,
+      // 10/output-token, maxTokens 4000 (fix round 1: $2/$10, docs/backlog-plan.md:345).
+      // 1000 input => 4000, plus 4000 * 10 = 40000 => 44000.
+      expect(estimateMicros(SEATS.driver, 1000)).toBe(44_000n)
     },
   )
 

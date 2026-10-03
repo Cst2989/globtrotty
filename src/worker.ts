@@ -431,7 +431,7 @@ async function loop(
         return
       case 'park':
         // NOT the same gap as the AgentStep 'park' below, which is now
-        // implemented and is the path `ask_user` uses. decideNext returns this
+        // implemented and is the path `offer_choices` uses. decideNext returns this
         // only for a PENDING USER MESSAGE that needs answering mid-turn, which
         // nothing in this plan wires. Kept as a throw rather than a silent
         // fall-through so the plan that wires it must replace real behaviour

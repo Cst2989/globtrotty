@@ -114,8 +114,16 @@ describe('cacheableSystem', () => {
 
 describe('expectsCacheReads', () => {
   it('is per model, and pins Opus 5 at 512 on both sides of the boundary', () => {
-    expect(expectsCacheReads(SEATS.driver, 511)).toBe(false)
-    expect(expectsCacheReads(SEATS.driver, 512)).toBe(true)
+    expect(expectsCacheReads(SEATS.reviewer, 511)).toBe(false)
+    expect(expectsCacheReads(SEATS.reviewer, 512)).toBe(true)
+  })
+
+  // Fix round 1: the driver's seat is Sonnet 5, not Opus 5 — and Sonnet 5 is in
+  // the 1,024-token cache-minimum tier, not Opus 5's 512 (Anthropic
+  // prompt-caching docs, 2026-10-03; src/model/cache.ts's MIN_CACHEABLE_TOKENS).
+  it('pins Sonnet 5 (the driver) at 1,024 on both sides of the boundary', () => {
+    expect(expectsCacheReads(SEATS.driver, 1_023)).toBe(false)
+    expect(expectsCacheReads(SEATS.driver, 1_024)).toBe(true)
   })
 
   it('pins Haiku 4.5 at 4096 on both sides — the cheap seats barely cache at all', () => {
