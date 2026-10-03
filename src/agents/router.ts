@@ -14,7 +14,7 @@ import {
   askJev, choiceQ, noulQ, type JevAnswer, type JevDeps, type JevQuestion, type JevRequest, type JevResponse,
 } from '../jev/client.js'
 import { recordJevCall } from '../jev/record.js'
-import { readNewestMessage, readLatestResults } from '../repo/messages.js'
+import { readNewestMessage, readLatestResults, readLatestChoices } from '../repo/messages.js'
 import { rehydrate } from '../repo/toolResults.js'
 import { readLastOrigin } from '../repo/conversations.js'
 import { loadNotebook } from '../repo/notebook.js'
@@ -203,6 +203,17 @@ export function makeRouter(deps: IntakeDeps): Agent {
     if (newest && newest.role === 'action') {
       const action = parseAction(newest.content)
       if (action?.action === 'choice') {
+        // Fix round 1 (Important): `ActionPayload`'s own regex only proves `questionId`/
+        // `optionId` are id-SHAPED, never that they were actually offered — a stale card re-sent
+        // after a later choice card replaced it, or a forged id, must not reach `runIntakeTurn`
+        // at confidence 1. Checked BEFORE any Jev call, so a refusal here costs nothing.
+        const latestChoices = await readLatestChoices(sql, ctx.conversationId, ctx.userId)
+        const offered = latestChoices !== null
+          && latestChoices.questionId === action.questionId
+          && latestChoices.options.some((o) => o.id === action.optionId)
+        if (!offered) {
+          return { kind: 'park', message: 'That option is no longer available. Tell me in your own words.', costMicros: 0n }
+        }
         const overrides: Partial<Record<'origin' | 'destination' | 'outbound', string>> = {}
         if (action.questionId === 'origin' || action.questionId === 'destination' || action.questionId === 'outbound') {
           overrides[action.questionId] = action.optionId

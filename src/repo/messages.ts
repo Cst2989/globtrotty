@@ -1,5 +1,5 @@
 import type postgres from 'postgres'
-import { parseResults, type ResultsContent } from '../results.js'
+import { parseResults, parseChoices, type ResultsContent, type ChoicesContent } from '../results.js'
 
 export type StoredMessageRow = { role: 'user' | 'agent' | 'action' | 'results' | 'choices'; content: string }
 
@@ -40,4 +40,25 @@ export async function readLatestResults(
      limit 1`
   const row = rows[0]
   return row ? parseResults(row.content) : null
+}
+
+/**
+ * The newest `choices` row's own content for this conversation — fix round 1 (Important):
+ * `makeRouter`'s `choice` dispatch (src/agents/router.ts) must check her click against what was
+ * ACTUALLY offered, never trust `ActionPayload`'s `questionId`/`optionId` on their own (both are
+ * just id-shaped strings the client sent; nothing upstream of this read proves they came from a
+ * card this office actually rendered). `null` when she has no choice card at all, or the newest
+ * one fails `parseChoices` (a garbled write — never something our own writer produces), either of
+ * which `makeRouter` treats as "nothing was offered", same as a genuine mismatch.
+ */
+export async function readLatestChoices(
+  sql: postgres.Sql, conversationId: string, userId: string,
+): Promise<ChoicesContent | null> {
+  const rows = await sql<{ content: string }[]>`
+    select content from messages
+     where conversation_id = ${conversationId} and user_id = ${userId} and role = 'choices'
+     order by created_at desc, id desc
+     limit 1`
+  const row = rows[0]
+  return row ? parseChoices(row.content) : null
 }

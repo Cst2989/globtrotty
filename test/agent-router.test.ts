@@ -8,7 +8,7 @@ import { LogNotifier } from '../src/notify.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
 import { money } from '../src/money.js'
 import type { SupplierItem } from '../src/supplier/types.js'
-import type { ResultsContent } from '../src/results.js'
+import type { ResultsContent, ChoicesContent } from '../src/results.js'
 import type { ActionPayload } from '../src/actions.js'
 
 type Seeded = { userId: string; conversationId: string; turnId: string }
@@ -27,7 +27,7 @@ async function seedConversation(sql: postgres.Sql, n: string, desk: 'front' | 'p
  * explicitly, the same way src/handler.ts's own `submitAction` orders a userNote ahead of its
  * action row. */
 async function insertMessage(
-  sql: postgres.Sql, s: Seeded, role: 'user' | 'results' | 'action', content: string, clock = false,
+  sql: postgres.Sql, s: Seeded, role: 'user' | 'results' | 'choices' | 'action', content: string, clock = false,
 ) {
   if (clock) {
     await sql`insert into messages (conversation_id, user_id, role, content, created_at)
@@ -192,6 +192,11 @@ describeDb('makeRouter', () => {
       const s = await seedConversation(sql, '04')
       const original = 'a week somewhere, not sure where from or to'
       await insertMessage(sql, s, 'user', original, true)
+      const choices: ChoicesContent = {
+        questionId: 'origin', question: 'Which city are you flying from?',
+        options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
+      }
+      await insertMessage(sql, s, 'choices', JSON.stringify(choices), true)
       const action: ActionPayload = { action: 'choice', questionId: 'origin', optionId: 'BCN' }
       await insertMessage(sql, s, 'action', JSON.stringify(action), true)
 
@@ -225,6 +230,64 @@ describeDb('makeRouter', () => {
 
       const calls = await sql`select seat from model_calls where conversation_id = ${s.conversationId}`
       expect(calls.map((r) => r.seat)).toEqual(['intake'])
+    })
+  })
+
+  it('fix round 1: a choice action is refused when it was never actually offered — no Jev call, no spend', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '07')
+      const original = 'a week somewhere, not sure where from or to'
+      await insertMessage(sql, s, 'user', original, true)
+      // The office only ever offered an `origin` card with BCN/MAD — a forged action naming a
+      // DIFFERENT questionId (and an optionId that was never one of the offered ids either) must
+      // not be trusted at face value, however id-shaped `ActionPayload`'s own regex lets it be.
+      const choices: ChoicesContent = {
+        questionId: 'origin', question: 'Which city are you flying from?',
+        options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
+      }
+      await insertMessage(sql, s, 'choices', JSON.stringify(choices), true)
+      const forged: ActionPayload = { action: 'choice', questionId: 'outbound', optionId: 'BCN' }
+      await insertMessage(sql, s, 'action', JSON.stringify(forged), true)
+
+      const fetchImpl = vi.fn()
+      const create = vi.fn()
+      const flights = new MockSupplier({ kind: 'flight' })
+      const searchSpy = vi.spyOn(flights, 'search')
+
+      const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, original))
+
+      expect(step).toEqual({ kind: 'park', message: 'That option is no longer available. Tell me in your own words.', costMicros: 0n })
+      expect(fetchImpl).not.toHaveBeenCalled()
+      expect(create).not.toHaveBeenCalled()
+      expect(searchSpy).not.toHaveBeenCalled()
+      const calls = await sql`select seat from model_calls where conversation_id = ${s.conversationId}`
+      expect(calls).toHaveLength(0)
+      const [c] = await sql`select spend_usd_micros from conversations where id = ${s.conversationId}`
+      expect(BigInt(c!.spend_usd_micros as string)).toBe(0n)
+    })
+  })
+
+  it('fix round 1: a right questionId but an optionId never offered is refused too', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '08')
+      const original = 'a week somewhere, not sure where from or to'
+      await insertMessage(sql, s, 'user', original, true)
+      const choices: ChoicesContent = {
+        questionId: 'origin', question: 'Which city are you flying from?',
+        options: [{ id: 'BCN', label: 'Barcelona' }, { id: 'MAD', label: 'Madrid' }],
+      }
+      await insertMessage(sql, s, 'choices', JSON.stringify(choices), true)
+      const forged: ActionPayload = { action: 'choice', questionId: 'origin', optionId: 'LIS' }
+      await insertMessage(sql, s, 'action', JSON.stringify(forged), true)
+
+      const fetchImpl = vi.fn()
+      const create = vi.fn()
+      const flights = new MockSupplier({ kind: 'flight' })
+
+      const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, original))
+
+      expect(step).toEqual({ kind: 'park', message: 'That option is no longer available. Tell me in your own words.', costMicros: 0n })
+      expect(fetchImpl).not.toHaveBeenCalled()
     })
   })
 

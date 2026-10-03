@@ -54,6 +54,10 @@ const JEV = 'jev-latest'
 export const SEATS: Record<SeatName, Seat> = {
   driver:     seat(SONNET, 'medium', 4_000, 'driver@4'),
   reviewer:   seat(OPUS,  'high', 8_000,  'reviewer@1'),
+  // Retired (plan 5 Task 6 fix round 1): src/agents/router.ts's Jev classification replaced
+  // this seat on the live routing path for every turn. Left declared because model_calls
+  // history still references it, and src/monitor/drift.ts / test/driver.live.test.ts still
+  // exercise it as a drift canary.
   front_desk: seat(HAIKU, null,   1_024,  'front_desk@1'),
   scout:      seat(HAIKU, null,   2_048,  'scout@1'),
   titler:     seat(HAIKU, null,   256,    'titler@1'),
