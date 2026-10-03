@@ -243,12 +243,83 @@ describeDb('handleChoose', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
+      // M7: the GATE sentence specifically — a reviewer `Revise:` verdict gets its own, below.
       expect(step.message).toBe('That option no longer passes our checks (price moved or expired). Pick another.')
       expect(step.attachments).toBeUndefined()
       expect(create).not.toHaveBeenCalled()
 
       const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
       expect(proposals).toHaveLength(0)
+    })
+  })
+
+  // M7: this used to share the gate's "price moved or expired" sentence, which is a different
+  // thing and tells her to do the wrong thing about it. `rejectionMessage` reads only the
+  // `Revise:` prefix `runProposalPath` itself writes, never the reviewer's own prose.
+  it('a reviewer Revise verdict gets its own rejection sentence, not the gate\'s', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '08')
+      const flightSupplier = new MockSupplier({ kind: 'flight', now: () => NOW })
+      const flightItems = await flightSupplier.search(flightParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: flightParams, items: flightItems,
+      })
+
+      // A rejection with rounds left: `runProposalPath` returns `Revise: ...` and saves no row.
+      const create = vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: JSON.stringify({ approved: false, issues: ['the layover is too tight'] }) }],
+        stop_reason: 'end_turn', model: 'claude-opus-5', _request_id: 'r', usage,
+      })
+      const step = await handleChoose(
+        makeDeps(sql, create, new MockSupplier({ kind: 'hotel', now: () => NOW })),
+        ctx(s), { kind: 'flight', sourceId: flightItems[0]!.sourceId },
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('Our reviewer was not happy with that combination. Pick another option.')
+      // Never the reviewer's own words.
+      expect(step.message).not.toContain('layover')
+      expect(step.attachments).toBeUndefined()
+      const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
+      expect(proposals).toHaveLength(0)
+    })
+  })
+
+  // M1: a zero-item hotel search still said "Here are hotels in Tokyo for 20 Nov to 6 Dec." and
+  // attached a `results` row whose `sourceIds` was empty — `recordResults` short-circuits on an
+  // empty list, so the row named a corpus that was never written, and it rendered as an empty
+  // list with filter chips over it.
+  it('a hotel search that returns nothing gets its own reply and no attachment', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '09')
+      const flightSupplier = new MockSupplier({ kind: 'flight', now: () => NOW })
+      const flightItems = await flightSupplier.search(flightParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, params: flightParams, items: flightItems,
+      })
+
+      const create = vi.fn().mockResolvedValue(approve())
+      const emptyHotels = new MockSupplier({ kind: 'hotel', now: () => NOW, count: 0 })
+      const step = await handleChoose(
+        makeDeps(sql, create, emptyHotels), ctx(s), { kind: 'flight', sourceId: flightItems[0]!.sourceId },
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe(
+        'I could not find hotels in Tokyo for those dates. Tell me a different area or dates.',
+      )
+      expect(step.attachments).toBeUndefined()
+      // The flight proposal is still accepted — only the hotel half came back empty.
+      const saved = await loadNewestProposalForTurn(sql, s.turnId)
+      const [proposal] = await sql<{ decision: string | null }[]>`
+        select decision from proposals where id = ${saved!.id}`
+      expect(proposal!.decision).toBe('accept')
+      // And no hotel rows were written, so nothing can render an empty list over them.
+      const hotelRows = await sql`
+        select 1 from tool_results where conversation_id = ${s.conversationId} and kind = 'hotel'`
+      expect(hotelRows).toHaveLength(0)
     })
   })
 

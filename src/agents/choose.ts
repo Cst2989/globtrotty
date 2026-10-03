@@ -38,12 +38,25 @@ import { isFlight, isHotel, type HotelSearch, type SupplierItem } from '../suppl
  * job (telling the router which handler to call) by the time it reaches this one. */
 export type ChooseAction = { kind: 'flight' | 'hotel'; sourceId: string }
 
-/** Returned whenever `runProposalPath` rejected (a gate fault, or a reviewer verdict that still
- * has rounds left and so saved no row at all — see that function's own doc comment). Fixed text,
- * same trust-boundary instinct as every other reply here: never the gate's or reviewer's own
- * prose, which already reached the model's context in the driver's own flow but has no business
- * reaching HER directly from a card press. */
-const REJECTED_MESSAGE = 'That option no longer passes our checks (price moved or expired). Pick another.'
+/**
+ * The two reasons `runProposalPath` can reject, each with its own fixed sentence (M7: one
+ * message said "price moved or expired" even for a reviewer `Revise:` verdict, which is a
+ * different thing entirely and tells her to do the wrong thing about it).
+ *
+ * Still fixed text, same trust-boundary instinct as every other reply here: never the gate's or
+ * reviewer's own prose, which already reaches the model's context in the driver's flow but has
+ * no business reaching HER directly from a card press. `rejectionMessage` reads only the
+ * PREFIX `runProposalPath` itself writes, never any of the text after it.
+ */
+const GATE_REJECTED_MESSAGE = 'That option no longer passes our checks (price moved or expired). Pick another.'
+const REVIEW_REJECTED_MESSAGE = 'Our reviewer was not happy with that combination. Pick another option.'
+
+/** `runProposalPath` returns `Revise: ...` for a reviewer verdict with rounds left, and
+ * `The proposal was rejected. Fix exactly these...` for a gate fault. Those two prefixes are
+ * ours, written by that function; anything else is treated as the gate case. */
+function rejectionMessage(pathText: string): string {
+  return pathText.startsWith('Revise:') ? REVIEW_REJECTED_MESSAGE : GATE_REJECTED_MESSAGE
+}
 
 /**
  * Returned when `runProposalPath` itself THREW rather than returning a verdict — the final
@@ -54,7 +67,8 @@ const REJECTED_MESSAGE = 'That option no longer passes our checks (price moved o
  * the driver's tool path fixed with a `finally` (src/worker.ts); the `choose` path had no
  * equivalent, so the fail arm below reports `spent.micros` on `recordedMicros`.
  *
- * Fixed text, same reason as `REJECTED_MESSAGE`: never the thrown error's own message.
+ * Fixed text, same reason as the two rejection sentences above: never the thrown error's own
+ * message.
  */
 const PATH_FAILED_MESSAGE = 'I could not finish checking that option just now. Please try again in a moment.'
 
@@ -114,8 +128,9 @@ async function handleChooseFlight(
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
   const spent = { micros: 0n }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-flight')
+  let pathText: string
   try {
-    await runProposalPath(deps, ctx, spent, {
+    pathText = await runProposalPath(deps, ctx, spent, {
       refs: [{ sourceId, quantity: 1, slot: 'flight' }], notebook, round, parentProposalId: null,
     })
   } catch {
@@ -133,7 +148,7 @@ async function handleChooseFlight(
   const saved = await loadNewestProposalForTurn(sql, ctx.turnId)
   if (!saved) {
     return {
-      kind: 'park', message: REJECTED_MESSAGE, costMicros: 0n,
+      kind: 'park', message: rejectionMessage(pathText), costMicros: 0n,
       // Already debited by `reviewOffer`'s own reserve/reconcile inside
       // `runProposalPath` — reported, never re-spent. See that function's
       // own doc comment on `spent`.
@@ -195,6 +210,21 @@ async function handleChooseFlight(
     await recordResults(sql, {
       conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
     })
+
+    // M1: a zero-item search used to reply "Here are hotels in Tokyo for 20 Nov to 6 Dec." with
+    // a `results` attachment whose `sourceIds` was empty — `recordResults` short-circuits on an
+    // empty list, so the row named a corpus that was never written, and it rendered as an empty
+    // list with filter chips over it. No attachment and its own sentence instead; the flight is
+    // still accepted, so this is a `park`, not a `fail`.
+    if (items.length === 0) {
+      return {
+        kind: 'park',
+        message: `I could not find hotels in ${cityLabel(destinationCode)} for those dates. `
+          + 'Tell me a different area or dates.',
+        costMicros: 0n,
+        recordedMicros: spent.micros,
+      }
+    }
 
     return {
       kind: 'park',
@@ -272,8 +302,9 @@ async function handleChooseHotel(
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
   const spent = { micros: 0n }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-hotel')
+  let pathText: string
   try {
-    await runProposalPath(deps, ctx, spent, {
+    pathText = await runProposalPath(deps, ctx, spent, {
       refs: [
         { sourceId: flightSourceId, quantity: 1, slot: 'flight' },
         { sourceId, quantity: 1, slot: 'stay' },
@@ -288,7 +319,7 @@ async function handleChooseHotel(
   const saved = await loadNewestProposalForTurn(sql, ctx.turnId)
   if (!saved) {
     return {
-      kind: 'park', message: REJECTED_MESSAGE, costMicros: 0n,
+      kind: 'park', message: rejectionMessage(pathText), costMicros: 0n,
       recordedMicros: spent.micros,
     }
   }
