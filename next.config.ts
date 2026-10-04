@@ -19,9 +19,11 @@ if (!projectUrl || !anonKey) {
   )
 }
 
-const csp = cspFor(projectUrl)
+const csp = cspFor(projectUrl, { dev: process.env.NODE_ENV === 'development' })
 
 const nextConfig: NextConfig = {
+  // `next dev` otherwise writes AGENTS.md and CLAUDE.md into the repo root on every start.
+  agentRules: false,
   // Plan 4a, Task 7. `src/` (and `web/session.ts`) write relative imports
   // with an explicit `.js` extension pointing at sibling `.ts` files —
   // correct, and required, under `tsconfig.harness.json`'s `NodeNext`

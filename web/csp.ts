@@ -33,16 +33,23 @@
 // through `next.config.ts` and verified against the Netlify runtime's output,
 // which the plan explicitly time-boxes (fifteen minutes) and defers to the
 // Task 11 backlog rather than have Task 6 chase it. Revisit there.
-export function cspFor(projectUrl: string): string {
+/**
+ * `dev` (next dev only, never production): webpack's HMR runtime evaluates code and talks over a
+ * local websocket, which the production policy rightly forbids. Production builds pass `false`.
+ */
+export function cspFor(projectUrl: string, opts: { dev?: boolean } = {}): string {
   const { host } = new URL(projectUrl)
+  const dev = opts.dev === true
 
   const directives = [
     "default-src 'self'",
     'img-src \'self\' data: https://images.kiwi.com https://lh3.googleusercontent.com'
       + ' https://*.gstatic.com https://server.arcgisonline.com',
     "style-src 'self' 'unsafe-inline'",
-    "script-src 'self' 'unsafe-inline'",
-    `connect-src 'self' https://${host} wss://${host}`,
+    dev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self' 'unsafe-inline'",
+    dev
+      ? `connect-src 'self' https://${host} wss://${host} ws://localhost:* http://localhost:*`
+      : `connect-src 'self' https://${host} wss://${host}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
