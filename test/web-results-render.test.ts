@@ -17,7 +17,7 @@ import {
 import {
   HotelMap,
   TILE_ATTRIBUTION,
-  TILE_SUBDOMAINS,
+  TILE_MAX_ZOOM,
   TILE_URL,
   escapeHtml,
   pricePillHtml,
@@ -624,9 +624,18 @@ describe('PinnedSummary', () => {
    * the screen whose whole job is to say what she has decided.
    */
   it('says the trip the way a traveller says it', () => {
+    // The carrier joins the line only when it is not already the name on the row above. A Kiwi
+    // flight's own `name` IS its carrier, and the line read "China Eastern · ... · China
+    // Eastern" until the screenshot caught it.
     expect(flightLine(items[0]!)).toEqual([
       'Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec', 'China Eastern',
     ])
+    expect(flightLine({ ...items[0]!, name: 'China Eastern' }))
+      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
+    // And loosely, because the two strings come from different places: the supplier's own and
+    // this office's airline table.
+    expect(flightLine({ ...items[0]!, name: 'China Eastern Airlines' }))
+      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
     const html = renderToStaticMarkup(
       createElement(PinnedSummary, {
         items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
@@ -824,7 +833,14 @@ describe('ResultsPane', () => {
     expect(html).not.toContain('assumption-chip')
   })
 
-  it('shows the pinned summary only once something is chosen', () => {
+  /*
+   * Section 3, found by looking at the picture. Between choosing a flight and choosing a stay the
+   * proposal holds ONE item, and the summary and the `Chosen flight` card then said the same
+   * thing twice, one above the other, over a "Total" that was just the flight's own price. The
+   * summary is for a TRIP; until there is a trip, the chosen-flight card is the whole of what
+   * there is to pin.
+   */
+  it('shows the pinned summary only once the trip has both halves', () => {
     const noneChosen = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
@@ -833,9 +849,24 @@ describe('ResultsPane', () => {
     )
     expect(noneChosen).not.toContain('pinned-summary')
 
-    const chosen = renderToStaticMarkup(
+    const flightOnly = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: proposal(), now: NOW, pending: false, error: null,
+        onChoose: () => {}, onGetLinks: () => {},
+      }),
+    )
+    expect(flightOnly).not.toContain('pinned-summary')
+    expect(flightOnly).toContain('Chosen flight')
+
+    const wholeTrip = proposal()
+    wholeTrip.items = [...wholeTrip.items, {
+      slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Hotel Gracery', priceMinor: '430000',
+      currency: 'EUR', fetchedAt: NOW.toISOString(), route: null, outbound: '2026-11-20',
+      inbound: '2026-12-06', airline: null, stars: 4, nights: 16, ttlSeconds: 86_400,
+    }]
+    const chosen = renderToStaticMarkup(
+      createElement(ResultsPane, {
+        results: [resultsView()], proposal: wholeTrip, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
@@ -1392,17 +1423,32 @@ describe('HotelMap', () => {
   })
 
   /*
-   * Polish pass, section 1. OSM's own tile servers answered this deployment with a 403 and an
-   * "Access blocked" picture on every tile, so the basemap is CARTO's dark one. The URL is
-   * pinned here and the ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP does not
-   * admit fails exactly as silently as a blocked one.
+   * Polish pass, section 1, after TWO basemaps failed this page.
+   *
+   * OSM's own servers answered an anonymous deployment with a 403 and an "Access blocked"
+   * picture on every tile. CARTO's CDN then answered every request with HTTP 200 and a
+   * 2,513-byte tile reading "API KEY REQUIRED" — a broken map no status check can tell from a
+   * working one, caught only by looking at the screenshot. Esri's Dark Gray Canvas needs no key.
+   *
+   * The URL is pinned here and the ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP
+   * does not admit fails exactly as silently as a blocked one.
    */
-  it("draws its tiles from CARTO's dark basemap, not from OSM", () => {
-    expect(TILE_URL).toBe('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png')
+  it('draws its tiles from a basemap that needs no key', () => {
+    expect(TILE_URL).toBe(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base'
+      + '/MapServer/tile/{z}/{y}/{x}',
+    )
     expect(TILE_URL).not.toContain('openstreetmap.org')
-    expect(TILE_SUBDOMAINS).toBe('abcd')
-    // CARTO's terms and OSM's licence both want naming; neither is optional.
-    expect(TILE_ATTRIBUTION).toBe('&copy; OpenStreetMap contributors &copy; CARTO')
+    expect(TILE_URL).not.toContain('cartocdn.com')
+    // Esri's REST tile path is row before column. Getting this the usual way round produces a
+    // map of somewhere else entirely, which renders perfectly and is completely wrong.
+    expect(TILE_URL.endsWith('{z}/{y}/{x}')).toBe(true)
+    // One host, so no subdomain sharding and an exact CSP origin rather than a wildcard.
+    expect(TILE_URL).not.toContain('{s}')
+    // Esri's terms want naming, and it is not optional.
+    expect(TILE_ATTRIBUTION).toBe('Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ')
+    // This layer's own ceiling: past it the server returns nothing at all.
+    expect(TILE_MAX_ZOOM).toBe(16)
   })
 
   it('builds a price pill, and marks the active one', () => {

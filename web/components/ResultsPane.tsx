@@ -428,6 +428,14 @@ export function ResultsPane(
   const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? pendingFlight
   const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? pendingHotel
   const hasChosen = proposal !== null && proposal.items.length > 0
+  /*
+   * Section 3 again, found by looking at the picture. Between choosing a flight and choosing a
+   * stay, the proposal holds ONE item — and the pinned summary and the `Chosen flight` card then
+   * said the same thing twice, one above the other, with a "Total" that was just the flight's own
+   * price. The summary is for a TRIP; until there is a trip, the chosen-flight card is the whole
+   * of what there is to pin.
+   */
+  const hasStay = proposal?.items.some((i) => i.kind === 'hotel') ?? false
   // Every OTHER card's Select goes dead while a choice is in flight: one press is one
   // instruction, and a second one would be refused with a 409 anyway (`submitAction`).
   const choosing = pendingChoice !== null
@@ -457,7 +465,7 @@ export function ResultsPane(
 
   return (
     <div className="results-pane">
-      {hasChosen ? (
+      {hasChosen && hasStay ? (
         <PinnedSummary
           items={proposal!.items}
           totalMinor={proposal!.totalMinor}

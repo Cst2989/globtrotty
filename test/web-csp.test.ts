@@ -25,18 +25,19 @@ describe('cspFor: img-src is pinned exactly', () => {
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
     expect(imgSrc).toBe(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com')
+      + ' https://*.gstatic.com https://server.arcgisonline.com')
   })
 
   it('names each host, never a scheme-wide source, and wildcards only two subdomains', () => {
     const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
     expect(imgSrc).not.toMatch(/https:(\s|$)/)
-    // Two SUBDOMAIN wildcards, each on a single registrable domain and each unavoidable: Google
-    // numbers its thumbnail hosts (`encrypted-tbn0`, ...) and CARTO serves tiles from a/b/c/d.
-    // Nothing else in the directive carries one.
-    expect(imgSrc.match(/\*/g)).toHaveLength(2)
+    // ONE subdomain wildcard, and it is unavoidable: Google numbers its thumbnail hosts
+    // (`encrypted-tbn0`, ...) with no stable single name to pin. The tile host is exact — the
+    // second wildcard went with CARTO, whose keyless CDN turned out to serve an "API KEY
+    // REQUIRED" watermark rather than a map.
+    expect(imgSrc.match(/\*/g)).toHaveLength(1)
     expect(imgSrc).toContain('https://*.gstatic.com')
-    expect(imgSrc).toContain('https://*.basemaps.cartocdn.com')
+    expect(imgSrc).toContain('https://server.arcgisonline.com')
   })
 
   it('does NOT widen script-src or style-src for the map: Leaflet is bundled', () => {
@@ -83,6 +84,6 @@ describe('next.config.ts headers(): the real config object', () => {
     expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
     expect(csp!.split('; ')).toContain(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com')
+      + ' https://*.gstatic.com https://server.arcgisonline.com')
   })
 })

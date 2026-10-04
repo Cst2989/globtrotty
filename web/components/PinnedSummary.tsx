@@ -55,8 +55,20 @@ export function flightLine(item: ProposalItemLite): string[] {
       ? `${weekdayDayMonth(item.outbound)} to ${weekdayDayMonth(item.inbound)}`
       : `${weekdayDayMonth(item.outbound)}, one way`)
   }
-  if (item.airline) parts.push(item.airline)
+  // Not when it is already the name on the row above. A Kiwi flight's `name` IS its carrier, so
+  // this line read "China Eastern · Barcelona BCN → Tokyo NRT · ... · China Eastern" — which the
+  // screenshot caught and no test would have. Compared loosely, because the two come from
+  // different places: the supplier's own string and this office's airline table, which may say
+  // "China Eastern Airlines" for the same carrier.
+  if (item.airline && !saysTheSame(item.name, item.airline)) parts.push(item.airline)
   return parts
+}
+
+/** Whether one of these two names contains the other, ignoring case and spacing. */
+function saysTheSame(a: string, b: string): boolean {
+  const norm = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim()
+  const [x, y] = [norm(a), norm(b)]
+  return x.length > 0 && y.length > 0 && (x.includes(y) || y.includes(x))
 }
 
 /** The stay's own line: how long, for a stay whose name and class are already on the row above. */

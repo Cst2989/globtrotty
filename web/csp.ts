@@ -9,13 +9,13 @@
 //    UI pass 2, C). Self-hosting ~1000 carrier logos was the alternative; it
 //    trades a 24-hour-stale logo for a megabyte of binaries in the repo and a
 //    build step that has to notice a rebrand.
-//  - `https://*.basemaps.cartocdn.com` — the map tiles (hotels pass, section
-//    5). OSM's own tile servers answer this deployment with a 403 and an
-//    "Access blocked" tile: their usage policy wants a named, contactable
-//    application, so the tiles come from CARTO's basemap CDN, which serves
-//    them from `a.` through `d.` — a subdomain wildcard for the same reason
-//    gstatic's is. Leaflet itself is bundled from node_modules, so nothing but
-//    the tiles leaves this origin.
+//  - `https://server.arcgisonline.com` — the map tiles (hotels pass, section
+//    5). An EXACT origin, no wildcard: Esri serves its Dark Gray Canvas from
+//    one host and needs no key. Two basemaps failed before it — OSM's own
+//    servers 403 an anonymous deployment, and CARTO's CDN answers 200 with a
+//    tile reading "API KEY REQUIRED" — so this directive has been wrong twice
+//    in a way only a screenshot could catch. Leaflet itself is bundled from
+//    node_modules, so nothing but the tiles leaves this origin.
 //  - `https://lh3.googleusercontent.com` and `https://*.gstatic.com` — the
 //    hotel photographs (hotels pass, section 3). These are exactly the hosts
 //    `allowedImageUrl` (src/supplier/searchapi.ts) admits at the adapter
@@ -25,8 +25,8 @@
 // Each is an IMAGE origin only, which can neither run script nor read anything
 // out of this document. The two subdomain wildcards are unavoidable: Google
 // serves its thumbnails from numbered hosts (`encrypted-tbn0`,
-// `encrypted-tbn1`, ...) and CARTO serves tiles from `a` through `d`, with no
-// stable single name to pin in either case.
+// `encrypted-tbn1`, ...), with no stable single name to pin. The tile host is
+// not one of them: it is exact.
 //
 // `'unsafe-inline'` on `script-src` is a deliberate, recorded compromise, not
 // an oversight: Next's nonce-based strict CSP needs a middleware nonce wired
@@ -39,7 +39,7 @@ export function cspFor(projectUrl: string): string {
   const directives = [
     "default-src 'self'",
     'img-src \'self\' data: https://images.kiwi.com https://lh3.googleusercontent.com'
-      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com',
+      + ' https://*.gstatic.com https://server.arcgisonline.com',
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self' 'unsafe-inline'",
     `connect-src 'self' https://${host} wss://${host}`,

@@ -23,18 +23,29 @@ export type HotelMapProps = {
 }
 
 /**
- * CARTO's dark basemap, and the attribution both CARTO and OpenStreetMap's licence require; the
- * origin is pinned in web/csp.ts.
+ * Esri's Dark Gray Canvas, and the attribution its terms require; the origin is pinned in
+ * web/csp.ts.
  *
- * OSM's own tile servers answer this app with a 403 and an "Access blocked" tile: their usage
- * policy is written for a named, contactable application, not for an anonymous deployment, and
- * the correct fix is a CDN that exists to serve applications rather than arguing with it. CARTO's
- * dark_all is also the right PICTURE for this page: a light street map under a dark page was a
- * white rectangle shouting beside the list.
+ * Two basemaps have now failed this page, and the screenshot is what caught the second one.
+ * OSM's own tile servers answer an anonymous deployment with a 403 and an "Access blocked" tile,
+ * because their usage policy is written for a named, contactable application. CARTO's
+ * `basemaps.cartocdn.com` then answered every request with HTTP 200 and a 2,513-byte tile
+ * reading "API KEY REQUIRED" — a broken map that a status check cannot tell from a working one,
+ * which is exactly why section 6 of this pass says to LOOK at the picture.
+ *
+ * Esri serves this layer without a key and without a registration, and it is the right picture
+ * as well: a dark grey canvas designed to be a background for data, under a dark page, with the
+ * price pills as the only bright thing on it. Its own ceiling is zoom 16, which is street level
+ * and well past anything this map opens at.
+ *
+ * `{s}` is absent on purpose — one host, no subdomain sharding, which also keeps the CSP to a
+ * single exact origin instead of a wildcard. Note the axis order: Esri's REST tile path is
+ * `{z}/{y}/{x}`, row before column, not the `{z}/{x}/{y}` every slippy-map URL uses.
  */
-export const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-export const TILE_SUBDOMAINS = 'abcd'
-export const TILE_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; CARTO'
+export const TILE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+export const TILE_MAX_ZOOM = 16
+export const TILE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
 
 /**
  * `&`, `<`, `>`, `"` and `'` as entities.
@@ -115,11 +126,7 @@ export function HotelMap(
         attributionControl: true,
       })
       mapRef.current = map
-      L.tileLayer(TILE_URL, {
-        attribution: TILE_ATTRIBUTION,
-        subdomains: TILE_SUBDOMAINS,
-        maxZoom: 19,
-      }).addTo(map)
+      L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: TILE_MAX_ZOOM }).addTo(map)
       L.control.zoom({ position: 'bottomright' }).addTo(map)
 
       const points: [number, number][] = []
