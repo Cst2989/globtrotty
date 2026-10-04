@@ -1864,6 +1864,160 @@ select {
 /* ---------- hotel list ---------- */
 
 .flight-list,
+/* ---------- the map beside the list (hotels pass, section 5) ---------- */
+
+/*
+ * The bar and the List | Map toggle share a row, with the toggle pushed to the
+ * right: it switches what the whole section shows, so it does not belong among
+ * the controls that narrow it.
+ */
+.filter-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.filter-bar-row .filter-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.view-toggle {
+  flex-shrink: 0;
+}
+
+/*
+ * Airbnb's own split, at the width where both halves are still readable: the
+ * list reads down the left at 55%, the map holds its place on the right at 45%
+ * and stays put while the list scrolls under it. Below that width only one is
+ * on screen, and the toggle picks which.
+ */
+.hotel-split {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hotel-split-list {
+  min-width: 0;
+}
+
+.hotel-split[data-split='true'] {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.hotel-split[data-split='true'] .hotel-split-list {
+  flex: 0 0 55%;
+}
+
+.hotel-split[data-split='true'] .hotel-split-map {
+  flex: 0 0 calc(45% - 1rem);
+  position: sticky;
+  top: 1rem;
+}
+
+.hotel-map {
+  height: 540px;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.hotel-map-loading {
+  display: block;
+}
+
+@media (max-width: 1279px) {
+  .hotel-map {
+    height: 420px;
+  }
+}
+
+/*
+ * A price pill, not a teardrop pin: the number IS the information, and a map of
+ * forty identical markers answers none of the question she is on this screen to
+ * answer. The active one takes the accent so the stay she is hovering in the
+ * list is findable among them.
+ */
+.map-pill {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.map-pill[data-active='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  z-index: 1;
+}
+
+/* The city centre every "3.2 km from centre" on a card is measured from. */
+.map-centre {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+/* Leaflet's own icon wrapper, neutralised: the pill carries its own look. */
+.map-pill-icon,
+.map-centre-icon {
+  background: none;
+  border: none;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* The stay whose pin was just clicked, so the scroll lands somewhere obvious. */
+.hotel-card[data-highlighted='true'] {
+  border-color: var(--accent);
+}
+
+/*
+ * Leaflet ships light-theme chrome; this is the whole of what it takes to make
+ * the attribution and the zoom buttons belong to this page rather than to it.
+ */
+.leaflet-container {
+  background: var(--surface-2);
+  font-family: inherit;
+}
+
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--paper) 80%, transparent) !important;
+  color: var(--ink-3) !important;
+  font-size: 0.68rem;
+}
+
+.leaflet-control-attribution a {
+  color: var(--ink-2) !important;
+}
+
+.leaflet-bar a {
+  background: var(--surface) !important;
+  border-bottom-color: var(--line) !important;
+  color: var(--ink) !important;
+}
+
+.leaflet-bar a:hover {
+  background: var(--surface-2) !important;
+}
+
 /* ---------- verified results (hotels pass, section 7) ---------- */
 
 /*

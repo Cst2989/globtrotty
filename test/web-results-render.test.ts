@@ -10,9 +10,10 @@ import { FlightList } from '../web/components/FlightList.js'
 import { FlightCard, stopsWords, durationWords, timeHM, dayOffset } from '../web/components/FlightCard.js'
 import { HotelList } from '../web/components/HotelList.js'
 import {
-  HotelCard, amenityChips, essentialsLine, locationLine, ratingNumber, ratingWord, transitLine,
-  typeLabel,
+  HotelCard, amenityChips, essentialsLine, locationLine, ratingNumber, ratingWord, stayCardId,
+  transitLine, typeLabel,
 } from '../web/components/HotelCard.js'
+import { HotelMap, escapeHtml, pricePillHtml } from '../web/components/HotelMap.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import {
   FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel, starsLabel,
@@ -662,7 +663,7 @@ function resultsView(overrides: Partial<ResultsView> = {}): ResultsView {
     assumptions: [], filter: undefined, items: [FLIGHT_ITEM],
     fetchedAt: FLIGHT_ITEM.fetchedAt, stale: false,
     cityNames: { BCN: 'Barcelona', HND: 'Tokyo' },
-    verdicts: undefined,
+    verdicts: undefined, centre: null,
     ...overrides,
   }
 }
@@ -1198,5 +1199,83 @@ describe('verified results', () => {
     expect(html).toContain('match-chip')
     expect(html).toContain('Near the centre')
     expect(html).toContain('Well rated')
+  })
+})
+
+/**
+ * Hotels pass, section 5. The map itself is Leaflet's imperative DOM and is not rendered here —
+ * `ResultsPane` loads it through `next/dynamic` with `ssr: false` precisely because it cannot be.
+ * What IS testable is the pure part, and the pure part is the one that builds markup by hand.
+ */
+describe('HotelMap', () => {
+  it('exports the component and its pure pill builder', () => {
+    expect(typeof HotelMap).toBe('function')
+    expect(typeof pricePillHtml).toBe('function')
+  })
+
+  it('builds a price pill, and marks the active one', () => {
+    expect(pricePillHtml('113700', 'EUR', false))
+      .toBe('<span class="map-pill" data-active="false">€1,137.00</span>')
+    expect(pricePillHtml('113700', 'EUR', true)).toContain('data-active="true"')
+  })
+
+  it('escapes its text: no < from a price string survives into the markup', () => {
+    // `divIcon` takes an HTML STRING — the one path in this project with no React escaping on
+    // it. Nothing can put a `<` in a formatted price today; this is the guard for the next
+    // person who puts a NAME on a pill.
+    expect(escapeHtml('<script>alert(1)</script>'))
+      .toBe('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(escapeHtml('a & b "c" \'d\'')).toBe('a &amp; b &quot;c&quot; &#39;d&#39;')
+    // The interpolated half of the pill — everything between the two tags this module itself
+    // wrote — carries no markup of its own.
+    const inner = /<span class="map-pill" data-active="false">(.*)<\/span>$/.exec(
+      pricePillHtml('100', 'EUR', false),
+    )
+    expect(inner).not.toBeNull()
+    expect(inner![1]).not.toContain('<')
+    expect(inner![1]).toBe('€1.00')
+  })
+
+  it('gives every stay a card id a pin can scroll to, with nothing a supplier wrote left in it', () => {
+    expect(stayCardId('tok:abc')).toBe('stay-tok-abc')
+    expect(stayCardId('a"><script>')).toBe('stay-a---script-')
+  })
+})
+
+describe('the hotels list and map split', () => {
+  const PLACED: ResultItemLite = {
+    ...HOTEL_ITEM,
+    hotel: hotelLite({ rating: 4.4, coordinates: { lat: 35.6676, lon: 139.7657 } }),
+  }
+
+  it('renders the list and the List | Map toggle below the split width, and no map', () => {
+    // `useMediaQuery` is false on a first render by construction (there is no viewport in a
+    // static render), so this IS the narrow layout.
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ messageId: 'm2', kind: 'hotels', items: [PLACED], centre: { lat: 35.68, lon: 139.76 } })],
+      proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('List or map')
+    expect(html).toContain('data-split="false"')
+    expect(html).toContain('data-view="list"')
+    expect(html).toContain('hotel-split-list')
+    // The map is mounted only when it is on screen: Leaflet measures its container, and one
+    // built inside a hidden element comes up 0x0.
+    expect(html).not.toContain('hotel-split-map')
+  })
+
+  it('gives each stay card the id a pin scrolls to', () => {
+    const html = renderToStaticMarkup(createElement(HotelCard, {
+      item: PLACED, adults: 2, now: NOW, onChoose: () => {},
+    }))
+    expect(html).toContain(`id="${stayCardId(PLACED.sourceId)}"`)
+  })
+
+  it('marks the card whose pin was picked', () => {
+    const html = renderToStaticMarkup(createElement(HotelCard, {
+      item: PLACED, adults: 2, now: NOW, highlighted: true, onChoose: () => {},
+    }))
+    expect(html).toContain('data-highlighted="true"')
   })
 })

@@ -20,22 +20,31 @@ import { cspFor } from '../web/csp.js'
 const PROJECT_URL = 'https://fhqsiydgoqmwvihqsbap.supabase.co'
 
 describe('cspFor: img-src is pinned exactly', () => {
-  it('is exactly self, data:, the Kiwi logo host and Google\'s two image hosts, nothing wider', () => {
+  it('is exactly self, data: and the four image hosts this product renders, nothing wider', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
     expect(imgSrc).toBe(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com')
+      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
   })
 
-  it('names each host, never a scheme-wide source, and wildcards only gstatic\'s subdomain', () => {
+  it('names each host, never a scheme-wide source, and wildcards only two subdomains', () => {
     const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
     expect(imgSrc).not.toMatch(/https:(\s|$)/)
-    // The hotels pass's one wildcard, and it is a SUBDOMAIN wildcard on a single registrable
-    // domain — Google numbers these thumbnail hosts (`encrypted-tbn0`, `encrypted-tbn1`, ...)
-    // and there is no stable single name to pin. Nothing else in the directive carries one.
-    expect(imgSrc.match(/\*/g)).toHaveLength(1)
+    // Two SUBDOMAIN wildcards, each on a single registrable domain and each unavoidable: Google
+    // numbers its thumbnail hosts (`encrypted-tbn0`, ...) and OSM serves tiles from a/b/c.
+    // Nothing else in the directive carries one.
+    expect(imgSrc.match(/\*/g)).toHaveLength(2)
     expect(imgSrc).toContain('https://*.gstatic.com')
+    expect(imgSrc).toContain('https://*.tile.openstreetmap.org')
+  })
+
+  it('does NOT widen script-src or style-src for the map: Leaflet is bundled', () => {
+    const directives = cspFor(PROJECT_URL).split('; ')
+    expect(directives).toContain("style-src 'self' 'unsafe-inline'")
+    expect(directives).toContain("script-src 'self' 'unsafe-inline'")
+    expect(cspFor(PROJECT_URL)).not.toContain('unpkg')
+    expect(cspFor(PROJECT_URL)).not.toContain('cdn')
   })
 })
 
@@ -68,6 +77,6 @@ describe('next.config.ts headers(): the real config object', () => {
     expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
     expect(csp!.split('; ')).toContain(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com')
+      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
   })
 })

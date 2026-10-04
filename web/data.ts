@@ -6,7 +6,7 @@ import {
 } from '@/src/results'
 import { maskDisplayName, maskUntrustedText } from '@/src/sanitize'
 import { allowedImageUrl } from '@/src/supplier/searchapi'
-import { CODE_MAP } from '@/src/intake/places'
+import { CODE_MAP, placeByName } from '@/src/intake/places'
 import { airportCity } from '@/src/intake/airports'
 import { airlineName } from '@/src/intake/airlines'
 
@@ -633,6 +633,8 @@ export type ResultItemLite = {
     nearby: { name: string; minutes: number | null; by: string | null }[]
     pricePerNightMinor: string | null
     distanceKm: number | null
+    /** Where it is, for the map (hotels pass, section 5). `null` for a stay the supplier did not place. */
+    coordinates: { lat: number; lon: number } | null
   }
 }
 
@@ -672,6 +674,13 @@ export type ResultsView = {
    * same way, and is shown in the main list rather than hidden.
    */
   verdicts: Record<string, { matches: string[]; issues: string[] }> | undefined
+  /**
+   * The destination city's own centre, for the map's centre ring and its initial bounds (hotels
+   * pass, section 5). Resolved HERE, server-side, for the same reason `cityNames` is:
+   * `src/intake/places.ts` reads `places.json` off disk at import time and the map is a client
+   * component. `null` on a flights row, or for a place the table no longer carries.
+   */
+  centre: { lat: number; lon: number } | null
 }
 
 /**
@@ -824,6 +833,22 @@ function imagesOf(value: unknown): string[] {
     .slice(0, 5)
 }
 
+/**
+ * A `{ lat, lon }` pair inside the real range, or `null`.
+ *
+ * Bounds-checked rather than trusted: this is handed straight to Leaflet as a marker position,
+ * and a latitude of 900 puts a pin somewhere the map cannot show while silently wrecking the
+ * bounds every other pin is fitted inside.
+ */
+function coordinatesOf(value: unknown): { lat: number; lon: number } | null {
+  if (!isRecord(value)) return null
+  const { lat, lon } = value
+  if (typeof lat !== 'number' || typeof lon !== 'number') return null
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null
+  return { lat, lon }
+}
+
 /** `undefined` when `payload` is not a `HotelDetail` (src/supplier/types.ts) this reader recognises. */
 function hotelLite(payload: UnknownRecord): ResultItemLite['hotel'] | undefined {
   if (payload.kind !== 'hotel') return undefined
@@ -858,6 +883,7 @@ function hotelLite(payload: UnknownRecord): ResultItemLite['hotel'] | undefined 
       ? payload.pricePerNightMinor
       : null,
     distanceKm: numberOr(payload.distanceKm, 100_000),
+    coordinates: coordinatesOf(payload.coordinates),
   }
 }
 
@@ -1004,6 +1030,9 @@ export async function loadResults(
       ...freshnessOf(items),
       cityNames: cityNamesFor(r.content),
       verdicts: r.content.verdicts,
+      centre: r.content.kind === 'hotels' && r.content.query.place
+        ? placeByName(r.content.query.place)?.center ?? null
+        : null,
     }
   })
 }

@@ -9,6 +9,10 @@
 //    UI pass 2, C). Self-hosting ~1000 carrier logos was the alternative; it
 //    trades a 24-hour-stale logo for a megabyte of binaries in the repo and a
 //    build step that has to notice a rebrand.
+//  - `https://*.tile.openstreetmap.org` — the map tiles (hotels pass, section
+//    5). OSM serves them from `a.`, `b.` and `c.`, which is a subdomain
+//    wildcard for the same reason gstatic's is. Leaflet itself is bundled from
+//    node_modules, so nothing but the tiles leaves this origin.
 //  - `https://lh3.googleusercontent.com` and `https://*.gstatic.com` — the
 //    hotel photographs (hotels pass, section 3). These are exactly the hosts
 //    `allowedImageUrl` (src/supplier/searchapi.ts) admits at the adapter
@@ -16,10 +20,10 @@
 //    directive is the browser's own backstop behind both.
 //
 // Each is an IMAGE origin only, which can neither run script nor read anything
-// out of this document. The `*.gstatic.com` wildcard is the one subdomain
-// wildcard here and it is unavoidable: Google serves these thumbnails from
-// numbered hosts (`encrypted-tbn0`, `encrypted-tbn1`, ...) with no stable
-// single name to pin.
+// out of this document. The two subdomain wildcards are unavoidable: Google
+// serves its thumbnails from numbered hosts (`encrypted-tbn0`,
+// `encrypted-tbn1`, ...) and OSM serves tiles from `a`/`b`/`c`, with no stable
+// single name to pin in either case.
 //
 // `'unsafe-inline'` on `script-src` is a deliberate, recorded compromise, not
 // an oversight: Next's nonce-based strict CSP needs a middleware nonce wired
@@ -32,7 +36,7 @@ export function cspFor(projectUrl: string): string {
   const directives = [
     "default-src 'self'",
     'img-src \'self\' data: https://images.kiwi.com https://lh3.googleusercontent.com'
-      + ' https://*.gstatic.com',
+      + ' https://*.gstatic.com https://*.tile.openstreetmap.org',
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self' 'unsafe-inline'",
     `connect-src 'self' https://${host} wss://${host}`,

@@ -22,7 +22,22 @@ export type HotelCardProps = {
    * chips. Empty (or absent) for a stay Jev never checked — see `MatchChips`.
    */
   matches?: string[]
+  /** Section 5: this stay's pin was clicked on the map, so the card says which one it is. */
+  highlighted?: boolean
+  /** Hovering a card lights up its pin; `null` on the way out. */
+  onHover?: (sourceId: string | null) => void
   onChoose: (sourceId: string) => void
+}
+
+/**
+ * The DOM id of one stay's card, so a map pin can scroll to it.
+ *
+ * A `sourceId` is supplier-authored and can carry anything; everything outside the id-safe set
+ * becomes `-`, exactly as the view-transition name below does, because an id only has to be
+ * unique in the document and never has to be read back.
+ */
+export function stayCardId(sourceId: string): string {
+  return `stay-${sourceId.replace(/[^A-Za-z0-9_-]/g, '-')}`
 }
 
 /** Same two sentences `FlightCard` puts on a disabled Select, for the same two states. */
@@ -175,7 +190,7 @@ function Stars({ stars }: { stars: number }) {
 export function HotelCard(
   {
     item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
-    onChoose,
+    highlighted = false, onHover, onChoose,
   }: HotelCardProps,
 ) {
   const hotel = item.hotel
@@ -195,9 +210,13 @@ export function HotelCard(
   return (
     <li
       className="hotel-card"
+      id={stayCardId(item.sourceId)}
       data-chosen={chosen}
+      data-highlighted={highlighted ? 'true' : undefined}
       data-expired={item.expired && !updating ? 'true' : undefined}
       data-flip-id={item.sourceId}
+      onMouseEnter={onHover ? () => onHover(item.sourceId) : undefined}
+      onMouseLeave={onHover ? () => onHover(null) : undefined}
       // Pairs this card with ITSELF across the re-render a refreshed row causes — see
       // `FlightCard` for the whole reasoning and for why the name is scrubbed this way.
       style={{ viewTransitionName: `card-${item.sourceId.replace(/[^A-Za-z0-9]/g, '-')}` }}

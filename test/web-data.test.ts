@@ -403,7 +403,7 @@ describe('newestResultItemPerSourceId', () => {
     expect(out[0]!.hotel).toEqual({
       rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26',
       propertyType: 'other', stars: null, reviews: null, images: [], amenities: [],
-      essentials: [], nearby: [], pricePerNightMinor: null, distanceKm: null,
+      essentials: [], nearby: [], pricePerNightMinor: null, distanceKm: null, coordinates: null,
     })
     expect(out[0]!.flight).toBeUndefined()
   })

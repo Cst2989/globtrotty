@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { CaretDown } from '@phosphor-icons/react'
 import { formatMoney, money } from '@/src/money'
@@ -9,6 +10,8 @@ import type { ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMo
 import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
+import { stayCardId } from './HotelCard'
+import { prefersReducedMotion, useMediaQuery, SPLIT_QUERY } from './media'
 import { FilterBar } from './FilterBar'
 import { SortTabs } from './SortTabs'
 import { PinnedSummary } from './PinnedSummary'
@@ -120,6 +123,61 @@ const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
  * its place (hotels pass, section 4), which is the figure a stay is actually compared on.
  */
 const HOTEL_SORTS: Sort[] = ['best', 'cheapest', 'rated']
+
+/**
+ * Loaded only in the browser: Leaflet reads `window` while it evaluates, so a server render of
+ * this component throws. `ssr: false` is the documented way to say that in Next, and the
+ * placeholder is what stands in its place until the chunk lands.
+ */
+const HotelMap = dynamic(() => import('./HotelMap').then((m) => m.HotelMap), {
+  ssr: false,
+  loading: () => <div className="hotel-map hotel-map-loading" aria-hidden="true" />,
+})
+
+/** List or map, below the width where both fit. `list` is the default: it works at every width. */
+export type HotelView = 'list' | 'map'
+
+/**
+ * The segmented List | Map control at the top right of the hotels bar.
+ *
+ * Only rendered below the split width — above it there is nothing to toggle, because both are on
+ * screen. Same markup as `Segmented` in the filter bar (`aria-pressed` buttons in a named
+ * group), spelled here rather than imported because that one is a generic over filter values and
+ * this one switches a view.
+ */
+function ViewToggle({ view, onChange }: { view: HotelView; onChange: (view: HotelView) => void }) {
+  return (
+    <div className="filter-segmented view-toggle" role="group" aria-label="List or map">
+      <button
+        type="button" className="filter-segment"
+        aria-pressed={view === 'list'} onClick={() => onChange('list')}
+      >
+        List
+      </button>
+      <button
+        type="button" className="filter-segment"
+        aria-pressed={view === 'map'} onClick={() => onChange('map')}
+      >
+        Map
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Scrolls a stay's card into view and leaves it marked — what clicking a price pill does.
+ *
+ * `prefersReducedMotion` is read at the moment of the scroll rather than cached: it is a setting
+ * she can change while the page is open, and this is a single DOM call either way.
+ */
+function scrollToStay(sourceId: string) {
+  if (typeof document === 'undefined') return
+  const card = document.getElementById(stayCardId(sourceId))
+  card?.scrollIntoView({
+    behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    block: 'center',
+  })
+}
 
 /**
  * Hotels pass, section 7. Splits a filtered, sorted list into the items that match what she asked
@@ -329,6 +387,14 @@ export function ResultsPane(
   const flightMatchChips = matchesBySourceId(newestFlights?.verdicts)
   const hotelMatchChips = matchesBySourceId(newestHotels?.verdicts)
 
+  // Section 5. `split` is false on the first render everywhere (there is no viewport during a
+  // server render) and corrects itself a frame later — see `useMediaQuery`. The hovered or
+  // picked stay is one piece of state shared by the list and the map, which is what makes the
+  // two halves feel like one thing rather than two views of the same data.
+  const split = useMediaQuery(SPLIT_QUERY)
+  const [hotelView, setHotelView] = useState<HotelView>('list')
+  const [highlightedStay, setHighlightedStay] = useState<string | null>(null)
+
   // Pass 3, section 6a: her click counts as chosen immediately, exactly as the proposal row
   // will once it lands. The proposal wins when both exist — it is the server's own answer.
   const pendingFlight = pendingChoice?.kind === 'flight' ? pendingChoice.sourceId : null
@@ -384,10 +450,14 @@ export function ResultsPane(
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
           <SummaryBar {...summaryBarPropsFor(newestHotels)} />
-          <FilterBar
-            kind="hotels" items={newestHotels.items}
-            filter={hotelState.filter} onChange={setHotelFilter}
-          />
+          <div className="filter-bar-row">
+            <FilterBar
+              kind="hotels" items={newestHotels.items}
+              filter={hotelState.filter} onChange={setHotelFilter}
+            />
+            {/* Nothing to toggle once both are on screen — above the split width this is gone. */}
+            {split ? null : <ViewToggle view={hotelView} onChange={setHotelView} />}
+          </div>
           {/* The tabs summarise the MATCHED list: a tab advertising the price of a stay that is
               hidden in the collapsed section below is the row claiming a lead it is not
               offering — the same fault pass 3 fixed for the updating case. */}
@@ -396,30 +466,58 @@ export function ResultsPane(
             active={hotelState.sort} updating={updatingHotels} onChange={setHotelSort}
           />
           {newestHotels.verdicts ? null : <UncheckedNote />}
-          <HotelList
-            items={hotelMatched}
-            adults={newestHotels.query.adults}
-            now={now}
-            chosenSourceId={chosenHotelSourceId}
-            selectDisabled={choosing}
-            updating={updatingHotels}
-            matchesBySourceId={hotelMatchChips}
-            onChoose={(sourceId) => onChoose('hotel', sourceId)}
-          />
-          {hotelUnmatched.length > 0 && newestHotels.verdicts ? (
-            <UnmatchedSection kind="hotels" items={hotelUnmatched} verdicts={newestHotels.verdicts}>
+          {/* Airbnb's own split: the list reads down the left, the map holds its place on the
+              right. Below the split width only one is on screen at a time and the toggle picks
+              which — a 45% map on a laptop is a map nobody can read beside a list nobody can
+              compare in. */}
+          <div className="hotel-split" data-split={split ? 'true' : 'false'} data-view={hotelView}>
+            <div className="hotel-split-list">
               <HotelList
-                items={hotelUnmatched}
+                items={hotelMatched}
                 adults={newestHotels.query.adults}
                 now={now}
                 chosenSourceId={chosenHotelSourceId}
                 selectDisabled={choosing}
                 updating={updatingHotels}
                 matchesBySourceId={hotelMatchChips}
+                highlightedSourceId={highlightedStay}
+                onHover={setHighlightedStay}
                 onChoose={(sourceId) => onChoose('hotel', sourceId)}
               />
-            </UnmatchedSection>
-          ) : null}
+              {hotelUnmatched.length > 0 && newestHotels.verdicts ? (
+                <UnmatchedSection kind="hotels" items={hotelUnmatched} verdicts={newestHotels.verdicts}>
+                  <HotelList
+                    items={hotelUnmatched}
+                    adults={newestHotels.query.adults}
+                    now={now}
+                    chosenSourceId={chosenHotelSourceId}
+                    selectDisabled={choosing}
+                    updating={updatingHotels}
+                    matchesBySourceId={hotelMatchChips}
+                    highlightedSourceId={highlightedStay}
+                    onHover={setHighlightedStay}
+                    onChoose={(sourceId) => onChoose('hotel', sourceId)}
+                  />
+                </UnmatchedSection>
+              ) : null}
+            </div>
+            {/* Mounted only when it is actually on screen: Leaflet measures its container when it
+                initialises, and a map built inside a hidden element comes up 0x0. */}
+            {split || hotelView === 'map' ? (
+              <div className="hotel-split-map">
+                <HotelMap
+                  items={hotelMatched}
+                  centre={newestHotels.centre}
+                  chosenSourceId={chosenHotelSourceId}
+                  highlightedSourceId={highlightedStay}
+                  onPick={(sourceId) => {
+                    setHighlightedStay(sourceId)
+                    scrollToStay(sourceId)
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

@@ -30,6 +30,7 @@ export function hotelLite(
     nearby: [],
     pricePerNightMinor: null,
     distanceKm: null,
+    coordinates: null,
     ...over,
   }
 }

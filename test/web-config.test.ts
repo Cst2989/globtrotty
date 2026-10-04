@@ -43,7 +43,7 @@ describe('cspFor', () => {
   it('restricts images to self, data URIs and the Kiwi logo host', () => {
     expect(csp).toContain(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com')
+      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
   })
 
   it('forbids framing', () => {
@@ -55,13 +55,14 @@ describe('cspFor', () => {
     expect(csp).toContain('wss://fhqsiydgoqmwvihqsbap.supabase.co')
   })
 
-  it('carries one wildcard source, and only gstatic\'s subdomain', () => {
+  it('carries two wildcard sources, both subdomain-only', () => {
     // The hotels pass widened `img-src` with Google's two image hosts. Google numbers the
     // thumbnail ones (`encrypted-tbn0`, `encrypted-tbn1`, ...) so there is no single name to
     // pin; everything else here is still an exact host. `test/web-csp.test.ts` pins the whole
     // directive character for character.
-    expect(csp.match(/\*/g)).toHaveLength(1)
+    expect(csp.match(/\*/g)).toHaveLength(2)
     expect(csp).toContain('https://*.gstatic.com')
+    expect(csp).toContain('https://*.tile.openstreetmap.org')
   })
 
   it('restricts base-uri and form-action to self', () => {

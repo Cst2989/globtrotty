@@ -23,6 +23,10 @@ export type HotelListProps = {
    * gets no chips.
    */
   matchesBySourceId?: Record<string, string[]>
+  /** Section 5: the stay whose map pin was clicked — that card is marked while she looks at it. */
+  highlightedSourceId?: string | null
+  /** Hovering a card lights up its pin. */
+  onHover?: (sourceId: string | null) => void
   onChoose: (sourceId: string) => void
 }
 
@@ -37,7 +41,7 @@ export type HotelListProps = {
 export function HotelList(
   {
     items, adults, now, chosenSourceId, selectDisabled = false, updating = false,
-    matchesBySourceId, onChoose,
+    matchesBySourceId, highlightedSourceId = null, onHover, onChoose,
   }: HotelListProps,
 ) {
   const listRef = useRef<HTMLUListElement>(null)
@@ -56,6 +60,8 @@ export function HotelList(
           selectDisabled={selectDisabled}
           updating={updating}
           matches={matchesBySourceId?.[item.sourceId] ?? []}
+          highlighted={highlightedSourceId === item.sourceId}
+          onHover={onHover}
           onChoose={onChoose}
         />
       ))}
