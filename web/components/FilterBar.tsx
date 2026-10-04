@@ -6,6 +6,7 @@ import { formatMoney, money } from '@/src/money'
 import type { Filter } from '@/src/results'
 import type { ResultItemLite } from '@/web/data'
 import { priceRange, airlineCounts, airlineNamesOf, isFilterSet } from '@/web/filters'
+import { FILTER_AMENITY_KEYS, amenityLabel } from '@/src/intake/amenities'
 
 export type FilterBarProps = {
   kind: 'flights' | 'hotels'
@@ -21,7 +22,7 @@ export type FilterBarProps = {
   openPopover?: PopoverKey | null
 }
 
-export type PopoverKey = 'bags' | 'price' | 'airlines'
+export type PopoverKey = 'bags' | 'price' | 'airlines' | 'stars' | 'amenities'
 
 /** How many of each bag the stepper will ask for. Two checked bags is past any fare's allowance. */
 const MAX_BAGS = 2
@@ -63,11 +64,25 @@ const DEPARTURE_OPTIONS: { window: 'morning' | 'afternoon' | 'evening'; label: s
   { window: 'evening', label: 'Evening' },
 ]
 
+/**
+ * Hotels pass, section 4: 4+ and 4.5+ rather than 3+ and 4+. Three-point-something is most of a
+ * hotel list, so a 3+ filter narrows almost nothing; the two bands that actually divide a list
+ * are the ones a rating chip already calls "Very good" and "Excellent" (see `ratingWord`).
+ */
 const RATING_OPTIONS: { value: number | null; label: string }[] = [
   { value: null, label: 'Any' },
-  { value: 3, label: '3+' },
   { value: 4, label: '4+' },
+  { value: 4.5, label: '4.5+' },
 ]
+
+const TYPE_OPTIONS: { value: 'hotel' | 'rental' | null; label: string }[] = [
+  { value: null, label: 'Any' },
+  { value: 'hotel', label: 'Hotels' },
+  { value: 'rental', label: 'Rentals' },
+]
+
+/** The classes worth offering: 1- and 2-star exist but nobody narrows a list to them. */
+const STAR_OPTIONS = [3, 4, 5]
 
 /**
  * 'Bags' / 'Bags: 1 cabin' / 'Bags: 1 cabin, 2 checked' — the trigger's own label says what is
@@ -91,6 +106,18 @@ export function priceLabel(filter: Filter, currency: string): string {
 export function airlinesLabel(filter: Filter): string {
   const n = filter.airlines?.length ?? 0
   return n === 0 ? 'Airlines' : `Airlines (${n})`
+}
+
+/** 'Stars' / 'Stars: 4, 5' — same reasoning as `bagsLabel`. */
+export function starsLabel(filter: Filter): string {
+  const stars = filter.stars ?? []
+  return stars.length === 0 ? 'Stars' : `Stars: ${[...stars].sort((a, b) => a - b).join(', ')}`
+}
+
+/** 'Amenities' / 'Amenities (2)' — same reasoning as `bagsLabel`. */
+export function amenitiesLabel(filter: Filter): string {
+  const n = filter.amenities?.length ?? 0
+  return n === 0 ? 'Amenities' : `Amenities (${n})`
 }
 
 /** One bag stepper: minus, the count, plus. 0 means the filter is off, not "0 bags required". */
@@ -255,6 +282,30 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
     onChange(value === null ? rest : { ...rest, minRating: value })
   }
 
+  function setPropertyType(value: 'hotel' | 'rental' | null) {
+    const { propertyType: _propertyType, ...rest } = filter
+    onChange(value === null ? rest : { ...rest, propertyType: value })
+  }
+
+  function setStar(star: number, on: boolean) {
+    const current = filter.stars ?? []
+    const next = on ? [...new Set([...current, star])].sort((a, b) => a - b) : current.filter((s) => s !== star)
+    const { stars: _stars, ...rest } = filter
+    onChange(next.length > 0 ? { ...rest, stars: next } : rest)
+  }
+
+  function setAmenity(key: string, on: boolean) {
+    const current = filter.amenities ?? []
+    const next = on ? [...new Set([...current, key])] : current.filter((a) => a !== key)
+    const { amenities: _amenities, ...rest } = filter
+    onChange(next.length > 0 ? { ...rest, amenities: next } : rest)
+  }
+
+  function setNearCentre(on: boolean) {
+    const { nearCentre: _nearCentre, ...rest } = filter
+    onChange(on ? { ...rest, nearCentre: true } : rest)
+  }
+
   function setAirline(code: string, on: boolean) {
     const current = filter.airlines ?? []
     const next = on ? [...new Set([...current, code])] : current.filter((a) => a !== code)
@@ -315,13 +366,76 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
           </div>
         </>
       ) : (
-        <Segmented
-          label="Rating"
-          options={RATING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          active={filter.minRating ?? null}
-          onPick={setRating}
-        />
+        <>
+          {/* Hotels pass, section 4. Rating and Type stay on the surface (one answer each, used
+              constantly); stars and amenities live behind triggers that say what is set inside
+              them, exactly as the flight side's bags and airlines do. */}
+          <Segmented
+            label="Rating"
+            options={RATING_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            active={filter.minRating ?? null}
+            onPick={setRating}
+          />
+
+          <Segmented
+            label="Type"
+            options={TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            active={filter.propertyType ?? null}
+            onPick={setPropertyType}
+          />
+
+          <Popover
+            label={starsLabel(filter)}
+            active={(filter.stars?.length ?? 0) > 0}
+            defaultOpen={openPopover === 'stars'}
+          >
+            <fieldset className="filter-pop-list">
+              <legend className="filter-pop-title">Stars</legend>
+              {STAR_OPTIONS.map((star) => (
+                <label key={star} className="filter-check">
+                  <input
+                    type="checkbox"
+                    checked={(filter.stars ?? []).includes(star)}
+                    onChange={(event) => setStar(star, event.target.checked)}
+                  />
+                  <span className="filter-check-name">{star} star</span>
+                </label>
+              ))}
+            </fieldset>
+          </Popover>
+
+          <Popover
+            label={amenitiesLabel(filter)}
+            active={(filter.amenities?.length ?? 0) > 0}
+            defaultOpen={openPopover === 'amenities'}
+          >
+            <fieldset className="filter-pop-list">
+              <legend className="filter-pop-title">Amenities</legend>
+              {FILTER_AMENITY_KEYS.map((key) => (
+                <label key={key} className="filter-check">
+                  <input
+                    type="checkbox"
+                    checked={(filter.amenities ?? []).includes(key)}
+                    onChange={(event) => setAmenity(key, event.target.checked)}
+                  />
+                  <span className="filter-check-name">{amenityLabel(key)}</span>
+                </label>
+              ))}
+            </fieldset>
+          </Popover>
+
+          <div className="filter-chip-row" role="group" aria-label="Distance">
+            <button
+              type="button" className="chip"
+              aria-pressed={filter.nearCentre === true}
+              onClick={() => setNearCentre(filter.nearCentre !== true)}
+            >
+              Near the centre
+            </button>
+          </div>
+        </>
       )}
+
 
       {max > 0n ? (
         <Popover

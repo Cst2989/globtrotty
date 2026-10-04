@@ -11,7 +11,8 @@ import { hotelLite } from './helpers/web-lite.js'
 // `src/intake/filter.ts`'s own ones (see both files' `inWindow`).
 import { applyFilter } from '../src/intake/filter.js'
 import { money } from '../src/money.js'
-import type { StoredItem } from '../src/supplier/types.js'
+import { hotelDetail, type StoredItem } from '../src/supplier/types.js'
+import type { Filter } from '../src/results.js'
 
 type FlightOverrides = {
   sourceId?: string; name?: string; priceMinor?: string; currency?: string; fetchedAt?: string; ttlSeconds?: number
@@ -385,5 +386,112 @@ describe('isFilterSet', () => {
     expect(isFilterSet({ nonstop: true })).toBe(true)
     expect(isFilterSet({ minCheckedBags: 1 })).toBe(true)
     expect(isFilterSet({ airlines: ['QR'] })).toBe(true)
+  })
+})
+
+/**
+ * Hotels pass, section 4. The five hotel filters, pinned against BOTH implementations over the
+ * same stay — `applyFilterLite` (web/filters.ts, over the lite shape) and `applyFilter`
+ * (src/intake/filter.ts, over the corpus). The two have to answer identically or a chip and a
+ * typed filter disagree about the same list, which is the fault the ledger's I3 was made of.
+ */
+describe('hotel filter reconciliation (web/filters.ts vs src/intake/filter.ts)', () => {
+  type StayFields = {
+    rating?: number | null
+    stars?: number | null
+    propertyType?: 'hotel' | 'rental' | 'other'
+    amenities?: string[]
+    distanceKm?: number | null
+  }
+
+  function pair(sourceId: string, over: StayFields = {}) {
+    const fields = {
+      rating: 4.4, stars: 4, propertyType: 'hotel' as const,
+      amenities: ['Free Wi-Fi', 'Outdoor pool'], distanceKm: 1.2,
+      ...over,
+    }
+    const lite: ResultItemLite = {
+      sourceId, name: 'stay', priceMinor: '100000', currency: 'EUR',
+      fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 3600, expired: false,
+      hotel: hotelLite(fields),
+    }
+    const stored: StoredItem = {
+      sourceId, supplier: 'searchapi', kind: 'hotel', name: 'stay',
+      price: money(100_000n, 'EUR'), priceBasis: 'total',
+      fetchedAt: new Date('2026-10-01T10:00:00.000Z'), ttlSeconds: 3600, bookingUrl: null,
+      searchParams: null,
+      detail: hotelDetail({ checkIn: '2026-11-19', checkOut: '2026-11-26', nights: 7, ...fields }),
+    }
+    return { lite, stored }
+  }
+
+  /** Both modules, same stay, same filter — and they must agree. */
+  function bothKeep(stay: ReturnType<typeof pair>, filter: Filter): boolean {
+    const liteKept = applyFilterLite([stay.lite], filter).length === 1
+    const storedKept = applyFilter([stay.stored], filter).length === 1
+    expect(liteKept).toBe(storedKept)
+    return liteKept
+  }
+
+  it('stars: keeps a listed class, drops the others, and drops an unclassified stay', () => {
+    expect(bothKeep(pair('A', { stars: 4 }), { stars: [3, 4] })).toBe(true)
+    expect(bothKeep(pair('B', { stars: 5 }), { stars: [3, 4] })).toBe(false)
+    expect(bothKeep(pair('C', { stars: null }), { stars: [3, 4] })).toBe(false)
+    // An empty list narrows nothing, in both.
+    expect(bothKeep(pair('D', { stars: null }), { stars: [] })).toBe(true)
+  })
+
+  it('propertyType: hotels only, rentals only, and neither for a property of unknown type', () => {
+    expect(bothKeep(pair('A', { propertyType: 'hotel' }), { propertyType: 'hotel' })).toBe(true)
+    expect(bothKeep(pair('B', { propertyType: 'rental' }), { propertyType: 'hotel' })).toBe(false)
+    expect(bothKeep(pair('C', { propertyType: 'rental' }), { propertyType: 'rental' })).toBe(true)
+    expect(bothKeep(pair('D', { propertyType: 'other' }), { propertyType: 'hotel' })).toBe(false)
+  })
+
+  it('amenities: matches the supplier\'s own spellings, and requires ALL of them', () => {
+    // "Free Wi-Fi" and "Outdoor pool" are real labels from the recorded Tokyo response.
+    expect(bothKeep(pair('A'), { amenities: ['wifi'] })).toBe(true)
+    expect(bothKeep(pair('A'), { amenities: ['wifi', 'pool'] })).toBe(true)
+    expect(bothKeep(pair('A'), { amenities: ['wifi', 'kitchen'] })).toBe(false)
+    expect(bothKeep(pair('B', { amenities: ['Parking ($)'] }), { amenities: ['parking'] })).toBe(true)
+    expect(bothKeep(pair('C', { amenities: [] }), { amenities: ['wifi'] })).toBe(false)
+  })
+
+  it('nearCentre: 3 km in, 3.1 km out, and a stay with no distance out', () => {
+    expect(bothKeep(pair('A', { distanceKm: 3 }), { nearCentre: true })).toBe(true)
+    expect(bothKeep(pair('B', { distanceKm: 3.1 }), { nearCentre: true })).toBe(false)
+    expect(bothKeep(pair('C', { distanceKm: null }), { nearCentre: true })).toBe(false)
+  })
+
+  it('minRating: the bar\'s own two bands, and an unrated stay out of both', () => {
+    expect(bothKeep(pair('A', { rating: 4.4 }), { minRating: 4 })).toBe(true)
+    expect(bothKeep(pair('B', { rating: 4.4 }), { minRating: 4.5 })).toBe(false)
+    expect(bothKeep(pair('C', { rating: null }), { minRating: 4 })).toBe(false)
+  })
+
+  it('a flight passes every hotel-only filter untouched, in both', () => {
+    const liteFlight = flight({ sourceId: 'F1' })
+    const storedF = storedFlight('F1', 9)
+    for (const filter of [
+      { stars: [5] }, { propertyType: 'hotel' as const }, { amenities: ['wifi'] }, { nearCentre: true },
+    ]) {
+      expect(applyFilterLite([liteFlight], filter)).toHaveLength(1)
+      expect(applyFilter([storedF], filter)).toHaveLength(1)
+    }
+  })
+})
+
+describe('sortItemsLite: Top rated', () => {
+  const stay = (sourceId: string, rating: number | null): ResultItemLite => ({
+    sourceId, name: 'stay', priceMinor: '100000', currency: 'EUR',
+    fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 3600, expired: false,
+    hotel: hotelLite({ rating }),
+  })
+
+  it('orders by rating descending, with an unrated stay last rather than as a zero', () => {
+    const items = [stay('A', 3.9), stay('B', null), stay('C', 4.6)]
+    expect(sortItemsLite(items, 'rated').map((i) => i.sourceId)).toEqual(['C', 'A', 'B'])
+    // Never mutates its argument, same contract as the other sorts.
+    expect(items.map((i) => i.sourceId)).toEqual(['A', 'B', 'C'])
   })
 })

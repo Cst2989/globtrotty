@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { maskIdChars, maskControlChars, maskUntrustedText } from './sanitize.js'
 import { isKnownVerdictLabel } from './intake/verdicts.js'
+import { AMENITY_KEYS } from './intake/amenities.js'
 import type { Cabin, Assumption } from './intake/brief.js'
 
 /**
@@ -50,6 +51,23 @@ export type Filter = {
   minCheckedBags?: number
   /** Hide a stay rated below this, and one with no rating at all. Hotels only. */
   minRating?: number
+  /**
+   * Hotels pass, section 4. Keep only stays whose hotel class is one of these (3, 4 or 5 stars,
+   * multi-select). A stay with NO class is excluded whenever this is set, the same rule and the
+   * same reason as `minRating`: "4 stars and up" is a claim about the place, and an unclassified
+   * one has not made it.
+   */
+  stars?: number[]
+  /** Keep only hotels, or only rentals. A property of neither type is excluded either way. */
+  propertyType?: 'hotel' | 'rental'
+  /**
+   * Keep only stays carrying every one of these amenities, by the keys in
+   * `src/intake/amenities.ts` — never a supplier's own label, which is exactly what that table
+   * exists to stop both filter implementations from matching on.
+   */
+  amenities?: string[]
+  /** Keep only stays within `NEAR_CENTRE_KM` of the city centre; one with no distance is excluded. */
+  nearCentre?: boolean
 }
 
 export type ResultsContent = {
@@ -145,6 +163,15 @@ const FilterSchema = z.strictObject({
   minCabinBags: z.number().int().min(0).max(9).optional(),
   minCheckedBags: z.number().int().min(0).max(9).optional(),
   minRating: z.number().min(0).max(5).optional(),
+  // Hotel class is 1-5 by definition; the rail offers 3, 4 and 5. Bounded here rather than in
+  // the bar for the same reason every other number in this schema is: a typed filter can reach
+  // the same field without going through any UI.
+  stars: z.array(z.number().int().min(1).max(5)).max(5).optional(),
+  propertyType: z.enum(['hotel', 'rental']).optional(),
+  // Our OWN keys, never a supplier's label — `src/intake/amenities.ts` owns the list, and this
+  // refuses anything outside it at the boundary.
+  amenities: z.array(z.string().refine((k) => AMENITY_KEYS.includes(k))).max(8).optional(),
+  nearCentre: z.boolean().optional(),
 })
 
 /**

@@ -3,6 +3,7 @@ import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite } from '@/web/data'
 import { ageText, staleAgeText } from './age'
 import { MatchChips } from './MatchChips'
+import { AMENITIES, amenityKeysOf, amenityLabel } from '@/src/intake/amenities'
 
 export type HotelCardProps = {
   item: ResultItemLite
@@ -32,46 +33,23 @@ const STALE = 'These prices are out of date'
 const MAX_CHIPS = 5
 
 /**
- * The amenities worth a chip, in the order a traveller scans for them, matched case-insensitively
- * as a SUBSTRING of the supplier's own label.
+ * Up to `MAX_CHIPS` chips: this office's own word for every amenity it recognises (see
+ * `src/intake/amenities.ts` for why the matching is a substring and why that table is shared with
+ * the filter), then the supplier's remaining labels verbatim to fill the row out.
  *
- * Substring rather than equality because Google's vocabulary is not ours and is not stable:
- * "Free Wi-Fi", "Paid parking", "Parking ($)", "Kitchen in some rooms" and "Outdoor pool" are all
- * real labels in the recorded Tokyo response, and a card that only recognised "Wifi" would show
- * nothing for any of them. The chip shows OUR word, not theirs, so twelve spellings of parking
- * read as one fact — and the ones that did not match are not invented, they are simply absent.
- */
-const CHIP_PRIORITY: { label: string; match: string[] }[] = [
-  { label: 'Wifi', match: ['wi-fi', 'wifi', 'wi fi'] },
-  { label: 'Breakfast', match: ['breakfast'] },
-  { label: 'Kitchen', match: ['kitchen'] },
-  { label: 'Pool', match: ['pool'] },
-  { label: 'Parking', match: ['parking'] },
-  { label: 'Air conditioning', match: ['air conditioning', 'air-conditioning'] },
-  { label: 'Gym', match: ['gym', 'fitness'] },
-  { label: 'Spa', match: ['spa', 'sauna'] },
-]
-
-/**
- * Up to `MAX_CHIPS` chips: the priority list's own labels for whatever this stay actually has,
- * then the supplier's remaining labels verbatim to fill the row out.
+ * The chip shows OUR word, not theirs, so twelve spellings of parking read as one fact — and the
+ * ones that did not match are not invented, they are simply absent.
  *
  * Pure, and exported so the render tests can pin the matching without a DOM.
  */
 export function amenityChips(amenities: string[]): string[] {
-  const lower = amenities.map((a) => a.toLowerCase())
-  const chips: string[] = []
-  const used = new Set<number>()
-  for (const { label, match } of CHIP_PRIORITY) {
+  const chips = amenityKeysOf(amenities).map(amenityLabel).slice(0, MAX_CHIPS)
+  const matched = new Set(chips.map((c) => c.toLowerCase()))
+  for (const amenity of amenities) {
     if (chips.length >= MAX_CHIPS) break
-    const index = lower.findIndex((a, i) => !used.has(i) && match.some((m) => a.includes(m)))
-    if (index === -1) continue
-    used.add(index)
-    chips.push(label)
-  }
-  for (const [i, amenity] of amenities.entries()) {
-    if (chips.length >= MAX_CHIPS) break
-    if (used.has(i)) continue
+    // Skip a supplier label this office already said in its own words ("Free Wi-Fi" after
+    // "Wifi"), which is the one way the filled-out tail can repeat the head.
+    if (AMENITIES.some((a) => matched.has(a.label.toLowerCase()) && a.patterns.some((pattern) => amenity.toLowerCase().includes(pattern)))) continue
     chips.push(amenity)
   }
   return chips

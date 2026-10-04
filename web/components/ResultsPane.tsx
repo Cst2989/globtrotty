@@ -115,8 +115,11 @@ function stateFor(view: ResultsView | null): KindState {
 }
 
 const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
-/** No "fastest" for a stay: nothing about a hotel row has a duration to be fast. */
-const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
+/**
+ * No "fastest" for a stay: nothing about a hotel row has a duration to be fast. "Top rated" takes
+ * its place (hotels pass, section 4), which is the figure a stay is actually compared on.
+ */
+const HOTEL_SORTS: Sort[] = ['best', 'cheapest', 'rated']
 
 /**
  * Hotels pass, section 7. Splits a filtered, sorted list into the items that match what she asked

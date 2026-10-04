@@ -1,5 +1,7 @@
 import type { Filter } from '@/src/results'
 import type { ResultItemLite } from '@/web/data'
+import { hasAmenity } from '@/src/intake/amenities'
+import { NEAR_CENTRE_KM } from '@/src/intake/verdicts'
 
 /**
  * Client-side filter application over the lite result shape (`ResultItemLite`,
@@ -39,13 +41,24 @@ function matchesFilter(item: ResultItemLite, filter: Filter): boolean {
 
   const flight = item.flight
   if (!flight) {
-    // `minRating` is the one filter that runs the other way round from the flight fields: only a
-    // stay can answer it, and a stay with NO rating is excluded, because "4 stars and up" is a
-    // claim about the place and an unrated one has not made it. Mirrors
-    // `src/intake/filter.ts`.
-    if (filter.minRating !== undefined) {
-      const rating = item.hotel?.rating ?? null
-      if (rating === null || rating < filter.minRating) return false
+    // The hotel-only half, mirroring `src/intake/filter.ts` line for line. Every one of these
+    // excludes a stay that cannot ANSWER it — an unrated or unclassified property, a property of
+    // neither type, a stay with no distance — because the filter is a claim about the place and
+    // one that has not made the claim has not met it.
+    const hotel = item.hotel
+    if (!hotel) return true
+    if (filter.minRating !== undefined && (hotel.rating === null || hotel.rating < filter.minRating)) {
+      return false
+    }
+    if (filter.stars !== undefined && filter.stars.length > 0) {
+      if (hotel.stars === null || !filter.stars.includes(Math.round(hotel.stars))) return false
+    }
+    if (filter.propertyType !== undefined && hotel.propertyType !== filter.propertyType) return false
+    if (filter.amenities !== undefined && filter.amenities.length > 0) {
+      if (!filter.amenities.every((key) => hasAmenity(hotel.amenities, key))) return false
+    }
+    if (filter.nearCentre && (hotel.distanceKm === null || hotel.distanceKm > NEAR_CENTRE_KM)) {
+      return false
     }
     return true // nothing else below applies to a hotel item
   }
@@ -129,7 +142,7 @@ export function priceRange(items: ResultItemLite[]): { min: bigint; max: bigint 
  * re-rank (src/intake/rank.ts), which is the only one of the three that knows anything about the
  * brief — so it is the default and it is deliberately NOT a sort at all.
  */
-export type Sort = 'best' | 'cheapest' | 'fastest'
+export type Sort = 'best' | 'cheapest' | 'fastest' | 'rated'
 
 /**
  * `items`, reordered. Never mutates its argument; `best` returns a copy in the stored order so
@@ -155,6 +168,11 @@ export function sortItemsLite(items: ResultItemLite[], sort: Sort): ResultItemLi
   }
   if (sort === 'fastest') {
     return copy.sort((a, b) => (a.flight?.durationMinutes ?? 0) - (b.flight?.durationMinutes ?? 0))
+  }
+  if (sort === 'rated') {
+    // Highest first, and an UNRATED stay sorts last rather than as a zero — it has not been
+    // rated badly, it has not been rated. A flight list never offers this tab.
+    return copy.sort((a, b) => (b.hotel?.rating ?? -1) - (a.hotel?.rating ?? -1))
   }
   return copy
 }

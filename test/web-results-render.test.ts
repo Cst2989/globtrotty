@@ -15,7 +15,8 @@ import {
 } from '../web/components/HotelCard.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import {
-  FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel,
+  FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel, starsLabel,
+  amenitiesLabel,
 } from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
@@ -469,16 +470,47 @@ describe('FilterBar', () => {
     expect(bar({ filter: { minCheckedBags: 1 } })).toContain('>Clear<')
   })
 
-  it('gives the hotels bar the rating segments and the price trigger, and none of the flight controls', () => {
+  it('gives the hotels bar its own six controls, and none of the flight ones', () => {
     const html = renderToStaticMarkup(createElement(FilterBar, {
       kind: 'hotels', items: [HOTEL_ITEM], filter: {}, onChange: () => {},
     }))
-    expect(html).toContain('3+')
+    // Hotels pass, section 4: 4+ and 4.5+ rather than 3+ and 4+ — see `RATING_OPTIONS`.
     expect(html).toContain('4+')
+    expect(html).toContain('4.5+')
+    expect(html).not.toContain('>3+<')
+    expect(html).toContain('Hotels')
+    expect(html).toContain('Rentals')
+    expect(html).toContain('Stars')
+    expect(html).toContain('Amenities')
+    expect(html).toContain('Near the centre')
     expect(html).toContain('Max price')
     expect(html).not.toContain('Bags')
     expect(html).not.toContain('Morning')
     expect(html).not.toContain('Airlines')
+  })
+
+  it('opens the stars and amenities panels with this office\'s own words, never a supplier label', () => {
+    const stars = renderToStaticMarkup(createElement(FilterBar, {
+      kind: 'hotels', items: [HOTEL_ITEM], filter: { stars: [4, 5] }, onChange: () => {},
+      openPopover: 'stars' as const,
+    }))
+    expect(stars).toContain('Stars: 4, 5')
+    expect(stars).toContain('3 star')
+    const amenities = renderToStaticMarkup(createElement(FilterBar, {
+      kind: 'hotels', items: [HOTEL_ITEM], filter: { amenities: ['wifi'] }, onChange: () => {},
+      openPopover: 'amenities' as const,
+    }))
+    expect(amenities).toContain('Amenities (1)')
+    expect(amenities).toContain('Air conditioning')
+    // The internal key never reaches her.
+    expect(amenities).not.toContain('air_conditioning')
+  })
+
+  it('labels what is set inside a closed stars or amenities trigger', () => {
+    expect(starsLabel({})).toBe('Stars')
+    expect(starsLabel({ stars: [5, 3] })).toBe('Stars: 3, 5')
+    expect(amenitiesLabel({})).toBe('Amenities')
+    expect(amenitiesLabel({ amenities: ['wifi', 'pool'] })).toBe('Amenities (2)')
   })
 
   it('presses the matching rating segment', () => {
@@ -559,8 +591,9 @@ describe('SortTabs', () => {
     expect(/aria-pressed="true"[\s\S]*?Cheapest/.test(html)).toBe(true)
   })
 
-  it('summarises a stay with its price alone — a hotel row has no duration', () => {
-    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120.00')
+  it('summarises a stay with its price and its rating — a hotel row has no duration', () => {
+    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120.00 · 4.4')
+    expect(tabSummary({ ...HOTEL_ITEM, hotel: hotelLite({ rating: null }) })).toBe('€1,120.00')
     expect(tabSummary(null)).toBe('—')
   })
 })
@@ -809,10 +842,13 @@ describe('ResultsPane', () => {
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(html).toContain('3+')
+    expect(html).toContain('4.5+')
+    expect(html).toContain('Near the centre')
     expect(html).toContain('Max price')
     expect(html).not.toContain('Bags')
+    // A stay has no duration to be fast; "Top rated" is the hotels pass's third tab.
     expect(html).not.toContain('Fastest')
+    expect(html).toContain('Top rated')
   })
 
 describe('MessageBubble (plan 5 roles)', () => {

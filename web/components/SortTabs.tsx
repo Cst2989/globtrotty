@@ -23,18 +23,23 @@ const LABELS: Record<Sort, string> = {
   best: 'Best',
   cheapest: 'Cheapest',
   fastest: 'Fastest',
+  rated: 'Top rated',
 }
 
 /**
- * `€2,657 · 44h 20m` — the price and total duration of whatever this sort would put first, so
- * the three tabs are a comparison and not just three ways to reorder the same list. The duration
- * half is dropped for an item with no flight payload (a stay), where it would mean nothing.
+ * `€2,657 · 44h 20m` for a flight, `€1,120.00 · 4.4` for a stay — the price of whatever this sort
+ * would put first, and the one other figure that tab is about, so the tabs are a comparison and
+ * not just three ways to reorder the same list.
  */
 export function tabSummary(item: ResultItemLite | null): string {
   if (!item) return '—'
   const price = formatMoney(money(BigInt(item.priceMinor), item.currency))
   const flight = item.flight
-  return flight ? `${price} · ${durationWords(flight.durationMinutes)}` : price
+  if (flight) return `${price} · ${durationWords(flight.durationMinutes)}`
+  // A stay's second half is its rating, which is what the hotels pass's Top rated tab is sorting
+  // on: a row of three identical prices says nothing about which tab to press.
+  const rating = item.hotel?.rating ?? null
+  return rating === null ? price : `${price} · ${rating.toFixed(1)}`
 }
 
 /**

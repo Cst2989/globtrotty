@@ -76,8 +76,11 @@ export type Verdict = { matches: string[]; issues: string[] }
 /** Past this many kilometres a stay is far enough out for the question to be worth asking at all. */
 export const FAR_FROM_CENTRE_KM = 8
 
-/** Within this many kilometres a stay earns the `Near the centre` chip. */
-const NEAR_CENTRE_KM = 3
+/**
+ * Within this many kilometres a stay earns the `Near the centre` chip — and is kept by the
+ * `Near the centre` filter toggle, which is the same claim and must therefore be the same number.
+ */
+export const NEAR_CENTRE_KM = 3
 
 /** A stay has to be rated at least this well to earn `Well rated`. */
 const WELL_RATED = 4

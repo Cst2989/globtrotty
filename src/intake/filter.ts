@@ -1,6 +1,8 @@
 import type { Filter } from '../results.js'
 import { isFlight, type StoredItem } from '../supplier/types.js'
 import { maskUntrustedText } from '../sanitize.js'
+import { amenityLabel, hasAmenity } from './amenities.js'
+import { NEAR_CENTRE_KM } from './verdicts.js'
 
 /** The hour-of-day (local, naive) a leg's `departureLocal` string names — 'YYYY-MM-DDTHH:MM:SS'. */
 function departureHour(local: string): number {
@@ -41,10 +43,22 @@ export function applyFilter(items: StoredItem[], f: Filter): StoredItem[] {
     if (f.maxPriceMinor !== undefined && item.price.minor > BigInt(f.maxPriceMinor)) return false
 
     if (!isFlight(item)) {
-      if (f.minRating !== undefined) {
-        const rating = item.detail.kind === 'hotel' ? item.detail.rating : null
-        if (rating === null || rating < f.minRating) return false
+      if (item.detail.kind !== 'hotel') return true
+      const d = item.detail
+      if (f.minRating !== undefined && (d.rating === null || d.rating < f.minRating)) return false
+      // Hotels pass, section 4. Each of these excludes a stay that cannot ANSWER it — an
+      // unclassified property under a stars filter, a property of neither type under a type
+      // filter, a stay with no distance under "near the centre" — for the same reason
+      // `minRating` always has: the filter is a claim about the place, and one that has not made
+      // the claim has not met it. `web/filters.ts` mirrors every line of this.
+      if (f.stars !== undefined && f.stars.length > 0) {
+        if (d.stars === null || !f.stars.includes(Math.round(d.stars))) return false
       }
+      if (f.propertyType !== undefined && d.propertyType !== f.propertyType) return false
+      if (f.amenities !== undefined && f.amenities.length > 0) {
+        if (!f.amenities.every((key) => hasAmenity(d.amenities, key))) return false
+      }
+      if (f.nearCentre && (d.distanceKm === null || d.distanceKm > NEAR_CENTRE_KM)) return false
       return true
     }
 
@@ -94,6 +108,16 @@ export function describeFilter(f: Filter): string {
     parts.push(f.minCheckedBags === 1 ? 'with a checked bag' : `with ${f.minCheckedBags} checked bags`)
   }
   if (f.minRating !== undefined && f.minRating > 0) parts.push(`rated ${f.minRating}+`)
+  if (f.stars !== undefined && f.stars.length > 0) {
+    parts.push(`${[...f.stars].sort((a, b) => a - b).join(', ')} star`)
+  }
+  if (f.propertyType !== undefined) parts.push(f.propertyType === 'hotel' ? 'hotels only' : 'rentals only')
+  // The amenity KEY never reaches her — `amenityLabel` is this office's own word for it, and the
+  // key is an internal identifier that happens to look like English.
+  if (f.amenities !== undefined && f.amenities.length > 0) {
+    parts.push(f.amenities.map(amenityLabel).join(', ').toLowerCase())
+  }
+  if (f.nearCentre) parts.push('near the centre')
   if (f.airlines && f.airlines.length > 0) parts.push(f.airlines.map(maskUntrustedText).join(', '))
   return parts.length > 0 ? parts.join(', ') : 'all results'
 }
