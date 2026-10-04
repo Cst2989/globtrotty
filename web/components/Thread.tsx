@@ -14,9 +14,21 @@ import { MessageBubble } from './MessageBubble'
 import { StatusLine } from './StatusLine'
 import type { MessageBoxProps } from './MessageBox'
 
+/**
+ * Streamed reveal: the extra, all-optional fields `ThreadLive` attaches to a just-arrived
+ * `agent` row (see its own doc comment) so `ThreadView` — which stays hook-free, see below — can
+ * decide, from props alone, whether to stream that row's text and whether to hold back whatever
+ * `results`/`action`/`choices` row follows it in the same turn.
+ */
+export type RevealableMessage = (ThreadMessage | MergedMessage) & {
+  animate?: boolean
+  revealed?: boolean
+  onRevealed?: () => void
+}
+
 export type ThreadViewProps = {
   conversation: ConversationHeader
-  messages: (ThreadMessage | MergedMessage)[]
+  messages: RevealableMessage[]
   latestTurn: LatestTurn | null
   /** Rendered inside the scrolling column, after the messages (proposal cards). */
   children?: ReactNode
@@ -102,16 +114,37 @@ export function ThreadView(
             <StatusLine status={effectiveStatus} failReason={latestTurn?.fail_reason ?? null} />
           </header>
           <ul className="thread-messages">
-            {messages.map((m) => (
-              <li key={m.id}>
-                <MessageBubble
-                  role={m.role}
-                  content={m.content}
-                  conversationId={conversationId}
-                  pending={'pending' in m ? m.pending : undefined}
-                />
-              </li>
-            ))}
+            {(() => {
+              // Streamed reveal: a plain `let`, recomputed fresh every render — no hooks needed,
+              // which is what keeps this function callable directly (see the "forwards
+              // conversationId" test's own doc comment). True for the stretch of rows, right
+              // after a still-revealing agent message, that belong to the SAME turn: the next
+              // non-marker row (a `user` message, or an agent row that is not still revealing)
+              // always closes the window.
+              let awaitingReveal = false
+              return messages.map((m) => {
+                const isMarkerOrChoice = m.role === 'results' || m.role === 'action' || m.role === 'choices'
+                const gatedForThisRow = isMarkerOrChoice && awaitingReveal
+                if (m.role === 'agent') {
+                  awaitingReveal = m.animate === true && m.revealed !== true
+                } else if (!isMarkerOrChoice) {
+                  awaitingReveal = false
+                }
+                return (
+                  <li key={m.id}>
+                    <MessageBubble
+                      role={m.role}
+                      content={m.content}
+                      conversationId={conversationId}
+                      pending={'pending' in m ? m.pending : undefined}
+                      animate={m.animate}
+                      onRevealed={m.onRevealed}
+                      gated={gatedForThisRow}
+                    />
+                  </li>
+                )
+              })
+            })()}
           </ul>
           {/* Pass 3, section 5e/6b: driven by the same `working` as the status line, so the
               typing dots appear in the tick she presses send rather than after the POST. */}
@@ -175,6 +208,15 @@ const PENDING_TIMEOUT_MS = 30_000
  * the pending bubble is left for the next refresh to match and drop). The
  * merge itself is `mergePending` (`./pending.ts`), a pure function so it is
  * unit-tested directly rather than through this component.
+ *
+ * Streamed reveal: `mountedIdsRef` is the set of message ids this instance opened with, so an
+ * `agent` row that shows up afterward (the ordinary case, a reply landing through the Realtime
+ * refresh above) gets `animate: true` and streams through `StreamedText`, while everything that
+ * was already on the page at load renders instantly, same as before this feature existed.
+ * `revealedIds` tracks which of those have finished streaming, so the `results`/`action` marker
+ * or `choices` row (the `next` chips included) that follows one in the same turn can stay out of
+ * the way — `ThreadView` does the actual gating, from these two plain props, with no hooks of its
+ * own; see `RevealableMessage`.
  */
 export function ThreadLive({ userId, conversation, messages, latestTurn, children, composer, searching }: ThreadLiveProps) {
   const router = useRouter()
@@ -183,6 +225,29 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
   const tailRef = useRef<HTMLDivElement>(null)
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  /**
+   * Streamed reveal: every message id present the FIRST time this component rendered — on the
+   * server and again on hydration, from the same initial `messages` prop, so both passes agree
+   * and there is no hydration mismatch. Captured once (the lazy `if` below only ever runs on the
+   * very first render) and never updated after, so anything that shows up later through a
+   * Realtime-triggered `router.refresh()` is, by definition, not in it.
+   */
+  const mountedIdsRef = useRef<Set<string> | null>(null)
+  if (mountedIdsRef.current === null) {
+    mountedIdsRef.current = new Set(messages.map((m) => m.id))
+  }
+  // Ids of agent messages whose `StreamedText` reveal has finished. Only ever grows; a message
+  // never in here and not in `mountedIdsRef` is the one currently streaming.
+  const [revealedIds, setRevealedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const markRevealed = useCallback((id: string) => {
+    setRevealedIds((current) => {
+      if (current.has(id)) return current
+      const next = new Set(current)
+      next.add(id)
+      return next
+    })
+  }, [])
 
   function dropPending(predicate: (p: PendingMessage) => boolean) {
     setPendingMessages((current) => {
@@ -268,6 +333,19 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
 
   const mergedMessages = mergePending(messages, pendingMessages)
 
+  // Streamed reveal: an agent row not already on the page at mount streams in; `revealed` and
+  // `onRevealed` are only meaningful for those, so every other row (including the pending-merge
+  // additions, which are always `role: 'user'`) passes through untouched.
+  const revealableMessages: RevealableMessage[] = mergedMessages.map((m) => {
+    if (m.role !== 'agent' || mountedIdsRef.current!.has(m.id)) return m
+    return {
+      ...m,
+      animate: true,
+      revealed: revealedIds.has(m.id),
+      onRevealed: () => markRevealed(m.id),
+    }
+  })
+
   const liveComposer =
     composer && isValidElement(composer)
       ? cloneElement(composer as ReactElement<MessageBoxProps>, {
@@ -283,7 +361,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
     <ThreadView
       conversation={conversation}
       conversationId={conversation.id}
-      messages={mergedMessages}
+      messages={revealableMessages}
       latestTurn={latestTurn}
       composer={liveComposer}
       sending={pendingMessages.length > 0 || activity.busy}

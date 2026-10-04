@@ -749,6 +749,7 @@ select {
 
 .message-row {
   display: flex;
+  opacity: 1;
 }
 
 .message-row[data-role='user'] {
@@ -762,6 +763,22 @@ select {
 /* Task 10: the optimistic bubble, shown ahead of the real server row (see `ThreadLive`/`mergePending`). */
 .message-row[data-pending='true'] .message {
   opacity: 0.6;
+}
+
+/*
+ * Streamed reveal: a `results`/`action` marker or a `choices` row (the `next` chips included)
+ * that landed in the same turn as an agent reply still streaming stays invisible and `inert`
+ * (`MessageBubble`'s own doc comment) until that reply finishes, then fades in — never a hard
+ * cut, same as every other piece of motion in this file.
+ */
+.message-row[data-gated='true'] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .message-row {
+    transition: opacity 150ms var(--ease);
+  }
 }
 
 .message {
@@ -837,6 +854,37 @@ select {
     40% {
       opacity: 1;
       transform: translateY(-2px);
+    }
+  }
+}
+
+/* Streamed reveal: the thin blinking cursor `StreamedText` renders at the end of the visible
+   text while it is still streaming (`web/components/StreamedText.tsx`). Under reduced motion the
+   component never renders this at all (it reveals instantly instead), so the media query below
+   is belt and braces, the same posture `.thinking i` already takes. */
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stream-cursor {
+    animation: stream-cursor-blink 1s steps(1, end) infinite;
+  }
+
+  @keyframes stream-cursor-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+
+    50%,
+    100% {
+      opacity: 0;
     }
   }
 }
