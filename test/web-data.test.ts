@@ -11,8 +11,8 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
-  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems, cityNamesFor,
-  naiveMinutesBetween, skeletonMode,
+  dropExpiredAlternatives, newestResultItemPerSourceId, isExpired, freshnessOf, cityNamesFor,
+  naiveMinutesBetween, skeletonMode, describeResultsForUi,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -232,6 +232,9 @@ describe('dropExpiredAlternatives', () => {
 })
 
 // Plan 5, Task 9.
+/** Inside every fixture row's own ttl below, so `expired` is false unless a case says otherwise. */
+const NOW_ROWS = new Date('2026-10-01T10:05:00.000Z')
+
 describe('newestResultItemPerSourceId', () => {
   const flightPayload = {
     kind: 'flight',
@@ -255,7 +258,7 @@ describe('newestResultItemPerSourceId', () => {
   })
 
   it('maps a flight payload into ResultItemLite, reading stops/airlines/bags/duration/via off it', () => {
-    const out = newestResultItemPerSourceId([row()])
+    const out = newestResultItemPerSourceId([row()], NOW_ROWS)
     expect(out).toHaveLength(1)
     const item = out[0]!
     expect(item.sourceId).toBe('F1')
@@ -294,7 +297,7 @@ describe('newestResultItemPerSourceId', () => {
           stops: 2, route: ['HND', 'DOH', 'MAD', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
         },
       },
-    })])
+    })], NOW_ROWS)
     expect(out[0]!.flight!.stops).toBe(1)
     expect(out[0]!.flight!.inboundStops).toBe(2)
     // A return trip has no per-leg figure from the supplier, so each leg's duration is the
@@ -313,7 +316,7 @@ describe('newestResultItemPerSourceId', () => {
         ...flightPayload,
         outbound: { ...flightPayload.outbound, route: ['BCN', 'ZZZ', 'HND'], carriers: ['ZZ'] },
       },
-    })])
+    })], NOW_ROWS)
     expect(out[0]!.flight!.outbound.viaCities).toEqual(['ZZZ'])
     expect(out[0]!.flight!.airlineNames).toEqual(['ZZ'])
   })
@@ -327,7 +330,7 @@ describe('newestResultItemPerSourceId', () => {
           route: ['HND', 'BCN'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR789'],
         },
       },
-    })])
+    })], NOW_ROWS)
     expect(out[0]!.flight!.inboundStops).toBe(0)
   })
 
@@ -336,7 +339,7 @@ describe('newestResultItemPerSourceId', () => {
   // control characters, not `<`/`>`; what actually keeps it from rendering
   // as markup is React's own escaping (pinned in test/web-results-render.test.ts).
   it('does not strip or escape printable-ASCII supplier text (that is the render layer\'s job)', () => {
-    const out = newestResultItemPerSourceId([row({ name: '<script>alert(1)</script>' })])
+    const out = newestResultItemPerSourceId([row({ name: '<script>alert(1)</script>' })], NOW_ROWS)
     expect(out[0]!.name).toBe('<script>alert(1)</script>')
   })
 
@@ -344,42 +347,94 @@ describe('newestResultItemPerSourceId', () => {
     const out = newestResultItemPerSourceId([
       row({ source_id: 'A', price_minor: '100', fetched_at: 't2' }),
       row({ source_id: 'A', price_minor: '999', fetched_at: 't1' }),
-    ])
+    ], NOW_ROWS)
     expect(out).toHaveLength(1)
     expect(out[0]!.priceMinor).toBe('100')
   })
 
   it('drops a row whose payload is neither a recognisable flight nor hotel shape', () => {
-    expect(newestResultItemPerSourceId([row({ payload: { kind: 'bogus' } })])).toEqual([])
+    expect(newestResultItemPerSourceId([row({ payload: { kind: 'bogus' } })], NOW_ROWS)).toEqual([])
   })
 
   it('maps a hotel payload into ResultItemLite', () => {
-    const out = newestResultItemPerSourceId([row({ source_id: 'H1', payload: hotelPayload })])
+    const out = newestResultItemPerSourceId([row({ source_id: 'H1', payload: hotelPayload })], NOW_ROWS)
     expect(out).toHaveLength(1)
     expect(out[0]!.hotel).toEqual({ rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' })
     expect(out[0]!.flight).toBeUndefined()
   })
 
   it('returns an empty list for no rows', () => {
-    expect(newestResultItemPerSourceId([])).toEqual([])
+    expect(newestResultItemPerSourceId([], NOW_ROWS)).toEqual([])
+  })
+
+  // Pass 3's bug: this used to be the caller's cue to DROP the item, which left the pane
+  // rendering an empty list under a full summary bar fifteen minutes after any search.
+  it('keeps a row past its own ttl and flags it expired', () => {
+    const out = newestResultItemPerSourceId([row()], new Date('2026-10-01T10:20:00.000Z'))
+    expect(out).toHaveLength(1)
+    expect(out[0]!.expired).toBe(true)
+    expect(newestResultItemPerSourceId([row()], NOW_ROWS)[0]!.expired).toBe(false)
   })
 })
 
-describe('dropExpiredResultItems', () => {
+// Pass 3, section 1: expired items are FLAGGED, not dropped — see `ResultItemLite.expired`.
+describe('isExpired', () => {
   const NOW = new Date('2026-09-13T12:00:00.000Z')
+
+  it('is false inside the ttl', () => {
+    expect(isExpired('2026-09-13T11:50:00.000Z', 900, NOW)).toBe(false)
+  })
+
+  it('is false exactly at the boundary, same rule as dropExpiredAlternatives', () => {
+    expect(isExpired('2026-09-13T11:45:00.000Z', 900, NOW)).toBe(false)
+  })
+
+  it('is true past the ttl', () => {
+    expect(isExpired('2026-09-13T11:40:00.000Z', 300, NOW)).toBe(true)
+  })
+})
+
+describe('freshnessOf', () => {
   const item = (overrides: Partial<ResultItemLite> = {}): ResultItemLite => ({
     sourceId: 'A', name: 'n', priceMinor: '1', currency: 'EUR',
-    fetchedAt: '2026-09-13T11:50:00.000Z', ttlSeconds: 900, // fetched 10 min ago, ttl 15 min → fresh
+    fetchedAt: '2026-09-13T11:50:00.000Z', ttlSeconds: 900, expired: false,
     ...overrides,
   })
 
-  it('keeps an id still inside its own ttl', () => {
-    expect(dropExpiredResultItems([item()], NOW)).toEqual([item()])
+  it('reports the NEWEST item\'s fetchedAt', () => {
+    expect(freshnessOf([
+      item({ sourceId: 'A', fetchedAt: '2026-09-13T11:50:00.000Z' }),
+      item({ sourceId: 'B', fetchedAt: '2026-09-13T11:58:00.000Z' }),
+    ]).fetchedAt).toBe('2026-09-13T11:58:00.000Z')
   })
 
-  it('drops an id past its own ttl', () => {
-    const expired = item({ fetchedAt: '2026-09-13T11:40:00.000Z', ttlSeconds: 300 }) // 20 min ago, ttl 5 min
-    expect(dropExpiredResultItems([expired], NOW)).toEqual([])
+  it('is stale as soon as ANY item is expired', () => {
+    expect(freshnessOf([item(), item({ sourceId: 'B', expired: true })]).stale).toBe(true)
+    expect(freshnessOf([item(), item({ sourceId: 'B' })]).stale).toBe(false)
+  })
+
+  it('has no fetchedAt and is not stale for a row that resolved to nothing', () => {
+    expect(freshnessOf([])).toEqual({ fetchedAt: null, stale: false })
+  })
+})
+
+// Pass 3, section 1f.
+describe('describeResultsForUi', () => {
+  const base = {
+    kind: 'flights' as const,
+    query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+    assumptions: [],
+  }
+
+  it('says how many were shown for an ordinary row', () => {
+    expect(describeResultsForUi({ ...base, sourceIds: ['a', 'b'] })).toBe('2 flights shown')
+    expect(describeResultsForUi({ ...base, sourceIds: ['a'] })).toBe('1 flight shown')
+    expect(describeResultsForUi({ ...base, kind: 'hotels', sourceIds: ['a', 'b'] })).toBe('2 hotels shown')
+  })
+
+  it('says the prices were refreshed for a refresh row', () => {
+    expect(describeResultsForUi({ ...base, sourceIds: new Array(10).fill('a'), refreshed: true }))
+      .toBe('Prices refreshed · 10 flights')
   })
 })
 
@@ -459,5 +514,15 @@ describe('skeletonMode', () => {
     expect(skeletonMode({
       status: 'working', resultKinds: ['flights'], latestAction: { action: 'choose', kind: 'hotel' },
     })).toBeNull()
+  })
+
+  // Pass 3, section 1e: a refresh IS a search, so it gets the same two shapes.
+  it('is "full" while a flights refresh runs, and "hotels" while a hotels one does', () => {
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights'], latestAction: { action: 'refresh', kind: 'flight' },
+    })).toBe('full')
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights', 'hotels'], latestAction: { action: 'refresh', kind: 'hotel' },
+    })).toBe('hotels')
   })
 })

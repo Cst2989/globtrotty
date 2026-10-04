@@ -30,6 +30,7 @@ import { runIntakeTurn, type IntakeDeps } from './intake.js'
 import { nextStepsAttachment, NEXT_QUESTION_ID } from './nextSteps.js'
 import { makeDriver } from './driver.js'
 import { handleChoose } from './choose.js'
+import { handleRefresh } from './refresh.js'
 import { faqAnswer } from './frontDesk.js'
 
 export type RouteIntent = 'filter' | 'new_search' | 'question' | 'chat' | 'faq'
@@ -328,6 +329,7 @@ async function reshowFlights(sql: postgres.Sql, ctx: AgentContext): Promise<Agen
  * - `choice` — ledger ruling 2: re-run intake on the original message (the newest hydrated
  *   `user` entry) with `overrides: { [questionId]: optionId }` at confidence 1.
  * - `choose` — Task 7's handler (a stub today).
+ * - `refresh` — pass 3's handler: re-run the stored search for that kind (src/agents/refresh.ts).
  * - `hand_off` / `rejected` / `revise` / anything else (including an unreadable action row) — the
  *   driver, same as before Task 6.
  *
@@ -389,6 +391,11 @@ export function makeRouter(deps: IntakeDeps): Agent {
       }
       if (action?.action === 'choose') {
         return handleChoose(deps, ctx, { kind: action.kind, sourceId: action.sourceId })
+      }
+      // Pass 3: "Refresh prices" on the stale banner. A search, so it belongs beside `choose`
+      // rather than with the driver — see src/agents/refresh.ts.
+      if (action?.action === 'refresh') {
+        return handleRefresh(deps, ctx, { kind: action.kind })
       }
       // hand_off / rejected / revise, and an unreadable action row (parseAction returned null —
       // `loop()`'s own hydration already told the model so via UNREADABLE_ACTION_TEXT): all go

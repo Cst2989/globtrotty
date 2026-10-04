@@ -2,7 +2,7 @@ import { Backpack, Bag, Suitcase, Warning } from '@phosphor-icons/react/dist/ssr
 import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite, LegLite } from '@/web/data'
 import { AirlineLogo } from './AirlineLogo'
-import { ageText } from './age'
+import { ageText, staleAgeText } from './age'
 
 export type FlightCardProps = {
   item: ResultItemLite
@@ -51,6 +51,14 @@ export function durationWords(minutes: number): string {
   const m = Math.max(0, minutes) % 60
   return `${h}h ${m}m`
 }
+
+/**
+ * Pass 3: an expired card's Select says why it is disabled rather than just being dead. Pressing
+ * it could never have worked — the freshness gate (src/gates/freshnessGate.ts) rejects a
+ * proposal built on an expired price — so the button that CAN work is the one in the banner
+ * above the list.
+ */
+const REFRESH_FIRST = 'Refresh prices first'
 
 /** How many carrier logos fit on one leg's line before the rest become a `+N`. */
 const MAX_LOGOS = 2
@@ -121,7 +129,7 @@ export function FlightCard({ item, adults, now, chosen = false, onChoose }: Flig
   const clock = now ?? new Date()
 
   return (
-    <li className="flight-card" data-chosen={chosen}>
+    <li className="flight-card" data-chosen={chosen} data-expired={item.expired ? 'true' : undefined}>
       <div className="flight-card-main">
         {chosen ? <span className="flight-card-ribbon">Selected</span> : null}
         <LegRow label="Outbound" leg={flight.outbound} stops={flight.stops} />
@@ -158,11 +166,19 @@ export function FlightCard({ item, adults, now, chosen = false, onChoose }: Flig
         <span className="flight-card-price">{formatMoney(money(BigInt(item.priceMinor), item.currency))}</span>
         <span className="flight-card-per">for {adults} {adults === 1 ? 'passenger' : 'passengers'}</span>
         {chosen ? null : (
-          <button type="button" className="btn btn-primary" onClick={() => onChoose(item.sourceId)}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={item.expired}
+            title={item.expired ? REFRESH_FIRST : undefined}
+            onClick={() => onChoose(item.sourceId)}
+          >
             Select
           </button>
         )}
-        <span className="flight-card-age">{ageText(item.fetchedAt, clock)}</span>
+        <span className="flight-card-age">
+          {item.expired ? staleAgeText(item.fetchedAt, clock) : ageText(item.fetchedAt, clock)}
+        </span>
       </div>
     </li>
   )

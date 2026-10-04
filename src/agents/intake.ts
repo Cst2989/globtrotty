@@ -40,13 +40,16 @@ class IntakeSupplierError extends Error {}
 
 /**
  * Kiwi's own cabin vocabulary (src/supplier/kiwi.ts sends `cabinClass` straight through to the
- * supplier as a request parameter) — a translation local to this call, never written back to the
- * notebook or the results row, both of which keep the brief's own `Cabin` enum.
+ * supplier as a request parameter) — a translation local to the supplier call, never written
+ * back to the notebook or the results row, both of which keep the brief's own `Cabin` enum.
+ *
+ * Exported for `src/agents/refresh.ts`, which rebuilds the same `FlightSearch` from a stored
+ * `results` row's `query` and must send the supplier the SAME cabin string this did.
  */
 const KIWI_CABIN: Record<Cabin, string> = {
   economy: 'Economy', premium_economy: 'PremiumEconomy', business: 'Business', first: 'First',
 }
-function kiwiCabin(cabin: Cabin): string {
+export function kiwiCabin(cabin: Cabin): string {
   return KIWI_CABIN[cabin]
 }
 

@@ -13,6 +13,7 @@ import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './ProposalCard'
+import { ageWords } from './age'
 
 export type ResultsPaneProps = {
   /** Every `results` row for this conversation, oldest first — `web/data.ts`'s `loadResults`. */
@@ -31,6 +32,32 @@ export type ResultsPaneProps = {
   skeleton?: SkeletonMode
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
+  /**
+   * Pass 3, section 1: "Refresh prices" on the stale banner, which this component renders above
+   * any list whose own prices have aged past their ttl (`ResultsView.stale`, web/data.ts).
+   */
+  onRefresh: (kind: 'flights' | 'hotels') => void
+}
+
+/**
+ * The one thing on screen that says WHY a list of flights is dimmed and why every Select on it
+ * is dead: the prices behind it are past the ttl the supplier gave them.
+ *
+ * It replaces nothing — before pass 3 there was no such state to be in, because `loadResults`
+ * dropped every expired item and the pane rendered an empty list under a full summary bar. The
+ * button is the only way back, so it is the primary one.
+ */
+function StaleBanner(
+  { fetchedAt, now, onRefresh }: { fetchedAt: string; now: Date; onRefresh: () => void },
+) {
+  return (
+    <div className="stale-banner" role="status">
+      <span>These prices are from {ageWords(fetchedAt, now)} ago.</span>
+      <button type="button" className="btn btn-primary btn-sm" onClick={onRefresh}>
+        Refresh prices
+      </button>
+    </div>
+  )
 }
 
 /** The newest `ResultsView` of one kind, or `null` when there is none — `results` arrives oldest-first. */
@@ -72,8 +99,9 @@ const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
  * tests confirm is safe under static rendering (no router, no effects).
  */
 export function ResultsPane(
-  { results, proposal, now, pending, error, skeleton = null, onChoose, onGetLinks }: ResultsPaneProps,
+  { results, proposal, now, pending, error, skeleton = null, onChoose, onGetLinks, onRefresh }: ResultsPaneProps,
 ) {
+  const clock = now ?? new Date()
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
@@ -139,6 +167,12 @@ export function ResultsPane(
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
           <SummaryBar {...summaryBarPropsFor(newestHotels)} />
+          {newestHotels.stale && newestHotels.fetchedAt ? (
+            <StaleBanner
+              fetchedAt={newestHotels.fetchedAt} now={clock}
+              onRefresh={() => onRefresh('hotels')}
+            />
+          ) : null}
           <div className="results-layout">
             <FilterRail
               kind="hotels" items={newestHotels.items}
@@ -163,6 +197,12 @@ export function ResultsPane(
       {newestFlights ? (
         <section className="results-section" aria-label="Flights">
           <SummaryBar {...summaryBarPropsFor(newestFlights)} />
+          {newestFlights.stale && newestFlights.fetchedAt ? (
+            <StaleBanner
+              fetchedAt={newestFlights.fetchedAt} now={clock}
+              onRefresh={() => onRefresh('flights')}
+            />
+          ) : null}
           <div className="results-layout">
             <FilterRail
               kind="flights" items={newestFlights.items}
@@ -247,6 +287,7 @@ export function ResultsPaneLive({ conversationId, results, proposal, skeleton = 
       pending={pending}
       error={error}
       onChoose={(kind, sourceId) => void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId })}
+      onRefresh={(kind) => void post(`/api/conversations/${conversationId}/refresh`, { kind })}
       onGetLinks={() => {
         if (!proposal || proposal.decision !== null) return
         void post(`/api/proposals/${proposal.id}/decide`, { decision: 'accept' })

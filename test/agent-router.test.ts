@@ -473,6 +473,32 @@ describeDb('makeRouter', () => {
     })
   })
 
+  // Pass 3, section 1d: a `refresh` action belongs beside `choose` rather than with the driver.
+  // This conversation has no stored `results` row of that kind, so it reaches the same refusal
+  // `handleRefresh` gives for any press with nothing to re-run — and makes no Jev, model or
+  // supplier call on the way there.
+  it('a refresh action dispatches straight to handleRefresh, no Jev call at all', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '20')
+      const action: ActionPayload = { action: 'refresh', kind: 'flight' }
+      await insertMessage(sql, s, 'action', JSON.stringify(action))
+
+      const fetchImpl = vi.fn()
+      const create = vi.fn()
+      const flights = new MockSupplier({ kind: 'flight' })
+      const searchSpy = vi.spyOn(flights, 'search')
+
+      const step = await makeRouter(deps(sql, fetchImpl, create, flights))(ctx(s, 'irrelevant'))
+
+      expect(step).toEqual({
+        kind: 'park', message: 'I do not have a search to refresh. Tell me the trip again.', costMicros: 0n,
+      })
+      expect(fetchImpl).not.toHaveBeenCalled()
+      expect(create).not.toHaveBeenCalled()
+      expect(searchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it('a hand_off action goes straight to the driver, no Jev call', async () => {
     await withTestDb(async (sql) => {
       const s = await seedConversation(sql, '06')

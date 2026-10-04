@@ -65,6 +65,14 @@ export type ResultsContent = {
   sourceIds: string[]
   assumptions: Assumption[]
   filter?: Filter
+  /**
+   * Pass 3: this row is `handleRefresh`'s (src/agents/refresh.ts), a re-run of
+   * a search she already had rather than a new one. Only the thread marker
+   * reads it (`describeResultsForUi`, web/data.ts: "Prices refreshed · 10
+   * flights"); the pane renders a refreshed row exactly like any other,
+   * because it IS one.
+   */
+  refreshed?: boolean
 }
 
 export type ChoicesContent = {
@@ -129,6 +137,7 @@ export const ResultsContentSchema = z.strictObject({
   sourceIds: z.array(z.string().min(1).max(512)),
   assumptions: z.array(AssumptionSchema),
   filter: FilterSchema.optional(),
+  refreshed: z.boolean().optional(),
 }) satisfies z.ZodType<ResultsContent>
 
 /**

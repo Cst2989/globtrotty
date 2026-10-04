@@ -24,7 +24,7 @@ const NOW = new Date('2026-11-18T09:00:00.000Z')
 
 const FLIGHT_ITEM: ResultItemLite = {
   sourceId: 'F1', name: 'Qatar Airways', priceMinor: '84500', currency: 'EUR',
-  fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900,
+  fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900, expired: false,
   flight: {
     outbound: {
       from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
@@ -44,7 +44,7 @@ const FLIGHT_ITEM: ResultItemLite = {
 
 const HOTEL_ITEM: ResultItemLite = {
   sourceId: 'H1', name: 'Hotel Gracery', priceMinor: '112000', currency: 'EUR',
-  fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900,
+  fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900, expired: false,
   hotel: { rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
 }
 
@@ -406,6 +406,7 @@ function resultsView(overrides: Partial<ResultsView> = {}): ResultsView {
     messageId: 'm1', kind: 'flights',
     query: { from: 'BCN', to: 'HND', outbound: '2026-11-19', inbound: null, adults: 1 },
     assumptions: [], filter: undefined, items: [FLIGHT_ITEM],
+    fetchedAt: FLIGHT_ITEM.fetchedAt, stale: false,
     cityNames: { BCN: 'Barcelona', HND: 'Tokyo' },
     ...overrides,
   }
@@ -475,7 +476,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView({ assumptions: [{ field: 'year', value: '2026', reason: 'year' }] })],
-        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(html).toContain('Barcelona BCN → Tokyo HND')
@@ -487,7 +488,7 @@ describe('ResultsPane', () => {
     const noneChosen = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
-        onChoose: () => {}, onGetLinks: () => {},
+        onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(noneChosen).not.toContain('pinned-summary')
@@ -495,7 +496,7 @@ describe('ResultsPane', () => {
     const chosen = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: proposal(), now: NOW, pending: false, error: null,
-        onChoose: () => {}, onGetLinks: () => {},
+        onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(chosen).toContain('pinned-summary')
@@ -506,7 +507,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView({ messageId: 'm1', kind: 'flights', items: [FLIGHT_ITEM] }), resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
-        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     // A flight card renders no supplier `name` field at all (an itinerary has no single name
@@ -524,7 +525,7 @@ describe('ResultsPane', () => {
     // the callback wiring compiles and the row renders with it attached.
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
-        results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, onChoose, onGetLinks: () => {},
+        results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, onChoose, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(html).toContain('Select')
@@ -541,7 +542,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView({ filter: { nonstop: true }, items: [nonstopItem, FLIGHT_ITEM] })],
-        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     // The rail's Direct radio is checked...
@@ -558,7 +559,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
-        onChoose: () => {}, onGetLinks: () => {},
+        onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(/<input[^>]*checked[^>]*value="any"/.test(html)).toBe(true)
@@ -571,7 +572,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
-        onChoose: () => {}, onGetLinks: () => {},
+        onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(html.indexOf('sort-tabs')).toBeLessThan(html.indexOf('flight-card'))
@@ -583,7 +584,7 @@ describe('ResultsPane', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
-        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
     expect(html).toContain('Rating')
@@ -644,11 +645,84 @@ describe('ResultsSkeleton', () => {
   })
 })
 
+// Pass 3, section 1. The bug: a page refresh fifteen minutes after a search rendered an empty
+// list under a full summary bar, because `loadResults` dropped every expired item. The items now
+// stay, flagged, and these are the three things that says.
+describe('expired prices', () => {
+  const EXPIRED_ITEM: ResultItemLite = { ...FLIGHT_ITEM, expired: true }
+  const LATER = new Date('2026-11-18T10:55:00.000Z')   // two hours after FLIGHT_ITEM's fetchedAt
+
+  it('dims an expired card, disables its Select with a reason, and says how old the price is', () => {
+    const html = renderToStaticMarkup(createElement(FlightCard, {
+      item: EXPIRED_ITEM, adults: 2, now: LATER, onChoose: () => {},
+    }))
+    expect(html).toContain('data-expired="true"')
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('title="Refresh prices first"')
+    expect(html).toContain('Prices from 2 h ago')
+    expect(html).not.toContain('found')
+  })
+
+  it('leaves a fresh card alone', () => {
+    const html = renderToStaticMarkup(createElement(FlightCard, {
+      item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {},
+    }))
+    expect(html).not.toContain('data-expired')
+    expect(html).not.toContain('disabled')
+    expect(html).toContain('found 10 min ago')
+  })
+
+  it('gives an expired hotel row the same treatment', () => {
+    const html = renderToStaticMarkup(createElement(HotelList, {
+      items: [{ ...HOTEL_ITEM, expired: true }], now: LATER, onChoose: () => {},
+    }))
+    expect(html).toContain('data-expired="true"')
+    expect(html).toContain('title="Refresh prices first"')
+    expect(html).toContain('Prices from 2 h ago')
+  })
+
+  it('puts a Refresh prices banner between the summary bar and the list of a stale row', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [EXPIRED_ITEM], stale: true })],
+      proposal: null, now: LATER, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+    expect(html).toContain('These prices are from 2 h ago.')
+    expect(html).toContain('Refresh prices')
+    expect(html.indexOf('summary-bar')).toBeLessThan(html.indexOf('stale-banner'))
+    expect(html.indexOf('stale-banner')).toBeLessThan(html.indexOf('flight-card'))
+    // The cards are still THERE — that is the whole fix.
+    expect(html).toContain('flight-card')
+  })
+
+  it('shows no banner for a fresh row', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+    expect(html).not.toContain('stale-banner')
+    expect(html).not.toContain('Refresh prices')
+  })
+
+  it('calls onRefresh with the section\'s own kind', () => {
+    const onRefresh = vi.fn()
+    // No click to simulate under `renderToStaticMarkup`; this pins that the hotels section gets
+    // its own banner, wired to its own kind, rather than the flights one's.
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ messageId: 'm2', kind: 'hotels', items: [{ ...HOTEL_ITEM, expired: true }], stale: true })],
+      proposal: null, now: LATER, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh,
+    }))
+    expect([...html.matchAll(/stale-banner/g)]).toHaveLength(1)
+    expect(html).toContain('Refresh prices')
+  })
+})
+
 describe('ResultsPane skeletons', () => {
   it('replaces the whole pane while the first search runs', () => {
     const html = renderToStaticMarkup(createElement(ResultsPane, {
       results: [], proposal: null, now: NOW, pending: false, error: null, skeleton: 'full',
-      onChoose: () => {}, onGetLinks: () => {},
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
     }))
     expect(html).toContain('Searching flights…')
     expect(html).not.toContain('Select')
@@ -657,7 +731,7 @@ describe('ResultsPane skeletons', () => {
   it('puts a hotel skeleton ABOVE the flights she already has, leaving them in place', () => {
     const html = renderToStaticMarkup(createElement(ResultsPane, {
       results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, skeleton: 'hotels',
-      onChoose: () => {}, onGetLinks: () => {},
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
     }))
     expect(html.indexOf('Searching hotels…')).toBeGreaterThan(-1)
     expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
@@ -667,7 +741,7 @@ describe('ResultsPane skeletons', () => {
   it('shows no skeleton at all once the results are in', () => {
     const html = renderToStaticMarkup(createElement(ResultsPane, {
       results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, skeleton: null,
-      onChoose: () => {}, onGetLinks: () => {},
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
     }))
     expect(html).not.toContain('Searching')
   })

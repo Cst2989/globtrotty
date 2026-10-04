@@ -21,7 +21,7 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
   const { flight: flightOverrides, ...rest } = overrides
   return {
     sourceId: 'F1', name: 'Qatar Airways', priceMinor: '45600', currency: 'EUR',
-    fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
+    fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
     flight: {
       outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600 },
       inbound: null,
@@ -40,7 +40,7 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
 function hotel(overrides: Partial<ResultItemLite> = {}): ResultItemLite {
   return {
     sourceId: 'H1', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR',
-    fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
+    fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
     hotel: { rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
     ...overrides,
   }
@@ -295,7 +295,7 @@ describe('bag and rating filters, in both modules', () => {
   it('minRating keeps a stay rated at or above it, and drops an unrated one', () => {
     const hotel = (sourceId: string, rating: number | null): ResultItemLite => ({
       sourceId, name: 'h', priceMinor: '100000', currency: 'EUR',
-      fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
+      fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
       hotel: { rating, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
     })
     const hotels = [hotel('H3', 3), hotel('H4', 4), hotel('H0', null)]

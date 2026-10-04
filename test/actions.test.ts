@@ -108,9 +108,36 @@ describe('actions', () => {
     for (const t of texts) expect(t).not.toContain('"')
   })
 
+  // Pass 3, section 1d: "Refresh prices". An enum and nothing else — no id to forge, because
+  // the row to re-run is found server-side (src/agents/refresh.ts).
+  it('parses refresh, and refuses anything beyond its kind', () => {
+    expect(parseAction(JSON.stringify({ action: 'refresh', kind: 'flight' })))
+      .toEqual({ action: 'refresh', kind: 'flight' })
+    expect(parseAction(JSON.stringify({ action: 'refresh', kind: 'hotel' })))
+      .toEqual({ action: 'refresh', kind: 'hotel' })
+    // The ROW vocabulary ('flights'/'hotels') is the route's body, never the action's.
+    expect(parseAction(JSON.stringify({ action: 'refresh', kind: 'flights' }))).toBeNull()
+    expect(parseAction(JSON.stringify({ action: 'refresh' }))).toBeNull()
+    expect(parseAction(JSON.stringify({ action: 'refresh', kind: 'flight', sourceId: 'kiwi:a' }))).toBeNull()
+  })
+
+  it('renders refresh operator text byte for byte, with no `"` character', () => {
+    expect(renderActionMessage({ action: 'refresh', kind: 'flight' })).toBe(
+      'Operator: the traveller asked to refresh the flight prices. '
+      + 'The office is re-running the search; do not ask her to confirm.',
+    )
+    expect(renderActionMessage({ action: 'refresh', kind: 'hotel' })).toBe(
+      'Operator: the traveller asked to refresh the hotel prices. '
+      + 'The office is re-running the search; do not ask her to confirm.',
+    )
+    expect(renderActionMessage({ action: 'refresh', kind: 'flight' })).not.toContain('"')
+  })
+
   it('describes choose and choice for the UI', () => {
     expect(describeActionForUi({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a' })).toBe('You chose a flight')
     expect(describeActionForUi({ action: 'choose', kind: 'hotel', sourceId: 'booking:y' })).toBe('You chose a hotel')
     expect(describeActionForUi({ action: 'choice', questionId: 'origin', optionId: 'BCN' })).toBe('You answered a question')
+    expect(describeActionForUi({ action: 'refresh', kind: 'flight' })).toBe('You asked to refresh prices')
+    expect(describeActionForUi({ action: 'refresh', kind: 'hotel' })).toBe('You asked to refresh prices')
   })
 })

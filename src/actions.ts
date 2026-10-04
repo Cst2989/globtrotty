@@ -46,6 +46,12 @@ export const ActionPayload = z.discriminatedUnion('action', [
   // `optionId` matches one of its `options[].id` — never free text, so a
   // traveller cannot smuggle her own words ("Tokyo please") through this
   // channel; the regex rejects anything that is not already id-shaped.
+  // Pass 3: the traveller pressed "Refresh prices" on a `results` row whose
+  // own ttl has run out. An enum and nothing else — the row to re-run is
+  // found server-side from the stored search (src/agents/refresh.ts reads
+  // the newest unfiltered `results` row of this kind), never named by the
+  // client, so there is no id here to forge or to mask.
+  z.strictObject({ action: z.literal('refresh'), kind: z.enum(['flight', 'hotel']) }),
   z.strictObject({
     action: z.literal('choice'),
     questionId: z.string().regex(/^[a-z_]{1,32}$/),
@@ -109,6 +115,9 @@ export function renderActionMessage(a: ActionPayload): string {
     case 'choose':
       return `Operator: the traveller chose ${a.kind} ${maskIdChars(a.sourceId)} from the list. `
         + 'The office has recorded it and is searching the next step; do not ask her to confirm.'
+    case 'refresh':
+      return `Operator: the traveller asked to refresh the ${a.kind} prices. `
+        + 'The office is re-running the search; do not ask her to confirm.'
     case 'choice':
       return `Operator: to the question ${a.questionId} she chose ${a.optionId}.`
   }
@@ -125,6 +134,8 @@ export function describeActionForUi(a: ActionPayload): string {
       return 'You asked to revise the proposal'
     case 'choose':
       return a.kind === 'flight' ? 'You chose a flight' : 'You chose a hotel'
+    case 'refresh':
+      return 'You asked to refresh prices'
     case 'choice':
       return 'You answered a question'
   }

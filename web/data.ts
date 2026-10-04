@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { parseAction, describeActionForUi } from '@/src/actions'
+import { parseAction, describeActionForUi, type ActionPayload } from '@/src/actions'
 import {
   parseResults,
   type ResultsContent, type Filter, type Assumption,
@@ -220,7 +220,10 @@ export async function listConversations(sb: SupabaseClient): Promise<Conversatio
 export function describeResultsForUi(r: ResultsContent): string {
   const n = r.sourceIds.length
   const noun = r.kind === 'flights' ? (n === 1 ? 'flight' : 'flights') : (n === 1 ? 'hotel' : 'hotels')
-  return `${n} ${noun} shown`
+  // Pass 3: a row written by `handleRefresh` says so, so the thread reads as a
+  // history of what happened rather than the same line twice over. The flag is
+  // the row's own (`ResultsContent.refreshed`), never inferred from timing.
+  return r.refreshed ? `Prices refreshed · ${n} ${noun}` : `${n} ${noun} shown`
 }
 
 export function toThreadView(rows: ThreadMessage[]): ThreadMessage[] {
@@ -559,6 +562,17 @@ export type ResultItemLite = {
   currency: string
   fetchedAt: string
   ttlSeconds: number
+  /**
+   * Pass 3's bug: `fetchedAt + ttlSeconds` is already in the past. Kiwi
+   * flight rows carry `ttl_seconds = 900`, so a page refresh sixteen minutes
+   * after a search used to render an EMPTY list under a summary bar and a row
+   * of sort tabs — `loadResults` dropped every expired id and nothing said
+   * why. The items now survive with this flag instead: the card renders
+   * dimmed with its Select disabled, and the pane puts a `Refresh prices`
+   * banner above the list. Computed against `loadResults`'s own `now`, so it
+   * is a server-render-time answer, never a client clock's.
+   */
+  expired: boolean
   flight?: {
     outbound: LegLite
     inbound: LegLite | null
@@ -606,6 +620,14 @@ export type ResultsView = {
   assumptions: Assumption[]
   filter: Filter | undefined
   items: ResultItemLite[]
+  /**
+   * The newest item's `fetchedAt`, or `null` for a row that resolved to no
+   * items at all — what the stale banner's "These prices are from 2 h ago."
+   * is computed from. See `freshnessOf`.
+   */
+  fetchedAt: string | null
+  /** True once any item in this row is past its own ttl — the banner's one condition. */
+  stale: boolean
   /**
    * Place-table city names for every metro code this row names — `query.from`, `query.to`, and
    * any place-code assumption value. Resolved HERE, server-side, because
@@ -758,7 +780,7 @@ function hotelLite(payload: UnknownRecord): ResultItemLite['hotel'] | undefined 
  * hotel shape — a garbled write, never something `recordResults` itself
  * produces. The caller drops a `null` rather than surfacing a broken row.
  */
-function toResultItemLite(row: ToolResultRow): ResultItemLite | null {
+function toResultItemLite(row: ToolResultRow, now: Date): ResultItemLite | null {
   if (!isRecord(row.payload)) return null
   const flight = flightLite(row.payload)
   const hotel = hotelLite(row.payload)
@@ -770,9 +792,22 @@ function toResultItemLite(row: ToolResultRow): ResultItemLite | null {
     currency: row.currency,
     fetchedAt: row.fetched_at,
     ttlSeconds: row.ttl_seconds,
+    expired: isExpired(row.fetched_at, row.ttl_seconds, now),
     ...(flight ? { flight } : {}),
     ...(hotel ? { hotel } : {}),
   }
+}
+
+/**
+ * The same boundary rule `dropExpiredAlternatives` applies (`>= now` counts
+ * as still fresh), now kept as a FLAG rather than a filter for result items —
+ * see `ResultItemLite.expired`. The swap picker's own `AlternativeLite` still
+ * filters: an alternative whose price has expired is an offer this office
+ * cannot stand behind, and there is no Refresh button on that card to make it
+ * good again.
+ */
+export function isExpired(fetchedAt: string, ttlSeconds: number, now: Date): boolean {
+  return new Date(fetchedAt).getTime() + ttlSeconds * 1000 < now.getTime()
 }
 
 /**
@@ -780,31 +815,52 @@ function toResultItemLite(row: ToolResultRow): ResultItemLite | null {
  * above, extracted so it is testable without a live DB. Correct only when
  * `rows` already arrives newest-first.
  */
-export function newestResultItemPerSourceId(rows: ToolResultRow[]): ResultItemLite[] {
+export function newestResultItemPerSourceId(rows: ToolResultRow[], now: Date): ResultItemLite[] {
   const seen = new Set<string>()
   const out: ResultItemLite[] = []
   for (const r of rows) {
     if (seen.has(r.source_id)) continue
     seen.add(r.source_id)
-    const item = toResultItemLite(r)
+    const item = toResultItemLite(r, now)
     if (item) out.push(item)
   }
   return out
 }
 
-/** Same rule as `dropExpiredAlternatives` above, over the richer `ResultItemLite` shape. */
-export function dropExpiredResultItems(items: ResultItemLite[], now: Date): ResultItemLite[] {
-  return items.filter((i) => new Date(i.fetchedAt).getTime() + i.ttlSeconds * 1000 >= now.getTime())
+/**
+ * A `results` row's own freshness, from the items it actually resolved to:
+ * `fetchedAt` is the NEWEST item's (they are written by one search, so they
+ * normally share it to the millisecond), and `stale` is true as soon as any
+ * one of them is past its ttl. Any, not all: a row half of whose prices can
+ * no longer be stood behind is a row worth re-running, and the banner's
+ * offer ("Refresh prices") re-runs the whole search either way.
+ *
+ * Pure and exported so `test/web-data.test.ts` pins it without a live DB.
+ */
+export function freshnessOf(items: ResultItemLite[]): { fetchedAt: string | null; stale: boolean } {
+  let fetchedAt: string | null = null
+  for (const i of items) {
+    if (fetchedAt === null || i.fetchedAt > fetchedAt) fetchedAt = i.fetchedAt
+  }
+  return { fetchedAt, stale: items.some((i) => i.expired) }
 }
 
 /**
  * Every `results` row for one conversation, oldest first, each one's
- * `sourceIds` rehydrated from `tool_results` (newest row per `source_id`,
- * expired ids dropped) into `ResultItemLite`s — the same "newest row per id,
- * then drop what's past its own ttl" shape `loadAlternatives` already uses,
- * just over the richer flight/hotel payload instead of the swap picker's
- * flat name/price. A `sourceId` the corpus no longer has fresh (or never
- * had) is silently absent from that row's `items` rather than throwing.
+ * `sourceIds` rehydrated from `tool_results` (newest row per `source_id`)
+ * into `ResultItemLite`s. A `sourceId` the corpus never had is silently
+ * absent from that row's `items` rather than throwing.
+ *
+ * Pass 3's bug: this used to drop every id past its own ttl, exactly as
+ * `loadAlternatives` still does. Kiwi flight rows carry `ttl_seconds = 900`,
+ * so a page refresh a quarter of an hour after a search rendered an empty
+ * list under a full summary bar and a row of sort tabs, with nothing on
+ * screen saying the prices had simply aged out. Expired items are KEPT here
+ * and flagged (`ResultItemLite.expired`, `ResultsView.stale`); the pane dims
+ * them, disables their Select, and offers "Refresh prices", which re-runs
+ * the stored search (src/agents/refresh.ts). The guarantee that matters —
+ * never letting her ACT on an expired price — is unchanged, and the freshness
+ * gate (src/gates/freshnessGate.ts) remains the one that enforces it.
  *
  * `.limit(50)` on `results` rows and `.limit(500)` on the `tool_results`
  * lookup are the same bounding instinct as `loadThread`/`loadAlternatives`
@@ -841,22 +897,25 @@ export async function loadResults(
       .order('fetched_at', { ascending: false })
       .limit(500)
     if (toolError) throw toolError
-    const deduped = newestResultItemPerSourceId((toolRows ?? []) as ToolResultRow[])
-    const fresh = dropExpiredResultItems(deduped, now)
-    bySourceId = new Map(fresh.map((i) => [i.sourceId, i]))
+    const deduped = newestResultItemPerSourceId((toolRows ?? []) as ToolResultRow[], now)
+    bySourceId = new Map(deduped.map((i) => [i.sourceId, i]))
   }
 
-  return parsed.map((r) => ({
-    messageId: r.id,
-    kind: r.content.kind,
-    query: r.content.query,
-    assumptions: r.content.assumptions,
-    filter: r.content.filter,
-    items: r.content.sourceIds
+  return parsed.map((r) => {
+    const items = r.content.sourceIds
       .map((id) => bySourceId.get(id))
-      .filter((i): i is ResultItemLite => i !== undefined),
-    cityNames: cityNamesFor(r.content),
-  }))
+      .filter((i): i is ResultItemLite => i !== undefined)
+    return {
+      messageId: r.id,
+      kind: r.content.kind,
+      query: r.content.query,
+      assumptions: r.content.assumptions,
+      filter: r.content.filter,
+      items,
+      ...freshnessOf(items),
+      cityNames: cityNamesFor(r.content),
+    }
+  })
 }
 
 /* ---------- Results UI pass 2 (E): the skeleton's own two inputs ---------- */
@@ -869,6 +928,11 @@ export async function loadResults(
  * sentence it renders an action row as.
  */
 export type LatestAction = { action: string; kind: 'flight' | 'hotel' | null }
+
+/** The two actions whose own `kind` the skeleton needs; every other one has none to carry. */
+function kindOf(action: ActionPayload): 'flight' | 'hotel' | null {
+  return action.action === 'choose' || action.action === 'refresh' ? action.kind : null
+}
 
 export async function loadLatestAction(
   sb: SupabaseClient, conversationId: string,
@@ -885,7 +949,7 @@ export async function loadLatestAction(
   if (content === undefined) return null
   const action = parseAction(content)
   if (!action) return null
-  return { action: action.action, kind: action.action === 'choose' ? action.kind : null }
+  return { action: action.action, kind: kindOf(action) }
 }
 
 /**
@@ -900,6 +964,10 @@ export async function loadLatestAction(
  * - `null` — nothing is running, or something is running that the pane has no shape to promise
  *   (a question for the driver, a typed filter, which both answer in the thread).
  *
+ * Pass 3 (section 1e) adds the `refresh` action, which is a search like any other and so gets
+ * the same two shapes: refreshing FLIGHTS replaces the pane (the whole list is about to be
+ * rewritten with new prices), refreshing HOTELS puts the hotel placeholder above what she has.
+ *
  * Pure, so `test/web-data.test.ts` pins every branch without a live DB.
  */
 export type SkeletonMode = 'full' | 'hotels' | null
@@ -913,7 +981,9 @@ export function skeletonMode(input: {
 }): SkeletonMode {
   if (input.status !== 'working') return null
   if (input.resultKinds.length === 0) return 'full'
+  const action = input.latestAction
+  if (action?.action === 'refresh') return action.kind === 'hotel' ? 'hotels' : 'full'
   const newest = input.resultKinds[input.resultKinds.length - 1]
-  const choseFlight = input.latestAction?.action === 'choose' && input.latestAction.kind === 'flight'
+  const choseFlight = action?.action === 'choose' && action.kind === 'flight'
   return newest === 'flights' && choseFlight ? 'hotels' : null
 }
