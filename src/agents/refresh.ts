@@ -60,7 +60,10 @@ export async function handleRefresh(
   let cost = 0n
   try {
     const callId = action.kind === 'flight' ? 'refresh-flights' : 'refresh-hotels'
-    const run = await rerunSearch(deps, ctx, plan, callId)
+    // Section 10's cache is deliberately bypassed here: "Refresh prices" is the one request in
+    // this office that is ABOUT the supplier call, and answering it out of a store — however
+    // fresh that store is — answers a different question than the one she asked.
+    const run = await rerunSearch(deps, ctx, plan, callId, { cache: false })
     if (run.status === 'budget') {
       return {
         kind: 'fail', reason: 'limit_reached',

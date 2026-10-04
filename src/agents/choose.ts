@@ -33,6 +33,7 @@ import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { type Place } from '../intake/places.js'
 import { hotelSearchFor, stayWindowForFlight, withDistanceFromCentre } from './hotels.js'
 import { ResearchSupplierError, planFor, rerunSearch, resultsAttachment } from './research.js'
+import { cachedSearch, logCache } from './searchCache.js'
 import { conversationStage, hotelsFoundReply, nextStepsForList } from './stage.js'
 import { nightsBetween } from '../supplier/dates.js'
 import { rankItems } from '../intake/rank.js'
@@ -336,10 +337,16 @@ async function handleChooseFlight(
         return found ? [found] : []
       })
     } else {
+      // Section 10: the same stay search this traveller already ran, inside its own window,
+      // answers this one — choosing a flight for a trip she is planning in two conversations is
+      // exactly the case. The rows keep their original timestamps.
+      const cached = await cachedSearch(sql, ctx.userId, params, new Date(deps.now()))
+      logCache(cached !== null, params)
       // The distance from the city centre is this office's own arithmetic over the search it
       // just ran, not the supplier's — so it is stamped on before `recordResults` writes the
-      // corpus row, and a replayed call gets it back from the corpus for free.
-      items = withDistanceFromCentre(await deps.hotels.search(params), destination)
+      // corpus row, and a replayed call gets it back from the corpus for free. A cached row
+      // already carries it, and re-stamping it changes nothing.
+      items = withDistanceFromCentre(cached ?? await deps.hotels.search(params), destination)
       await finishToolCall(sql, ctx.turnId, callId, { sourceIds: items.map((i) => i.sourceId) })
     }
 

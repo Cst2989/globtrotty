@@ -24,6 +24,7 @@ import { recordSpend } from '../repo/spend.js'
 import { applyRequirementsPatch } from '../repo/notebook.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { beginToolCall, finishToolCall } from '../repo/toolCalls.js'
+import { cachedSearch, logCache } from './searchCache.js'
 import { CODE_MAP } from '../intake/places.js'
 import type { FlightSearch, SupplierItem } from '../supplier/types.js'
 
@@ -266,10 +267,21 @@ export async function runIntakeTurn(
         return item ? [item] : []
       })
     } else {
-      try {
-        items = await deps.flights.search(params)
-      } catch (err) {
-        throw new IntakeSupplierError(err instanceof Error ? err.message : String(err))
+      // Section 10: the same brief sent twice inside the fare's own freshness window is one
+      // supplier call, not two. The rows come back out of `tool_results` with their original
+      // timestamps and are written into this conversation's corpus below exactly as a live
+      // search's would be — `rehydrate` is conversation-scoped, and the freshness gate must go
+      // on seeing the true age of every price.
+      const cached = await cachedSearch(sql, ctx.userId, params, new Date(deps.now()))
+      logCache(cached !== null, params)
+      if (cached !== null) {
+        items = cached
+      } else {
+        try {
+          items = await deps.flights.search(params)
+        } catch (err) {
+          throw new IntakeSupplierError(err instanceof Error ? err.message : String(err))
+        }
       }
       // Marks the EXTERNAL effect done — a resumed turn must never call Kiwi again for this
       // search — independent of whether anything below (the rerank call, the notebook write)

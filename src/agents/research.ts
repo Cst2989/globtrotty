@@ -37,6 +37,7 @@ import { loadNotebook } from '../repo/notebook.js'
 import { loadNewestAcceptedItinerary } from '../repo/proposals.js'
 import { recordResults, rehydrate } from '../repo/toolResults.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
+import { cachedSearch, logCache } from './searchCache.js'
 import { beginToolCall, finishToolCall } from '../repo/toolCalls.js'
 import type { Assumption, ResultsContent } from '../results.js'
 import type { TripBrief } from '../intake/brief.js'
@@ -228,7 +229,7 @@ export async function planFor(
  * has to be unique WITHIN the turn, and a turn runs each of these at most once.
  */
 async function search(
-  deps: IntakeDeps, ctx: AgentContext, params: SearchParams, callId: string,
+  deps: IntakeDeps, ctx: AgentContext, params: SearchParams, callId: string, cache: boolean,
 ): Promise<SupplierItem[]> {
   const { sql } = deps
   const flights = params.kind === 'flight'
@@ -244,6 +245,23 @@ async function search(
       return item ? [item] : []
     })
   }
+  // Section 10: an identical search this traveller already ran, inside its own freshness
+  // window, answers this one. The rows are copied into THIS conversation's corpus below with
+  // their original `fetched_at`/`ttl_seconds`, because `rehydrate` is conversation-scoped and
+  // because the freshness gate must go on seeing the true age of every price.
+  //
+  // `cache` is false for an explicit "Refresh prices": pressing that means "go and ask again",
+  // and answering it out of a store — however fresh — is answering a different question. It is
+  // the one request in this office that is ABOUT the supplier call.
+  if (cache) {
+    const cached = await cachedSearch(sql, ctx.userId, params, new Date(deps.now()))
+    logCache(cached !== null, params)
+    if (cached !== null) {
+      await finishToolCall(sql, ctx.turnId, callId, { sourceIds: cached.map((i) => i.sourceId) })
+      return cached
+    }
+  }
+
   let items: SupplierItem[]
   try {
     items = flights
@@ -268,6 +286,7 @@ async function search(
  */
 export async function rerunSearch(
   deps: IntakeDeps, ctx: AgentContext, plan: SearchPlan, callId: string,
+  opts: { cache?: boolean } = {},
 ): Promise<RerunResult> {
   const { sql } = deps
   // Spec section 1.4: a direct supplier call counts against the same per-turn budget
@@ -275,7 +294,7 @@ export async function rerunSearch(
   const budget = await assertSupplierBudget(sql, ctx.turnId, deps.limits.maxSupplierCallsPerTurn)
   if (!budget.ok) return { status: 'budget', max: budget.max, used: budget.used }
 
-  const found = await search(deps, ctx, plan.params, callId)
+  const found = await search(deps, ctx, plan.params, callId, opts.cache ?? true)
   // The stays get their distance from the centre stamped on exactly as the original search did
   // (`handleChooseFlight`), from the plan's own place — otherwise a re-run would quietly drop
   // "3.2 km from centre" off every card.
