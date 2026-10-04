@@ -25,7 +25,7 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
     sourceId: 'F1', name: 'Qatar Airways', priceMinor: '45600', currency: 'EUR',
     fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
     flight: {
-      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600 },
+      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'], viaCities: ['Doha'], viaCountries: ['QA'], viaCountryNames: ['Qatar'], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600 },
       inbound: null,
       stops: 1,
       inboundStops: null,
@@ -72,8 +72,8 @@ describe('applyFilterLite', () => {
   })
 
   it('departure window matches the outbound leg\'s local hour, read without parsing a Date', () => {
-    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
-    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
     expect(applyFilterLite([morning, evening], { departure: 'morning' }).map((i) => i.sourceId)).toEqual(['FA'])
     expect(applyFilterLite([morning, evening], { departure: 'evening' }).map((i) => i.sourceId)).toEqual(['FB'])
   })
@@ -153,7 +153,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('both modules classify the morning (9), afternoon (14) and evening (20) hour the same way', () => {
     for (const [window, hour] of Object.entries(HOURS) as ['morning' | 'afternoon' | 'evening', number][]) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
 
       const liteMatches = applyFilterLite([lite], { departure: window }).length === 1
@@ -166,7 +166,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('each hour matches exactly one of the three windows in both modules', () => {
     for (const hour of Object.values(HOURS)) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
       const windows: Array<'morning' | 'afternoon' | 'evening'> = ['morning', 'afternoon', 'evening']
 
@@ -193,8 +193,8 @@ describe('stops reconciliation (web/filters.ts vs src/intake/filter.ts)', () => 
     return flight({
       sourceId,
       flight: {
-        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
-        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
+        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 },
+        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [], viaCities: [], viaCountries: [], viaCountryNames: [], carriers: [], carrierNames: [], durationMinutes: 600 },
         stops: out,
         inboundStops: back,
       },
@@ -478,6 +478,91 @@ describe('hotel filter reconciliation (web/filters.ts vs src/intake/filter.ts)',
       expect(applyFilterLite([liteFlight], filter)).toHaveLength(1)
       expect(applyFilter([storedF], filter)).toHaveLength(1)
     }
+  })
+})
+
+/**
+ * The bug this filter exists for: "I don't want to stop in China or the Middle East" used to
+ * classify as `filter` and change nothing, because no dimension matched a connection's own
+ * country. Three BCN→TYO items, one direct and two connecting (one via Doha — Qatar, middle
+ * east; one via Shanghai Pudong — China), pinned against BOTH modules the same way every other
+ * dimension in this file is.
+ */
+describe('connections filter (avoidCountries/avoidRegions), reconciled with src/intake/filter.ts', () => {
+  /** A BCN→TYO lite item with a single via stop (or none, for `viaCode: null`). */
+  function liteVia(sourceId: string, viaCode: string | null, viaCity: string, viaCountry: string | null, viaCountryName: string | null): ResultItemLite {
+    return flight({
+      sourceId,
+      flight: {
+        outbound: {
+          from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00',
+          via: viaCode === null ? [] : [viaCode],
+          viaCities: viaCode === null ? [] : [viaCity],
+          viaCountries: viaCode === null ? [] : [viaCountry],
+          viaCountryNames: viaCode === null ? [] : [viaCountryName],
+          carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600,
+        },
+      },
+    })
+  }
+
+  /** The same itinerary as a corpus `StoredItem`, via `src/intake/filter.ts`'s own lookup
+   * (`airportCountry`/`regionOfCountry`) rather than a pre-resolved field. */
+  function storedVia(sourceId: string, viaCode: string | null): StoredItem {
+    const base = storedFlight(sourceId, 9)
+    if (base.detail.kind !== 'flight') throw new Error('unreachable')
+    const route = viaCode === null ? ['BCN', 'TYO'] : ['BCN', viaCode, 'TYO']
+    return { ...base, detail: { ...base.detail, outbound: { ...base.detail.outbound, route } } }
+  }
+
+  const doh = { lite: liteVia('DOH1', 'DOH', 'Doha', 'QA', 'Qatar'), stored: storedVia('DOH1', 'DOH') }
+  const pvg = { lite: liteVia('PVG1', 'PVG', 'Shanghai', 'CN', 'China'), stored: storedVia('PVG1', 'PVG') }
+  const direct = { lite: liteVia('DIRECT', null, '', null, null), stored: storedVia('DIRECT', null) }
+
+  it('avoidRegions: middle_east excludes the Doha connection, keeps Shanghai and the direct one', () => {
+    const filter: Filter = { avoidRegions: ['middle_east'] }
+    expect(applyFilterLite([doh.lite, pvg.lite, direct.lite], filter).map((i) => i.sourceId))
+      .toEqual(['PVG1', 'DIRECT'])
+    expect(applyFilter([doh.stored, pvg.stored, direct.stored], filter).map((i) => i.sourceId))
+      .toEqual(['PVG1', 'DIRECT'])
+  })
+
+  it('avoidRegions: china excludes the Shanghai connection, keeps Doha', () => {
+    const filter: Filter = { avoidRegions: ['china'] }
+    expect(applyFilterLite([doh.lite, pvg.lite], filter).map((i) => i.sourceId)).toEqual(['DOH1'])
+    expect(applyFilter([doh.stored, pvg.stored], filter).map((i) => i.sourceId)).toEqual(['DOH1'])
+  })
+
+  it('both regions at once exclude both connections, keeping only the direct item', () => {
+    const filter: Filter = { avoidRegions: ['china', 'middle_east'] }
+    expect(applyFilterLite([doh.lite, pvg.lite, direct.lite], filter).map((i) => i.sourceId)).toEqual(['DIRECT'])
+    expect(applyFilter([doh.stored, pvg.stored, direct.stored], filter).map((i) => i.sourceId)).toEqual(['DIRECT'])
+  })
+
+  it('avoidCountries excludes by the exact country, independent of the region list', () => {
+    const filter: Filter = { avoidCountries: ['QA'] }
+    expect(applyFilterLite([doh.lite, pvg.lite], filter).map((i) => i.sourceId)).toEqual(['PVG1'])
+    expect(applyFilter([doh.stored, pvg.stored], filter).map((i) => i.sourceId)).toEqual(['PVG1'])
+  })
+
+  it('an airport neither table places by country is never excluded, in either module', () => {
+    const unknown = { lite: liteVia('ZZ1', 'ZZZ', 'ZZZ', null, null), stored: storedVia('ZZ1', 'ZZZ') }
+    const filter: Filter = { avoidRegions: ['china', 'middle_east', 'russia', 'usa', 'europe', 'asia', 'africa', 'south_america', 'north_america', 'oceania'] }
+    expect(applyFilterLite([unknown.lite], filter)).toHaveLength(1)
+    expect(applyFilter([unknown.stored], filter)).toHaveLength(1)
+  })
+
+  it('a hotel passes the connections filter untouched, in both', () => {
+    const liteHotel = hotel({ sourceId: 'H1' })
+    const storedHotel: StoredItem = {
+      sourceId: 'H1', supplier: 'mock', kind: 'hotel', name: 'hotel H1',
+      price: money(45_600n, 'EUR'), priceBasis: 'total',
+      fetchedAt: new Date('2026-10-03T12:00:00Z'), ttlSeconds: 900, bookingUrl: null, searchParams: null,
+      detail: hotelDetail({ checkIn: '2026-11-19', checkOut: '2026-12-06', nights: 17, rating: 4 }),
+    }
+    const filter: Filter = { avoidRegions: ['china'] }
+    expect(applyFilterLite([liteHotel], filter)).toHaveLength(1)
+    expect(applyFilter([storedHotel], filter)).toHaveLength(1)
   })
 })
 

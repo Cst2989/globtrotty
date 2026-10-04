@@ -175,3 +175,15 @@ export function filterReply(left: number, total: number, description: string, ch
   if (left === 0 || cheapest === null) return head
   return `${head} The cheapest is ${maskDisplayName(cheapest.name)} at ${cheapest.price}.`
 }
+
+/**
+ * The honest admission `src/agents/router.ts`'s `filter` case reaches for instead of
+ * `filterReply` whenever Jev classified her message as `filter` but the `Filter` it built is
+ * empty — the exact bug "I don't want to stop in China or the Middle East" used to hit: nothing
+ * matched, nothing changed, and "Showing 10 of 10: all results." read as agreement rather than
+ * confusion. Fixed English, no counts (there is nothing to count — the list on screen has not
+ * moved), and the caller attaches the conversation's own STAGE chips rather than
+ * `nextStepsAttachment('filter')`, since nothing was actually filtered.
+ */
+export const NO_FILTER_MESSAGE = 'I could not turn that into a filter. I can filter by stops, '
+  + 'departure time, airline, price, bags, or where you connect.'

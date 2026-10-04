@@ -2,6 +2,7 @@ import type { Filter } from '@/src/results'
 import type { ResultItemLite } from '@/web/data'
 import { hasAmenity } from '@/src/intake/amenities'
 import { NEAR_CENTRE_KM } from '@/src/intake/verdicts'
+import { avoidRegionLabel, regionOfCountry, type AvoidRegion } from '@/src/intake/regions'
 
 /**
  * Client-side filter application over the lite result shape (`ResultItemLite`,
@@ -77,6 +78,17 @@ function matchesFilter(item: ResultItemLite, filter: Filter): boolean {
 
   if (filter.airlines && filter.airlines.length > 0) {
     if (!flight.airlines.some((a) => filter.airlines!.includes(a))) return false
+  }
+
+  if ((filter.avoidCountries && filter.avoidCountries.length > 0) || (filter.avoidRegions && filter.avoidRegions.length > 0)) {
+    const legs = flight.inbound ? [flight.outbound, flight.inbound] : [flight.outbound]
+    const avoided = legs.some((leg) => leg.viaCountries.some((code) => {
+      if (code === null) return false
+      if (filter.avoidCountries?.includes(code)) return true
+      const region = regionOfCountry(code)
+      return region !== null && (filter.avoidRegions?.includes(region) ?? false)
+    }))
+    if (avoided) return false
   }
 
   return true
@@ -207,4 +219,51 @@ export function airlineNamesOf(items: ResultItemLite[]): Map<string, string> {
 /** True when `filter` narrows anything at all — what the rail's "Clear filters" link keys on. */
 export function isFilterSet(filter: Filter): boolean {
   return Object.values(filter).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined))
+}
+
+/**
+ * The regions and countries actually worth offering in the Connections popover: every one that
+ * shows up among `items`' own via airports, each with how many items would be affected by
+ * avoiding it — never the full ten-region/130-country vocabulary, which would mostly be
+ * checkboxes for places nothing in this list connects through. Counted per ITEM (an item with
+ * two stops in the same country counts once), same instinct as `airlineCounts`.
+ *
+ * Both lists are sorted by that count, descending, then alphabetically — the regions/countries
+ * she is most likely to actually want to avoid come first.
+ */
+export function connectionsPresent(items: ResultItemLite[]): {
+  regions: { region: AvoidRegion; label: string; count: number }[]
+  countries: { code: string; name: string; count: number }[]
+} {
+  const regionCounts = new Map<AvoidRegion, number>()
+  const countryCounts = new Map<string, number>()
+  const countryNames = new Map<string, string>()
+
+  for (const item of items) {
+    const flight = item.flight
+    if (!flight) continue
+    const legs = flight.inbound ? [flight.outbound, flight.inbound] : [flight.outbound]
+    const codes = new Set<string>()
+    const regions = new Set<AvoidRegion>()
+    for (const leg of legs) {
+      leg.viaCountries.forEach((code, i) => {
+        if (code === null) return
+        codes.add(code)
+        if (!countryNames.has(code)) countryNames.set(code, leg.viaCountryNames[i] ?? code)
+        const region = regionOfCountry(code)
+        if (region !== null) regions.add(region)
+      })
+    }
+    for (const code of codes) countryCounts.set(code, (countryCounts.get(code) ?? 0) + 1)
+    for (const region of regions) regionCounts.set(region, (regionCounts.get(region) ?? 0) + 1)
+  }
+
+  const regions = [...regionCounts.entries()]
+    .map(([region, count]) => ({ region, label: avoidRegionLabel(region), count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+  const countries = [...countryCounts.entries()]
+    .map(([code, count]) => ({ code, name: countryNames.get(code) ?? code, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+
+  return { regions, countries }
 }

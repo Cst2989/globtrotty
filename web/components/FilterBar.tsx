@@ -5,8 +5,9 @@ import { CaretDown, Minus, Plus } from '@phosphor-icons/react'
 import { formatMoney, money } from '@/src/money'
 import type { Filter } from '@/src/results'
 import type { ResultItemLite } from '@/web/data'
-import { priceRange, airlineCounts, airlineNamesOf, isFilterSet } from '@/web/filters'
+import { priceRange, airlineCounts, airlineNamesOf, isFilterSet, connectionsPresent } from '@/web/filters'
 import { FILTER_AMENITY_KEYS, amenityLabel } from '@/src/intake/amenities'
+import type { AvoidRegion } from '@/src/intake/regions'
 
 export type FilterBarProps = {
   kind: 'flights' | 'hotels'
@@ -22,7 +23,7 @@ export type FilterBarProps = {
   openPopover?: PopoverKey | null
 }
 
-export type PopoverKey = 'bags' | 'price' | 'airlines' | 'stars' | 'amenities'
+export type PopoverKey = 'bags' | 'price' | 'airlines' | 'stars' | 'amenities' | 'connections'
 
 /** How many of each bag the stepper will ask for. Two checked bags is past any fare's allowance. */
 const MAX_BAGS = 2
@@ -106,6 +107,12 @@ export function priceLabel(filter: Filter, currency: string): string {
 export function airlinesLabel(filter: Filter): string {
   const n = filter.airlines?.length ?? 0
   return n === 0 ? 'Airlines' : `Airlines (${n})`
+}
+
+/** 'Connections' / 'Connections (1 avoided)' — same reasoning as `bagsLabel`. */
+export function connectionsLabel(filter: Filter): string {
+  const n = (filter.avoidRegions?.length ?? 0) + (filter.avoidCountries?.length ?? 0)
+  return n === 0 ? 'Connections' : `Connections (${n} avoided)`
 }
 
 /** 'Stars' / 'Stars: 4, 5' — same reasoning as `bagsLabel`. */
@@ -263,6 +270,7 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
   const counts = airlineCounts(items)
   const names = airlineNamesOf(items)
   const airlines = [...counts.keys()].sort((a, b) => (counts.get(b)! - counts.get(a)!) || a.localeCompare(b))
+  const connections = connectionsPresent(items)
   const capMinor = filter.maxPriceMinor === undefined ? max : BigInt(filter.maxPriceMinor)
 
   function setDeparture(window: 'morning' | 'afternoon' | 'evening') {
@@ -311,6 +319,20 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
     const next = on ? [...new Set([...current, code])] : current.filter((a) => a !== code)
     const { airlines: _airlines, ...rest } = filter
     onChange(next.length > 0 ? { ...rest, airlines: next } : rest)
+  }
+
+  function setAvoidRegion(region: AvoidRegion, on: boolean) {
+    const current = filter.avoidRegions ?? []
+    const next = on ? [...new Set([...current, region])] : current.filter((r) => r !== region)
+    const { avoidRegions: _avoidRegions, ...rest } = filter
+    onChange(next.length > 0 ? { ...rest, avoidRegions: next } : rest)
+  }
+
+  function setAvoidCountry(code: string, on: boolean) {
+    const current = filter.avoidCountries ?? []
+    const next = on ? [...new Set([...current, code])] : current.filter((c) => c !== code)
+    const { avoidCountries: _avoidCountries, ...rest } = filter
+    onChange(next.length > 0 ? { ...rest, avoidCountries: next } : rest)
   }
 
   function setCap(event: ChangeEvent<HTMLInputElement>) {
@@ -477,6 +499,40 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
                 />
                 <span className="filter-check-name">{names.get(code) ?? code}</span>
                 <span className="filter-check-count">{counts.get(code)}</span>
+              </label>
+            ))}
+          </fieldset>
+        </Popover>
+      ) : null}
+
+      {kind === 'flights' && (connections.regions.length > 0 || connections.countries.length > 0) ? (
+        <Popover
+          label={connectionsLabel(filter)}
+          active={(filter.avoidRegions?.length ?? 0) > 0 || (filter.avoidCountries?.length ?? 0) > 0}
+          defaultOpen={openPopover === 'connections'}
+        >
+          <fieldset className="filter-pop-list">
+            <legend className="filter-pop-title">Avoid connecting through</legend>
+            {connections.regions.map((r) => (
+              <label key={r.region} className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={(filter.avoidRegions ?? []).includes(r.region)}
+                  onChange={(event) => setAvoidRegion(r.region, event.target.checked)}
+                />
+                <span className="filter-check-name">{r.label}</span>
+                <span className="filter-check-count">{r.count}</span>
+              </label>
+            ))}
+            {connections.countries.map((c) => (
+              <label key={c.code} className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={(filter.avoidCountries ?? []).includes(c.code)}
+                  onChange={(event) => setAvoidCountry(c.code, event.target.checked)}
+                />
+                <span className="filter-check-name">{c.name}</span>
+                <span className="filter-check-count">{c.count}</span>
               </label>
             ))}
           </fieldset>

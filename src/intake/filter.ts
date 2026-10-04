@@ -1,8 +1,33 @@
 import type { Filter } from '../results.js'
-import { isFlight, type StoredItem } from '../supplier/types.js'
+import { isFlight, type StoredItem, type LegSummary } from '../supplier/types.js'
 import { maskUntrustedText } from '../sanitize.js'
 import { amenityLabel, hasAmenity } from './amenities.js'
 import { NEAR_CENTRE_KM } from './verdicts.js'
+import { airportCountry } from './airports.js'
+import { avoidRegionLabel, regionOfCountry } from './regions.js'
+import { countryName } from './countries.js'
+
+/**
+ * Whether a leg's own connections make the item one the connections filter must exclude —
+ * `avoidCountries`/`avoidRegions`, resolved one via airport at a time. A leg's `route` is the
+ * whole itinerary (`['BCN', 'DOH', 'HND']`), so its OWN connections are every entry but the
+ * first and the last; a direct leg has none and never excludes anything by this rule.
+ *
+ * An airport `airports.json` cannot place by country is never excluded — `airportCountry`
+ * returns `null` for it, and the brief is explicit that unknown means "not excluded", never
+ * "excluded to be safe". A real connection the table simply has not catalogued should not read
+ * as narrower than it is.
+ */
+function legAvoided(leg: LegSummary, avoidCountries: string[], avoidRegions: NonNullable<Filter['avoidRegions']>): boolean {
+  const via = leg.route.slice(1, -1)
+  return via.some((code) => {
+    const country = airportCountry(code)
+    if (country === null) return false
+    if (avoidCountries.includes(country)) return true
+    const region = regionOfCountry(country)
+    return region !== null && avoidRegions.includes(region)
+  })
+}
 
 /** The hour-of-day (local, naive) a leg's `departureLocal` string names — 'YYYY-MM-DDTHH:MM:SS'. */
 function departureHour(local: string): number {
@@ -74,6 +99,16 @@ export function applyFilter(items: StoredItem[], f: Filter): StoredItem[] {
       const carriers = new Set(legs.flatMap((leg) => leg.carriers))
       if (!f.airlines.some((a) => carriers.has(a))) return false
     }
+    // The bug this filter exists for: "I don't want to stop in China or the Middle East" used
+    // to classify as `filter` and change nothing, because no dimension above named a
+    // connection's own country. ANY leg's via airport landing in an avoided country or region
+    // excludes the whole itinerary — `web/filters.ts` mirrors this over `LegLite.viaCountries`,
+    // which is the same lookup done once, server-side, at render time.
+    if ((f.avoidCountries && f.avoidCountries.length > 0) || (f.avoidRegions && f.avoidRegions.length > 0)) {
+      const avoidCountries = f.avoidCountries ?? []
+      const avoidRegions = f.avoidRegions ?? []
+      if (legs.some((leg) => legAvoided(leg, avoidCountries, avoidRegions))) return false
+    }
     return true
   })
 }
@@ -119,5 +154,13 @@ export function describeFilter(f: Filter): string {
   }
   if (f.nearCentre) parts.push('near the centre')
   if (f.airlines && f.airlines.length > 0) parts.push(f.airlines.map(maskUntrustedText).join(', '))
+  // Both lists are OUR OWN vocabulary (a region bucket's fixed English name, a country's name
+  // off `src/intake/countries.json`) — never a supplier string, so neither needs masking, the
+  // same posture `amenityLabel` already takes just above.
+  const avoidNames = [
+    ...(f.avoidRegions ?? []).map(avoidRegionLabel),
+    ...(f.avoidCountries ?? []).map((code) => countryName(code) ?? code),
+  ]
+  if (avoidNames.length > 0) parts.push(`no connections in ${avoidNames.join(', ')}`)
   return parts.length > 0 ? parts.join(', ') : 'all results'
 }

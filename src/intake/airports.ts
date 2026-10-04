@@ -53,3 +53,15 @@ export function airportCity(code: string): string | null {
 export function airportName(code: string): string | null {
   return AIRPORTS[code.trim().toUpperCase()]?.name ?? null
 }
+
+/**
+ * The airport's own ISO 3166-1 alpha-2 country, or `null` for a code the table lacks OR whose
+ * own `country` is `null` (a handful of OurAirports rows carry neither). The connections filter
+ * (`applyFilter`, src/intake/filter.ts; `applyFilterLite`'s mirror reads it off `LegLite.
+ * viaCountries`, resolved here server-side in web/data.ts) treats both cases the same way: an
+ * airport this table cannot place by country is never excluded by `avoidCountries`/
+ * `avoidRegions`, rather than guessed at.
+ */
+export function airportCountry(code: string): string | null {
+  return AIRPORTS[code.trim().toUpperCase()]?.country ?? null
+}
