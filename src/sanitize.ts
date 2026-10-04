@@ -106,6 +106,54 @@ export function maskControlChars(s: string): string {
     .replace(/[\x00-\x1f\x7f-\x9f]/g, '?')
 }
 
+/** A display name longer than this is truncated. Generous: a hotel's full legal name is long. */
+const MAX_DISPLAY_NAME_LEN = 120
+
+/**
+ * Every character a supplier's own NAME may legitimately contain: any Unicode letter, combining
+ * mark or number, a space, and the punctuation real property and airline names actually use.
+ * Everything else is removed — control characters, angle brackets, backticks, emoji, currency
+ * symbols, the lot.
+ */
+const DISPLAY_NAME_ALLOWED = /[^\p{L}\p{M}\p{N} .,'’&()\-/:·]/gu
+
+/**
+ * For a supplier-authored NAME on its way to the BROWSER, and nowhere else.
+ *
+ * `maskUntrustedText` keeps printable ASCII and turns everything else into `?`, which is right
+ * for a string a MODEL will read and wrong for one a person will. SearchApi returns real Tokyo
+ * properties called `BEE-HIVE巣鴨` and `シティパール桜新町`; run through that guard they reach a hotel card
+ * as `BEE-HIVE??` and `???????`, which reads as a broken page rather than as a safety measure.
+ * A traveller cannot book a property whose name we have deleted.
+ *
+ * So this keeps the name and removes the characters that are not part of one. It is a STRIP, not
+ * a substitution: a removed character leaves nothing behind, because `?` in the middle of a name
+ * is exactly the corruption this exists to stop. Whitespace of every kind collapses to single
+ * spaces first, so a name split across a newline reads as one line rather than as two words run
+ * together.
+ *
+ * ## Why this is safe, and where it is NOT allowed
+ *
+ * Safe for the browser: this project never renders raw HTML (no `dangerouslySetInnerHTML`
+ * anywhere), so React escapes whatever it is handed; `<` and `>` are removed here as well, which
+ * is strictly more than React needs. The characters this keeps that `maskUntrustedText` would
+ * not — Japanese, Cyrillic, accents — are text, not syntax, in every context a browser puts them
+ * in.
+ *
+ * NOT safe, and deliberately not used, for anything a MODEL reads: the newline-injection guard
+ * `maskUntrustedText` provides is about the STRUCTURE a line break creates in a model's context,
+ * and a prompt-injection attempt written in Japanese is still a prompt-injection attempt. Every
+ * model-facing path (`renderOfferForReview`, `renderResultsNote`, `rankItems`'s summaries, the
+ * driver's tool results) keeps `maskUntrustedText` and must continue to.
+ */
+export function maskDisplayName(s: string): string {
+  const flattened = s.replace(/\s+/gu, ' ')
+  const stripped = flattened.replace(DISPLAY_NAME_ALLOWED, '').replace(/ {2,}/g, ' ').trim()
+  return stripped.length > MAX_DISPLAY_NAME_LEN
+    ? `${stripped.slice(0, MAX_DISPLAY_NAME_LEN)}…`
+    : stripped
+}
+
 export const PRICE_REDACTED = '[price removed]'
 
 // A number with optional thousands separators and decimals, in either the

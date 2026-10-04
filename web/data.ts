@@ -4,7 +4,7 @@ import {
   parseResults,
   type ResultsContent, type Filter, type Assumption,
 } from '@/src/results'
-import { maskUntrustedText } from '@/src/sanitize'
+import { maskDisplayName, maskUntrustedText } from '@/src/sanitize'
 import { allowedImageUrl } from '@/src/supplier/searchapi'
 import { CODE_MAP } from '@/src/intake/places'
 import { airportCity } from '@/src/intake/airports'
@@ -360,7 +360,12 @@ export function itineraryItemsLite(itinerary: unknown): ProposalItemLite[] {
       || typeof priceMinor !== 'string' || typeof currency !== 'string' || typeof fetchedAt !== 'string'
       || (kind !== 'flight' && kind !== 'hotel')
     ) continue
-    out.push({ slot, sourceId, kind, name, priceMinor, currency, fetchedAt, dates: datesFromDetail(kind, detail) })
+    out.push({
+      // Browser-facing name, same reasoning as `newestAlternativePerSourceId` below: the pinned
+      // summary is read by her, never by the model.
+      slot, sourceId, kind, name: maskDisplayName(name), priceMinor, currency, fetchedAt,
+      dates: datesFromDetail(kind, detail),
+    })
   }
   return out
 }
@@ -381,7 +386,9 @@ export function newestAlternativePerSourceId(
     if (seen.has(r.source_id)) continue
     seen.add(r.source_id)
     out.push({
-      sourceId: r.source_id, name: r.name, priceMinor: String(r.price_minor),
+      // A NAME on its way to a person, so `maskDisplayName` — see its doc comment for why the
+      // model-facing guard is the wrong one here and what it still removes.
+      sourceId: r.source_id, name: maskDisplayName(r.name), priceMinor: String(r.price_minor),
       currency: r.currency, fetchedAt: r.fetched_at, ttlSeconds: r.ttl_seconds,
     })
   }
@@ -856,7 +863,10 @@ function toResultItemLite(row: ToolResultRow, now: Date): ResultItemLite | null 
   if (!flight && !hotel) return null
   return {
     sourceId: row.source_id,
-    name: maskUntrustedText(row.name),
+    // The one string on a card a traveller has to RECOGNISE, so it keeps its own letters:
+    // `maskUntrustedText` turned every Japanese property name into a row of '?'. Everything else
+    // read off this payload stays on the model-facing guard.
+    name: maskDisplayName(row.name),
     priceMinor: String(row.price_minor),
     currency: row.currency,
     fetchedAt: row.fetched_at,

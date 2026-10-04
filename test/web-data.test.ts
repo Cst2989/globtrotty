@@ -124,7 +124,7 @@ describe('itineraryItemsLite', () => {
       schemaVersion: 1,
       items: [
         {
-          slot: 'outbound', quantity: 1, sourceId: 'F1', supplier: 'mock', kind: 'flight', name: 'BER→FAO',
+          slot: 'outbound', quantity: 1, sourceId: 'F1', supplier: 'mock', kind: 'flight', name: 'BER-FAO',
           priceMinor: '12300', currency: 'EUR', priceBasis: 'total', fetchedAt: '2026-09-13T12:00:00.000Z',
           lineTotalMinor: '12300', bookingUrl: null, detail: {}, searchParams: null,
         },
@@ -136,9 +136,29 @@ describe('itineraryItemsLite', () => {
       ],
     }
     expect(itineraryItemsLite(itinerary)).toEqual([
-      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z', dates: null },
+      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER-FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z', dates: null },
       { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z', dates: null },
     ])
+  })
+
+  /**
+   * The pinned summary is read by her, not by the model, so a name reaches it through
+   * `maskDisplayName` — which keeps letters of any script and removes everything that is not
+   * part of a name. The arrow is one of those: `maskDisplayName`'s allowed punctuation is
+   * punctuation, and an arrow is a symbol. Nothing real loses by it (`src/supplier/kiwi.ts`
+   * builds its names as `BER-FAO`, with a hyphen), and this is the pin that would notice if a
+   * supplier started sending one.
+   */
+  it('masks the name for display: letters of any script kept, symbols and markup removed', () => {
+    const item = (name: string) => ({
+      items: [{
+        slot: 'stay', sourceId: 'H1', kind: 'hotel', name, priceMinor: '1', currency: 'EUR',
+        fetchedAt: 't', detail: {},
+      }],
+    })
+    expect(itineraryItemsLite(item('\u30b7\u30c6\u30a3\u30d1\u30fc\u30eb'))[0]!.name).toBe('\u30b7\u30c6\u30a3\u30d1\u30fc\u30eb')
+    expect(itineraryItemsLite(item('BER\u2192FAO'))[0]!.name).toBe('BERFAO')
+    expect(itineraryItemsLite(item('<b>Casa</b>'))[0]!.name).toBe('bCasa/b')
   })
 
   // Task 8 review, Minor #9: a real FlightDetail/HotelDetail shape yields
@@ -350,13 +370,18 @@ describe('newestResultItemPerSourceId', () => {
     expect(out[0]!.flight!.inboundStops).toBe(0)
   })
 
-  // A supplier name containing a script-shaped string passes through
-  // unchanged here: `maskUntrustedText` only neutralises non-printable-ASCII
-  // control characters, not `<`/`>`; what actually keeps it from rendering
-  // as markup is React's own escaping (pinned in test/web-results-render.test.ts).
-  it('does not strip or escape printable-ASCII supplier text (that is the render layer\'s job)', () => {
-    const out = newestResultItemPerSourceId([row({ name: '<script>alert(1)</script>' })], NOW_ROWS)
-    expect(out[0]!.name).toBe('<script>alert(1)</script>')
+  // The hotels pass changed this. A NAME now goes through `maskDisplayName`, which REMOVES the
+  // angle brackets outright instead of letting them through as printable ASCII — strictly more
+  // than React's own escaping needs, and it is what lets the same function keep Japanese letters.
+  // Every other string read off a payload is still `maskUntrustedText`'s, markup and all, because
+  // the render layer is what makes those safe (pinned in test/web-results-render.test.ts).
+  it('strips markup from a NAME, and leaves other printable-ASCII supplier text alone', () => {
+    const out = newestResultItemPerSourceId([row({
+      name: '<script>alert(1)</script>',
+      payload: { ...flightPayload, outbound: { ...flightPayload.outbound, from: '<b>BCN</b>' } },
+    })], NOW_ROWS)
+    expect(out[0]!.name).toBe('scriptalert(1)/script')
+    expect(out[0]!.flight!.outbound.from).toBe('<b>BCN</b>')
   })
 
   it('keeps the newest row per source_id, given newest-first input', () => {
@@ -398,6 +423,18 @@ describe('newestResultItemPerSourceId', () => {
     expect(hotel.images).toEqual(['https://lh3.googleusercontent.com/ok.png'])
     // A nearby entry with no name is dropped rather than rendered blank.
     expect(hotel.nearby).toEqual([{ name: 'Haneda Airport', minutes: 28, by: 'Taxi' }])
+  })
+
+  it('keeps a supplier NAME readable on its way to the browser, markup stripped', () => {
+    const japanese = '\u30b7\u30c6\u30a3\u30d1\u30fc\u30eb\u685c\u65b0\u753a'
+    const out = newestResultItemPerSourceId([
+      row({ source_id: 'H4', name: japanese, payload: richHotelPayload }),
+      row({ source_id: 'H5', name: '<script>alert(1)</script>', payload: richHotelPayload }),
+    ], NOW_ROWS)
+    // A card she cannot read is a card she cannot book from — see `maskDisplayName`.
+    expect(out[0]!.name).toBe(japanese)
+    // Markup is removed outright rather than left as printable ASCII.
+    expect(out[1]!.name).toBe('scriptalert(1)/script')
   })
 
   it('refuses a per-night price that is not a plain decimal string', () => {
