@@ -19,11 +19,11 @@ if (!projectUrl || !anonKey) {
   )
 }
 
-const csp = cspFor(projectUrl, { dev: process.env.NODE_ENV === 'development' })
+// `dev` only widens `script-src` with `'unsafe-eval'`, which the webpack dev server needs to
+// evaluate its own modules; see `cspFor`. A production build never takes that branch.
+const csp = cspFor(projectUrl, { dev: process.env.NODE_ENV !== 'production' })
 
 const nextConfig: NextConfig = {
-  // `next dev` otherwise writes AGENTS.md and CLAUDE.md into the repo root on every start.
-  agentRules: false,
   // Plan 4a, Task 7. `src/` (and `web/session.ts`) write relative imports
   // with an explicit `.js` extension pointing at sibling `.ts` files —
   // correct, and required, under `tsconfig.harness.json`'s `NodeNext`

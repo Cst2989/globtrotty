@@ -8,26 +8,27 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "dev": "node scripts/copy-maplibre.mjs && next dev --webpack",
+    "build": "node scripts/copy-maplibre.mjs && next build --webpack",
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:migrate": "bash scripts/ci-migrate.sh",
     "typecheck": "tsc -p tsconfig.harness.json --noEmit && tsc --noEmit && tsc -p tsconfig.webtests.json --noEmit",
     "lint": "eslint .",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "e2e": "bash scripts/e2e.sh"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
     "@babel/eslint-parser": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
     "@netlify/plugin-nextjs": "^5.16.0",
-    "@types/leaflet": "^1.9.22",
     "@types/node": "^26.2.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "dotenv": "^17.4.2",
     "eslint": "^10.9.1",
+    "puppeteer-core": "^25.12.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
@@ -37,7 +38,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
-    "leaflet": "^1.9.4",
+    "maplibre-gl": "^6.12.0",
     "next": "^16.3.5",
     "postgres": "^3.4.9",
     "react": "^19.3.0",

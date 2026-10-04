@@ -1,4 +1,4 @@
-import { formatMoney, money } from '@/src/money'
+import { formatMoneyShort, money } from '@/src/money'
 import type { ResultItemLite } from '@/web/data'
 import { leadersBySort, type Sort } from '@/web/filters'
 import { durationWords } from './FlightCard'
@@ -33,7 +33,7 @@ const LABELS: Record<Sort, string> = {
  */
 export function tabSummary(item: ResultItemLite | null): string {
   if (!item) return '—'
-  const price = formatMoney(money(BigInt(item.priceMinor), item.currency))
+  const price = formatMoneyShort(money(BigInt(item.priceMinor), item.currency))
   const flight = item.flight
   if (flight) return `${price} · ${durationWords(flight.durationMinutes)}`
   // A stay's second half is its rating, which is what the hotels pass's Top rated tab is sorting

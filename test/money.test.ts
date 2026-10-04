@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  money, addMoney, sumMoney, compareMoney, formatMoney,
+  money, addMoney, sumMoney, compareMoney, formatMoney, formatMoneyShort,
   minorUnitExponent, CurrencyMismatchError,
 } from '../src/money.js'
 
@@ -69,5 +69,28 @@ describe('formatMoney', () => {
   it('renders 3-exponent currencies with three fraction digits', () => {
     const formatted = formatMoney(money(141200n, 'KWD'))
     expect(formatted).toContain('141.2')
+  })
+})
+
+/**
+ * Trip-stage pass, section 4. Every price on a card, a tab, a pin, a summary bar and a totals
+ * block drops a whole-number fraction: `.00` on a four-figure number is two characters of noise
+ * on the figure a traveller is actually comparing. A REAL fraction is never hidden.
+ */
+describe('formatMoneyShort', () => {
+  it('drops a whole-number fraction and keeps a real one', () => {
+    expect(formatMoneyShort(money(324800n, 'EUR'))).toBe('€3,248')
+    expect(formatMoneyShort(money(1250n, 'EUR'))).toBe('€12.50')
+    expect(formatMoneyShort(money(1200n, 'EUR'))).toBe('€12')
+    expect(formatMoneyShort(money(0n, 'EUR'))).toBe('€0')
+    expect(formatMoneyShort(money(1n, 'EUR'))).toBe('€0.01')
+  })
+
+  it('leaves a zero-exponent currency exactly as `formatMoney` does', () => {
+    expect(formatMoneyShort(money(5400n, 'JPY'))).toBe(formatMoney(money(5400n, 'JPY')))
+  })
+
+  it('never changes what `formatMoney` itself says', () => {
+    expect(formatMoney(money(324800n, 'EUR'))).toBe('€3,248.00')
   })
 })

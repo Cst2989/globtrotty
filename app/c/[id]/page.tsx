@@ -2,18 +2,19 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { createServerSupabase } from '@/web/supabase/server'
 import {
-  listConversations, loadThread, loadProposals, loadAlternatives, loadResults, loadLatestAction,
+  listConversations, loadThread, loadProposals, loadResults, loadLatestAction,
   skeletonMode, shouldRecoverResults, threadClaimsResults,
 } from '@/web/data'
 import { AppShell } from '@/web/components/AppShell'
 import { Sidebar } from '@/web/components/Sidebar'
 import { ThreadLive } from '@/web/components/Thread'
 import { MessageBox } from '@/web/components/MessageBox'
-import { ProposalCardLive } from '@/web/components/ProposalCard'
+import { TripCardLive } from '@/web/components/TripCard'
 import { SplitShell } from '@/web/components/SplitShell'
 import { ResultsPaneLive } from '@/web/components/ResultsPane'
 import { ResultsRecovery } from '@/web/components/ResultsRecovery'
-import { ActivityProvider } from '@/web/components/activity'
+import { OptimisticProvider } from '@/web/components/optimistic'
+import { serverStateFor } from '@/web/components/pending'
 
 /**
  * The proxy (`proxy.ts` → `web/supabase/middleware.ts`) already redirects an
@@ -41,14 +42,10 @@ export default async function ConversationPage({
   } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const [
-    conversations, thread, proposals, flightAlternatives, hotelAlternatives, results, latestAction,
-  ] = await Promise.all([
+  const [conversations, thread, proposals, results, latestAction] = await Promise.all([
     listConversations(sb),
     loadThread(sb, id),
     loadProposals(sb, id),
-    loadAlternatives(sb, id, 'flight'),
-    loadAlternatives(sb, id, 'hotel'),
     loadResults(sb, id),
     loadLatestAction(sb, id),
   ])
@@ -56,8 +53,6 @@ export default async function ConversationPage({
   if (!thread.conversation) {
     redirect('/c/new')
   }
-
-  const alternatives = { flight: flightAlternatives, hotel: hotelAlternatives }
 
   /*
    * Polish pass, section 11. The two reads disagree: the transcript holds a `results` row (it is
@@ -80,6 +75,16 @@ export default async function ConversationPage({
   // `loadProposals` is newest-first; the results pane only ever shows the
   // current one — whatever `choose`/`decide` most recently touched.
   const proposal = proposals[0] ?? null
+  /*
+   * Trip-stage pass, section 2: the newest proposal that is both ACCEPTED and holds a stay.
+   * `handleChooseFlight` records a flights-only proposal and accepts it on the spot — that
+   * acceptance is how the office remembers the flight, not a decision about a trip — so
+   * `proposal.decision === 'accept'` is true for the whole of the hotels stage and is not the
+   * question the pane is asking.
+   */
+  const acceptedProposal = proposals.find(
+    (p) => p.decision === 'accept' && p.items.some((i) => i.kind === 'hotel'),
+  ) ?? null
   const hasResults = results.length > 0
   const latestResultsId = results.length > 0 ? results[results.length - 1]!.messageId : null
 
@@ -101,9 +106,7 @@ export default async function ConversationPage({
       searching={skeleton !== null}
       composer={<MessageBox conversationId={thread.conversation.id} status={thread.conversation.status} />}
     >
-      {proposals.map((p) => (
-        <ProposalCardLive key={p.id} proposal={p} alternatives={alternatives} />
-      ))}
+      <TripCardLive conversationId={id} proposals={proposals} />
     </ThreadLive>
   )
 
@@ -113,19 +116,23 @@ export default async function ConversationPage({
       rail={<Sidebar conversations={conversations} activeId={id} userEmail={user.email ?? null} />}
       collapsed={hasResults || skeleton === 'full'}
     >
-      {/* Pass 3, section 6: one `ActivityProvider` above BOTH islands, so a Select pressed in
-          the results pane flips the chat column's status line in the same tick, and a chip
-          clicked inside the thread reaches the pending-message list `ThreadLive` owns. It wraps
-          either branch, because the chips exist before the first `results` row does. */}
-      <ActivityProvider>
+      {/* Trip-stage pass, section 1: one `OptimisticProvider` above BOTH islands, so a Select
+          pressed in the results pane changes the chat column in the same tick, and a chip
+          clicked inside the thread changes the pane. It wraps either branch, because the chips
+          exist before the first `results` row does. */}
+      <OptimisticProvider
+        server={serverStateFor({ messages: thread.messages, results, proposals })}
+      >
         {hasResults || skeleton === 'full' ? (
           <SplitShell
             conversationId={id}
             chat={chat}
             results={(
               <ResultsPaneLive
-                conversationId={id} results={results} proposal={proposal} skeleton={skeleton}
+                conversationId={id} results={results} proposal={proposal}
+                acceptedProposal={acceptedProposal} skeleton={skeleton}
                 status={thread.conversation.status}
+                failReason={thread.latestTurn?.fail_reason ?? null}
               />
             )}
             latestResultsId={latestResultsId}
@@ -136,7 +143,7 @@ export default async function ConversationPage({
             {recoverResults ? <ResultsRecovery /> : null}
           </>
         )}
-      </ActivityProvider>
+      </OptimisticProvider>
     </AppShell>
   )
 }

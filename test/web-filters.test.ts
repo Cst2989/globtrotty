@@ -10,6 +10,7 @@ import { hotelLite } from './helpers/web-lite.js'
 // Task 10: reconciling this module's departure windows with
 // `src/intake/filter.ts`'s own ones (see both files' `inWindow`).
 import { applyFilter } from '../src/intake/filter.js'
+import { filterKind } from '../src/results.js'
 import { money } from '../src/money.js'
 import { hotelDetail, type StoredItem } from '../src/supplier/types.js'
 import type { Filter } from '../src/results.js'
@@ -578,5 +579,39 @@ describe('sortItemsLite: Top rated', () => {
     expect(sortItemsLite(items, 'rated').map((i) => i.sourceId)).toEqual(['C', 'A', 'B'])
     // Never mutates its argument, same contract as the other sorts.
     expect(items.map((i) => i.sourceId)).toEqual(['A', 'B', 'C'])
+  })
+})
+
+/**
+ * Trip-stage pass, found by the browser harness: a typed "only direct flights" at the hotels
+ * stage narrowed the HOTELS row, and the desk answered "Showing 19 of 19: nonstop" about a list
+ * of Tokyo hotels. A filter names its own kind; nothing about where she happens to be looking
+ * changes it. `routeTyped` (src/agents/router.ts) reads this to pick the row it applies to.
+ */
+describe('filterKind', () => {
+  it('reads a flight filter off any of its flight-only fields', () => {
+    expect(filterKind({ nonstop: true })).toBe('flights')
+    expect(filterKind({ maxStops: 1 })).toBe('flights')
+    expect(filterKind({ departure: 'evening' })).toBe('flights')
+    expect(filterKind({ airlines: ['QR'] })).toBe('flights')
+    expect(filterKind({ minCabinBags: 1 })).toBe('flights')
+    expect(filterKind({ minCheckedBags: 1 })).toBe('flights')
+  })
+
+  it('reads a stay filter off any of its hotel-only fields', () => {
+    expect(filterKind({ minRating: 4 })).toBe('hotels')
+    expect(filterKind({ stars: [4, 5] })).toBe('hotels')
+    expect(filterKind({ propertyType: 'rental' })).toBe('hotels')
+    expect(filterKind({ amenities: ['wifi'] })).toBe('hotels')
+    expect(filterKind({ nearCentre: true })).toBe('hotels')
+  })
+
+  it('names no kind for a filter that could be about either list, or about neither', () => {
+    // A price cap is the one field both lists share.
+    expect(filterKind({ maxPriceMinor: '50000' })).toBeNull()
+    expect(filterKind({})).toBeNull()
+    // Both vocabularies at once is a guess about a screen that does not exist; the row she is
+    // looking at decides it.
+    expect(filterKind({ nonstop: true, minRating: 4 })).toBeNull()
   })
 })

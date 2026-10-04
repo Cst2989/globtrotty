@@ -30,7 +30,7 @@ describe('toThreadView', () => {
     const view = toThreadView(rows)
 
     expect(view[0]).toEqual(rows[0])
-    expect(view[1]!.content).toBe('You accepted the proposal')
+    expect(view[1]!.content).toBe('You accepted the trip')
     expect(view[1]!.content).not.toContain(PROPOSAL_ID)
     expect(view[1]!.content).not.toContain('hand_off')
     expect(view[1]!.content).not.toContain('proposalId')

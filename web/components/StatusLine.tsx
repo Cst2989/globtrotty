@@ -33,7 +33,7 @@ const STATUS_WORDS: Record<string, string> = {
 }
 
 /** `turns.fail_reason` (same migration) → plain words, only shown when `status` is `failed`. */
-const FAIL_REASON_WORDS: Record<string, string> = {
+export const FAIL_REASON_WORDS: Record<string, string> = {
   provider_down: 'a travel provider was unavailable',
   fetch_failed: 'a search failed',
   limit_reached: "today's limit was reached mid-turn",
@@ -60,6 +60,16 @@ function toneFor(status: string): 'working' | 'failed' | 'limit' | 'neutral' {
  * words are followed by the three-dot thinking indicator every chat product
  * uses for "the other side is typing".
  */
+/**
+ * The words for a failed turn, as a sentence the pane can print beside its own `Try again`.
+ * Exported so the two never drift: a code the line has not been taught yet falls back to itself
+ * here as well, rather than to silence.
+ */
+export function failWords(failReason: string | null): string {
+  if (!failReason) return 'That turn did not finish.'
+  return `Something went wrong: ${FAIL_REASON_WORDS[failReason] ?? failReason}.`
+}
+
 export function StatusLine({ status, failReason }: StatusLineProps) {
   const words = STATUS_WORDS[status] ?? status
   const detail = status === 'failed' && failReason ? (FAIL_REASON_WORDS[failReason] ?? failReason) : null

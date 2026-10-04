@@ -137,7 +137,7 @@ export function renderActionMessage(a: ActionPayload): string {
 export function describeActionForUi(a: ActionPayload): string | null {
   switch (a.action) {
     case 'hand_off':
-      return 'You accepted the proposal'
+      return 'You accepted the trip'
     case 'rejected':
       return 'You rejected the proposal'
     case 'revise':

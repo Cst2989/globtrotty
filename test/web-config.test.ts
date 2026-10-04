@@ -40,10 +40,12 @@ function exists(file: string): boolean {
 describe('cspFor', () => {
   const csp = cspFor('https://fhqsiydgoqmwvihqsbap.supabase.co')
 
-  it('restricts images to self, data URIs and the Kiwi logo host', () => {
+  it('restricts images to self, data and blob URIs and the three photo hosts', () => {
+    // `blob:` is MapLibre decoding the sprite sheet and the natural-earth raster before it
+    // uploads them to the GPU (trip-stage pass, section 5).
     expect(csp).toContain(
-      "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://server.arcgisonline.com')
+      "img-src 'self' data: blob: https://images.kiwi.com https://lh3.googleusercontent.com"
+      + ' https://*.gstatic.com')
   })
 
   it('forbids framing', () => {
@@ -62,7 +64,7 @@ describe('cspFor', () => {
     // `test/web-csp.test.ts` pins the whole directive character for character.
     expect(csp.match(/\*/g)).toHaveLength(1)
     expect(csp).toContain('https://*.gstatic.com')
-    expect(csp).toContain('https://server.arcgisonline.com')
+    expect(csp).toContain('https://tiles.openfreemap.org')
   })
 
   it('restricts base-uri and form-action to self', () => {

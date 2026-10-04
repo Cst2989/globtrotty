@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import type { ResultItemLite } from '@/web/data'
 import { useListFlip } from './flip'
 import { HotelCard } from './HotelCard'
@@ -27,6 +27,10 @@ export type HotelListProps = {
   highlightedSourceId?: string | null
   /** Hovering a card lights up its pin. */
   onHover?: (sourceId: string | null) => void
+  /** Trip-stage pass, section 2: the pane's `Change` button, beside the chosen card's ribbon. */
+  /** Section 7: `sourceId` -> what Jev found WRONG, for the amber chips in the same row. */
+  issuesBySourceId?: Record<string, string[]>
+  ribbonAction?: ReactNode
   onChoose: (sourceId: string) => void
 }
 
@@ -41,7 +45,7 @@ export type HotelListProps = {
 export function HotelList(
   {
     items, adults, now, chosenSourceId, selectDisabled = false, updating = false,
-    matchesBySourceId, highlightedSourceId = null, onHover, onChoose,
+    matchesBySourceId, issuesBySourceId, highlightedSourceId = null, onHover, ribbonAction, onChoose,
   }: HotelListProps,
 ) {
   const listRef = useRef<HTMLUListElement>(null)
@@ -60,8 +64,10 @@ export function HotelList(
           selectDisabled={selectDisabled}
           updating={updating}
           matches={matchesBySourceId?.[item.sourceId] ?? []}
+          issues={issuesBySourceId?.[item.sourceId] ?? []}
           highlighted={highlightedSourceId === item.sourceId}
           onHover={onHover}
+          ribbonAction={chosenSourceId != null && item.sourceId === chosenSourceId ? ribbonAction : undefined}
           onChoose={onChoose}
         />
       ))}

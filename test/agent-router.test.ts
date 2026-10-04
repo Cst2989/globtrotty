@@ -830,7 +830,7 @@ describeDb('makeRouter: the `next` chips', () => {
     questionId: 'next', question: 'What next?',
     options: [
       { id: 'direct_only', label: 'Direct flights only' },
-      { id: 'get_links', label: 'Get booking links' },
+      { id: 'get_links', label: 'Accept the trip' },
       { id: 'change_flight', label: 'Change the flight' },
     ],
   }
@@ -848,7 +848,7 @@ describeDb('makeRouter: the `next` chips', () => {
   it('get_links points at the button and spends nothing at all', async () => {
     await withTestDb(async (sql) => {
       const s = await seedConversation(sql, '20')
-      await seedClick(sql, s, 'get_links', 'Get booking links')
+      await seedClick(sql, s, 'get_links', 'Accept the trip')
       const fetchImpl = vi.fn()
       const create = vi.fn()
 
@@ -858,7 +858,7 @@ describeDb('makeRouter: the `next` chips', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.message).toBe('Press "Get booking links" on the summary to the right.')
+      expect(step.message).toBe('Press "Accept this trip" on the summary to the right.')
       // The hand-off is a button, not a message: no Jev classification, no driver turn.
       expect(fetchImpl).not.toHaveBeenCalled()
       expect(create).not.toHaveBeenCalled()

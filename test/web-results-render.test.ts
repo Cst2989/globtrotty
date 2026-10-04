@@ -15,10 +15,10 @@ import {
   transitLine, typeLabel,
 } from '../web/components/HotelCard.js'
 import {
+  ENGLISH_TEXT_FIELD,
   HotelMap,
-  TILE_ATTRIBUTION,
-  TILE_MAX_ZOOM,
-  TILE_URL,
+  MAP_ATTRIBUTION,
+  MAP_STYLE_URL,
   escapeHtml,
   pricePillHtml,
 } from '../web/components/HotelMap.js'
@@ -29,7 +29,6 @@ import {
 } from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
-import { PinnedSummary, flightLine, priceAgeNote, stayLine } from '../web/components/PinnedSummary.js'
 import {
   REFRESH_TIMEOUT_MS, ResultsPane, outcomeForStatus, refreshPhase, splitByVerdict, unmatchedLabel,
 } from '../web/components/ResultsPane.js'
@@ -37,6 +36,7 @@ import { SummaryBar, summarySegments, nightsBetween } from '../web/components/Su
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
 import type { ResultItemLite, ResultsView, ProposalRowLite, LinkLite } from '../web/data.js'
+import type { PendingAction } from '../web/components/pending.js'
 import { hotelLite } from './helpers/web-lite.js'
 
 const NOW = new Date('2026-11-18T09:00:00.000Z')
@@ -130,7 +130,7 @@ describe('FlightCard', () => {
     const html = renderToStaticMarkup(
       createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
     )
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).toContain('for 2 passengers')
     expect(html).toContain('Select')
     expect(html).toContain('found 10 min ago')
@@ -268,8 +268,8 @@ describe('HotelCard', () => {
     expect(html).toContain('Very good')
     expect(html).toContain('350 reviews')
     expect(html).toContain('16 nights, 2 adults')
-    expect(html).toContain('€1,120.00')
-    expect(html).toContain('€70.00 per night')
+    expect(html).toContain('€1,120')
+    expect(html).toContain('€70 per night')
     expect(html).toMatch(/Select/)
   })
 
@@ -477,7 +477,7 @@ describe('FilterBar', () => {
 
   it('says on the closed trigger what is set inside it', () => {
     expect(bar({ filter: { minCabinBags: 1 } })).toContain('Bags: 1 cabin')
-    expect(bar({ filter: { maxPriceMinor: '20000' } })).toContain('Up to €200.00')
+    expect(bar({ filter: { maxPriceMinor: '20000' } })).toContain('Up to €200')
     expect(bar({ filter: { airlines: ['QR', 'LH'] } })).toContain('Airlines (2)')
     // And marks it, so the row reads as filtered at a glance.
     expect(bar({ filter: { minCabinBags: 1 } })).toContain('data-set="true"')
@@ -550,7 +550,7 @@ describe('the filter bar\'s trigger labels', () => {
 
   it('names the cap that is set', () => {
     expect(priceLabel({}, 'EUR')).toBe('Max price')
-    expect(priceLabel({ maxPriceMinor: '250000' }, 'EUR')).toBe('Up to €2,500.00')
+    expect(priceLabel({ maxPriceMinor: '250000' }, 'EUR')).toBe('Up to €2,500')
   })
 
   it('counts the airlines that are set', () => {
@@ -606,9 +606,9 @@ describe('SortTabs', () => {
     expect(html).toContain('Best')
     expect(html).toContain('Cheapest')
     expect(html).toContain('Fastest')
-    // Best leads with the stored first item (€845.00, 14h 15m); Cheapest with the €200 one.
-    expect(html).toContain('€845.00 · 14h 15m')
-    expect(html).toContain('€200.00 · 20h 0m')
+    // Best leads with the stored first item (€845, 14h 15m); Cheapest with the €200 one.
+    expect(html).toContain('€845 · 14h 15m')
+    expect(html).toContain('€200 · 20h 0m')
   })
 
   it('marks only the active tab', () => {
@@ -620,135 +620,9 @@ describe('SortTabs', () => {
   })
 
   it('summarises a stay with its price and its rating — a hotel row has no duration', () => {
-    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120.00 · 4.4')
-    expect(tabSummary({ ...HOTEL_ITEM, hotel: hotelLite({ rating: null }) })).toBe('€1,120.00')
+    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120 · 4.4')
+    expect(tabSummary({ ...HOTEL_ITEM, hotel: hotelLite({ rating: null }) })).toBe('€1,120')
     expect(tabSummary(null)).toBe('—')
-  })
-})
-
-describe('PinnedSummary', () => {
-  const items = [
-    {
-      slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BCN→HND',
-      priceMinor: '84500', currency: 'EUR', fetchedAt: NOW.toISOString(),
-      route: { from: 'BCN', to: 'NRT', fromCity: 'Barcelona', toCity: 'Tokyo' },
-      outbound: '2026-11-19', inbound: '2026-12-06', airline: 'China Eastern',
-      stars: null, nights: null, ttlSeconds: 900,
-    },
-  ]
-
-  /*
-   * Polish pass, section 4, the author's own line: the summary read `BCN-NRT`,
-   * `2026-11-19 → 2026-12-06`, `found 3 h ago`. A database row read aloud, in the one place on
-   * the screen whose whole job is to say what she has decided.
-   */
-  it('says the trip the way a traveller says it', () => {
-    // The carrier joins the line only when it is not already the name on the row above. A Kiwi
-    // flight's own `name` IS its carrier, and the line read "China Eastern · ... · China
-    // Eastern" until the screenshot caught it.
-    expect(flightLine(items[0]!)).toEqual([
-      'Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec', 'China Eastern',
-    ])
-    expect(flightLine({ ...items[0]!, name: 'China Eastern' }))
-      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
-    // And loosely, because the two strings come from different places: the supplier's own and
-    // this office's airline table.
-    expect(flightLine({ ...items[0]!, name: 'China Eastern Airlines' }))
-      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Barcelona BCN → Tokyo NRT · Thu 19 Nov to Sun 6 Dec · China Eastern')
-    expect(html).not.toContain('2026-11-19')
-    // The decision is a chip, not a word floating beside a heading.
-    expect(html).toContain('Waiting for your decision')
-    expect(html).toContain('pinned-status')
-  })
-
-  it('says Accepted once she has accepted it', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: 'accept' as const, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Accepted')
-    expect(html).not.toContain('Waiting for your decision')
-  })
-
-  it('names a stay by its class and its length of stay', () => {
-    const stay = {
-      slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Hotel Gracery',
-      priceMinor: '430000', currency: 'EUR', fetchedAt: NOW.toISOString(),
-      route: null, outbound: '2026-11-20', inbound: '2026-12-06', airline: null,
-      stars: 4, nights: 16, ttlSeconds: 86_400,
-    }
-    expect(stayLine(stay)).toEqual(['16 nights', 'Fri 20 Nov to Sun 6 Dec'])
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items: [stay], totalMinor: '430000', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Hotel Gracery')
-    expect(html).toContain('hotel-stars')
-    expect(html).toContain('16 nights')
-  })
-
-  /*
-   * `found 3 h ago` sat on every summary whatever its age — a fact about our corpus dressed up
-   * as a warning. An age is worth her attention exactly when the price behind it may have moved.
-   */
-  it('mentions the age of a price only once it has actually aged out', () => {
-    expect(priceAgeNote(items[0]!, NOW)).toBeNull()
-    const later = new Date(NOW.getTime() + 3 * 3_600_000)
-    expect(priceAgeNote(items[0]!, later)).toBe('Prices checked 3 h ago')
-    // Nothing to judge it by, so nothing said.
-    expect(priceAgeNote({ ...items[0]!, ttlSeconds: null }, later)).toBeNull()
-  })
-
-  it('shows chosen items, the total, and Get booking links while undecided', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('BCN→HND')
-    expect(html).toContain('€845.00')
-    expect(html).toContain('Get booking links')
-    expect(html).not.toContain('<a ')
-  })
-
-  // Pass 3, section 6d: the hand-off re-checks every price with the supplier before it mints a
-  // link, which takes seconds; an unchanged button through all of them reads as one that did
-  // nothing.
-  it('says Checking prices… while the hand-off is in flight', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: true, error: null, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Checking prices…')
-    expect(html).not.toContain('Get booking links')
-    expect(html).toContain('disabled=""')
-  })
-
-  it('shows only the links once accepted — no Get booking links button', () => {
-    const links: LinkLite[] = [{ itemId: 'F1', url: 'https://mock.example/book/F1?gt_ref=abc', quotedMinor: '84500', currency: 'EUR' }]
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: 'accept', links,
-        pending: false, error: null, onGetLinks: () => {},
-      }),
-    )
-    const hrefs = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1])
-    expect(hrefs).toEqual([links[0]!.url])
-    expect(html).not.toContain('Get booking links')
   })
 })
 
@@ -853,20 +727,21 @@ describe('ResultsPane', () => {
   })
 
   /*
-   * Section 3, found by looking at the picture. Between choosing a flight and choosing a stay the
-   * proposal holds ONE item, and the summary and the `Chosen flight` card then said the same
-   * thing twice, one above the other, over a "Total" that was just the flight's own price. The
-   * summary is for a TRIP; until there is a trip, the chosen-flight card is the whole of what
-   * there is to pin.
+   * Trip-stage pass, section 2. Between choosing a flight and choosing a stay the proposal holds
+   * ONE item, and the pane used to put a `Proposed trip` summary above the `Chosen flight` card
+   * saying the same thing twice, over a "Total" that was just the flight's own price. Until
+   * there is a trip, the chosen-flight card is the whole of what there is to pin — and once
+   * there is one, a totals block says what it costs rather than a second copy of the cards.
    */
-  it('shows the pinned summary only once the trip has both halves', () => {
+  it('pins the chosen flight alone until a stay is chosen too, then shows the totals', () => {
     const noneChosen = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(noneChosen).not.toContain('pinned-summary')
+    expect(noneChosen).not.toContain('Chosen flight')
+    expect(noneChosen).not.toContain('trip-totals')
 
     const flightOnly = renderToStaticMarkup(
       createElement(ResultsPane, {
@@ -874,7 +749,7 @@ describe('ResultsPane', () => {
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(flightOnly).not.toContain('pinned-summary')
+    expect(flightOnly).not.toContain('trip-totals')
     expect(flightOnly).toContain('Chosen flight')
 
     const wholeTrip = proposal()
@@ -885,12 +760,16 @@ describe('ResultsPane', () => {
     }]
     const chosen = renderToStaticMarkup(
       createElement(ResultsPane, {
-        results: [resultsView()], proposal: wholeTrip, now: NOW, pending: false, error: null,
+        results: [resultsView(), resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
+        proposal: wholeTrip, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(chosen).toContain('pinned-summary')
-    expect(chosen).toContain('Get booking links')
+    expect(chosen).toContain('trip-totals')
+    expect(chosen).toContain('Accept this trip')
+    // Section 4's money: the totals block drops the `.00` on a whole number.
+    expect(chosen).toContain('Total')
+    expect(chosen).toMatch(/trip-total-sum[\s\S]*?€845</)
   })
 
   it('renders the newest hotels list above the newest flights list', () => {
@@ -1083,7 +962,7 @@ describe('expired prices', () => {
       item: EXPIRED_ITEM, adults: 2, now: LATER, updating: true, onChoose: () => {},
     }))
     expect(html).toContain('skeleton-line-price')
-    expect(html).not.toContain('€845.00')
+    expect(html).not.toContain('€845')
     expect(html).toContain('Updating prices')
     // Everything a ttl does not expire is still there.
     expect(html).toContain('07:05')
@@ -1106,7 +985,7 @@ describe('expired prices', () => {
     const html = renderToStaticMarkup(createElement(FlightCard, {
       item: EXPIRED_ITEM, adults: 2, now: LATER, onChoose: () => {},
     }))
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).not.toContain('skeleton-line-price')
     expect(html).toContain('Prices from 2 h ago')
     expect(html).toContain('data-expired="true"')
@@ -1144,7 +1023,7 @@ describe('expired prices', () => {
     }))
     // Nothing shimmers and nothing is greyed just because a page was opened late.
     expect(html).not.toContain('skeleton-line-price')
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).toContain('Prices from 2 h ago')
     // A link in the bar, never the old banner across the top of the list.
     expect(html).not.toContain('stale-banner')
@@ -1195,7 +1074,7 @@ describe('expired prices', () => {
       results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
       onChoose: () => {}, onGetLinks: () => {},
     }))
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).not.toContain('skeleton-line-price')
     expect(html).not.toContain('Updating prices')
   })
@@ -1256,59 +1135,62 @@ describe('the stylesheet rules the flight list cannot do without', () => {
   })
 })
 
-describe('ResultsPane with a pendingChoice', () => {
+/**
+ * Trip-stage pass, sections 1 and 2: the pane reads ONE pending action off the shared store, and
+ * `paneLayout` turns it, plus the rows and the proposal, into exactly one layout.
+ */
+describe('ResultsPane with a pending action', () => {
   const SECOND_FLIGHT: ResultItemLite = {
     ...FLIGHT_ITEM, sourceId: 'F2', name: 'Finnair',
     flight: { ...FLIGHT_ITEM.flight!, stops: 0, airlines: ['AY'], airlineNames: ['Finnair'] },
   }
 
-  function paneWith(pendingChoice: { kind: 'flight' | 'hotel'; sourceId: string } | null, results = [
+  function paneWith(pendingAction: PendingAction | null, results = [
     resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT] }),
   ]) {
     return renderToStaticMarkup(createElement(ResultsPane, {
-      results, proposal: null, now: NOW, pending: false, error: null, pendingChoice,
+      results, proposal: null, now: NOW, pending: false, error: null, pendingAction,
       onChoose: () => {}, onGetLinks: () => {},
     }))
   }
 
+  const choose = (kind: 'choose_flight' | 'choose_hotel', sourceId: string): PendingAction =>
+    ({ kind, label: '', at: Date.now(), sourceId })
+
   it('collapses the list into the chosen card the moment she picks one', () => {
-    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
-    // Section 3: one card on screen — hers, ribboned — and no list under it. Two full result
-    // sections stacked was the complaint, and the list she has finished with is the one to go.
+    const html = paneWith(choose('choose_flight', 'F1'))
+    // One card on screen — hers, ribboned — and no list under it. Two full result sections
+    // stacked was the complaint, and the list she has finished with is the one to go.
     expect(html).toContain('Selected')
     expect([...html.matchAll(/flight-card-ribbon/g)]).toHaveLength(1)
     expect([...html.matchAll(/flight-card"/g)]).toHaveLength(1)
     // Nothing left to press, because there is nothing left to choose between.
     expect([...html.matchAll(/>Select</g)]).toHaveLength(0)
-    // The pinned block, with her card's own name and price — above the lists — and one link
-    // back to the list she came from.
     expect(html).toContain('Chosen flight')
-    expect(html).toContain('€845.00')
-    // The card is pinned ABOVE the way back to the list, not under it.
-    expect(html).toContain('Change flight')
-    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Change flight'))
+    expect(html).toContain('€845')
+    // `Change` sits in the ribbon row on the card itself, and the way back to the whole list is
+    // below the pinned card rather than above it.
+    expect(html).toContain('card-change')
+    expect(html).toContain('Other flights')
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Other flights'))
   })
 
-  it('promises the hotel search a chosen flight starts', () => {
-    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
+  it('promises the hotel search a chosen flight starts, BELOW the card she chose', () => {
+    const html = paneWith(choose('choose_flight', 'F1'))
     expect(html).toContain('Searching hotels…')
-    expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Searching hotels…'))
   })
 
   it('promises the trip summary a chosen HOTEL starts, not another list', () => {
     const html = paneWith(
-      { kind: 'hotel', sourceId: 'H1' },
+      choose('choose_hotel', 'H1'),
       [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
     )
     expect(html).toContain('Putting the trip together…')
     expect(html).not.toContain('Searching hotels…')
-    expect(html).toContain('Chosen hotel')
-    // Her row keeps its "Chosen" marker and loses its button, like the real thing.
-    expect(html).toContain('result-row-chosen')
-    expect(html).not.toContain('>Choose<')
   })
 
-  it('leaves every Select alive and promises nothing with no pendingChoice', () => {
+  it('leaves every Select alive and promises nothing with no pending action', () => {
     const html = paneWith(null)
     expect([...html.matchAll(/>Select</g)]).toHaveLength(2)
     // Both Select buttons, neither disabled. (The filter bar's own steppers carry a `disabled`
@@ -1317,7 +1199,6 @@ describe('ResultsPane with a pendingChoice', () => {
     expect(html).not.toContain('Chosen flight')
     expect(html).not.toContain('Searching hotels…')
   })
-
 })
 
 describe('ResultsPane skeletons', () => {
@@ -1338,6 +1219,8 @@ describe('ResultsPane skeletons', () => {
     expect(html.indexOf('Searching hotels…')).toBeGreaterThan(-1)
     expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
     expect(html).toContain('Barcelona BCN → Tokyo HND')
+    // Never a skeleton and a list of the same kind together (section 2's last rule).
+    expect(html).not.toContain('hotel-card')
   })
 
   it('shows no skeleton at all once the results are in', () => {
@@ -1398,9 +1281,9 @@ describe('verified results', () => {
     // Collapsed on first render: the reasons and the second card are behind the toggle.
     expect(html).toContain('aria-expanded="false"')
     expect(html).not.toContain('Self-transfer risk')
-    // The tabs summarise the matched list only — €845.00 is F1's price, not F2's cheaper one.
-    expect(html).toContain('€845.00')
-    expect(html).not.toContain('€600.00')
+    // The tabs summarise the matched list only — €845 is F1's price, not F2's cheaper one.
+    expect(html).toContain('€845')
+    expect(html).not.toContain('€600')
     expect(html).not.toContain('Not checked against your request')
   })
 
@@ -1414,8 +1297,8 @@ describe('verified results', () => {
     expect(html).not.toContain('didn&#x27;t match what you asked')
     expect(html).not.toContain('match-chip')
     // Both cards are in the one list.
-    expect(html).toContain('€845.00')
-    expect(html).toContain('€600.00')
+    expect(html).toContain('€845')
+    expect(html).toContain('€600')
   })
 
   it('renders the chips on a stay too', () => {
@@ -1431,9 +1314,10 @@ describe('verified results', () => {
 })
 
 /**
- * Hotels pass, section 5. The map itself is Leaflet's imperative DOM and is not rendered here —
- * `ResultsPane` loads it through `next/dynamic` with `ssr: false` precisely because it cannot be.
- * What IS testable is the pure part, and the pure part is the one that builds markup by hand.
+ * Hotels pass, section 5, re-cut by the trip-stage pass. The map itself is MapLibre's imperative
+ * WebGL canvas and is not rendered here — `ResultsPane` loads it through `next/dynamic` with
+ * `ssr: false` precisely because it cannot be. What IS testable is the pure part, and the pure
+ * part is the one that builds markup by hand.
  */
 describe('HotelMap', () => {
   it('exports the component and its pure pill builder', () => {
@@ -1442,44 +1326,53 @@ describe('HotelMap', () => {
   })
 
   /*
-   * Polish pass, section 1, after TWO basemaps failed this page.
+   * Trip-stage pass, section 5, after THREE raster basemaps failed this page.
    *
    * OSM's own servers answered an anonymous deployment with a 403 and an "Access blocked"
    * picture on every tile. CARTO's CDN then answered every request with HTTP 200 and a
    * 2,513-byte tile reading "API KEY REQUIRED" — a broken map no status check can tell from a
-   * working one, caught only by looking at the screenshot. Esri's Dark Gray Canvas needs no key.
+   * working one, caught only by looking at the screenshot. Esri's Dark Gray Canvas did work, and
+   * was still the wrong answer: a flat grey raster with its own zoom ceiling and no way to ask
+   * it for English labels.
    *
-   * The URL is pinned here and the ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP
-   * does not admit fails exactly as silently as a blocked one.
+   * OpenFreeMap serves VECTOR tiles, free, with no key. The style URL is pinned here and the
+   * ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP does not admit fails exactly
+   * as silently as a blocked one.
    */
-  it('draws its tiles from a basemap that needs no key', () => {
-    expect(TILE_URL).toBe(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base'
-      + '/MapServer/tile/{z}/{y}/{x}',
-    )
-    expect(TILE_URL).not.toContain('openstreetmap.org')
-    expect(TILE_URL).not.toContain('cartocdn.com')
-    // Esri's REST tile path is row before column. Getting this the usual way round produces a
-    // map of somewhere else entirely, which renders perfectly and is completely wrong.
-    expect(TILE_URL.endsWith('{z}/{y}/{x}')).toBe(true)
-    // One host, so no subdomain sharding and an exact CSP origin rather than a wildcard.
-    expect(TILE_URL).not.toContain('{s}')
-    // Esri's terms want naming, and it is not optional.
-    expect(TILE_ATTRIBUTION).toBe('Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ')
-    // This layer's own ceiling: past it the server returns nothing at all.
-    expect(TILE_MAX_ZOOM).toBe(16)
+  it('draws its map from a keyless vector style, with no raster service left', () => {
+    expect(MAP_STYLE_URL).toBe('https://tiles.openfreemap.org/styles/dark')
+    expect(MAP_STYLE_URL).not.toContain('openstreetmap.org')
+    expect(MAP_STYLE_URL).not.toContain('cartocdn.com')
+    expect(MAP_STYLE_URL).not.toContain('arcgisonline.com')
+    // No `{z}/{x}/{y}` of our own: the style document names its own sources, which is the whole
+    // difference between this and the three that came before it.
+    expect(MAP_STYLE_URL).not.toContain('{z}')
+    // OpenStreetMap's licence wants naming, and it is not optional.
+    expect(MAP_ATTRIBUTION).toContain('OpenFreeMap')
+    expect(MAP_ATTRIBUTION).toContain('OpenStreetMap')
+  })
+
+  /*
+   * A map whose labels a traveller cannot read is a picture of a city rather than a map of one.
+   * `coalesce` falls back to the local name where the data has no English one, which is the
+   * honest answer — an empty label would be worse than a Japanese one.
+   */
+  it('asks the style for English labels, falling back rather than blanking them', () => {
+    expect(ENGLISH_TEXT_FIELD[0]).toBe('coalesce')
+    expect(ENGLISH_TEXT_FIELD).toContainEqual(['get', 'name:en'])
+    expect(ENGLISH_TEXT_FIELD[ENGLISH_TEXT_FIELD.length - 1]).toEqual(['get', 'name'])
   })
 
   it('builds a price pill, and marks the active one', () => {
     expect(pricePillHtml('113700', 'EUR', false))
-      .toBe('<span class="map-pill" data-active="false">€1,137.00</span>')
+      .toBe('<span class="map-pill" data-active="false">€1,137</span>')
     expect(pricePillHtml('113700', 'EUR', true)).toContain('data-active="true"')
   })
 
   it('escapes its text: no < from a price string survives into the markup', () => {
-    // `divIcon` takes an HTML STRING — the one path in this project with no React escaping on
-    // it. Nothing can put a `<` in a formatted price today; this is the guard for the next
-    // person who puts a NAME on a pill.
+    // A marker's element is filled with this HTML STRING — the one path in this project with no
+    // React escaping on it. Nothing can put a `<` in a formatted price today; this is the guard
+    // for the next person who puts a NAME on a pill.
     expect(escapeHtml('<script>alert(1)</script>'))
       .toBe('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(escapeHtml('a & b "c" \'d\'')).toBe('a &amp; b &quot;c&quot; &#39;d&#39;')
@@ -1490,12 +1383,25 @@ describe('HotelMap', () => {
     )
     expect(inner).not.toBeNull()
     expect(inner![1]).not.toContain('<')
-    expect(inner![1]).toBe('€1.00')
+    expect(inner![1]).toBe('€1')
   })
 
   it('gives every stay a card id a pin can scroll to, with nothing a supplier wrote left in it', () => {
     expect(stayCardId('tok:abc')).toBe('stay-tok-abc')
     expect(stayCardId('a"><script>')).toBe('stay-a---script-')
+  })
+
+  /* Leaflet is gone, and so is its stylesheet: nothing may import it back by accident. */
+  it('leaves no Leaflet behind', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+    expect(pkg.dependencies.leaflet).toBeUndefined()
+    expect(pkg.devDependencies['@types/leaflet']).toBeUndefined()
+    expect(pkg.dependencies['maplibre-gl']).toBeTruthy()
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
+    expect(css).not.toContain('leaflet')
   })
 })
 
@@ -1517,7 +1423,7 @@ describe('the hotels list and map split', () => {
     expect(html).toContain('data-split="false"')
     expect(html).toContain('data-view="list"')
     expect(html).toContain('hotel-split-list')
-    // The map is mounted only when it is on screen: Leaflet measures its container, and one
+    // The map is mounted only when it is on screen: a map measures its container, and one
     // built inside a hidden element comes up 0x0.
     expect(html).not.toContain('hotel-split-map')
   })

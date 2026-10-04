@@ -465,7 +465,7 @@ async function handleChooseFlight(
  *
  * The final review's C4: this used to `decideProposal(... 'accept')` here, and
  * that made the whole hand-off unreachable.
- * `web/components/PinnedSummary.tsx` renders "Get booking links" ONLY while
+ * The pane renders "Accept this trip" ONLY while
  * `decision === null`, and the links branch needs `links.length > 0`, which
  * only `hand_off_to_booking`/the cashier ever populates; `ResultsPaneLive`'s
  * `onGetLinks` early-returns on a non-null decision too, and `POST /decide`
@@ -525,7 +525,7 @@ async function handleChooseHotel(
 
   return {
     kind: 'park',
-    message: 'Trip summary ready. Use "Get booking links" when you want to book.',
+    message: 'Your trip is ready. Press "Accept this trip" when you want the booking links.',
     costMicros: 0n,
     recordedMicros: spent.micros,
     // F2: the summary's own two steps. Both are answered by the router itself rather than by Jev

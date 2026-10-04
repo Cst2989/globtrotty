@@ -192,7 +192,7 @@ describeDb('handleChoose', () => {
 
       expect(hotelStep.kind).toBe('park')
       if (hotelStep.kind !== 'park') throw new Error('unreachable')
-      expect(hotelStep.message).toBe('Trip summary ready. Use "Get booking links" when you want to book.')
+      expect(hotelStep.message).toBe('Your trip is ready. Press "Accept this trip" when you want the booking links.')
       // F2: no results row (nothing new was searched), just the summary's own two next steps —
       // both of which the ROUTER answers itself rather than handing to Jev.
       expect(hotelStep.attachments!.map((a) => a.role)).toEqual(['choices'])
