@@ -247,9 +247,25 @@ describe('newestResultItemPerSourceId', () => {
     totalDurationSeconds: 51_300, // 14h 15m
     selfTransfer: false,
   }
+  /** A row written BEFORE the hotels pass: four fields, none of the twelve a card now reads. */
   const hotelPayload = {
     kind: 'hotel', checkIn: '2026-11-19', checkOut: '2026-11-26', nights: 7, rating: 4,
     coordinates: null, offerSource: null,
+  }
+
+  /** A row written after it, with every field the card renders — and three it must refuse. */
+  const richHotelPayload = {
+    ...hotelPayload,
+    propertyType: 'hotel', stars: 3, reviews: 350, locationRating: 4.4,
+    images: [
+      'https://lh3.googleusercontent.com/ok.png',
+      'javascript:alert(1)',
+      'http://evil.test/a.png',
+    ],
+    amenities: ['Free Wi-Fi', 'Parking'],
+    essentials: ['Entire apartment'],
+    nearby: [{ name: 'Haneda Airport', minutes: 28, by: 'Taxi' }, { bogus: true }],
+    pricePerNightMinor: '7000', distanceKm: 3.2,
   }
   const row = (overrides: Record<string, unknown> = {}) => ({
     source_id: 'F1', name: 'Qatar Airways', price_minor: '45600', currency: 'EUR',
@@ -356,11 +372,39 @@ describe('newestResultItemPerSourceId', () => {
     expect(newestResultItemPerSourceId([row({ payload: { kind: 'bogus' } })], NOW_ROWS)).toEqual([])
   })
 
-  it('maps a hotel payload into ResultItemLite', () => {
+  it('maps a pre-hotels-pass payload, defaulting every field it does not carry', () => {
     const out = newestResultItemPerSourceId([row({ source_id: 'H1', payload: hotelPayload })], NOW_ROWS)
     expect(out).toHaveLength(1)
-    expect(out[0]!.hotel).toEqual({ rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' })
+    expect(out[0]!.hotel).toEqual({
+      rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26',
+      propertyType: 'other', stars: null, reviews: null, images: [], amenities: [],
+      essentials: [], nearby: [], pricePerNightMinor: null, distanceKm: null,
+    })
     expect(out[0]!.flight).toBeUndefined()
+  })
+
+  it('maps the hotels pass\'s own fields, and host-checks the photos a SECOND time', () => {
+    const out = newestResultItemPerSourceId([row({ source_id: 'H2', payload: richHotelPayload })], NOW_ROWS)
+    const hotel = out[0]!.hotel!
+    expect(hotel.propertyType).toBe('hotel')
+    expect(hotel.stars).toBe(3)
+    expect(hotel.reviews).toBe(350)
+    expect(hotel.pricePerNightMinor).toBe('7000')
+    expect(hotel.distanceKm).toBe(3.2)
+    expect(hotel.amenities).toEqual(['Free Wi-Fi', 'Parking'])
+    expect(hotel.essentials).toEqual(['Entire apartment'])
+    // The corpus outlives the code that filled it, so the allowlist runs again on the way out:
+    // only the Google-hosted https URL may reach an `<img src>`.
+    expect(hotel.images).toEqual(['https://lh3.googleusercontent.com/ok.png'])
+    // A nearby entry with no name is dropped rather than rendered blank.
+    expect(hotel.nearby).toEqual([{ name: 'Haneda Airport', minutes: 28, by: 'Taxi' }])
+  })
+
+  it('refuses a per-night price that is not a plain decimal string', () => {
+    const out = newestResultItemPerSourceId([
+      row({ source_id: 'H3', payload: { ...richHotelPayload, pricePerNightMinor: '7000; drop table' } }),
+    ], NOW_ROWS)
+    expect(out[0]!.hotel!.pricePerNightMinor).toBeNull()
   })
 
   it('returns an empty list for no rows', () => {

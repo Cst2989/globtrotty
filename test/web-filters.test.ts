@@ -6,6 +6,7 @@ import {
   isFilterSet,
 } from '../web/filters.js'
 import type { ResultItemLite } from '../web/data.js'
+import { hotelLite } from './helpers/web-lite.js'
 // Task 10: reconciling this module's departure windows with
 // `src/intake/filter.ts`'s own ones (see both files' `inWindow`).
 import { applyFilter } from '../src/intake/filter.js'
@@ -41,7 +42,7 @@ function hotel(overrides: Partial<ResultItemLite> = {}): ResultItemLite {
   return {
     sourceId: 'H1', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR',
     fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
-    hotel: { rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
+    hotel: hotelLite({ rating: 4 }),
     ...overrides,
   }
 }
@@ -296,7 +297,7 @@ describe('bag and rating filters, in both modules', () => {
     const hotel = (sourceId: string, rating: number | null): ResultItemLite => ({
       sourceId, name: 'h', priceMinor: '100000', currency: 'EUR',
       fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900, expired: false,
-      hotel: { rating, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
+      hotel: hotelLite({ rating }),
     })
     const hotels = [hotel('H3', 3), hotel('H4', 4), hotel('H0', null)]
     expect(applyFilterLite(hotels, { minRating: 3 }).map((i) => i.sourceId)).toEqual(['H3', 'H4'])

@@ -18,6 +18,7 @@
     "netlify"
   ],
   "exclude": [
-    "test/web-*.test.ts"
+    "test/web-*.test.ts",
+    "test/helpers/web-lite.ts"
   ]
 }

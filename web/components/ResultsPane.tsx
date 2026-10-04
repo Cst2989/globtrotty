@@ -287,6 +287,7 @@ export function ResultsPane(
           />
           <HotelList
             items={hotelItems}
+            adults={newestHotels.query.adults}
             now={now}
             chosenSourceId={chosenHotelSourceId}
             selectDisabled={choosing}

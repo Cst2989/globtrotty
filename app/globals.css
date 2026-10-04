@@ -1188,6 +1188,10 @@ select {
 .flight-card[data-expired='true'] .flight-card-main,
 .flight-card[data-expired='true'] .flight-card-price,
 .flight-card[data-expired='true'] .flight-card-per,
+.hotel-card[data-expired='true'] .hotel-card-main,
+.hotel-card[data-expired='true'] .hotel-card-photo,
+.hotel-card[data-expired='true'] .hotel-card-price,
+.hotel-card[data-expired='true'] .hotel-card-per,
 .result-row[data-expired='true'] .result-row-main,
 .result-row[data-expired='true'] .result-row-price {
   opacity: 0.7;
@@ -1198,6 +1202,7 @@ select {
  * what explains the dimming.
  */
 .flight-card[data-expired='true'] .flight-card-age,
+.hotel-card[data-expired='true'] .hotel-card-age,
 .result-row[data-expired='true'] .result-row-age {
   color: var(--ink-2);
 }
@@ -1859,6 +1864,260 @@ select {
 /* ---------- hotel list ---------- */
 
 .flight-list,
+/* ---------- the hotel card (hotels pass, section 3) ---------- */
+
+/*
+ * Three columns: the photo, what the place is, and the money. The same skeleton
+ * as `.flight-card`, with a 220px photo rail in front of it — which is the one
+ * structural difference between choosing a flight and choosing somewhere to
+ * sleep. A flight is times and stops; a stay is a photograph and a rating, and
+ * every accommodation search has converged on showing them in that order.
+ */
+.hotel-card {
+  display: flex;
+  align-items: stretch;
+  gap: 1.1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  transition: border-color 180ms var(--ease), background-color 180ms var(--ease);
+}
+
+.hotel-card:hover {
+  border-color: var(--line-strong);
+}
+
+.hotel-card[data-chosen='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.hotel-card-photo {
+  position: relative;
+  flex-shrink: 0;
+  width: 220px;
+  height: 160px;
+  border-radius: var(--r-control);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+/*
+ * A property with no usable photo gets a neutral block, never a stock image of
+ * somewhere else: the placeholder is honest about knowing nothing, and a
+ * borrowed photograph would be the card inventing the one thing it is for.
+ */
+.hotel-card-photo[data-empty='true'] {
+  background:
+    linear-gradient(135deg, var(--surface-2) 0%, var(--surface-3) 100%);
+}
+
+.hotel-card-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/*
+ * A dot per photo, static: it says "there are more of these" without promising
+ * a carousel the card does not have. Centred over the bottom of the image with
+ * a scrim behind it so it reads on a bright photograph as well as a dark one.
+ */
+.hotel-photo-dots {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0.45rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.28rem;
+}
+
+.hotel-photo-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+.hotel-photo-dot:first-child {
+  background: #fff;
+}
+
+.hotel-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.hotel-card-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+}
+
+.hotel-card-name {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.hotel-stars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.hotel-stars-glyphs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  color: #e7bd68;
+}
+
+.hotel-card-type {
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.hotel-card-where {
+  color: var(--ink-2);
+  font-size: 0.86rem;
+}
+
+.hotel-card-transit,
+.hotel-card-essentials {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+}
+
+.hotel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
+.hotel-chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.hotel-card-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--line);
+  min-width: 9.5rem;
+}
+
+/*
+ * The rating chip: the number on the accent, the word beside it. The number is
+ * what a traveller compares and the word is what makes a single number mean
+ * something, so they are one object rather than two lines.
+ */
+.hotel-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hotel-rating-score {
+  padding: 0.1rem 0.45rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hotel-rating-word {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.hotel-reviews,
+.hotel-stay,
+.hotel-card-per,
+.hotel-card-age {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.hotel-stay {
+  margin-top: 0.2rem;
+}
+
+.hotel-card-price {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.hotel-card-side .btn {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+/*
+ * Narrow: the photo goes full width above the text rather than shrinking to a
+ * thumbnail, and the money column unfolds into a row along the bottom — the
+ * same two moves `.flight-card` makes at the same breakpoint.
+ */
+@media (max-width: 760px) {
+  .hotel-card {
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  .hotel-card-photo {
+    width: 100%;
+    height: 180px;
+  }
+
+  .hotel-card-side {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.9rem;
+    padding-left: 0;
+    padding-top: 0.7rem;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .hotel-card-side .btn {
+    width: auto;
+    margin-top: 0;
+  }
+}
+
 .hotel-list {
   list-style: none;
   margin: 0;

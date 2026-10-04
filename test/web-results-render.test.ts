@@ -8,7 +8,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { FlightList } from '../web/components/FlightList.js'
 import { FlightCard, stopsWords, durationWords, timeHM, dayOffset } from '../web/components/FlightCard.js'
-import { HotelList, ratingStars } from '../web/components/HotelList.js'
+import { HotelList } from '../web/components/HotelList.js'
+import {
+  HotelCard, amenityChips, essentialsLine, locationLine, ratingNumber, ratingWord, transitLine,
+  typeLabel,
+} from '../web/components/HotelCard.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import {
   FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel,
@@ -21,6 +25,7 @@ import { SummaryBar, summarySegments, nightsBetween } from '../web/components/Su
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
 import type { ResultItemLite, ResultsView, ProposalRowLite, LinkLite } from '../web/data.js'
+import { hotelLite } from './helpers/web-lite.js'
 
 const NOW = new Date('2026-11-18T09:00:00.000Z')
 
@@ -47,7 +52,18 @@ const FLIGHT_ITEM: ResultItemLite = {
 const HOTEL_ITEM: ResultItemLite = {
   sourceId: 'H1', name: 'Hotel Gracery', priceMinor: '112000', currency: 'EUR',
   fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900, expired: false,
-  hotel: { rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
+  hotel: hotelLite({
+    rating: 4.4, nights: 16, checkIn: '2026-11-20', checkOut: '2026-12-06',
+    propertyType: 'hotel', stars: 3, reviews: 350,
+    images: ['https://lh3.googleusercontent.com/a.png', 'https://lh3.googleusercontent.com/b.png'],
+    amenities: ['Free Wi-Fi', 'Parking ($)', 'Air conditioning'],
+    essentials: [],
+    nearby: [
+      { name: 'Asakusa-Kotobukicho', minutes: 2, by: 'Walking' },
+      { name: 'Haneda Airport', minutes: 28, by: 'Taxi' },
+    ],
+    pricePerNightMinor: '7000', distanceKm: 3.2,
+  }),
 }
 
 const INBOUND_LEG = {
@@ -196,36 +212,149 @@ describe('timeHM / dayOffset / stopsWords / durationWords', () => {
 })
 
 describe('HotelList', () => {
-  it('renders name, stars, nights, dates, price, age and a Choose button', () => {
+  it('renders one card per stay, with the party size the search was for', () => {
     const html = renderToStaticMarkup(
-      createElement(HotelList, { items: [HOTEL_ITEM], now: NOW, onChoose: () => {} }),
+      createElement(HotelList, { items: [HOTEL_ITEM], adults: 2, now: NOW, onChoose: () => {} }),
     )
+    expect(html).toContain('hotel-list')
     expect(html).toContain('Hotel Gracery')
-    expect(html).toContain('★★★★')
-    expect(html).toContain('7 nights')
-    expect(html).toContain('2026-11-19')
-    expect(html).toContain('2026-11-26')
-    expect(html).toContain('€1,120.00')
-    expect(html).toMatch(/Choose/)
+    expect(html).toContain('16 nights, 2 adults')
+    expect(html).toMatch(/Select/)
   })
 
-  it('renders a chosen hotel pinned, with no Choose button', () => {
+  it('renders a chosen hotel pinned, with no Select button', () => {
     const html = renderToStaticMarkup(
-      createElement(HotelList, { items: [HOTEL_ITEM], now: NOW, chosenSourceId: 'H1', onChoose: () => {} }),
+      createElement(HotelList, { items: [HOTEL_ITEM], adults: 2, now: NOW, chosenSourceId: 'H1', onChoose: () => {} }),
     )
     expect(html).toContain('Chosen')
     expect(html).not.toContain('<button')
   })
 })
 
-describe('ratingStars', () => {
-  it('renders the right number of stars', () => {
-    expect(ratingStars(4)).toBe('★★★★')
-    expect(ratingStars(5)).toBe('★★★★★')
+describe('HotelCard', () => {
+  it('renders the photo, the name, the stars, the type, where it is and how to reach the airport', () => {
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: HOTEL_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('Hotel Gracery')
+    expect(html).toContain('src="https://lh3.googleusercontent.com/a.png"')
+    expect(html).toContain('3-star')
+    expect(html).toContain('Hotel')
+    expect(html).toContain('Asakusa-Kotobukicho · 3.2 km from centre')
+    expect(html).toContain('28 min to Haneda Airport by taxi')
+    // One dot per photo, and only when there is more than one.
+    expect(html.match(/hotel-photo-dot"/g)).toHaveLength(2)
   })
 
-  it('renders "Unrated" for null', () => {
-    expect(ratingStars(null)).toBe('Unrated')
+  it('renders the rating badge with its word, the review count, the stay and both prices', () => {
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: HOTEL_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('4.4')
+    expect(html).toContain('Very good')
+    expect(html).toContain('350 reviews')
+    expect(html).toContain('16 nights, 2 adults')
+    expect(html).toContain('€1,120.00')
+    expect(html).toContain('€70.00 per night')
+    expect(html).toMatch(/Select/)
+  })
+
+  it('renders the amenity chips this office has words for, in its own vocabulary', () => {
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: HOTEL_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('>Wifi<')
+    expect(html).toContain('>Parking<')
+    expect(html).toContain('>Air conditioning<')
+    // The supplier's own spelling never reaches the card when ours covers it.
+    expect(html).not.toContain('Parking ($)')
+  })
+
+  it('renders a rental\'s own essentials line and type label instead', () => {
+    const rental: ResultItemLite = {
+      ...HOTEL_ITEM,
+      hotel: hotelLite({
+        propertyType: 'rental', rating: 4.1, reviews: 23, nights: 16,
+        essentials: ['Entire apartment', '1 bedroom', '2 beds'],
+      }),
+    }
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: rental, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('Apartment')
+    expect(html).toContain('Entire apartment · 1 bedroom · 2 beds')
+  })
+
+  it('invents nothing for a bare stay: no photo, no stars, no rating, no distance', () => {
+    const bare: ResultItemLite = { ...HOTEL_ITEM, hotel: hotelLite({ propertyType: 'other' }) }
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: bare, adults: 1, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('data-empty="true"')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('hotel-rating-score')
+    expect(html).not.toContain('km from centre')
+    expect(html).not.toContain('per night')
+    expect(html).not.toContain('hotel-card-type')
+    expect(html).toContain('7 nights, 1 adult')
+  })
+
+  it('renders a chosen stay pinned, with no Select button', () => {
+    const html = renderToStaticMarkup(
+      createElement(HotelCard, { item: HOTEL_ITEM, adults: 2, now: NOW, chosen: true, onChoose: () => {} }),
+    )
+    expect(html).toContain('Selected')
+    expect(html).toContain('Chosen')
+    expect(html).not.toContain('<button')
+  })
+})
+
+describe('the hotel card\'s pure pieces', () => {
+  it('bands a rating into Booking\'s own words, and withholds a word below 3.5', () => {
+    expect(ratingWord(4.8)).toBe('Excellent')
+    expect(ratingWord(4.5)).toBe('Excellent')
+    expect(ratingWord(4.0)).toBe('Very good')
+    expect(ratingWord(3.5)).toBe('Good')
+    expect(ratingWord(3.4)).toBeNull()
+    expect(ratingNumber(4)).toBe('4.0')
+    expect(ratingNumber(4.1130433)).toBe('4.1')
+  })
+
+  it('labels the two types it trusts and nothing else', () => {
+    expect(typeLabel('hotel')).toBe('Hotel')
+    expect(typeLabel('rental')).toBe('Apartment')
+    expect(typeLabel('other')).toBeNull()
+  })
+
+  it('reads the area off the first nearby place that is not an airport', () => {
+    const nearby = [{ name: 'Haneda Airport' }, { name: 'Sugamo Sta.' }]
+    expect(locationLine(nearby, 4.6)).toBe('Sugamo Sta. · 4.6 km from centre')
+    expect(locationLine([{ name: 'Haneda Airport' }], 4.6)).toBe('4.6 km from centre')
+    expect(locationLine(nearby, null)).toBe('Sugamo Sta.')
+    expect(locationLine([], null)).toBeNull()
+    // A name that masked to nothing readable is skipped rather than printed as a run of '?'.
+    expect(locationLine([{ name: '?????' }, { name: 'Sugamo Sta.' }], null)).toBe('Sugamo Sta.')
+    expect(locationLine([{ name: '?????' }], 12.4)).toBe('12.4 km from centre')
+  })
+
+  it('writes the transit line only for an airport carrying both a time and a way of getting there', () => {
+    expect(transitLine([{ name: 'Haneda Airport', minutes: 39, by: 'Taxi' }]))
+      .toBe('39 min to Haneda Airport by taxi')
+    expect(transitLine([{ name: 'Haneda Airport', minutes: null, by: 'Taxi' }])).toBeNull()
+    expect(transitLine([{ name: 'Sensoji', minutes: 9, by: 'Walking' }])).toBeNull()
+  })
+
+  it('joins the essentials and refuses to make one up', () => {
+    expect(essentialsLine(['Entire house', 'Sleeps 4'])).toBe('Entire house · Sleeps 4')
+    expect(essentialsLine([])).toBeNull()
+  })
+
+  it('prefers the chips a traveller scans for, then fills the row with what is left', () => {
+    expect(amenityChips(['Smoke-free', 'Free Wi-Fi', 'Outdoor pool', 'Microwave', 'Sauna', 'Crib', 'Washer']))
+      .toEqual(['Wifi', 'Pool', 'Spa', 'Smoke-free', 'Microwave'])
+    expect(amenityChips([])).toEqual([])
+    // Five at most, however many came back.
+    expect(amenityChips(['a', 'b', 'c', 'd', 'e', 'f', 'g'])).toHaveLength(5)
   })
 })
 
@@ -712,7 +841,7 @@ describe('MessageBubble (plan 5 roles)', () => {
     const html = renderToStaticMarkup(
       createElement(HotelList, {
         items: [{ ...HOTEL_ITEM, name: '<script>alert(1)</script>' }],
-        now: NOW, onChoose: () => {},
+        adults: 2, now: NOW, onChoose: () => {},
       }),
     )
     expect(html).not.toContain('<script>alert')
@@ -806,7 +935,7 @@ describe('expired prices', () => {
 
   it('gives an expired hotel row the same treatment', () => {
     const html = renderToStaticMarkup(createElement(HotelList, {
-      items: [{ ...HOTEL_ITEM, expired: true }], now: LATER, updating: true, onChoose: () => {},
+      items: [{ ...HOTEL_ITEM, expired: true }], adults: 2, now: LATER, updating: true, onChoose: () => {},
     }))
     expect(html).toContain('skeleton-line-price')
     expect(html).toContain('Updating prices')

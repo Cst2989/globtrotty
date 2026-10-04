@@ -20,16 +20,22 @@ import { cspFor } from '../web/csp.js'
 const PROJECT_URL = 'https://fhqsiydgoqmwvihqsbap.supabase.co'
 
 describe('cspFor: img-src is pinned exactly', () => {
-  it('is exactly self, data: and the Kiwi logo host, nothing wider', () => {
+  it('is exactly self, data:, the Kiwi logo host and Google\'s two image hosts, nothing wider', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
-    expect(imgSrc).toBe("img-src 'self' data: https://images.kiwi.com")
+    expect(imgSrc).toBe(
+      "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
+      + ' https://*.gstatic.com')
   })
 
-  it('names that host exactly, never a scheme-wide or wildcard source', () => {
+  it('names each host, never a scheme-wide source, and wildcards only gstatic\'s subdomain', () => {
     const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
     expect(imgSrc).not.toMatch(/https:(\s|$)/)
-    expect(imgSrc).not.toContain('*')
+    // The hotels pass's one wildcard, and it is a SUBDOMAIN wildcard on a single registrable
+    // domain — Google numbers these thumbnail hosts (`encrypted-tbn0`, `encrypted-tbn1`, ...)
+    // and there is no stable single name to pin. Nothing else in the directive carries one.
+    expect(imgSrc.match(/\*/g)).toHaveLength(1)
+    expect(imgSrc).toContain('https://*.gstatic.com')
   })
 })
 
@@ -60,6 +66,8 @@ describe('next.config.ts headers(): the real config object', () => {
     // process is configured with — proves `next.config.ts` wires its own
     // `headers()` to `cspFor`, not a copy that has since drifted from it.
     expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
-    expect(csp!.split('; ')).toContain("img-src 'self' data: https://images.kiwi.com")
+    expect(csp!.split('; ')).toContain(
+      "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
+      + ' https://*.gstatic.com')
   })
 })

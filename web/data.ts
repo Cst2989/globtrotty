@@ -5,6 +5,7 @@ import {
   type ResultsContent, type Filter, type Assumption,
 } from '@/src/results'
 import { maskUntrustedText } from '@/src/sanitize'
+import { allowedImageUrl } from '@/src/supplier/searchapi'
 import { CODE_MAP } from '@/src/intake/places'
 import { airportCity } from '@/src/intake/airports'
 import { airlineName } from '@/src/intake/airlines'
@@ -605,11 +606,26 @@ export type ResultItemLite = {
     bags: { personal: number; cabin: number; checked: number }
     selfTransfer: boolean
   }
+  /**
+   * The hotels pass: everything a Booking-grade card renders (web/components/HotelCard.tsx).
+   * Every field mirrors `HotelDetail` (src/supplier/types.ts), where each one's cap and its
+   * masking are documented — the adapter is the boundary. This reader still defaults rather
+   * than trusts, because a corpus row written before that pass carries none of them.
+   */
   hotel?: {
     rating: number | null
     nights: number
     checkIn: string
     checkOut: string
+    propertyType: 'hotel' | 'rental' | 'other'
+    stars: number | null
+    reviews: number | null
+    images: string[]
+    amenities: string[]
+    essentials: string[]
+    nearby: { name: string; minutes: number | null; by: string | null }[]
+    pricePerNightMinor: string | null
+    distanceKm: number | null
   }
 }
 
@@ -763,15 +779,68 @@ function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefine
   }
 }
 
+/** A number in `[0, max]` off an unknown payload field, else null. */
+function numberOr(value: unknown, max: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return value >= 0 && value <= max ? value : null
+}
+
+/** A capped list of masked strings off an unknown payload field. */
+function stringsOf(value: unknown, cap: number): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((v): v is string => typeof v === 'string').slice(0, cap).map(maskUntrustedText)
+}
+
+/**
+ * The photo URLs a card may render, host-checked a SECOND time.
+ *
+ * `allowedImageUrl` already ran at the adapter boundary, so every URL in a row this office
+ * wrote is on the allowlist. It runs again here because this is the step that puts a string
+ * into an `<img src>`, and the corpus is a database that outlives the code that filled it —
+ * a row from a future bypass insert, a restore, or an adapter that regressed does not get to
+ * reach the browser on the strength of having once been checked.
+ */
+function imagesOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((v): v is string => typeof v === 'string' && allowedImageUrl(v))
+    .slice(0, 5)
+}
+
 /** `undefined` when `payload` is not a `HotelDetail` (src/supplier/types.ts) this reader recognises. */
 function hotelLite(payload: UnknownRecord): ResultItemLite['hotel'] | undefined {
   if (payload.kind !== 'hotel') return undefined
   if (typeof payload.checkIn !== 'string' || typeof payload.checkOut !== 'string') return undefined
+  const nearby = Array.isArray(payload.nearby) ? payload.nearby : []
   return {
-    rating: typeof payload.rating === 'number' ? payload.rating : null,
+    rating: numberOr(payload.rating, 5),
     nights: typeof payload.nights === 'number' ? payload.nights : 0,
     checkIn: stringOr(payload.checkIn, ''),
     checkOut: stringOr(payload.checkOut, ''),
+    // An unknown value reads as `'other'`, which renders no type label at all — the same
+    // posture `propertyTypeOf` takes at the adapter.
+    propertyType: payload.propertyType === 'hotel' || payload.propertyType === 'rental'
+      ? payload.propertyType
+      : 'other',
+    stars: numberOr(payload.stars, 5),
+    reviews: numberOr(payload.reviews, Number.MAX_SAFE_INTEGER),
+    images: imagesOf(payload.images),
+    amenities: stringsOf(payload.amenities, 12),
+    essentials: stringsOf(payload.essentials, 6),
+    nearby: nearby.slice(0, 3).flatMap((entry) => {
+      if (!isRecord(entry) || typeof entry.name !== 'string') return []
+      return [{
+        name: maskUntrustedText(entry.name),
+        minutes: numberOr(entry.minutes, 100_000),
+        by: typeof entry.by === 'string' ? maskUntrustedText(entry.by) : null,
+      }]
+    }),
+    // A decimal-digit string or nothing: this goes through `BigInt()` in the renderer, which
+    // throws on anything else.
+    pricePerNightMinor: typeof payload.pricePerNightMinor === 'string' && /^\d{1,18}$/.test(payload.pricePerNightMinor)
+      ? payload.pricePerNightMinor
+      : null,
+    distanceKm: numberOr(payload.distanceKm, 100_000),
   }
 }
 
