@@ -32,12 +32,27 @@ export type MessageBoxProps = {
    */
   onOptimistic?: (text: string) => void
   /**
-   * Called with that same text if the POST then fails outright (not the
-   * 409/429 cases — see `messageForStatus`'s doc comment — both of which DID
-   * write her message, so the optimistic bubble is left for the next
-   * refresh to match and drop instead of being torn down here).
+   * Called with that same text, and the response status (`0` for a network
+   * error), if the POST then fails outright. For an EXISTING conversation
+   * that excludes the 409/429 cases — see `messageForStatus`'s doc comment —
+   * both of which DID write her message, so the optimistic bubble is left
+   * for the next refresh to match and drop instead of being torn down here.
+   *
+   * For the LANDING box it also covers 409 (see `landingPhaseAfterResponse`),
+   * because there is no thread to leave a bubble in: `LandingLive` has
+   * already replaced the whole screen with the split, and the only honest
+   * answer to a failure is to put the landing — and her words — back.
    */
-  onOptimisticError?: (text: string) => void
+  onOptimisticError?: (text: string, status: number) => void
+  /**
+   * Pass 3, section 5c: the text and the alert this box opens with, for the
+   * one case that needs them — `LandingLive` dropping back to the landing
+   * after a failed first send mounts a FRESH box (the hero and the split are
+   * different subtrees, so the instance that made the request is already
+   * gone), and her words have to come back with it.
+   */
+  initialText?: string
+  initialError?: string | null
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -92,11 +107,32 @@ export function messageForStatus(status: number): string {
  */
 export function nextLocation(
   conversationId: string, status: number, body: { conversationId: string },
-): { type: 'push'; url: string } | { type: 'refresh' } {
+): { type: 'replace'; url: string } | { type: 'refresh' } {
   if (conversationId === 'new' && (status === 200 || status === 429)) {
-    return { type: 'push', url: `/c/${body.conversationId}` }
+    return { type: 'replace', url: `/c/${body.conversationId}` }
   }
   return { type: 'refresh' }
+}
+
+/**
+ * Pass 3, section 5: what the LANDING box does with a response, now that the screen has already
+ * become the split before the request was even sent (`LandingLive`'s `phase`).
+ *
+ * - `'navigate'` — the conversation exists, so go to it. A 429 counts: `submitMessage` creates
+ *   the conversation and writes her message BEFORE the ceiling check can fire, so a capped
+ *   account still has a real, addressable id to land on, and the page there shows the limit
+ *   state. Nothing visibly changes at the swap — the server page renders the same skeleton the
+ *   optimistic split is already showing.
+ * - `'restore'` — nothing usable came back, so the landing comes back with her words in the box
+ *   and the alert copy above it. 409 (`busy`) is in here rather than with the navigators: it is
+ *   unreachable from `'new'` (no prior turn to collide with), and the old `router.refresh()`
+ *   answer refreshed the landing she had just left, which would now leave her looking at an
+ *   optimistic split that is never going to fill.
+ *
+ * Pure, so `test/web-render.test.ts` pins every status without a fetch mock.
+ */
+export function landingPhaseAfterResponse(status: number): 'navigate' | 'restore' {
+  return status === 200 || status === 429 ? 'navigate' : 'restore'
 }
 
 /** What the disabled composer says instead of its placeholder. */
@@ -126,16 +162,17 @@ function blockedPlaceholder(status: string | undefined): string | null {
  */
 export function MessageBox({
   conversationId, status, suggestions, placeholder, variant = 'inline', quickOptions = false,
-  onOptimistic, onOptimisticError,
+  onOptimistic, onOptimisticError, initialText = '', initialError = null,
 }: MessageBoxProps) {
   const router = useRouter()
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const [when, setWhen] = useState('')
   const [who, setWho] = useState('')
   const [budget, setBudget] = useState('')
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError)
 
+  const landingBox = conversationId === 'new'
   const statusAllows = status === undefined || SENDABLE_STATUSES.has(status)
   const disabled = !statusAllows || pending
   const canSend = !disabled && text.trim().length > 0
@@ -163,34 +200,44 @@ export function MessageBox({
 
       if (!res.ok) {
         setError(messageForStatus(res.status))
-        // 409 and 429 both still wrote her message (see messageForStatus),
-        // so she is sent to wherever that message lives; the optimistic
-        // bubble stays put for the next refresh to match by text and drop.
-        if (res.status === 409 || res.status === 429) {
+        // For the LANDING box the whole screen has already changed, so the
+        // only two answers are "go to the conversation" and "put the landing
+        // back" — see `landingPhaseAfterResponse`.
+        const keepGoing = landingBox
+          ? landingPhaseAfterResponse(res.status) === 'navigate'
+          // For an existing conversation, 409 and 429 both still WROTE her
+          // message (see messageForStatus), so the optimistic bubble stays
+          // put for the next refresh to match by text and drop.
+          : (res.status === 409 || res.status === 429)
+        if (keepGoing) {
           const body = (await res.json()) as { conversationId: string }
           const location = nextLocation(conversationId, res.status, body)
-          if (location.type === 'push') withViewTransition(() => router.push(location.url))
+          if (location.type === 'replace') withViewTransition(() => router.replace(location.url))
           else router.refresh()
           return
         }
-        // A genuine failure: nothing was written, so the optimistic bubble
-        // is wrong and so is an empty box — undo both.
-        onOptimisticError?.(trimmed)
+        // A genuine failure: nothing usable was written, so the optimistic
+        // bubble (or the whole optimistic split) is wrong and so is an empty
+        // box — undo both.
+        onOptimisticError?.(trimmed, res.status)
         setText(trimmed)
         return
       }
 
       const body = (await res.json()) as { conversationId: string }
       const location = nextLocation(conversationId, res.status, body)
-      // E: `nextLocation` only ever returns a push for the LANDING box, which is exactly the
-      // navigation worth a transition — a full-bleed photo wall becoming the split view.
-      // `withViewTransition` falls through to a plain push without the API or under reduced
-      // motion; it never swallows the navigation.
-      if (location.type === 'push') withViewTransition(() => router.push(location.url))
+      // `nextLocation` only ever navigates for the LANDING box. `replace`, not `push` (pass 3,
+      // section 5b): by the time this runs the landing is already gone from the screen — the
+      // optimistic split replaced it the instant she pressed send — so leaving a history entry
+      // pointing back at a landing mid-send would promise a state that no longer exists. The
+      // transition is worth it for the same reason it always was: a full-bleed photo wall
+      // becoming the split view. `withViewTransition` falls through to a plain navigation
+      // without the API or under reduced motion; it never swallows it.
+      if (location.type === 'replace') withViewTransition(() => router.replace(location.url))
       else router.refresh()
     } catch {
       setError(messageForStatus(0))
-      onOptimisticError?.(trimmed)
+      onOptimisticError?.(trimmed, 0)
       setText(trimmed)
     } finally {
       setPending(false)

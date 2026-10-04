@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/web/supabase/server'
 import { listConversations } from '@/web/data'
 import { AppShell } from '@/web/components/AppShell'
 import { Sidebar } from '@/web/components/Sidebar'
-import { Landing } from '@/web/components/Landing'
+import { LandingLive } from '@/web/components/LandingLive'
 
 /**
  * Sends her straight back into her most recently updated conversation, if
@@ -27,7 +27,7 @@ export default async function HomePage() {
       title="New trip"
       rail={<Sidebar conversations={conversations} userEmail={user.email ?? null} />}
     >
-      <Landing />
+      <LandingLive />
     </AppShell>
   )
 }

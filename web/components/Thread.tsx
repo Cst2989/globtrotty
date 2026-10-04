@@ -1,11 +1,15 @@
 'use client'
 
-import { cloneElement, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import {
+  cloneElement, isValidElement, useCallback, useEffect, useRef, useState,
+  type ReactElement, type ReactNode,
+} from 'react'
 import { useRouter } from 'next/navigation'
 import type { ConversationHeader, LatestTurn, ThreadMessage } from '@/web/data'
 import { subscribeConversation } from '@/web/realtime'
 import { createBrowserSupabase } from '@/web/supabase/browser'
 import { mergePending, type MergedMessage, type PendingMessage } from './pending'
+import { useActivity } from './activity'
 import { MessageBubble } from './MessageBubble'
 import { StatusLine } from './StatusLine'
 import type { MessageBoxProps } from './MessageBox'
@@ -22,11 +26,18 @@ export type ThreadViewProps = {
   tail?: ReactNode
   /**
    * Task 10: true while `ThreadLive` has at least one optimistic message
-   * still unmatched to a server row. While true AND the real `status` has
-   * not yet flipped to `working`, the status line shows "Sending" instead
-   * of whatever `status` would otherwise say (`active`'s stale "Ready for
-   * your next message" being the usual case right after a send) — see
-   * `StatusLine`'s own `sending` entry.
+   * still unmatched to a server row — or while a chip or choice card has
+   * just been clicked (pass 3, section 6b).
+   *
+   * While true AND the real `status` has not yet flipped to `working`, the
+   * line reads what the turn is ABOUT to be doing rather than what the
+   * stored status still says (`active`'s "Ready for your next message" being
+   * the usual case right in the half-second after a send): "Searching" when
+   * the results pane is already promising a list, "Thinking" otherwise.
+   *
+   * It used to read "Sending", which was honest about the network and wrong
+   * about the product — pass 3, section 5e: the only thing she cares about
+   * in that moment is that the desk has her message and is working on it.
    */
   sending?: boolean
   /**
@@ -66,9 +77,8 @@ export type ThreadViewProps = {
 export function ThreadView(
   { conversation, messages, latestTurn, children, composer, tail, sending, searching, conversationId }: ThreadViewProps,
 ) {
-  const effectiveStatus = sending && conversation.status !== 'working'
-    ? 'sending'
-    : (searching && conversation.status === 'working' ? 'searching' : conversation.status)
+  const working = conversation.status === 'working' || (sending === true && conversation.status !== 'working')
+  const effectiveStatus = working ? (searching ? 'searching' : 'working') : conversation.status
 
   return (
     <div className="thread">
@@ -90,7 +100,9 @@ export function ThreadView(
               </li>
             ))}
           </ul>
-          {conversation.status === 'working' ? (
+          {/* Pass 3, section 5e/6b: driven by the same `working` as the status line, so the
+              typing dots appear in the tick she presses send rather than after the POST. */}
+          {working ? (
             <div className="message-row" data-role="agent" aria-hidden="true">
               <p className="message thinking-row">
                 <span className="thinking">
@@ -153,6 +165,7 @@ const PENDING_TIMEOUT_MS = 30_000
  */
 export function ThreadLive({ userId, conversation, messages, latestTurn, children, composer, searching }: ThreadLiveProps) {
   const router = useRouter()
+  const activity = useActivity()
   const [sb] = useState(() => createBrowserSupabase())
   const tailRef = useRef<HTMLDivElement>(null)
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([])
@@ -173,6 +186,41 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
       return keep
     })
   }
+
+  /**
+   * Task 10's optimistic append, lifted out of the `cloneElement` below so pass 3's chips and
+   * choice cards can reach it too. Stable (`useCallback` over nothing but refs and a setter), so
+   * the registration effect below runs once per mount rather than on every render.
+   */
+  const addPending = useCallback((text: string) => {
+    const id = crypto.randomUUID()
+    setPendingMessages((current) => [...current, { id, content: text }])
+    const timer = setTimeout(() => {
+      setPendingMessages((current) => {
+        const timers = timersRef.current
+        const found = current.find((p) => p.id === id)
+        if (found) timers.delete(id)
+        return current.filter((p) => p.id !== id)
+      })
+    }, PENDING_TIMEOUT_MS)
+    timersRef.current.set(id, timer)
+  }, [])
+
+  // Pass 3, section 6b: `ChoiceCardLive` is rendered deep inside this thread but has no way to
+  // reach this list; `ActivityProvider` (web/components/activity.tsx) is the seam, and this is
+  // the registration that makes `activity.optimistic(label)` land here.
+  useEffect(() => {
+    activity.register(addPending)
+    return () => activity.register(null)
+  }, [activity, addPending])
+
+  // The server has caught up: whatever a click was optimistically claiming is now the stored
+  // truth, so the shared flag goes back down and the real `status` drives the line again.
+  useEffect(() => {
+    if (conversation.status !== 'active' && conversation.status !== 'awaiting_user') {
+      activity.setBusy(false)
+    }
+  }, [conversation.status, activity])
 
   useEffect(() => {
     return subscribeConversation(sb, {
@@ -210,14 +258,10 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
   const liveComposer =
     composer && isValidElement(composer)
       ? cloneElement(composer as ReactElement<MessageBoxProps>, {
-          onOptimistic: (text: string) => {
-            const id = crypto.randomUUID()
-            setPendingMessages((current) => [...current, { id, content: text }])
-            const timer = setTimeout(() => dropPending((p) => p.id === id), PENDING_TIMEOUT_MS)
-            timersRef.current.set(id, timer)
-          },
+          onOptimistic: addPending,
           onOptimisticError: (text: string) => {
             dropPending((p) => p.content === text)
+            activity.setBusy(false)
           },
         })
       : composer
@@ -229,7 +273,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
       messages={mergedMessages}
       latestTurn={latestTurn}
       composer={liveComposer}
-      sending={pendingMessages.length > 0}
+      sending={pendingMessages.length > 0 || activity.busy}
       searching={searching}
       tail={<div ref={tailRef} aria-hidden="true" />}
     >

@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/web/supabase/server'
 import { listConversations } from '@/web/data'
 import { AppShell } from '@/web/components/AppShell'
 import { Sidebar } from '@/web/components/Sidebar'
-import { Landing } from '@/web/components/Landing'
+import { LandingLive } from '@/web/components/LandingLive'
 
 /**
  * The landing box: always reachable directly (unlike `/`, which redirects
@@ -25,7 +25,7 @@ export default async function NewConversationPage() {
       title="New trip"
       rail={<Sidebar conversations={conversations} userEmail={user.email ?? null} />}
     >
-      <Landing />
+      <LandingLive />
     </AppShell>
   )
 }

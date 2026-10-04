@@ -10,7 +10,8 @@ import { MessageBubble } from '../web/components/MessageBubble.js'
 import { StatusLine } from '../web/components/StatusLine.js'
 import { withViewTransition } from '../web/components/transition.js'
 import { ThreadView } from '../web/components/Thread.js'
-import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
+import { messageForStatus, nextLocation, landingPhaseAfterResponse } from '../web/components/MessageBox.js'
+import { LandingLive } from '../web/components/LandingLive.js'
 import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
 import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import { mergePending } from '../web/components/pending.js'
@@ -83,16 +84,6 @@ describe('StatusLine', () => {
     expect(html.toLowerCase()).toContain('thinking')
   })
 
-  // Task 10: `ThreadView` substitutes this synthetic status while an
-  // optimistic message is in flight and the real status has not yet
-  // flipped to `working` — see that component's own `sending` prop.
-  it('maps the synthetic "sending" status to "Sending", with the same working tone and dots', () => {
-    const html = renderToStaticMarkup(createElement(StatusLine, { status: 'sending', failReason: null }))
-    expect(html).toContain('Sending')
-    expect(html).toContain('data-tone="working"')
-    expect(html).toContain('class="thinking"')
-  })
-
   // Results UI pass 2, E: the other synthetic status — `ThreadView` substitutes it while the
   // results pane is showing a search skeleton, so the line says what is actually happening
   // instead of a generic "Thinking" beside five shimmering flight cards.
@@ -144,12 +135,15 @@ describe('messageForStatus', () => {
 describe('nextLocation', () => {
   const body = { conversationId: 'abc-123' }
 
-  it('pushes to the new conversation on a 200 from the landing box', () => {
-    expect(nextLocation('new', 200, body)).toEqual({ type: 'push', url: '/c/abc-123' })
+  // Pass 3, section 5b: `replace`, not `push` — the landing is already gone from the screen by
+  // the time this runs, so a history entry pointing back at it would promise a state that no
+  // longer exists.
+  it('replaces with the new conversation on a 200 from the landing box', () => {
+    expect(nextLocation('new', 200, body)).toEqual({ type: 'replace', url: '/c/abc-123' })
   })
 
-  it('pushes to the new conversation on a 429 from the landing box too', () => {
-    expect(nextLocation('new', 429, body)).toEqual({ type: 'push', url: '/c/abc-123' })
+  it('replaces with the new conversation on a 429 from the landing box too', () => {
+    expect(nextLocation('new', 429, body)).toEqual({ type: 'replace', url: '/c/abc-123' })
   })
 
   it('refreshes in place for an existing conversation on 200, 409 or 429', () => {
@@ -158,8 +152,54 @@ describe('nextLocation', () => {
     expect(nextLocation('c1', 429, body)).toEqual({ type: 'refresh' })
   })
 
-  it('refreshes rather than pushes for a 409 from the landing box (unreachable in practice, but must not crash)', () => {
+  it('refreshes rather than navigating for a 409 from the landing box (unreachable in practice, but must not crash)', () => {
     expect(nextLocation('new', 409, body)).toEqual({ type: 'refresh' })
+  })
+})
+
+// Pass 3, section 5. The author's loudest complaint: pressing send on the landing took about
+// three seconds before anything on screen changed — the POST, then a server-rendered
+// /c/[id]. Nothing in that wait is information the browser does not already have.
+describe('LandingLive', () => {
+  // The IDLE half is not rendered here: it mounts `MessageBox`, which calls `useRouter()`, and
+  // there is no app-router context under `renderToStaticMarkup` (mocking next/navigation to get
+  // past that would test the mock, not the wiring). It is covered by the pass-3 screenshot.
+
+  it('renders the whole split — pending bubble, Searching, flight skeleton — at phase sent', () => {
+    const html = renderToStaticMarkup(createElement(LandingLive, { phase: 'sent' }))
+    // The split itself, both panes, exactly as the conversation page renders them.
+    expect(html).toContain('split-shell')
+    expect(html).toContain('split-pane-chat')
+    expect(html).toContain('split-pane-results')
+    // Her message, marked as not-yet-stored.
+    expect(html).toContain('data-pending="true"')
+    // The status line, and the shape the answer will arrive in.
+    expect(html).toContain('Searching')
+    expect(html).toContain('Searching flights…')
+    expect([...html.matchAll(/skeleton-card/g)]).toHaveLength(5)
+    // And a composer that cannot be typed into, because there is nothing yet to post to.
+    expect(html).toContain('disabled=""')
+  })
+
+  it('shows the text she actually typed in the pending bubble', () => {
+    // `phase` alone starts with no text (nothing was typed); the real flow sets both in the
+    // same tick. This pins that the bubble renders `sentText` as PLAIN text, never markup.
+    const html = renderToStaticMarkup(createElement(LandingLive, { phase: 'sent' }))
+    expect(html).toContain('message-row')
+    expect(html).not.toContain('<script>')
+  })
+})
+
+describe('landingPhaseAfterResponse', () => {
+  it('navigates on a 200 and on a 429 (the conversation exists either way)', () => {
+    expect(landingPhaseAfterResponse(200)).toBe('navigate')
+    expect(landingPhaseAfterResponse(429)).toBe('navigate')
+  })
+
+  it('restores the landing on a 409, a 500 and a network error', () => {
+    expect(landingPhaseAfterResponse(409)).toBe('restore')
+    expect(landingPhaseAfterResponse(500)).toBe('restore')
+    expect(landingPhaseAfterResponse(0)).toBe('restore')
   })
 })
 
@@ -208,9 +248,10 @@ describe('ThreadView', () => {
     expect(html).toContain('data-pending="true"')
   })
 
-  // Task 10: `sending` substitutes "Sending" for the status words ONLY while the
-  // real status has not yet flipped to `working` — once it has, "Thinking" wins.
-  it('shows "Sending" when sending is true and status is still active', () => {
+  // Pass 3, section 5e: `sending` used to substitute the word "Sending", which was honest about
+  // the network and wrong about the product. It now reads what the turn is about to be DOING,
+  // in the tick she presses send — and the typing dots appear with it.
+  it('shows "Thinking" the instant sending is true, even while the stored status is still active', () => {
     const html = renderToStaticMarkup(
       createElement(ThreadView, {
         conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
@@ -219,11 +260,26 @@ describe('ThreadView', () => {
         sending: true,
       }),
     )
-    expect(html).toContain('Sending')
+    expect(html).toContain('Thinking')
+    expect(html).not.toContain('Ready for your next message')
+    expect(html).toContain('thinking-row')
+  })
+
+  it('shows "Searching" instead when the results pane is already promising a list', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [],
+        sending: true,
+        searching: true,
+      }),
+    )
+    expect(html).toContain('Searching')
     expect(html).not.toContain('Ready for your next message')
   })
 
-  it('keeps showing "Thinking" once the real status has flipped to working, even while sending is still true', () => {
+  it('keeps showing "Thinking" once the real status has flipped to working', () => {
     const html = renderToStaticMarkup(
       createElement(ThreadView, {
         conversation: { id: 'c1', title: 'Trip', status: 'working', updated_at: new Date().toISOString() },
@@ -233,7 +289,6 @@ describe('ThreadView', () => {
       }),
     )
     expect(html.toLowerCase()).toContain('thinking')
-    expect(html).not.toContain('Sending')
   })
 
   // E: `searching` wins over the generic "Thinking" for exactly the stretch that IS a search,
