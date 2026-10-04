@@ -8,7 +8,7 @@ import { HEARTBEAT_STALE, MAX_ATTEMPTS } from './repo/turns.js'
  * different failure modes — but both are plain seconds bound via
  * `make_interval()`, never interpolated into the query text.
  */
-export const QUEUED_STALE = 120
+export const QUEUED_STALE = 45
 
 export const DEFAULT_BATCH = 100
 

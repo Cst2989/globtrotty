@@ -33,8 +33,8 @@ describe('netlify.toml', () => {
     expect(TOML).toMatch(/included_files\s*=\s*\[\s*"src\/agents\/prompts\/\*\.md"\s*\]/)
   })
 
-  it('keeps the sweep schedule at every five minutes', () => {
-    expect(TOML).toMatch(/\[functions\."sweep"\]\s*\n\s*schedule\s*=\s*"\*\/5 \* \* \* \*"/)
+  it('keeps the sweep schedule at every minute (a queued turn must never wait five)', () => {
+    expect(TOML).toMatch(/\[functions\."sweep"\]\s*\n\s*schedule\s*=\s*"\* \* \* \* \*"/)
   })
 
   it('keeps the drift-monitor schedule at 03:00 daily', () => {

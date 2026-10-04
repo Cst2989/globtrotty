@@ -10,7 +10,7 @@
   included_files = ["src/agents/prompts/*.md"]
 
 [functions."sweep"]
-  schedule = "*/5 * * * *"
+  schedule = "* * * * *"
 
 [functions."drift-monitor"]
   schedule = "0 3 * * *"

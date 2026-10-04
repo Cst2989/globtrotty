@@ -19,10 +19,20 @@ export function invokeBackground(
   fetchImpl: typeof fetch = fetch,
 ): (turnId: string) => Promise<void> {
   return async (turnId: string): Promise<void> => {
-    await fetchImpl(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-worker-secret': env.WORKER_SHARED_SECRET },
-      body: JSON.stringify({ turnId }),
-    }).catch(() => {})
+    // Best-effort by contract (the turn is durable at `queued` and the sweeper is the backstop),
+    // but never silent: a refused or failed invoke is the one thing that explains a turn that
+    // sits queued, so it is logged with the status and never the secret.
+    try {
+      const res = await fetchImpl(`${env.SITE_URL}/.netlify/functions/run-turn-background`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-worker-secret': env.WORKER_SHARED_SECRET },
+        body: JSON.stringify({ turnId }),
+      })
+      if (res.status !== 202 && res.status !== 200) {
+        console.error('invokeBackground: unexpected status', { turnId, status: res.status })
+      }
+    } catch (err) {
+      console.error('invokeBackground: fetch failed', { turnId, error: err instanceof Error ? err.message : String(err) })
+    }
   }
 }
