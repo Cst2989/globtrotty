@@ -1176,6 +1176,20 @@ select {
   font-size: 0.85rem;
 }
 
+/*
+ * Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It is the
+ * real summary minus what only the server can know (the total, the hand-off button), so it reads
+ * as the same object half-filled rather than as a different one.
+ */
+.pinned-pending-label {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* ---------- stale prices (pass 3, section 1) ---------- */
 
 /*

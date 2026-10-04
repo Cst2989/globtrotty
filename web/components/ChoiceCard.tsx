@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useActivity } from './activity'
 
 export type ChoiceCardProps = {
   question: string
@@ -88,12 +89,18 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  */
 export function ChoiceCardLive({ conversationId, questionId, question, options, variant }: ChoiceCardLiveProps) {
   const router = useRouter()
+  const activity = useActivity()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function pick(optionId: string, label: string) {
+    // Pass 3, section 6b: all three before the fetch. The label IS the message this click posts
+    // (spec §3), so it is exactly what the pending bubble should say, and `ThreadLive` owns that
+    // list — `activity.optimistic` is how a card this deep in the thread reaches it.
     setPending(true)
     setError(null)
+    activity.optimistic(label)
+    activity.setBusy(true)
     try {
       const res = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: 'POST',
@@ -106,11 +113,13 @@ export function ChoiceCardLive({ conversationId, questionId, question, options, 
       })
       if (!res.ok) {
         setError(GENERIC_ERROR)
+        activity.setBusy(false)
         return
       }
       router.refresh()
     } catch {
       setError(GENERIC_ERROR)
+      activity.setBusy(false)
     } finally {
       setPending(false)
     }

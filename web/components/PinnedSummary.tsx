@@ -41,8 +41,11 @@ export function PinnedSummary({ items, totalMinor, currency, decision, links, pe
         <span>{formatMoney(money(BigInt(totalMinor), currency))}</span>
       </p>
       {decision === null ? (
+        // Pass 3, section 6d: the label changes in the tick she presses it. The hand-off re-checks
+        // every price with the supplier before it mints a link (src/tools/cashier.ts), which takes
+        // seconds, and an unchanged button through all of them reads as a button that did nothing.
         <button type="button" className="btn btn-primary" disabled={pending} onClick={onGetLinks}>
-          Get booking links
+          {pending ? 'Checking prices…' : 'Get booking links'}
         </button>
       ) : decision === 'accept' && links.length > 0 ? (
         <ul className="pinned-links">

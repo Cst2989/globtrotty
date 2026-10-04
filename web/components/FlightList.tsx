@@ -9,6 +9,8 @@ export type FlightListProps = {
   now?: Date
   /** The source id already chosen for this slot, if any — renders with a `Selected` ribbon and no button. */
   chosenSourceId?: string | null
+  /** Pass 3, section 6a: a choice is in flight, so no OTHER card's Select is an offer any more. */
+  selectDisabled?: boolean
   onChoose: (sourceId: string) => void
 }
 
@@ -21,7 +23,7 @@ export type FlightListProps = {
  * `FlightCard` returns `null` for it — which is how a hotel item handed to this list by mistake
  * behaves.
  */
-export function FlightList({ items, adults, now, chosenSourceId, onChoose }: FlightListProps) {
+export function FlightList({ items, adults, now, chosenSourceId, selectDisabled, onChoose }: FlightListProps) {
   return (
     <ul className="flight-list">
       {items.map((item) => (
@@ -31,6 +33,7 @@ export function FlightList({ items, adults, now, chosenSourceId, onChoose }: Fli
           adults={adults}
           now={now}
           chosen={chosenSourceId != null && item.sourceId === chosenSourceId}
+          selectDisabled={selectDisabled}
           onChoose={onChoose}
         />
       ))}

@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { formatMoney, money } from '@/src/money'
 import type { Filter } from '@/src/results'
-import type { ResultsView, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
+import type { ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
 import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
@@ -14,6 +15,7 @@ import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './ProposalCard'
 import { ageWords } from './age'
+import { useActivity } from './activity'
 
 export type ResultsPaneProps = {
   /** Every `results` row for this conversation, oldest first — `web/data.ts`'s `loadResults`. */
@@ -37,6 +39,43 @@ export type ResultsPaneProps = {
    * any list whose own prices have aged past their ttl (`ResultsView.stale`, web/data.ts).
    */
   onRefresh: (kind: 'flights' | 'hotels') => void
+  /**
+   * Pass 3, section 6a: the card she just pressed Select on, set by `ResultsPaneLive`
+   * SYNCHRONOUSLY — before its POST — and cleared only if that POST comes back unusable.
+   *
+   * Pressing Select used to change nothing for about three seconds: the action row, the turn,
+   * the proposal path and the hotel search all had to land before `router.refresh()` brought
+   * back a page that finally said "Selected". Everything that answer eventually shows is
+   * already known here the moment she clicks: WHICH card she picked, that the others are no
+   * longer offers, and what the office does next. So this renders all three at once — the
+   * ribbon, the disabled Selects, the pinned block, and the placeholder for the search that is
+   * starting — and the server's own version of the same state replaces it without moving
+   * anything.
+   */
+  pendingChoice?: PendingChoice | null
+  /**
+   * Pass 3, section 6c: the kind whose "Refresh prices" button was just pressed. That section
+   * becomes the search skeleton in the same tick, rather than leaving the stale banner and the
+   * dimmed cards on screen while the turn runs.
+   */
+  refreshing?: 'flights' | 'hotels' | null
+}
+
+export type PendingChoice = { kind: 'flight' | 'hotel'; sourceId: string }
+
+/**
+ * Whether an optimistic state survives the response that eventually arrives.
+ *
+ * `200` is the only `keep`: `submitAction` (src/handler.ts) writes the action row and the turn
+ * in ONE transaction and returns `busy` (409) or `limit_reached` (429) having written NEITHER —
+ * unlike `submitMessage`, which preserves her typed words on both. So for a card press there is
+ * no status where the optimistic screen is still true but the row is missing: anything other
+ * than 200 means nothing happened, and the screen has to go back to what it was.
+ *
+ * Pure, so `test/web-results-render.test.ts` pins every status without a fetch mock.
+ */
+export function outcomeForStatus(status: number): 'keep' | 'rollback' {
+  return status === 200 ? 'keep' : 'rollback'
 }
 
 /**
@@ -83,6 +122,56 @@ const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
 const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
 
 /**
+ * The pinned block for a choice the server has not confirmed yet (pass 3, section 6a): the one
+ * card she picked, with its price, under the same heading the real `PinnedSummary` uses.
+ *
+ * No total and no "Get booking links": a total needs the gates' own arithmetic and the button
+ * needs a proposal id, neither of which exists yet. Promising either would be the optimistic
+ * screen claiming something the server has not said.
+ */
+function PendingPinned(
+  { item, kind }: { item: ResultItemLite; kind: 'flight' | 'hotel' },
+) {
+  return (
+    <section className="pinned-summary" aria-label="Your trip so far">
+      <p className="pinned-pending-label">{kind === 'flight' ? 'Chosen flight' : 'Chosen hotel'}</p>
+      <ul className="pinned-items">
+        <li className="pinned-item">
+          <span className="pinned-item-name">{item.name}</span>
+          <span className="pinned-item-price">
+            {formatMoney(money(BigInt(item.priceMinor), item.currency))}
+          </span>
+        </li>
+      </ul>
+    </section>
+  )
+}
+
+/**
+ * What a chosen HOTEL promises: not another list, but the summary of the whole trip, which
+ * `handleChooseHotel` is off building through the gates and the reviewer. A skeleton list would
+ * be a lie about what is coming.
+ */
+function PendingTripSummary() {
+  return (
+    <section className="results-section results-skeleton" aria-label="Putting the trip together">
+      <div className="summary-bar" aria-hidden="true">
+        <div className="summary-pills">
+          <span className="skeleton-pill skeleton-pill-wide" />
+          <span className="skeleton-pill" />
+        </div>
+      </div>
+      <p className="results-skeleton-note" role="status">Putting the trip together…</p>
+    </section>
+  )
+}
+
+/** The item one `sourceId` names in a row, or `null` — what the pending pinned block renders. */
+function itemById(view: ResultsView | null, sourceId: string): ResultItemLite | null {
+  return view?.items.find((i) => i.sourceId === sourceId) ?? null
+}
+
+/**
  * Spec §5's results pane: the pinned summary once anything is chosen, then the newest hotels
  * list (if any), then the newest flights list.
  *
@@ -99,7 +188,10 @@ const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
  * tests confirm is safe under static rendering (no router, no effects).
  */
 export function ResultsPane(
-  { results, proposal, now, pending, error, skeleton = null, onChoose, onGetLinks, onRefresh }: ResultsPaneProps,
+  {
+    results, proposal, now, pending, error, skeleton = null, pendingChoice = null, refreshing = null,
+    onChoose, onGetLinks, onRefresh,
+  }: ResultsPaneProps,
 ) {
   const clock = now ?? new Date()
   const newestFlights = newestOfKind(results, 'flights')
@@ -132,9 +224,19 @@ export function ResultsPane(
     ? sortItemsLite(applyFilterLite(newestHotels.items, hotelState.filter), hotelState.sort)
     : []
 
-  const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? null
-  const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? null
+  // Pass 3, section 6a: her click counts as chosen immediately, exactly as the proposal row
+  // will once it lands. The proposal wins when both exist — it is the server's own answer.
+  const pendingFlight = pendingChoice?.kind === 'flight' ? pendingChoice.sourceId : null
+  const pendingHotel = pendingChoice?.kind === 'hotel' ? pendingChoice.sourceId : null
+  const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? pendingFlight
+  const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? pendingHotel
   const hasChosen = proposal !== null && proposal.items.length > 0
+  // Every OTHER card's Select goes dead while a choice is in flight: one press is one
+  // instruction, and a second one would be refused with a 409 anyway (`submitAction`).
+  const choosing = pendingChoice !== null
+  const pendingItem = pendingChoice === null
+    ? null
+    : itemById(pendingChoice.kind === 'flight' ? newestFlights : newestHotels, pendingChoice.sourceId)
 
   // Nothing to show beside a placeholder, and nothing to put it above: the whole pane IS the
   // skeleton. Returning early rather than rendering empty sections keeps the "searching" state
@@ -162,9 +264,21 @@ export function ResultsPane(
         />
       ) : null}
 
-      {skeleton === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
+      {/* Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It
+          stands in for `PinnedSummary` above, never beside it. */}
+      {!hasChosen && pendingItem && pendingChoice ? (
+        <PendingPinned item={pendingItem} kind={pendingChoice.kind} />
+      ) : null}
 
-      {newestHotels ? (
+      {/* The placeholder for what the office does next with her choice: hotels after a flight,
+          the trip summary after a hotel. The server's own `skeleton` says the same thing one
+          round trip later, so whichever arrives first renders the same shape. */}
+      {skeleton === 'hotels' || pendingChoice?.kind === 'flight' ? <ResultsSkeleton kind="hotels" /> : null}
+      {pendingChoice?.kind === 'hotel' ? <PendingTripSummary /> : null}
+
+      {newestHotels && refreshing === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
+
+      {newestHotels && refreshing !== 'hotels' ? (
         <section className="results-section" aria-label="Hotels">
           <SummaryBar {...summaryBarPropsFor(newestHotels)} />
           {newestHotels.stale && newestHotels.fetchedAt ? (
@@ -187,6 +301,7 @@ export function ResultsPane(
                 items={hotelItems}
                 now={now}
                 chosenSourceId={chosenHotelSourceId}
+                selectDisabled={choosing}
                 onChoose={(sourceId) => onChoose('hotel', sourceId)}
               />
             </div>
@@ -194,7 +309,9 @@ export function ResultsPane(
         </section>
       ) : null}
 
-      {newestFlights ? (
+      {newestFlights && refreshing === 'flights' ? <ResultsSkeleton kind="flights" /> : null}
+
+      {newestFlights && refreshing !== 'flights' ? (
         <section className="results-section" aria-label="Flights">
           <SummaryBar {...summaryBarPropsFor(newestFlights)} />
           {newestFlights.stale && newestFlights.fetchedAt ? (
@@ -218,6 +335,7 @@ export function ResultsPane(
                 adults={newestFlights.query.adults}
                 now={now}
                 chosenSourceId={chosenFlightSourceId}
+                selectDisabled={choosing}
                 onChoose={(sourceId) => onChoose('flight', sourceId)}
               />
             </div>
@@ -255,10 +373,19 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  */
 export function ResultsPaneLive({ conversationId, results, proposal, skeleton = null }: ResultsPaneLiveProps) {
   const router = useRouter()
+  const activity = useActivity()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
+  const [refreshing, setRefreshing] = useState<'flights' | 'hotels' | null>(null)
 
-  async function post(path: string, body: unknown) {
+  /**
+   * Pass 3, section 6: `rollback` runs on every path that leaves the screen claiming something
+   * the server did not do — a non-200 response (see `outcomeForStatus`) or a thrown fetch. On a
+   * 200 the optimistic state is LEFT in place and `router.refresh()` replaces it with the
+   * server's identical own, so nothing jumps in between.
+   */
+  async function post(path: string, body: unknown, rollback?: () => void) {
     setPending(true)
     setError(null)
     try {
@@ -267,16 +394,28 @@ export function ResultsPaneLive({ conversationId, results, proposal, skeleton = 
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (!res.ok) {
+      if (!res.ok || outcomeForStatus(res.status) === 'rollback') {
         setError(errorForStatus(res.status))
+        rollback?.()
         return
       }
       router.refresh()
     } catch {
       setError(GENERIC_ERROR)
+      rollback?.()
     } finally {
       setPending(false)
     }
+  }
+
+  function rollbackChoice() {
+    setPendingChoice(null)
+    activity.setBusy(false)
+  }
+
+  function rollbackRefresh() {
+    setRefreshing(null)
+    activity.setBusy(false)
   }
 
   return (
@@ -286,11 +425,25 @@ export function ResultsPaneLive({ conversationId, results, proposal, skeleton = 
       skeleton={skeleton}
       pending={pending}
       error={error}
-      onChoose={(kind, sourceId) => void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId })}
-      onRefresh={(kind) => void post(`/api/conversations/${conversationId}/refresh`, { kind })}
+      pendingChoice={pendingChoice}
+      refreshing={refreshing}
+      onChoose={(kind, sourceId) => {
+        // Before the fetch, deliberately: this is the whole of section 6a.
+        setPendingChoice({ kind, sourceId })
+        activity.setBusy(true)
+        void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId }, rollbackChoice)
+      }}
+      onRefresh={(kind) => {
+        setRefreshing(kind)
+        activity.setBusy(true)
+        void post(`/api/conversations/${conversationId}/refresh`, { kind }, rollbackRefresh)
+      }}
       onGetLinks={() => {
         if (!proposal || proposal.decision !== null) return
-        void post(`/api/proposals/${proposal.id}/decide`, { decision: 'accept' })
+        // `pending` (set first thing in `post`, synchronously) is what turns the button into
+        // "Checking prices…" — see `PinnedSummary`.
+        activity.setBusy(true)
+        void post(`/api/proposals/${proposal.id}/decide`, { decision: 'accept' }, () => activity.setBusy(false))
       }}
     />
   )

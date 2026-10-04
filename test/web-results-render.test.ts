@@ -14,7 +14,7 @@ import { FilterRail, stopsModeOf, withStopsMode } from '../web/components/Filter
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
-import { ResultsPane } from '../web/components/ResultsPane.js'
+import { ResultsPane, outcomeForStatus } from '../web/components/ResultsPane.js'
 import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
@@ -241,6 +241,22 @@ describe('ChoiceCard', () => {
     expect(html).toContain('Osaka')
     expect([...html.matchAll(/btn-ghost/g)]).toHaveLength(2)
   })
+
+  // Pass 3, section 6b: a click posts the label as an ordinary message, so clicking twice would
+  // send it twice. `ChoiceCardLive` sets `disabled` in the same tick it fires the optimistic
+  // bubble, before the POST.
+  it('disables every option while a pick is in flight, as a card and as chips', () => {
+    for (const variant of ['card', 'chips'] as const) {
+      const html = renderToStaticMarkup(
+        createElement(ChoiceCard, {
+          question: 'What next?', variant, disabled: true,
+          options: [{ id: 'direct_only', label: 'Direct flights only' }, { id: 'cheapest', label: 'Cheapest first' }],
+          onPick: () => {},
+        }),
+      )
+      expect([...html.matchAll(/disabled=""/g)]).toHaveLength(2)
+    }
+  })
 })
 
 describe('FilterRail', () => {
@@ -375,6 +391,21 @@ describe('PinnedSummary', () => {
     expect(html).toContain('€845.00')
     expect(html).toContain('Get booking links')
     expect(html).not.toContain('<a ')
+  })
+
+  // Pass 3, section 6d: the hand-off re-checks every price with the supplier before it mints a
+  // link, which takes seconds; an unchanged button through all of them reads as one that did
+  // nothing.
+  it('says Checking prices… while the hand-off is in flight', () => {
+    const html = renderToStaticMarkup(
+      createElement(PinnedSummary, {
+        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
+        pending: true, error: null, onGetLinks: () => {},
+      }),
+    )
+    expect(html).toContain('Checking prices…')
+    expect(html).not.toContain('Get booking links')
+    expect(html).toContain('disabled=""')
   })
 
   it('shows only the links once accepted — no Get booking links button', () => {
@@ -715,6 +746,92 @@ describe('expired prices', () => {
     }))
     expect([...html.matchAll(/stale-banner/g)]).toHaveLength(1)
     expect(html).toContain('Refresh prices')
+  })
+})
+
+// Pass 3, section 6. Pressing Select used to change nothing for about three seconds. Everything
+// the eventual answer shows is already known the moment she clicks, so it all renders at once.
+describe('outcomeForStatus', () => {
+  it('keeps the optimistic screen only on a 200', () => {
+    expect(outcomeForStatus(200)).toBe('keep')
+  })
+
+  it('rolls back on 409, 429, 404, 500 and a network error — `submitAction` wrote nothing', () => {
+    for (const status of [400, 404, 409, 429, 500, 0]) {
+      expect(outcomeForStatus(status)).toBe('rollback')
+    }
+  })
+})
+
+describe('ResultsPane with a pendingChoice', () => {
+  const SECOND_FLIGHT: ResultItemLite = {
+    ...FLIGHT_ITEM, sourceId: 'F2', name: 'Finnair',
+    flight: { ...FLIGHT_ITEM.flight!, stops: 0, airlines: ['AY'], airlineNames: ['Finnair'] },
+  }
+
+  function paneWith(pendingChoice: { kind: 'flight' | 'hotel'; sourceId: string } | null, results = [
+    resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT] }),
+  ]) {
+    return renderToStaticMarkup(createElement(ResultsPane, {
+      results, proposal: null, now: NOW, pending: false, error: null, pendingChoice,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+  }
+
+  it('ribbons the chosen card, disables every other Select, and pins the choice at the top', () => {
+    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
+    // The one she picked: the ribbon, and no button at all on that card.
+    expect(html).toContain('Selected')
+    expect([...html.matchAll(/flight-card-ribbon/g)]).toHaveLength(1)
+    // One Select left (the other card's), and it is dead.
+    expect([...html.matchAll(/>Select</g)]).toHaveLength(1)
+    expect(html).toContain('disabled=""')
+    // The pinned block, with her card's own name and price — above the lists.
+    expect(html).toContain('Chosen flight')
+    expect(html).toContain('€845.00')
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('flight-card'))
+  })
+
+  it('promises the hotel search a chosen flight starts', () => {
+    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
+    expect(html).toContain('Searching hotels…')
+    expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
+  })
+
+  it('promises the trip summary a chosen HOTEL starts, not another list', () => {
+    const html = paneWith(
+      { kind: 'hotel', sourceId: 'H1' },
+      [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
+    )
+    expect(html).toContain('Putting the trip together…')
+    expect(html).not.toContain('Searching hotels…')
+    expect(html).toContain('Chosen hotel')
+    // Her row keeps its "Chosen" marker and loses its button, like the real thing.
+    expect(html).toContain('result-row-chosen')
+    expect(html).not.toContain('>Choose<')
+  })
+
+  it('leaves every Select alive and promises nothing with no pendingChoice', () => {
+    const html = paneWith(null)
+    expect([...html.matchAll(/>Select</g)]).toHaveLength(2)
+    // Both Select buttons, neither disabled. (The filter bar's own steppers carry a `disabled`
+    // of their own at zero, so this looks at the buttons in question rather than the whole page.)
+    expect([...html.matchAll(/<button type="button" class="btn btn-primary">Select<\/button>/g)]).toHaveLength(2)
+    expect(html).not.toContain('Chosen flight')
+    expect(html).not.toContain('Searching hotels…')
+  })
+
+  // Section 6c: the banner and the dimmed cards are not a state to leave on screen while the
+  // turn she just started runs.
+  it('swaps a refreshing section for its own skeleton', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [{ ...FLIGHT_ITEM, expired: true }], stale: true })],
+      proposal: null, now: NOW, pending: false, error: null, refreshing: 'flights',
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+    expect(html).toContain('Searching flights…')
+    expect(html).not.toContain('stale-banner')
+    expect(html).not.toContain('flight-card-age')
   })
 })
 

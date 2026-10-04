@@ -12,6 +12,8 @@ export type FlightCardProps = {
   now?: Date
   /** True once this item is the chosen flight: a `Selected` ribbon and no button. */
   chosen?: boolean
+  /** Pass 3, section 6a: some OTHER card's Select is in flight, so this one is no longer an offer. */
+  selectDisabled?: boolean
   onChoose: (sourceId: string) => void
 }
 
@@ -123,7 +125,7 @@ function LegRow({ label, leg, stops }: { label: string; leg: LegLite; stops: num
  * with `renderToStaticMarkup`. `AirlineLogo` is the one client island inside it, for its
  * `onError` fallback alone.
  */
-export function FlightCard({ item, adults, now, chosen = false, onChoose }: FlightCardProps) {
+export function FlightCard({ item, adults, now, chosen = false, selectDisabled = false, onChoose }: FlightCardProps) {
   const flight = item.flight
   if (!flight) return null
   const clock = now ?? new Date()
@@ -169,7 +171,7 @@ export function FlightCard({ item, adults, now, chosen = false, onChoose }: Flig
           <button
             type="button"
             className="btn btn-primary"
-            disabled={item.expired}
+            disabled={item.expired || selectDisabled}
             title={item.expired ? REFRESH_FIRST : undefined}
             onClick={() => onChoose(item.sourceId)}
           >

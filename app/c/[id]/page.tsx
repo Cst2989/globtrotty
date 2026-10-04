@@ -12,6 +12,7 @@ import { MessageBox } from '@/web/components/MessageBox'
 import { ProposalCardLive } from '@/web/components/ProposalCard'
 import { SplitShell } from '@/web/components/SplitShell'
 import { ResultsPaneLive } from '@/web/components/ResultsPane'
+import { ActivityProvider } from '@/web/components/activity'
 
 /**
  * The proxy (`proxy.ts` → `web/supabase/middleware.ts`) already redirects an
@@ -92,20 +93,26 @@ export default async function ConversationPage({
       rail={<Sidebar conversations={conversations} activeId={id} userEmail={user.email ?? null} />}
       collapsed={hasResults || skeleton === 'full'}
     >
-      {hasResults || skeleton === 'full' ? (
-        <SplitShell
-          conversationId={id}
-          chat={chat}
-          results={(
-            <ResultsPaneLive
-              conversationId={id} results={results} proposal={proposal} skeleton={skeleton}
-            />
-          )}
-          latestResultsId={latestResultsId}
-        />
-      ) : (
-        chat
-      )}
+      {/* Pass 3, section 6: one `ActivityProvider` above BOTH islands, so a Select pressed in
+          the results pane flips the chat column's status line in the same tick, and a chip
+          clicked inside the thread reaches the pending-message list `ThreadLive` owns. It wraps
+          either branch, because the chips exist before the first `results` row does. */}
+      <ActivityProvider>
+        {hasResults || skeleton === 'full' ? (
+          <SplitShell
+            conversationId={id}
+            chat={chat}
+            results={(
+              <ResultsPaneLive
+                conversationId={id} results={results} proposal={proposal} skeleton={skeleton}
+              />
+            )}
+            latestResultsId={latestResultsId}
+          />
+        ) : (
+          chat
+        )}
+      </ActivityProvider>
     </AppShell>
   )
 }

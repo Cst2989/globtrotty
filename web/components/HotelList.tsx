@@ -8,6 +8,8 @@ export type HotelListProps = {
   now?: Date
   /** The source id already chosen for this slot, if any — renders pinned, with no button. */
   chosenSourceId?: string | null
+  /** Pass 3, section 6a: a choice is in flight, so no OTHER row's Choose is an offer any more. */
+  selectDisabled?: boolean
   onChoose: (sourceId: string) => void
 }
 
@@ -26,7 +28,7 @@ export function ratingStars(rating: number | null): string {
  * price, fetched age, a `Choose` button — same pinned/`Chosen` convention as
  * `FlightList`. Pure (`onChoose` is a callback prop).
  */
-export function HotelList({ items, now, chosenSourceId, onChoose }: HotelListProps) {
+export function HotelList({ items, now, chosenSourceId, selectDisabled = false, onChoose }: HotelListProps) {
   const clock = now ?? new Date()
   return (
     <ul className="hotel-list">
@@ -59,7 +61,7 @@ export function HotelList({ items, now, chosenSourceId, onChoose }: HotelListPro
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
-                  disabled={item.expired}
+                  disabled={item.expired || selectDisabled}
                   title={item.expired ? REFRESH_FIRST : undefined}
                   onClick={() => onChoose(item.sourceId)}
                 >
