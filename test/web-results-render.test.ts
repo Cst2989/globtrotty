@@ -29,7 +29,7 @@ import {
 } from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
-import { PinnedSummary } from '../web/components/PinnedSummary.js'
+import { PinnedSummary, flightLine, priceAgeNote, stayLine } from '../web/components/PinnedSummary.js'
 import {
   REFRESH_TIMEOUT_MS, ResultsPane, outcomeForStatus, refreshPhase, splitByVerdict, unmatchedLabel,
 } from '../web/components/ResultsPane.js'
@@ -609,8 +609,78 @@ describe('SortTabs', () => {
 
 describe('PinnedSummary', () => {
   const items = [
-    { slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BCN→HND', priceMinor: '84500', currency: 'EUR', fetchedAt: NOW.toISOString(), dates: '2026-11-19' },
+    {
+      slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BCN→HND',
+      priceMinor: '84500', currency: 'EUR', fetchedAt: NOW.toISOString(),
+      route: { from: 'BCN', to: 'NRT', fromCity: 'Barcelona', toCity: 'Tokyo' },
+      outbound: '2026-11-19', inbound: '2026-12-06', airline: 'China Eastern',
+      stars: null, nights: null, ttlSeconds: 900,
+    },
   ]
+
+  /*
+   * Polish pass, section 4, the author's own line: the summary read `BCN-NRT`,
+   * `2026-11-19 → 2026-12-06`, `found 3 h ago`. A database row read aloud, in the one place on
+   * the screen whose whole job is to say what she has decided.
+   */
+  it('says the trip the way a traveller says it', () => {
+    expect(flightLine(items[0]!)).toEqual([
+      'Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec', 'China Eastern',
+    ])
+    const html = renderToStaticMarkup(
+      createElement(PinnedSummary, {
+        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
+        pending: false, error: null, now: NOW, onGetLinks: () => {},
+      }),
+    )
+    expect(html).toContain('Barcelona BCN → Tokyo NRT · Thu 19 Nov to Sun 6 Dec · China Eastern')
+    expect(html).not.toContain('2026-11-19')
+    // The decision is a chip, not a word floating beside a heading.
+    expect(html).toContain('Waiting for your decision')
+    expect(html).toContain('pinned-status')
+  })
+
+  it('says Accepted once she has accepted it', () => {
+    const html = renderToStaticMarkup(
+      createElement(PinnedSummary, {
+        items, totalMinor: '84500', currency: 'EUR', decision: 'accept' as const, links: [],
+        pending: false, error: null, now: NOW, onGetLinks: () => {},
+      }),
+    )
+    expect(html).toContain('Accepted')
+    expect(html).not.toContain('Waiting for your decision')
+  })
+
+  it('names a stay by its class and its length of stay', () => {
+    const stay = {
+      slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Hotel Gracery',
+      priceMinor: '430000', currency: 'EUR', fetchedAt: NOW.toISOString(),
+      route: null, outbound: '2026-11-20', inbound: '2026-12-06', airline: null,
+      stars: 4, nights: 16, ttlSeconds: 86_400,
+    }
+    expect(stayLine(stay)).toEqual(['16 nights', 'Fri 20 Nov to Sun 6 Dec'])
+    const html = renderToStaticMarkup(
+      createElement(PinnedSummary, {
+        items: [stay], totalMinor: '430000', currency: 'EUR', decision: null, links: [],
+        pending: false, error: null, now: NOW, onGetLinks: () => {},
+      }),
+    )
+    expect(html).toContain('Hotel Gracery')
+    expect(html).toContain('hotel-stars')
+    expect(html).toContain('16 nights')
+  })
+
+  /*
+   * `found 3 h ago` sat on every summary whatever its age — a fact about our corpus dressed up
+   * as a warning. An age is worth her attention exactly when the price behind it may have moved.
+   */
+  it('mentions the age of a price only once it has actually aged out', () => {
+    expect(priceAgeNote(items[0]!, NOW)).toBeNull()
+    const later = new Date(NOW.getTime() + 3 * 3_600_000)
+    expect(priceAgeNote(items[0]!, later)).toBe('Prices checked 3 h ago')
+    // Nothing to judge it by, so nothing said.
+    expect(priceAgeNote({ ...items[0]!, ttlSeconds: null }, later)).toBeNull()
+  })
 
   it('shows chosen items, the total, and Get booking links while undecided', () => {
     const html = renderToStaticMarkup(
@@ -658,7 +728,13 @@ function proposal(overrides: Partial<ProposalRowLite & { links: LinkLite[] }> = 
   return {
     id: 'p1', totalMinor: '84500', currency: 'EUR', gateOutcome: 'approved', reviewIssues: [],
     decision: null,
-    items: [{ slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BCN→HND', priceMinor: '84500', currency: 'EUR', fetchedAt: NOW.toISOString(), dates: '2026-11-19' }],
+    items: [{
+      slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BCN→HND', priceMinor: '84500',
+      currency: 'EUR', fetchedAt: NOW.toISOString(),
+      route: { from: 'BCN', to: 'NRT', fromCity: 'Barcelona', toCity: 'Tokyo' },
+      outbound: '2026-11-19', inbound: '2026-12-06', airline: 'China Eastern',
+      stars: null, nights: null, ttlSeconds: 900,
+    }],
     links: [],
     ...overrides,
   }

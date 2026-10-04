@@ -1,32 +1,63 @@
 /*
- * Globetrotty design tokens (UI redesign, 2026-10-03).
+ * Globetrotty design tokens.
  *
- * One accent (cobalt), one neutral family (cool, blue-tinted greys), one radius
- * scale (controls 12px, cards 16px, pills full). Fonts arrive as CSS variables
- * from `next/font` in app/layout.tsx: --font-display (Bricolage Grotesque) for
- * headlines and the wordmark, --font-body (Instrument Sans) for everything
- * else. Both are self-hosted at build time, so the CSP's default-src 'self'
- * covers them without a font-src exception.
+ * One warm-neutral family, one accent, one radius scale (controls 12px, cards
+ * 16px, pills full). Fonts arrive as CSS variables from `next/font` in
+ * app/layout.tsx: --font-display (Bricolage Grotesque) for headlines and the
+ * wordmark, --font-body (Instrument Sans) for everything else. Both are
+ * self-hosted at build time, so the CSP's default-src 'self' covers them
+ * without a font-src exception.
+ *
+ * Polish pass, section 5 — the author's biggest complaint, and the hardest to
+ * argue with: "everything looks faded, nothing looks real."
+ *
+ * It was all one problem. The neutrals sat in a narrow band in the middle of
+ * the range, so a card, the page behind it and the border between them were
+ * three shades of the same grey and nothing had an edge. The accent was a PALE
+ * blue with DARK text on it, which on a dark page reads as a disabled control:
+ * the primary button on every card, the thing she is meant to press, looked
+ * switched off. And `--ink-3` at #847e77 is 3.6:1 on the old surface, which is
+ * under the 4.5:1 line for the body text it was carrying.
+ *
+ * What changed, and why each number:
+ *
+ *  - The page goes DOWN (#141312) and the surfaces go UP (#1c1b19, #272523,
+ *    #33302c), so each step is visible rather than implied. Contrast between
+ *    a card and its page is what makes a card look like an object.
+ *  - `--ink` #f4f2ee and `--ink-2` #c9c3ba carry text; `--ink-3` #9a938a is
+ *    4.6:1 on `--surface`, which is the point at which "muted" stops meaning
+ *    "unreadable".
+ *  - The accent becomes a saturated blue (#4f8cff) with WHITE on it. A primary
+ *    button is now a primary button.
+ *  - `--ok` #4ade80 on `--ok-soft` #163020 for the match chips: green that
+ *    reads as a confirmation rather than as a smudge.
+ *
+ * The whole family stays warm (every neutral carries a little red and yellow
+ * over blue), which is what keeps a near-black page from looking like a
+ * terminal.
  */
 :root {
   color-scheme: dark;
 
-  --paper: #171615;
-  --surface: #1e1d1b;
-  --surface-2: #2a2826;
-  --surface-3: #35322f;
-  --ink: #ece9e4;
-  --ink-2: #b7b1aa;
-  --ink-3: #847e77;
-  --line: #2c2a27;
-  --line-strong: #403c38;
-  --accent: #8fb0f5;
-  --accent-ink: #12141a;
-  --accent-soft: #263349;
+  --paper: #141312;
+  --surface: #1c1b19;
+  --surface-2: #272523;
+  --surface-3: #33302c;
+  --ink: #f4f2ee;
+  --ink-2: #c9c3ba;
+  --ink-3: #9a938a;
+  --line: #2f2d2a;
+  --line-strong: #45413c;
+  --accent: #4f8cff;
+  --accent-ink: #ffffff;
+  --accent-soft: #1e2f4d;
   --user-bubble: #2b2927;
   --danger: #f09a92;
   --danger-soft: #3b2522;
-  --ok: #8fd3a7;
+  --ok: #4ade80;
+  --ok-soft: #163020;
+  /* Amber, and only ever a hotel's class — never a rating, never a warning. */
+  --star: #f5b32b;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -16px rgba(0, 0, 0, 0.8);
 
   --r-control: 12px;
@@ -366,9 +397,15 @@ select {
   border-right: 1px solid var(--line);
 }
 
+/*
+ * Section 9: the chevron sits ON the rail's own right-hand border, half in and half out, the way
+ * Notion's does. Collapsed, a 40px ghost button centred in a 56px strip is almost the whole
+ * width of it and reads as one more icon in the stack rather than as the control that changes
+ * the stack's width. A small round button on the edge reads as a hinge.
+ */
 .rail-collapse {
   position: absolute;
-  top: 0.6rem;
+  top: 0.75rem;
   right: 0.6rem;
   z-index: 2;
 }
@@ -444,11 +481,37 @@ select {
 
 .rail-user {
   min-width: 0;
+  flex: 1;
   font-size: 0.85rem;
   color: var(--ink-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Section 9: the signed-in traveller, as one letter in a circle.
+ *
+ * The collapsed rail hid the whole foot of the sidebar, so the 56px strip ended in nothing and
+ * there was no way to tell who was signed in or to sign out without expanding it first. A circle
+ * is what fits, and it is also what every application of this shape uses, so it needs no
+ * explaining.
+ */
+.rail-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 .shell-main {
@@ -551,29 +614,60 @@ select {
     grid-template-columns: 56px minmax(0, 1fr);
   }
 
+  /*
+   * Section 9. What the author saw at 56px: a ring with a chevron, the compass mark, and an
+   * EMPTY ring where New trip should be — its label hidden by the rule below and its 16px glyph
+   * too faint on the old tokens to register — and then nothing. No list (correct: a trip title
+   * has no 56px form, and first initials would be a puzzle, not a menu), but also no sign of who
+   * was signed in and no way to sign out.
+   *
+   * It is a proper icon rail now: a wordmark mark, a New trip button, and at the foot an avatar
+   * and a sign-out button, every one of them 40px with a 20px glyph in it. The chevron hangs off
+   * the right edge rather than joining the stack, because it changes the rail rather than
+   * belonging to it.
+   */
   .shell[data-rail-collapsed='true'] .rail-label,
   .shell[data-rail-collapsed='true'] .rail-heading,
   .shell[data-rail-collapsed='true'] .rail-list,
-  .shell[data-rail-collapsed='true'] .rail-empty,
-  .shell[data-rail-collapsed='true'] .rail-bottom {
+  .shell[data-rail-collapsed='true'] .rail-empty {
     display: none;
   }
 
-  /* Collapsed, the chevron is the first thing in the strip, centred over the
-     wordmark mark; expanded, it sits at the top right of the rail's header. */
+  /* On the border itself, half in and half out — a hinge, not another icon. */
   .shell[data-rail-collapsed='true'] .rail-collapse {
-    position: static;
-    margin: 0.6rem auto 0;
+    top: 0.75rem;
+    right: -14px;
+    width: 28px;
+    min-height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    color: var(--ink);
   }
 
   .shell[data-rail-collapsed='true'] .rail-top {
     justify-content: center;
-    padding: 0.5rem 0 0.25rem;
+    padding: 0.9rem 0 0.25rem;
+  }
+
+  .shell[data-rail-collapsed='true'] .wordmark,
+  .shell[data-rail-collapsed='true'] .rail-new.btn {
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
   }
 
   .shell[data-rail-collapsed='true'] .rail-new {
-    justify-content: center;
-    margin: 0.25rem 0.5rem 0.75rem;
+    margin: 0.25rem auto 0.75rem;
+  }
+
+  /* The foot survives the collapse: an avatar over a sign-out button, stacked. */
+  .shell[data-rail-collapsed='true'] .rail-bottom {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.75rem 0 0.9rem;
   }
 }
 
@@ -1260,6 +1354,57 @@ select {
 
 .change-flight:hover {
   color: var(--ink);
+}
+
+/*
+ * Section 4: the pinned summary's own head — what this block is, and where the trip stands.
+ *
+ * The status used to be the word "Accepted" sitting beside a heading, which reads as a claim
+ * about the trip rather than as its state. A chip is a state.
+ */
+.pinned-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pinned-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pinned-status {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pinned-status[data-decision='accept'] {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.pinned-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* Said once for the whole block, and only when something in it has actually aged out. */
+.pinned-age {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 0.8rem;
 }
 
 /* ---------- the filter bar above the list (pass 3, section 3) ---------- */
@@ -2130,16 +2275,27 @@ select {
   gap: 0.3rem;
 }
 
+/*
+ * Section 5: a border and brighter text. A chip made only of a 16% tint of its
+ * own colour had no edge at all on a dark page — it read as a smudge behind the
+ * words rather than as a thing. The green stays the signal; the border is what
+ * makes it an object and the near-white text is what makes it readable.
+ */
 .match-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--ok) 16%, transparent);
-  color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ink);
   font-size: 0.74rem;
   white-space: nowrap;
+}
+
+.match-chip svg {
+  color: var(--ok);
 }
 
 /*
@@ -2344,11 +2500,17 @@ select {
   align-items: center;
 }
 
+/*
+ * Amber, and the same size as the name beside it. The old #e7bd68 was a dulled
+ * gold that disappeared next to a white name; a hotel's class is one of the two
+ * things she scans a list for, and it has to be visible from across the row.
+ */
 .hotel-stars-glyphs {
   display: inline-flex;
   align-items: center;
   gap: 0.05rem;
-  color: #e7bd68;
+  color: var(--star);
+  font-size: 16px;
 }
 
 .hotel-card-type {
@@ -2410,11 +2572,14 @@ select {
   gap: 0.4rem;
 }
 
+/* White on the accent — `--accent-ink` is white since section 5, said here so
+ * the one badge that must never lose contrast does not depend on that staying
+ * true. */
 .hotel-rating-score {
   padding: 0.1rem 0.45rem;
   border-radius: 8px;
   background: var(--accent);
-  color: var(--accent-ink);
+  color: #ffffff;
   font-size: 0.9rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;

@@ -70,8 +70,20 @@ export function amenityChips(amenities: string[]): string[] {
 }
 
 /** 'Hotel' / 'Apartment', or `null` for a type the supplier did not give a word this office trusts. */
-export function typeLabel(propertyType: 'hotel' | 'rental' | 'other'): string | null {
-  if (propertyType === 'hotel') return 'Hotel'
+/**
+ * `4-star hotel` / `Hotel` / `Apartment`, or nothing.
+ *
+ * Section 5: the class joins the label. The stars beside the name say it as a picture and this
+ * says it in words — which is what a screen reader gets, and what distinguishes a four-star
+ * tower from a four-star guest house in a list where both show four glyphs. A rental is never
+ * given a class, because the number means something different for one and this office does not
+ * know which.
+ */
+export function typeLabel(propertyType: 'hotel' | 'rental' | 'other', stars: number | null = null): string | null {
+  if (propertyType === 'hotel') {
+    const rounded = stars === null ? null : Math.round(stars)
+    return rounded !== null && rounded > 0 ? `${rounded}-star hotel` : 'Hotel'
+  }
   if (propertyType === 'rental') return 'Apartment'
   return null
 }
@@ -158,7 +170,7 @@ export function essentialsLine(essentials: string[]): string | null {
  * emoji font the platform feels like, which on one of the two platforms this runs on is a colour
  * emoji. `aria-hidden` on the row plus one visually hidden sentence is the honest markup.
  */
-function Stars({ stars }: { stars: number }) {
+export function Stars({ stars }: { stars: number }) {
   return (
     <span className="hotel-stars">
       <span aria-hidden="true" className="hotel-stars-glyphs">
@@ -196,7 +208,7 @@ export function HotelCard(
   if (!hotel) return null
   const clock = now ?? new Date()
   const photo = hotel.images[0] ?? null
-  const type = typeLabel(hotel.propertyType)
+  const type = typeLabel(hotel.propertyType, hotel.stars)
   const location = locationLine(hotel.nearby, hotel.distanceKm)
   const transit = transitLine(hotel.nearby)
   const essentials = essentialsLine(hotel.essentials)

@@ -6,7 +6,7 @@ import {
 } from '@/src/results'
 import { maskDisplayName, maskUntrustedText } from '@/src/sanitize'
 import { allowedImageUrl } from '@/src/supplier/searchapi'
-import { CODE_MAP, placeByName } from '@/src/intake/places'
+import { CODE_MAP, placeByName, placeForCode } from '@/src/intake/places'
 import { airportCity } from '@/src/intake/airports'
 import { airlineName } from '@/src/intake/airlines'
 
@@ -73,7 +73,24 @@ export type ProposalItemLite = {
   priceMinor: string
   currency: string
   fetchedAt: string
-  dates: string | null
+  /**
+   * Polish pass, section 4. The summary used to print `BCN-NRT`, `2026-11-19 → 2026-12-06` and
+   * `found 3 h ago` — a database row read aloud, in the one place on the screen that is supposed
+   * to say what she has decided. These are the fields it needs to say it instead, resolved
+   * server-side for the same reason `ResultsView.cityNames` is: the place and airline tables are
+   * read off disk at import time and this is rendered by a client component.
+   */
+  route: { from: string; to: string; fromCity: string | null; toCity: string | null } | null
+  /** ISO dates: the outbound/return for a flight, the check-in/check-out for a stay. */
+  outbound: string | null
+  inbound: string | null
+  /** The operating carrier's name, for a flight — `airlineName`, never a code. */
+  airline: string | null
+  /** Hotel class and length of stay, for a stay. */
+  stars: number | null
+  nights: number | null
+  /** The supplier's own freshness window, so the summary can say an age only when it matters. */
+  ttlSeconds: number | null
 }
 
 export type ProposalRowLite = {
@@ -329,21 +346,67 @@ function isRecord(v: unknown): v is UnknownRecord {
  * Returns `null` (never throws) when `detail` doesn't carry a recognisable
  * shape for `kind`.
  */
-function datesFromDetail(kind: 'flight' | 'hotel', detail: unknown): string | null {
-  if (!isRecord(detail)) return null
+/**
+ * The CITY a traveller means by an airport code: "Tokyo NRT", not "Narita NRT".
+ *
+ * The place table is keyed on metros and `placeForCode` is the airport-to-metro bridge — the
+ * same one `handleChooseFlight` uses to decide where to search for hotels. `airportCity` is the
+ * fallback for an airport that table does not carry, and `null` when neither knows it, which
+ * leaves the line reading as the bare code rather than inventing a city for it.
+ */
+function cityForAirport(code: string): string | null {
+  return placeForCode(code)?.city ?? airportCity(code)
+}
+
+type ItemFacts = Pick<
+  ProposalItemLite, 'route' | 'outbound' | 'inbound' | 'airline' | 'stars' | 'nights'
+>
+
+const NO_FACTS: ItemFacts = {
+  route: null, outbound: null, inbound: null, airline: null, stars: null, nights: null,
+}
+
+/**
+ * Everything the pinned summary needs out of one stored itinerary item's `detail`.
+ *
+ * `departureLocal`/`arrivalLocal` are naive ISO strings with no offset (`src/supplier/types.ts`'s
+ * own comment) — `.slice(0, 10)` reads the date portion without ever parsing one into a `Date`,
+ * which is the one thing this codebase never does to that field.
+ *
+ * Structurally checked rather than cast, same posture as `itineraryItemsLite` around it: this is
+ * a jsonb column, and a shape this reader does not recognise yields nulls rather than a throw —
+ * the summary then falls back to the stay's or flight's name, which is still true.
+ */
+function factsFromDetail(kind: 'flight' | 'hotel', detail: unknown): ItemFacts {
+  if (!isRecord(detail)) return NO_FACTS
   if (kind === 'flight') {
     const outbound = detail.outbound
+    if (!isRecord(outbound)) return NO_FACTS
     const inbound = detail.inbound
-    const outboundDate = isRecord(outbound) && typeof outbound.departureLocal === 'string'
-      ? outbound.departureLocal.slice(0, 10) : null
-    if (!outboundDate) return null
-    const inboundDate = isRecord(inbound) && typeof inbound.departureLocal === 'string'
-      ? inbound.departureLocal.slice(0, 10) : null
-    return inboundDate ? `${outboundDate} → ${inboundDate}` : outboundDate
+    const from = typeof outbound.from === 'string' ? outbound.from : null
+    const to = typeof outbound.to === 'string' ? outbound.to : null
+    const carriers = Array.isArray(detail.airlines) ? detail.airlines : outbound.carriers
+    const firstCarrier = Array.isArray(carriers) && typeof carriers[0] === 'string' ? carriers[0] : null
+    return {
+      route: from && to
+        ? { from, to, fromCity: cityForAirport(from), toCity: cityForAirport(to) }
+        : null,
+      outbound: typeof outbound.departureLocal === 'string' ? outbound.departureLocal.slice(0, 10) : null,
+      inbound: isRecord(inbound) && typeof inbound.departureLocal === 'string'
+        ? inbound.departureLocal.slice(0, 10) : null,
+      airline: firstCarrier === null ? null : airlineName(firstCarrier) ?? firstCarrier,
+      stars: null, nights: null,
+    }
   }
-  const { checkIn, checkOut } = detail
-  if (typeof checkIn !== 'string' || typeof checkOut !== 'string') return null
-  return `${checkIn} → ${checkOut}`
+  const { checkIn, checkOut, stars, nights } = detail
+  return {
+    route: null,
+    outbound: typeof checkIn === 'string' ? checkIn : null,
+    inbound: typeof checkOut === 'string' ? checkOut : null,
+    airline: null,
+    stars: typeof stars === 'number' && stars > 0 ? stars : null,
+    nights: typeof nights === 'number' && nights > 0 ? nights : null,
+  }
 }
 
 /**
@@ -365,11 +428,13 @@ export function itineraryItemsLite(itinerary: unknown): ProposalItemLite[] {
       || typeof priceMinor !== 'string' || typeof currency !== 'string' || typeof fetchedAt !== 'string'
       || (kind !== 'flight' && kind !== 'hotel')
     ) continue
+    const ttl = (raw as { ttlSeconds?: unknown }).ttlSeconds
     out.push({
       // Browser-facing name, same reasoning as `newestAlternativePerSourceId` below: the pinned
       // summary is read by her, never by the model.
       slot, sourceId, kind, name: maskDisplayName(name), priceMinor, currency, fetchedAt,
-      dates: datesFromDetail(kind, detail),
+      ...factsFromDetail(kind, detail),
+      ttlSeconds: typeof ttl === 'number' ? ttl : null,
     })
   }
   return out

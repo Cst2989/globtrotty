@@ -140,7 +140,9 @@ describe('firstMessagePerConversation', () => {
 })
 
 describe('itineraryItemsLite', () => {
-  it('trims a real StoredItinerary down to the card fields, with detail: {} yielding dates: null', () => {
+  const BARE = { route: null, outbound: null, inbound: null, airline: null, stars: null, nights: null, ttlSeconds: null }
+
+  it('trims a real StoredItinerary down to the card fields, with detail: {} yielding no facts', () => {
     const itinerary = {
       schemaVersion: 1,
       items: [
@@ -157,8 +159,8 @@ describe('itineraryItemsLite', () => {
       ],
     }
     expect(itineraryItemsLite(itinerary)).toEqual([
-      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER-FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z', dates: null },
-      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z', dates: null },
+      { slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'BER-FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: '2026-09-13T12:00:00.000Z', ...BARE },
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: '2026-09-13T12:05:00.000Z', ...BARE },
     ])
   })
 
@@ -182,37 +184,56 @@ describe('itineraryItemsLite', () => {
     expect(itineraryItemsLite(item('<b>Casa</b>'))[0]!.name).toBe('bCasa/b')
   })
 
-  // Task 8 review, Minor #9: a real FlightDetail/HotelDetail shape yields
-  // a human date range, read straight off `detail` rather than the model's
-  // (or anyone else's) prose.
-  it('reads dates off a real FlightDetail (one-way and round-trip) and HotelDetail', () => {
+  /*
+   * Polish pass, section 4. The summary used to print `BCN-NRT` and `2026-11-19 → 2026-12-06`.
+   * What it needs to say "Barcelona BCN → Tokyo NRT · Thu 19 Nov to Sun 6 Dec · China Eastern"
+   * instead is read off the stored `detail` here, server-side: the airport and airline tables
+   * are loaded from disk at import time and the summary is a client component.
+   */
+  it('reads the route, the dates and the carrier off a real FlightDetail', () => {
+    const roundTrip = itineraryItemsLite({
+      items: [{
+        slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'n', priceMinor: '1', currency: 'EUR',
+        fetchedAt: 't', ttlSeconds: 900,
+        detail: {
+          kind: 'flight',
+          outbound: {
+            from: 'BCN', to: 'NRT', departureLocal: '2026-11-19T10:20:00', carriers: ['MU'],
+          },
+          inbound: { departureLocal: '2026-12-06T14:30:00' },
+          airlines: ['MU'],
+        },
+      }],
+    })[0]!
+    expect(roundTrip.route).toEqual({ from: 'BCN', to: 'NRT', fromCity: 'Barcelona', toCity: 'Tokyo' })
+    expect(roundTrip.outbound).toBe('2026-11-19')
+    expect(roundTrip.inbound).toBe('2026-12-06')
+    expect(roundTrip.airline).toBe('China Eastern Airlines')
+    expect(roundTrip.ttlSeconds).toBe(900)
+
     const oneWay = itineraryItemsLite({
       items: [{
         slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
         detail: { kind: 'flight', outbound: { departureLocal: '2026-09-12T08:00:00' }, inbound: null },
       }],
-    })
-    expect(oneWay[0]!.dates).toBe('2026-09-12')
+    })[0]!
+    // No codes on this one, so there is no route to claim — and the line simply leaves it out.
+    expect(oneWay.route).toBeNull()
+    expect(oneWay.outbound).toBe('2026-09-12')
+    expect(oneWay.inbound).toBeNull()
+  })
 
-    const roundTrip = itineraryItemsLite({
-      items: [{
-        slot: 'outbound', sourceId: 'F1', kind: 'flight', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
-        detail: {
-          kind: 'flight',
-          outbound: { departureLocal: '2026-09-12T08:00:00' },
-          inbound: { departureLocal: '2026-09-19T14:30:00' },
-        },
-      }],
-    })
-    expect(roundTrip[0]!.dates).toBe('2026-09-12 → 2026-09-19')
-
+  it('reads the stay\'s own class and length off a real HotelDetail', () => {
     const hotel = itineraryItemsLite({
       items: [{
         slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't',
-        detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19' },
+        detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19', stars: 4, nights: 7 },
       }],
-    })
-    expect(hotel[0]!.dates).toBe('2026-09-12 → 2026-09-19')
+    })[0]!
+    expect(hotel.outbound).toBe('2026-09-12')
+    expect(hotel.inbound).toBe('2026-09-19')
+    expect(hotel.stars).toBe(4)
+    expect(hotel.nights).toBe(7)
   })
 
   it('never throws on a shape it does not recognise; drops unreadable items instead', () => {
@@ -226,7 +247,7 @@ describe('itineraryItemsLite', () => {
         { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't' },
       ],
     })).toEqual([
-      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't', dates: null },
+      { slot: 'stay', sourceId: 'H1', kind: 'hotel', name: 'n', priceMinor: '1', currency: 'EUR', fetchedAt: 't', ...BARE },
     ])
   })
 })

@@ -12,6 +12,8 @@ import { withViewTransition } from '../web/components/transition.js'
 import { ThreadView } from '../web/components/Thread.js'
 import { messageForStatus, nextLocation, landingPhaseAfterResponse } from '../web/components/MessageBox.js'
 import { LandingLive } from '../web/components/LandingLive.js'
+import { readFileSync } from 'node:fs'
+import { userInitial } from '../web/components/Sidebar.js'
 import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
 import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import { mergePending } from '../web/components/pending.js'
@@ -487,8 +489,19 @@ describe('SplitShell (Task 10)', () => {
 })
 
 const BASE_ITEMS = [
-  { slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO', priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString(), dates: '2026-09-12 → 2026-09-19' },
-  { slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString(), dates: '2026-09-12 → 2026-09-19' },
+  {
+    slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO',
+    priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString(),
+    route: { from: 'BER', to: 'FAO', fromCity: 'Berlin', toCity: 'Faro' },
+    outbound: '2026-09-12', inbound: '2026-09-19', airline: 'TAP Air Portugal',
+    stars: null, nights: null, ttlSeconds: 900,
+  },
+  {
+    slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela',
+    priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString(),
+    route: null, outbound: '2026-09-12', inbound: '2026-09-19', airline: null,
+    stars: 4, nights: 7, ttlSeconds: 86_400,
+  },
 ]
 const NO_ALTERNATIVES = { flight: [], hotel: [] }
 const ONE_ALTERNATIVE = {
@@ -561,11 +574,22 @@ describe('ProposalCard', () => {
   })
 
   // Task 8 review, Minor #9.
-  it('shows each item\'s dates, read from the stored detail', () => {
+  /*
+   * Polish pass, section 4. It used to read `2026-09-12 → 2026-09-19` — the ISO pair straight
+   * off the stored detail. The card now says the trip the way a traveller says it, through the
+   * same formatter the summary bar above the results list uses, so one date is written one way
+   * on this screen.
+   */
+  it("says each item's dates the way a traveller says them, read from the stored detail", () => {
     const html = renderToStaticMarkup(
       createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
     )
-    expect(html).toContain('2026-09-12 → 2026-09-19')
+    expect(html).not.toContain('2026-09-12 → 2026-09-19')
+    expect(html).toContain('Berlin BER → Faro FAO')
+    expect(html).toContain('Sat 12 Sep to Sat 19 Sep')
+    expect(html).toContain('TAP Air Portugal')
+    // The stay's own line: how long, and when.
+    expect(html).toContain('7 nights')
   })
 
   /**
@@ -775,5 +799,59 @@ describe('withViewTransition', () => {
     const fn = vi.fn()
     withGlobals({ startViewTransition: start }, 'throw', () => withViewTransition(fn))
     expect(fn).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+/*
+ * Polish pass, section 9. At 56px the author saw a ring with a chevron, the compass mark, and an
+ * EMPTY ring where New trip should be — then nothing. No sign of who was signed in, and no way
+ * to sign out without expanding the rail first.
+ *
+ * The markup is identical at both widths by design (CSS hides the labels), so what is pinned
+ * here is that the collapsed strip has something to show in every slot: an icon in each button,
+ * and a foot that is not empty.
+ */
+describe('the collapsed rail', () => {
+  it('names the signed-in traveller with one letter, whatever her address starts with', () => {
+    expect(userInitial('alice@example.com')).toBe('A')
+    expect(userInitial('\u00e9ve@example.com')).toBe('\u00c9')
+    expect(userInitial('7@example.com')).toBe('7')
+    // A circle with a punctuation mark in it says less than one with nothing in it.
+    expect(userInitial('_hidden@example.com')).toBe('\u00b7')
+    expect(userInitial(null)).toBe('\u00b7')
+    expect(userInitial('')).toBe('\u00b7')
+  })
+
+  /*
+   * `Sidebar` itself cannot be rendered here — `SignOutButton` is a client component that calls
+   * `useRouter`, and there is no app router under `renderToStaticMarkup`. The collapsed look is
+   * pure CSS in any case (the markup is identical at both widths by design), so the stylesheet
+   * is what has to be read, the same way the flight list's own lost rule is read in
+   * test/web-results-render.test.ts.
+   */
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
+
+  it('keeps the foot of the rail at 56px, instead of hiding it with the rest', () => {
+    const hidden = css.slice(css.indexOf("data-rail-collapsed='true'] .rail-label"))
+      .slice(0, css.slice(css.indexOf("data-rail-collapsed='true'] .rail-label")).indexOf('}'))
+    // The list, the heading and the labels go. The foot does NOT: it is where the avatar and
+    // the sign-out button live, and hiding it left the strip ending in nothing at all.
+    expect(hidden).toContain('.rail-list')
+    expect(hidden).toContain('.rail-heading')
+    expect(hidden).not.toContain('.rail-bottom')
+  })
+
+  it('gives the collapsed controls a real 40px target, and hangs the chevron off the edge', () => {
+    const at = css.indexOf("data-rail-collapsed='true'] .wordmark")
+    expect(at).toBeGreaterThan(-1)
+    expect(css.slice(at, css.indexOf('}', at))).toContain('width: 40px')
+
+    const chevron = css.indexOf("data-rail-collapsed='true'] .rail-collapse")
+    expect(chevron).toBeGreaterThan(-1)
+    const rule = css.slice(chevron, css.indexOf('}', chevron))
+    // On the border, half in and half out: a hinge, not one more icon in the stack.
+    expect(rule).toContain('right: -14px')
+    expect(rule).toContain('border-radius: 50%')
   })
 })

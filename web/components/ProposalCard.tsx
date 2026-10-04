@@ -8,6 +8,7 @@ import { SLOT_KINDS } from '@/src/gates/checks'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '@/web/data'
 import { SwapPicker } from './SwapPicker'
 import { ageText } from './age'
+import { flightLine, priceAgeNote, stayLine } from './PinnedSummary'
 
 export type ProposalCardProps = {
   proposal: ProposalRowLite & { links: LinkLite[] }
@@ -79,10 +80,22 @@ export function ProposalCard({
               </span>
               <div className="proposal-item-main">
                 <span className="proposal-item-name">{item.name}</span>
+                {/* Section 4: the chat-side card reads the same as the pinned one — a route, a
+                    pair of weekday dates and a carrier, not `BCN-NRT` and an ISO pair. The age
+                    appears only once the quote is past its own ttl; `found 3 h ago` on every
+                    card whatever its age was a fact about our corpus dressed up as a warning. */}
                 <span className="proposal-item-meta">
                   <span className="proposal-item-slot">{slotLabel(item.slot)}</span>
-                  {item.dates ? <span className="proposal-item-dates">{item.dates}</span> : null}
-                  <span className="proposal-item-age">{ageText(item.fetchedAt, clock)}</span>
+                  {(() => {
+                    const line = kind === 'flight' ? flightLine(item) : stayLine(item)
+                    return line.length > 0
+                      ? <span className="proposal-item-dates">{line.join(' · ')}</span>
+                      : null
+                  })()}
+                  {(() => {
+                    const age = priceAgeNote(item, clock)
+                    return age === null ? null : <span className="proposal-item-age">{age}</span>
+                  })()}
                 </span>
               </div>
               <span className="proposal-item-price">
