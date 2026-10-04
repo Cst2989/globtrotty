@@ -1211,58 +1211,131 @@ select {
   color: var(--ink-2);
 }
 
-/* ---------- results layout: the filter rail beside the list ---------- */
+/* ---------- the filter bar above the list (pass 3, section 3) ---------- */
 
 /*
- * A 240px rail to the left of the list at wide widths; below 1100px the grid
- * collapses to one column and the rail becomes a compact wrapping strip ABOVE
- * the list (it is first in the DOM, so nothing has to move for that).
+ * One horizontal row between the summary bar and the sort tabs. It replaced a
+ * 240px left rail, which was right that eight undifferentiated pills said
+ * nothing about which controls were alternatives to each other, and wrong
+ * about where to put them: a quarter of the pane, permanently, beside a list
+ * she mostly wants to read, with the cards squeezed into a column too narrow
+ * to compare departure times in.
+ *
+ * The two controls she touches constantly (stops, departure) are on the
+ * surface; the three she touches occasionally are behind triggers that say
+ * what is set inside them. Everything in the row is at least 40px tall, which
+ * is also what keeps the row one consistent height as it wraps.
  */
-.results-layout {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 1.25rem;
-  align-items: start;
-}
-
-.results-main {
-  min-width: 0;
+.filter-bar {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.filter-rail {
-  position: sticky;
-  top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  background: var(--surface);
-}
-
-.filter-rail-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.filter-rail-title {
-  margin: 0;
-  font-family: var(--font-display), var(--font-body), sans-serif;
-  font-size: 0.95rem;
+.filter-segmented {
+  display: inline-flex;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.filter-segment {
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), color 140ms var(--ease);
+}
+
+.filter-segment:last-child {
+  border-right: 0;
+}
+
+.filter-segment:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.filter-segment[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+
+/* The popovers: a trigger, and a panel anchored under it. */
+.filter-pop {
+  position: relative;
+}
+
+.filter-pop-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease);
+}
+
+.filter-pop-trigger:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.filter-pop-trigger[data-set='true'],
+.filter-pop-trigger[aria-expanded='true'] {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.filter-pop-trigger[data-set='true'] {
+  background: var(--accent-soft);
+}
+
+.filter-pop-panel {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 15rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.filter-pop-title {
+  padding: 0;
+  color: var(--ink-3);
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.filter-rail-head .link-button {
-  font-size: 0.8rem;
-}
-
-.filter-group {
+.filter-pop-list {
   margin: 0;
   padding: 0;
   border: 0;
@@ -1272,31 +1345,20 @@ select {
   min-width: 0;
 }
 
-.filter-group-title {
-  padding: 0;
-  color: var(--ink-3);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.filter-radio,
 .filter-check {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-height: 28px;
   color: var(--ink-2);
   font-size: 0.85rem;
   cursor: pointer;
 }
 
-.filter-radio:hover,
 .filter-check:hover {
   color: var(--ink);
 }
 
-.filter-radio input,
 .filter-check input {
   accent-color: var(--accent);
   width: 15px;
@@ -1323,7 +1385,8 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  min-height: 32px;
   color: var(--ink-2);
   font-size: 0.85rem;
 }
@@ -1342,8 +1405,8 @@ select {
 }
 
 .bag-stepper .btn {
-  min-height: 26px;
-  width: 26px;
+  min-height: 28px;
+  width: 28px;
   padding: 0;
   border: 1px solid var(--line-strong);
 }
@@ -1366,57 +1429,34 @@ select {
   gap: 0.35rem;
 }
 
-@media (max-width: 1100px) {
-  .results-layout {
-    grid-template-columns: minmax(0, 1fr);
+.filter-clear {
+  min-height: 40px;
+  padding: 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* Every control in the row takes focus, and every one of them shows it. */
+.filter-segment:focus-visible,
+.filter-pop-trigger:focus-visible,
+.filter-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Below 900px the row wraps to two: the stops/rating control and the chips on
+ * one line, the three triggers on the next. A panel is pinned to the right
+ * edge of its trigger there, so one opened near the edge of a phone screen
+ * does not open off it.
+ */
+@media (max-width: 900px) {
+  .filter-bar {
+    gap: 0.4rem 0.5rem;
   }
 
-  .filter-rail {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 0.75rem 1.5rem;
-  }
-
-  .filter-rail-head {
-    flex-basis: 100%;
-  }
-
-  .filter-group {
-    flex: 0 1 auto;
-  }
-
-  /* Four radios down a column is fine in a rail and wasteful in a strip. */
-  .filter-group:has(.filter-radio) {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem 0.75rem;
-  }
-
-  .filter-group:has(.filter-radio) .filter-group-title {
-    flex-basis: 100%;
-  }
-
-  .filter-group:has(.filter-check) {
-    flex-basis: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem 1rem;
-  }
-
-  .filter-group:has(.filter-check) .filter-check {
-    flex: 0 1 auto;
-  }
-
-  .filter-group:has(.filter-check) .filter-check-name {
-    flex: 0 1 auto;
-  }
-
-  .filter-group:has(.filter-price-slider) {
-    flex: 1 1 14rem;
+  .filter-pop-panel {
+    left: auto;
+    right: 0;
   }
 }
 
@@ -2105,7 +2145,7 @@ select {
  * preference set these stay flat blocks, which still read as "a list is
  * coming".
  */
-.results-skeleton .filter-rail,
+.results-skeleton .filter-bar,
 .results-skeleton .sort-tabs {
   opacity: 0.55;
 }
@@ -2152,11 +2192,6 @@ select {
   width: 100%;
 }
 
-.skeleton-line-title {
-  height: 11px;
-  width: 4.5rem;
-}
-
 .skeleton-line-short {
   width: 55%;
 }
@@ -2169,10 +2204,6 @@ select {
 .skeleton-line-price {
   height: 26px;
   width: 6rem;
-}
-
-.results-skeleton .filter-rail {
-  gap: 0.6rem;
 }
 
 @media (prefers-reduced-motion: no-preference) {

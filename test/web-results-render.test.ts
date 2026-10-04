@@ -10,7 +10,9 @@ import { FlightList } from '../web/components/FlightList.js'
 import { FlightCard, stopsWords, durationWords, timeHM, dayOffset } from '../web/components/FlightCard.js'
 import { HotelList, ratingStars } from '../web/components/HotelList.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
-import { FilterRail, stopsModeOf, withStopsMode } from '../web/components/FilterRail.js'
+import {
+  FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel,
+} from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
@@ -259,7 +261,10 @@ describe('ChoiceCard', () => {
   })
 })
 
-describe('FilterRail', () => {
+// Pass 3, section 3: the left rail became one horizontal bar above the list. The controls she
+// touches constantly stay on the surface; the three she touches occasionally sit behind triggers
+// that say what is set inside them.
+describe('FilterBar', () => {
   const items: ResultItemLite[] = [
     FLIGHT_ITEM,
     {
@@ -268,55 +273,109 @@ describe('FilterRail', () => {
     },
   ]
 
-  it('renders the stops radios, the bag steppers, the departure chips and a price slider', () => {
-    const html = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
-    expect(html).toContain('Stops')
-    for (const label of ['Any', 'Direct', 'Up to 1 stop', 'Up to 2 stops']) expect(html).toContain(label)
-    expect([...html.matchAll(/type="radio"/g)]).toHaveLength(4)
-    expect(html).toContain('Cabin bags')
-    expect(html).toContain('Checked bags')
+  function bar(props: Partial<Parameters<typeof FilterBar>[0]> = {}) {
+    return renderToStaticMarkup(createElement(FilterBar, {
+      kind: 'flights', items, filter: {}, onChange: () => {}, ...props,
+    }))
+  }
+
+  it('is one row: a stops segmented control, a Bags trigger, the departure chips, a price trigger and an Airlines trigger', () => {
+    const html = bar()
+    expect(html).toContain('filter-bar')
+    for (const label of ['Any', 'Direct', '1 stop', '2 stops']) expect(html).toContain(`>${label}<`)
+    expect([...html.matchAll(/class="filter-segment"/g)]).toHaveLength(4)
+    expect(html).toContain('Bags')
     expect(html).toContain('Morning')
-    expect(html).toContain('type="range"')
+    expect(html).toContain('Max price')
+    expect(html).toContain('Airlines')
+    // No radios and no rail: the four stops options are one segmented control.
+    expect(html).not.toContain('type="radio"')
+    expect(html).not.toContain('filter-rail')
   })
 
-  it('names each airline and how many results carry it, rather than printing the bare code', () => {
-    const html = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
-    expect(html).toContain('Qatar Airways')
-    expect(html).toContain('Lufthansa')
-    expect([...html.matchAll(/type="checkbox"/g)]).toHaveLength(2)
+  it('keeps every popover closed by default — no panel, and nothing inside one, in the markup', () => {
+    const html = bar()
+    expect(html).not.toContain('filter-pop-panel')
+    expect(html).not.toContain('Cabin bags')
+    expect(html).not.toContain('type="range"')
+    expect(html).not.toContain('Qatar Airways')
+    expect([...html.matchAll(/aria-expanded="false"/g)]).toHaveLength(3)
   })
 
-  it('starts on "Any" with no filter, and checks the matching radio for one that is set', () => {
-    const any = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
-    expect(/<input[^>]*checked[^>]*value="any"/.test(any)).toBe(true)
+  it('opens exactly the one popover it is asked to, with its own contents', () => {
+    const bags = bar({ openPopover: 'bags' })
+    expect([...bags.matchAll(/filter-pop-panel/g)]).toHaveLength(1)
+    expect(bags).toContain('Cabin bags')
+    expect(bags).toContain('Checked bags')
 
-    const direct = renderToStaticMarkup(
-      createElement(FilterRail, { kind: 'flights', items, filter: { nonstop: true }, onChange: () => {} }),
-    )
-    expect(/<input[^>]*checked[^>]*value="direct"/.test(direct)).toBe(true)
+    const price = bar({ openPopover: 'price' })
+    expect(price).toContain('type="range"')
+
+    const airlines = bar({ openPopover: 'airlines' })
+    // Each airline by NAME with how many results carry it, which the old chip row could never fit.
+    expect(airlines).toContain('Qatar Airways')
+    expect(airlines).toContain('Lufthansa')
+    expect([...airlines.matchAll(/type="checkbox"/g)]).toHaveLength(2)
   })
 
-  it('offers "Clear filters" only once something is set', () => {
-    const clean = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
-    expect(clean).not.toContain('Clear filters')
-
-    const set = renderToStaticMarkup(
-      createElement(FilterRail, { kind: 'flights', items, filter: { minCheckedBags: 1 }, onChange: () => {} }),
-    )
-    expect(set).toContain('Clear filters')
+  it('presses the matching segment for the stops option that is set', () => {
+    expect(/aria-pressed="true"[^>]*>Any</.test(bar())).toBe(true)
+    expect(/aria-pressed="true"[^>]*>Direct</.test(bar({ filter: { nonstop: true } }))).toBe(true)
+    expect(/aria-pressed="true"[^>]*>1 stop</.test(bar({ filter: { maxStops: 1 } }))).toBe(true)
   })
 
-  it('gives a hotel rail the rating radios and the price slider, and none of the flight sections', () => {
-    const html = renderToStaticMarkup(
-      createElement(FilterRail, { kind: 'hotels', items: [HOTEL_ITEM], filter: {}, onChange: () => {} }),
-    )
-    expect(html).toContain('Rating')
+  it('says on the closed trigger what is set inside it', () => {
+    expect(bar({ filter: { minCabinBags: 1 } })).toContain('Bags: 1 cabin')
+    expect(bar({ filter: { maxPriceMinor: '20000' } })).toContain('Up to €200.00')
+    expect(bar({ filter: { airlines: ['QR', 'LH'] } })).toContain('Airlines (2)')
+    // And marks it, so the row reads as filtered at a glance.
+    expect(bar({ filter: { minCabinBags: 1 } })).toContain('data-set="true"')
+    expect(bar()).not.toContain('data-set="true"')
+  })
+
+  it('offers Clear only once something is set', () => {
+    expect(bar()).not.toContain('>Clear<')
+    expect(bar({ filter: { minCheckedBags: 1 } })).toContain('>Clear<')
+  })
+
+  it('gives the hotels bar the rating segments and the price trigger, and none of the flight controls', () => {
+    const html = renderToStaticMarkup(createElement(FilterBar, {
+      kind: 'hotels', items: [HOTEL_ITEM], filter: {}, onChange: () => {},
+    }))
     expect(html).toContain('3+')
     expect(html).toContain('4+')
-    expect(html).toContain('type="range"')
-    expect(html).not.toContain('Stops')
-    expect(html).not.toContain('Cabin bags')
+    expect(html).toContain('Max price')
+    expect(html).not.toContain('Bags')
+    expect(html).not.toContain('Morning')
     expect(html).not.toContain('Airlines')
+  })
+
+  it('presses the matching rating segment', () => {
+    const html = renderToStaticMarkup(createElement(FilterBar, {
+      kind: 'hotels', items: [HOTEL_ITEM], filter: { minRating: 4 }, onChange: () => {},
+    }))
+    expect(/aria-pressed="true"[^>]*>4\+</.test(html)).toBe(true)
+  })
+})
+
+describe('the filter bar\'s trigger labels', () => {
+  it('names the bags that are set, and nothing when none are', () => {
+    expect(bagsLabel({})).toBe('Bags')
+    expect(bagsLabel({ minCabinBags: 1 })).toBe('Bags: 1 cabin')
+    expect(bagsLabel({ minCheckedBags: 2 })).toBe('Bags: 2 checked')
+    expect(bagsLabel({ minCabinBags: 1, minCheckedBags: 1 })).toBe('Bags: 1 cabin, 1 checked')
+  })
+
+  it('names the cap that is set', () => {
+    expect(priceLabel({}, 'EUR')).toBe('Max price')
+    expect(priceLabel({ maxPriceMinor: '250000' }, 'EUR')).toBe('Up to €2,500.00')
+  })
+
+  it('counts the airlines that are set', () => {
+    expect(airlinesLabel({})).toBe('Airlines')
+    expect(airlinesLabel({ airlines: [] })).toBe('Airlines')
+    expect(airlinesLabel({ airlines: ['QR'] })).toBe('Airlines (1)')
+    expect(airlinesLabel({ airlines: ['QR', 'LH'] })).toBe('Airlines (2)')
   })
 })
 
@@ -565,7 +624,7 @@ describe('ResultsPane', () => {
 
   // M4: `ResultsPane` ignored `ResultsView.filter`, so after a TYPED filter the chips rendered
   // unselected while the list below them was narrowed — two stories about the same list.
-  it('starts the chips from the results row\'s own filter, and narrows the list to match', () => {
+  it('starts the filter bar from the results row\'s own filter, and narrows the list to match', () => {
     const nonstopItem: ResultItemLite = {
       ...FLIGHT_ITEM, sourceId: 'F0',
       flight: { ...FLIGHT_ITEM.flight!, stops: 0 },
@@ -576,25 +635,25 @@ describe('ResultsPane', () => {
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
-    // The rail's Direct radio is checked...
-    expect(/<input[^>]*checked[^>]*value="direct"/.test(html)).toBe(true)
+    // The bar's Direct segment is pressed...
+    expect(/aria-pressed="true"[^>]*>Direct</.test(html)).toBe(true)
     // ...and FLIGHT_ITEM (one stop, via Doha) is filtered out of the list below it, leaving only
     // the direct card. Source ids are not rendered, so the cards are counted and the excluded
     // item is identified by its own stops line.
     expect(html.match(/class="flight-card"/g)).toHaveLength(1)
-    expect(html).toContain('>Direct<')
+    expect(html).toContain('data-direct="true"')
     expect(html).not.toContain('1 stop, Doha')
   })
 
-  it('leaves the rail on its defaults when the row carries no filter', () => {
+  it('leaves the bar on its defaults when the row carries no filter', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
-    expect(/<input[^>]*checked[^>]*value="any"/.test(html)).toBe(true)
-    expect(html).not.toContain('Clear filters')
+    expect(/aria-pressed="true"[^>]*>Any</.test(html)).toBe(true)
+    expect(html).not.toContain('>Clear<')
   })
 
   // D: the sort tabs read the FILTERED list, so a tab's summary never advertises a price the
@@ -611,15 +670,16 @@ describe('ResultsPane', () => {
     expect(html).toContain('Fastest')
   })
 
-  it('gives the hotels section its own rail, with no flight sections in it', () => {
+  it('gives the hotels section its own filter bar, with none of the flight controls in it', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
       }),
     )
-    expect(html).toContain('Rating')
-    expect(html).not.toContain('Cabin bags')
+    expect(html).toContain('3+')
+    expect(html).toContain('Max price')
+    expect(html).not.toContain('Bags')
     expect(html).not.toContain('Fastest')
   })
 
@@ -667,7 +727,8 @@ describe('ResultsSkeleton', () => {
     expect([...html.matchAll(/skeleton-card/g)]).toHaveLength(5)
     expect(html).toContain('summary-bar')
     expect(html).toContain('sort-tabs')
-    expect(html).toContain('filter-rail')
+    // Pass 3, section 3: the filter placeholder is a horizontal row now, like the real thing.
+    expect(html).toContain('filter-bar')
   })
 
   it('says hotels for the hotel pass', () => {

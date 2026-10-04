@@ -8,7 +8,7 @@ import type { ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMo
 import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
-import { FilterRail } from './FilterRail'
+import { FilterBar } from './FilterBar'
 import { SortTabs } from './SortTabs'
 import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
@@ -175,10 +175,11 @@ function itemById(view: ResultsView | null, sourceId: string): ResultItemLite | 
  * Spec §5's results pane: the pinned summary once anything is chosen, then the newest hotels
  * list (if any), then the newest flights list.
  *
- * Each list is one section: a `SummaryBar` (what was searched for, and what had to be guessed),
- * then a `FilterRail` beside it and `SortTabs` above it (results UI pass 2, D). Every piece here
- * is pure (callbacks as props); the rail's filter and the tabs' sort are lifted to this
- * component, one pair per kind — the flight-only fields (stops, bags, departure, airlines) mean
+ * Each list is one section, stacked: a `SummaryBar` (what was searched for, and what had to be
+ * guessed), the stale banner when its prices have aged out, the horizontal `FilterBar` (pass 3,
+ * section 3 — it replaced the left rail results UI pass 2 put beside the list), the `SortTabs`,
+ * and the list. Every piece here is pure (callbacks as props); the bar's filter and the tabs'
+ * sort are lifted to this component, one pair per kind — the flight-only fields (stops, bags, departure, airlines) mean
  * nothing for a stay, and a stay's rating means nothing for a flight — and applied with
  * `applyFilterLite` then `sortItemsLite`, in that order, so the tab summaries describe the
  * filtered list rather than the whole corpus.
@@ -197,9 +198,9 @@ export function ResultsPane(
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
-  // M4: the rail used to start empty whatever the row said, so after a TYPED filter it rendered
-  // unselected while the list beside it was narrowed — two different stories about the same
-  // list. `ResultsView.filter` is the row's own filter, so the rail starts from it.
+  // M4: the filter controls used to start empty whatever the row said, so after a TYPED filter
+  // they rendered unselected while the list below them was narrowed — two different stories
+  // about the same list. `ResultsView.filter` is the row's own filter, so the bar starts from it.
   //
   // Tracked against the row's `messageId` and reset during render (React's documented
   // adjust-state-when-props-change pattern) rather than with `useState`'s initializer alone: a
@@ -287,25 +288,21 @@ export function ResultsPane(
               onRefresh={() => onRefresh('hotels')}
             />
           ) : null}
-          <div className="results-layout">
-            <FilterRail
-              kind="hotels" items={newestHotels.items}
-              filter={hotelState.filter} onChange={setHotelFilter}
-            />
-            <div className="results-main">
-              <SortTabs
-                items={hotelItems} sorts={HOTEL_SORTS}
-                active={hotelState.sort} onChange={setHotelSort}
-              />
-              <HotelList
-                items={hotelItems}
-                now={now}
-                chosenSourceId={chosenHotelSourceId}
-                selectDisabled={choosing}
-                onChoose={(sourceId) => onChoose('hotel', sourceId)}
-              />
-            </div>
-          </div>
+          <FilterBar
+            kind="hotels" items={newestHotels.items}
+            filter={hotelState.filter} onChange={setHotelFilter}
+          />
+          <SortTabs
+            items={hotelItems} sorts={HOTEL_SORTS}
+            active={hotelState.sort} onChange={setHotelSort}
+          />
+          <HotelList
+            items={hotelItems}
+            now={now}
+            chosenSourceId={chosenHotelSourceId}
+            selectDisabled={choosing}
+            onChoose={(sourceId) => onChoose('hotel', sourceId)}
+          />
         </section>
       ) : null}
 
@@ -320,26 +317,22 @@ export function ResultsPane(
               onRefresh={() => onRefresh('flights')}
             />
           ) : null}
-          <div className="results-layout">
-            <FilterRail
-              kind="flights" items={newestFlights.items}
-              filter={flightState.filter} onChange={setFlightFilter}
-            />
-            <div className="results-main">
-              <SortTabs
-                items={flightItems} sorts={FLIGHT_SORTS}
-                active={flightState.sort} onChange={setFlightSort}
-              />
-              <FlightList
-                items={flightItems}
-                adults={newestFlights.query.adults}
-                now={now}
-                chosenSourceId={chosenFlightSourceId}
-                selectDisabled={choosing}
-                onChoose={(sourceId) => onChoose('flight', sourceId)}
-              />
-            </div>
-          </div>
+          <FilterBar
+            kind="flights" items={newestFlights.items}
+            filter={flightState.filter} onChange={setFlightFilter}
+          />
+          <SortTabs
+            items={flightItems} sorts={FLIGHT_SORTS}
+            active={flightState.sort} onChange={setFlightSort}
+          />
+          <FlightList
+            items={flightItems}
+            adults={newestFlights.query.adults}
+            now={now}
+            chosenSourceId={chosenFlightSourceId}
+            selectDisabled={choosing}
+            onChoose={(sourceId) => onChoose('flight', sourceId)}
+          />
         </section>
       ) : null}
     </div>

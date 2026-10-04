@@ -6,8 +6,9 @@ export type ResultsSkeletonProps = {
 const CARD_COUNT = 5
 
 /**
- * The results pane before there are any results: the summary bar as shimmering blocks, the sort
- * tabs greyed out, five card-shaped placeholders, and one line saying what is being searched for.
+ * The results pane before there are any results: the summary bar and the filter bar as
+ * shimmering blocks, the sort tabs greyed out, five card-shaped placeholders, and one line
+ * saying what is being searched for.
  *
  * It exists so the split appears the INSTANT she sends (results UI pass 2, E). Before this, the
  * page rendered the thread alone until the first `results` row landed, so the layout jumped from
@@ -32,42 +33,37 @@ export function ResultsSkeleton({ kind }: ResultsSkeletonProps) {
         </div>
       </div>
 
-      <div className="results-layout">
-        <div className="filter-rail" aria-hidden="true">
-          <span className="skeleton-line skeleton-line-title" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line skeleton-line-short" />
-          <span className="skeleton-line skeleton-line-title" />
-          <span className="skeleton-line" />
-          <span className="skeleton-line skeleton-line-short" />
-        </div>
-
-        <div className="results-main">
-          <div className="sort-tabs" aria-hidden="true">
-            <span className="skeleton-tab" />
-            <span className="skeleton-tab" />
-            <span className="skeleton-tab" />
-          </div>
-          <p className="results-skeleton-note" role="status">
-            {kind === 'hotels' ? 'Searching hotels…' : 'Searching flights…'}
-          </p>
-          <ul className="flight-list" aria-hidden="true">
-            {Array.from({ length: CARD_COUNT }, (_, i) => (
-              <li key={i} className="flight-card skeleton-card">
-                <div className="flight-card-main">
-                  <span className="skeleton-line skeleton-line-leg" />
-                  <span className="skeleton-line skeleton-line-leg" />
-                </div>
-                <div className="flight-card-side">
-                  <span className="skeleton-line skeleton-line-price" />
-                  <span className="skeleton-line skeleton-line-short" />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {/* Pass 3, section 3: the filter bar is a horizontal row above the tabs now, so its
+          placeholder is one too — the skeleton has to promise the shape the answer arrives in. */}
+      <div className="filter-bar" aria-hidden="true">
+        <span className="skeleton-pill skeleton-pill-wide" />
+        <span className="skeleton-pill" />
+        <span className="skeleton-pill" />
+        <span className="skeleton-pill skeleton-pill-narrow" />
       </div>
+
+      <div className="sort-tabs" aria-hidden="true">
+        <span className="skeleton-tab" />
+        <span className="skeleton-tab" />
+        <span className="skeleton-tab" />
+      </div>
+      <p className="results-skeleton-note" role="status">
+        {kind === 'hotels' ? 'Searching hotels…' : 'Searching flights…'}
+      </p>
+      <ul className="flight-list" aria-hidden="true">
+        {Array.from({ length: CARD_COUNT }, (_, i) => (
+          <li key={i} className="flight-card skeleton-card">
+            <div className="flight-card-main">
+              <span className="skeleton-line skeleton-line-leg" />
+              <span className="skeleton-line skeleton-line-leg" />
+            </div>
+            <div className="flight-card-side">
+              <span className="skeleton-line skeleton-line-price" />
+              <span className="skeleton-line skeleton-line-short" />
+            </div>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
