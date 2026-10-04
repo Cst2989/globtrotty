@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Backpack, Bag, Suitcase, Warning } from '@phosphor-icons/react/dist/ssr'
-import { formatMoney, money } from '@/src/money'
+import { formatMoneyShort, money } from '@/src/money'
 import type { ResultItemLite, LegLite } from '@/web/data'
 import { AirlineLogo } from './AirlineLogo'
 import { MatchChips } from './MatchChips'
@@ -28,6 +28,8 @@ export type FlightCardProps = {
    * check chips. Empty (or absent) for an item Jev never checked — see `MatchChips`.
    */
   matches?: string[]
+  /** Section 7: what Jev found WRONG with this itinerary, in the same chip row and in amber. */
+  issues?: string[]
   /**
    * Trip-stage pass, section 2: what sits beside the `Selected` ribbon on a card the pane has
    * pinned — the `Change` button. A plain node, so this card knows nothing about what it does.
@@ -153,7 +155,7 @@ function LegRow({ label, leg, stops }: { label: string; leg: LegLite; stops: num
 export function FlightCard(
   {
     item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
-    ribbonAction, onChoose,
+    issues = [], ribbonAction, onChoose,
   }: FlightCardProps,
 ) {
   const flight = item.flight
@@ -185,7 +187,7 @@ export function FlightCard(
         {flight.inbound ? (
           <LegRow label="Inbound" leg={flight.inbound} stops={flight.inboundStops ?? 0} />
         ) : null}
-        <MatchChips matches={matches} />
+        <MatchChips matches={matches} issues={issues} />
         <div className="flight-card-extras">
           <span className="flight-bags">
             <span className="flight-bag" data-included={flight.bags.personal > 0 ? 'true' : 'false'}>
@@ -216,7 +218,7 @@ export function FlightCard(
         {updating ? (
           <span className="skeleton-line skeleton-line-price" aria-label="Updating the price" />
         ) : (
-          <span className="flight-card-price">{formatMoney(money(BigInt(item.priceMinor), item.currency))}</span>
+          <span className="flight-card-price">{formatMoneyShort(money(BigInt(item.priceMinor), item.currency))}</span>
         )}
         <span className="flight-card-per">for {adults} {adults === 1 ? 'passenger' : 'passengers'}</span>
         {chosen ? null : (

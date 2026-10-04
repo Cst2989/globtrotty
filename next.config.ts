@@ -19,7 +19,9 @@ if (!projectUrl || !anonKey) {
   )
 }
 
-const csp = cspFor(projectUrl)
+// `dev` only widens `script-src` with `'unsafe-eval'`, which the webpack dev server needs to
+// evaluate its own modules; see `cspFor`. A production build never takes that branch.
+const csp = cspFor(projectUrl, { dev: process.env.NODE_ENV !== 'production' })
 
 const nextConfig: NextConfig = {
   // Plan 4a, Task 7. `src/` (and `web/session.ts`) write relative imports

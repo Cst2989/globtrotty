@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Star } from '@phosphor-icons/react/dist/ssr'
-import { formatMoney, money } from '@/src/money'
+import { formatMoneyShort, money } from '@/src/money'
 import type { ResultItemLite } from '@/web/data'
 import { ageText, staleAgeText } from './age'
 import { MatchChips } from './MatchChips'
@@ -23,6 +23,8 @@ export type HotelCardProps = {
    * chips. Empty (or absent) for a stay Jev never checked — see `MatchChips`.
    */
   matches?: string[]
+  /** Section 7: what Jev found WRONG with this stay, in the same chip row and in amber. */
+  issues?: string[]
   /** Section 5: this stay's pin was clicked on the map, so the card says which one it is. */
   highlighted?: boolean
   /** Hovering a card lights up its pin; `null` on the way out. */
@@ -48,6 +50,9 @@ const UPDATING = 'Updating prices'
 
 /** How many amenity chips fit on one card before the rest are dropped. */
 const MAX_CHIPS = 5
+
+/** Section 4: five dots is a strip; twelve is a dotted line that says nothing. */
+const MAX_PHOTO_DOTS = 5
 
 /**
  * Up to `MAX_CHIPS` chips: this office's own word for every amenity it recognises (see
@@ -128,7 +133,7 @@ function isReadable(name: string): boolean {
 }
 
 /**
- * 'Asakusa - 3.2 km from centre' / 'Asakusa' / '3.2 km from centre', or `null` when the stay
+ * 'Asakusa · 3.2 km from centre' / 'Asakusa' / '3.2 km from centre', or `null` when the stay
  * carries neither.
  *
  * The AREA is the first nearby place that is not an airport: SearchApi lists the closest things
@@ -204,7 +209,7 @@ export function Stars({ stars }: { stars: number }) {
 export function HotelCard(
   {
     item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
-    highlighted = false, onHover, ribbonAction, onChoose,
+    issues = [], highlighted = false, onHover, ribbonAction, onChoose,
   }: HotelCardProps,
 ) {
   const hotel = item.hotel
@@ -212,14 +217,18 @@ export function HotelCard(
   const clock = now ?? new Date()
   const photo = hotel.images[0] ?? null
   const type = typeLabel(hotel.propertyType, hotel.stars)
-  const location = locationLine(hotel.nearby, hotel.distanceKm)
-  const transit = transitLine(hotel.nearby)
+  // Section 4: where it is and how far the airport is are ONE line, 13px, ellipsised — they are
+  // the same question (where is this) and two lines of muted grey for it pushed the chips, the
+  // price and the button down the card.
+  const where = [locationLine(hotel.nearby, hotel.distanceKm), transitLine(hotel.nearby)]
+    .filter((part): part is string => part !== null)
+    .join(' · ')
   const essentials = essentialsLine(hotel.essentials)
   const chips = amenityChips(hotel.amenities)
   const word = hotel.rating === null ? null : ratingWord(hotel.rating)
   const perNight = hotel.pricePerNightMinor === null
     ? null
-    : formatMoney(money(BigInt(hotel.pricePerNightMinor), item.currency))
+    : formatMoneyShort(money(BigInt(hotel.pricePerNightMinor), item.currency))
 
   return (
     <li
@@ -243,7 +252,9 @@ export function HotelCard(
         {photo !== null ? <img src={photo} alt="" loading="lazy" decoding="async" /> : null}
         {hotel.images.length > 1 ? (
           <span className="hotel-photo-dots" aria-hidden="true">
-            {hotel.images.map((image) => <span key={image} className="hotel-photo-dot" />)}
+            {hotel.images.slice(0, MAX_PHOTO_DOTS).map((image) => (
+              <span key={image} className="hotel-photo-dot" />
+            ))}
           </span>
         ) : null}
       </div>
@@ -260,15 +271,14 @@ export function HotelCard(
           {hotel.stars !== null && hotel.stars > 0 ? <Stars stars={Math.round(hotel.stars)} /> : null}
           {type !== null ? <span className="hotel-card-type">{type}</span> : null}
         </div>
-        {location !== null ? <span className="hotel-card-where">{location}</span> : null}
-        {transit !== null ? <span className="hotel-card-transit">{transit}</span> : null}
+        {where !== '' ? <span className="hotel-card-where">{where}</span> : null}
         {chips.length > 0 ? (
           <span className="hotel-chips">
             {chips.map((chip) => <span key={chip} className="hotel-chip">{chip}</span>)}
           </span>
         ) : null}
         {essentials !== null ? <span className="hotel-card-essentials">{essentials}</span> : null}
-        <MatchChips matches={matches} />
+        <MatchChips matches={matches} issues={issues} />
       </div>
 
       <div className="hotel-card-side">
@@ -290,13 +300,13 @@ export function HotelCard(
         {updating ? (
           <span className="skeleton-line skeleton-line-price" aria-label="Updating the price" />
         ) : (
-          <span className="hotel-card-price">{formatMoney(money(BigInt(item.priceMinor), item.currency))}</span>
+          <span className="hotel-card-price">{formatMoneyShort(money(BigInt(item.priceMinor), item.currency))}</span>
         )}
         {!updating && perNight !== null ? (
           <span className="hotel-card-per">{perNight} per night</span>
         ) : null}
         {chosen ? (
-          <span className="result-row-chosen">Chosen</span>
+          <span className="hotel-card-chosen">Chosen</span>
         ) : (
           <button
             type="button"

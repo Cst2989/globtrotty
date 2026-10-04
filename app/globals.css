@@ -1018,215 +1018,163 @@ select {
 
 /* ---------- proposal card ---------- */
 
-.proposal-card {
+/* ---------- the chat's trip card (trip-stage pass, section 3) ---------- */
+
+/*
+ * ONE card, for the newest proposal that is actually a trip. What it replaced drew a card per
+ * proposal — including the flights-only one the office writes and accepts for itself — each with
+ * a Swap picker and a total of its own, which is the 16.23 screenshot.
+ */
+.trip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
   box-shadow: var(--shadow);
-  overflow: hidden;
+  max-width: 85%;
 }
 
-.proposal-head {
+.trip-card-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.9rem 1.1rem 0.6rem;
 }
 
-.proposal-head h2 {
-  font-size: 1rem;
-  font-weight: 600;
+.trip-card-head h2 {
+  font-size: 1.05rem;
 }
 
-.proposal-state {
-  font-size: 0.85rem;
+.trip-card-status {
   color: var(--ink-3);
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 
-.proposal-card[data-decision='accept'] .proposal-state {
+.trip-card-status[data-decision='accept'] {
   color: var(--ok);
 }
 
-.proposal-card[data-decision='reject'] .proposal-state {
-  color: var(--ink-3);
+.trip-card-status[data-decision='reject'] {
+  color: var(--danger);
 }
 
-.proposal-items {
+.trip-card-items {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.proposal-item {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  gap: 0.25rem 0.85rem;
-  align-items: start;
-  padding: 0.85rem 1.1rem;
-  border-top: 1px solid var(--line);
-}
-
-.proposal-item-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--surface-2);
-  color: var(--ink-2);
-  display: grid;
-  place-items: center;
-}
-
-.proposal-item-main {
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.35rem;
 }
 
-.proposal-item-name {
-  font-weight: 500;
+/* One line per item, exactly as section 3 spells it. Nothing wraps into a second column. */
+.trip-card-item {
+  font-size: 0.9rem;
+  color: var(--ink-2);
   overflow-wrap: anywhere;
 }
 
-.proposal-item-meta {
-  color: var(--ink-3);
-  font-size: 0.85rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-}
-
-.proposal-item-slot {
-  color: var(--ink-2);
-}
-
-.proposal-item-price {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.proposal-item-tools {
-  grid-column: 2 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
-}
-
-.swap-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.swap-picker select {
-  min-height: 36px;
-  padding: 0 0.6rem;
-  border-radius: 10px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  max-width: 100%;
-}
-
-.proposal-total {
+.trip-card-total {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  gap: 1rem;
   margin: 0;
-  padding: 0.85rem 1.1rem;
+  padding-top: 0.6rem;
   border-top: 1px solid var(--line);
-  background: var(--surface-2);
   font-weight: 600;
-}
-
-.proposal-total span:last-child {
-  font-family: var(--font-display), var(--font-body), sans-serif;
-  font-size: 1.25rem;
   font-variant-numeric: tabular-nums;
 }
 
-.proposal-issues {
-  margin: 0.85rem 1.1rem 0;
-  padding: 0.75rem 0.9rem;
+.trip-card-issues {
+  padding: 0.6rem 0.75rem;
   border-radius: var(--r-control);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 
-.proposal-issues p {
-  margin: 0 0 0.35rem;
-  font-weight: 500;
+.trip-card-issues p {
+  margin: 0 0 0.3rem;
 }
 
-.proposal-issues ul {
+.trip-card-issues ul {
   margin: 0;
   padding-left: 1.1rem;
 }
 
-.proposal-actions {
+.trip-card-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 0.5rem;
-  padding: 0.85rem 1.1rem 1rem;
 }
 
-.proposal-actions .spacer {
-  flex: 1;
+.trip-card-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.trip-card-links-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+.trip-card-links .suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-decoration: none;
+}
+
+/* Every proposal before the current one, as one line each behind a disclosure. */
+.earlier-proposals {
+  max-width: 85%;
+}
+
+.earlier-proposals-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
 .reject-reason {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
   width: 100%;
-  margin-top: 0.25rem;
 }
 
 .reject-reason .input {
-  min-height: 40px;
-  padding: 0.4rem 0.75rem;
+  max-width: 28rem;
 }
 
-.proposal-links {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 1.1rem 1rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+/*
+ * Section 1: an optimistic bubble whose POST came back unusable. The retry re-posts with the
+ * SAME idempotency key, so pressing it twice cannot write her words twice.
+ */
+.message-retry {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
 }
 
-.proposal-links a.btn:hover {
-  text-decoration: none;
-}
-
-.proposal-card .alert {
-  margin: 0 1.1rem 1rem;
-}
-
-@media (max-width: 600px) {
-  .proposal-item {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .proposal-item-icon {
-    display: none;
-  }
-
-  .proposal-item-tools {
-    grid-column: 1 / -1;
-  }
-
-  .message {
-    max-width: 92%;
-  }
+.message-row[data-role='user'] .message-retry {
+  align-self: flex-end;
 }
 
 .link-button {
@@ -1330,20 +1278,6 @@ select {
   cursor: default;
 }
 
-/*
- * Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It is the
- * real summary minus what only the server can know (the total, the hand-off button), so it reads
- * as the same object half-filled rather than as a different one.
- */
-.pinned-pending-label {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 /* ---------- stale prices ---------- */
 
 /*
@@ -1364,28 +1298,14 @@ select {
  * `data-expired` survives on the element for that age line alone.
  */
 .flight-card[data-expired='true'] .flight-card-age,
-.hotel-card[data-expired='true'] .hotel-card-age,
-.result-row[data-expired='true'] .result-row-age {
+.hotel-card[data-expired='true'] .hotel-card-age {
   color: var(--ink-2);
 }
 
 /*
- * Section 3: the chosen flight, pinned above the stays, and the one link back to the list.
- *
- * Both full result sections used to stay on screen, stacked, so the list she had finished with
- * took the top half of the pane away from the one she was working in — and nothing said which
- * flight she had actually chosen. This is the card she picked, with its `Selected` ribbon, and
- * nothing else.
+ * Section 2: the way back to a list she has finished with — `Other flights`, `Other hotels`, and
+ * the `Hide` that closes each again.
  */
-.chosen-flight-heading {
-  margin: 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
 .change-flight {
   align-self: flex-start;
   margin: 0;
@@ -1402,57 +1322,6 @@ select {
 
 .change-flight:hover {
   color: var(--ink);
-}
-
-/*
- * Section 4: the pinned summary's own head — what this block is, and where the trip stands.
- *
- * The status used to be the word "Accepted" sitting beside a heading, which reads as a claim
- * about the trip rather than as its state. A chip is a state.
- */
-.pinned-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.pinned-heading {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.pinned-status {
-  padding: 0.15rem 0.6rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-pill);
-  background: var(--surface-2);
-  color: var(--ink-2);
-  font-size: 0.75rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.pinned-status[data-decision='accept'] {
-  border-color: var(--ok);
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.pinned-item-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-/* Said once for the whole block, and only when something in it has actually aged out. */
-.pinned-age {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: 0.8rem;
 }
 
 /* ---------- the filter bar above the list (pass 3, section 3) ---------- */
@@ -1713,7 +1582,7 @@ select {
  */
 @media (prefers-reduced-motion: no-preference) {
   .flight-card,
-  .hotel-list .result-row {
+  .hotel-card {
     animation: card-in 240ms var(--ease) both;
   }
 
@@ -2171,6 +2040,9 @@ select {
 
 .hotel-split-list {
   min-width: 0;
+  /* Trip-stage pass, section 4: the hotel card's own breakpoint is the LIST's width, not the
+     viewport's — beside a map the list is 55% of the pane. See `@container (max-width: 720px)`. */
+  container-type: inline-size;
 }
 
 .hotel-split[data-split='true'] {
@@ -2217,9 +2089,9 @@ select {
   padding: 0.2rem 0.5rem;
   border-radius: var(--r-pill);
   /*
-   * White pill, dark text, on a DARK basemap: the pill has to be the brightest
-   * thing on the tile or forty prices disappear into the streets. It is not a
-   * surface token for that reason — it sits on CARTO's map, not on this page.
+   * White pill, dark text, on a DARK basemap: the pill has to be the brightest thing on the tile
+   * or forty prices disappear into the streets. It is not a surface token for that reason — it
+   * sits on OpenFreeMap's `dark` style, not on this page.
    */
   border: 1px solid rgba(0, 0, 0, 0.18);
   background: #ffffff;
@@ -2229,7 +2101,6 @@ select {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   box-shadow: var(--shadow);
-  transform: translate(-50%, -50%);
   cursor: pointer;
 }
 
@@ -2237,10 +2108,9 @@ select {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
-  z-index: 1;
 }
 
-.leaflet-container .map-pill-icon:hover .map-pill {
+.map-pill-icon:hover .map-pill {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
@@ -2249,10 +2119,9 @@ select {
 /*
  * The city centre every "3.2 km from centre" on a card is measured from.
  *
- * A ring rather than a pin, and a white halo around it: it is a reference
- * point, not an option she can pick, and on CARTO's dark basemap it has to read
- * against near-black streets and near-black parks alike without competing with
- * the prices for attention.
+ * A ring rather than a pin, and a white halo around it: it is a reference point, not an option
+ * she can pick, and on a dark basemap it has to read against near-black streets and near-black
+ * parks alike without competing with the prices for attention.
  */
 .map-centre {
   display: block;
@@ -2264,16 +2133,20 @@ select {
   box-shadow:
     0 0 0 2px rgba(255, 255, 255, 0.92),
     0 0 10px 2px color-mix(in srgb, var(--accent) 70%, transparent);
-  transform: translate(-50%, -50%);
 }
 
-/* Leaflet's own icon wrapper, neutralised: the pill carries its own look. */
-.map-pill-icon,
+/*
+ * MapLibre positions a marker's element by transform and expects it to size itself; these two
+ * only have to stop inheriting anything that would give them a box of their own. The pill is
+ * the hovered thing, so it keeps the pointer; the centre ring is not.
+ */
+.map-pill-icon {
+  line-height: 0;
+}
+
 .map-centre-icon {
-  background: none;
-  border: none;
-  width: auto !important;
-  height: auto !important;
+  line-height: 0;
+  pointer-events: none;
 }
 
 /* The stay whose pin was just clicked, so the scroll lands somewhere obvious. */
@@ -2282,31 +2155,42 @@ select {
 }
 
 /*
- * Leaflet ships light-theme chrome; this is the whole of what it takes to make
- * the attribution and the zoom buttons belong to this page rather than to it.
+ * MapLibre ships light-theme chrome; this is the whole of what it takes to make the attribution
+ * and the zoom buttons belong to this page rather than to it.
  */
-.leaflet-container {
+.maplibregl-map {
   background: var(--surface-2);
   font-family: inherit;
 }
 
-.leaflet-control-attribution {
+.maplibregl-ctrl-attrib {
   background: color-mix(in srgb, var(--paper) 80%, transparent) !important;
   color: var(--ink-3) !important;
   font-size: 0.68rem;
 }
 
-.leaflet-control-attribution a {
+.maplibregl-ctrl-attrib a {
   color: var(--ink-2) !important;
 }
 
-.leaflet-bar a {
-  background: var(--surface) !important;
-  border-bottom-color: var(--line) !important;
-  color: var(--ink) !important;
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1);
 }
 
-.leaflet-bar a:hover {
+.maplibregl-ctrl-group {
+  background: var(--surface) !important;
+  border: 1px solid var(--line);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--line) !important;
+}
+
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+.maplibregl-ctrl-group button:hover {
   background: var(--surface-2) !important;
 }
 
@@ -2320,38 +2204,44 @@ select {
 .match-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 4px;
 }
 
-/*
- * Section 5: a border and brighter text. A chip made only of a 16% tint of its
- * own colour had no edge at all on a dark page — it read as a smudge behind the
- * words rather than as a thing. The green stays the signal; the border is what
- * makes it an object and the near-white text is what makes it readable.
- */
 .match-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.1rem 0.45rem;
-  border: 1px solid var(--line-strong);
+  gap: 5px;
+  padding: 1px 8px;
   border-radius: var(--r-pill);
   background: var(--ok-soft);
-  color: var(--ink);
-  font-size: 0.74rem;
+  color: var(--ok);
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.match-chip svg {
-  color: var(--ok);
+.match-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: currentcolor;
 }
 
 /*
- * What did not match is COLLAPSED, never dropped: "wrong for what she asked" is
- * a judgment, and she is the one entitled to overrule it — a self-transfer she
- * is happy to risk, a rental she would take at that price. The toggle says how
- * many and the panel says why, so expanding it answers the question it raises.
+ * An issue sits in the SAME row as the matches and differs only in colour: amber is the one
+ * thing this office says in a warning colour, and splitting the row in two would make a finding
+ * look like a different kind of fact than a match.
  */
+.match-chip[data-kind='issue'] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.match-chip-more {
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+
 .unmatched {
   margin-top: 0.9rem;
   border-top: 1px solid var(--line);
@@ -2438,20 +2328,22 @@ select {
   }
 }
 
-/* ---------- the hotel card (hotels pass, section 3) ---------- */
+/* ---------- the hotel card (trip-stage pass, section 4) ---------- */
 
 /*
- * Three columns: the photo, what the place is, and the money. The same skeleton
- * as `.flight-card`, with a 220px photo rail in front of it — which is the one
- * structural difference between choosing a flight and choosing somewhere to
- * sleep. A flight is times and stops; a stay is a photograph and a rating, and
- * every accommodation search has converged on showing them in that order.
+ * A three-column grid with exact sizes, not a flexbox that negotiates: the photo is 200px, the
+ * money column is 180px, and the middle takes what is left and is allowed to be narrower than
+ * its content (`minmax(0, 1fr)`), which is what lets line 2 ellipsise instead of pushing the
+ * price column off the card.
+ *
+ * `align-items: start`, so a card with two chip rows does not stretch its photo to match.
  */
 .hotel-card {
-  display: flex;
-  align-items: stretch;
-  gap: 1.1rem;
-  padding: 0.9rem 1rem;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 180px;
+  gap: 20px;
+  padding: 16px;
+  align-items: start;
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
@@ -2469,22 +2361,20 @@ select {
 
 .hotel-card-photo {
   position: relative;
-  flex-shrink: 0;
-  width: 220px;
-  height: 160px;
-  border-radius: var(--r-control);
+  width: 200px;
+  height: 150px;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--surface-2);
 }
 
 /*
- * A property with no usable photo gets a neutral block, never a stock image of
- * somewhere else: the placeholder is honest about knowing nothing, and a
- * borrowed photograph would be the card inventing the one thing it is for.
+ * A property with no usable photo gets a neutral block, never a stock image of somewhere else:
+ * the placeholder is honest about knowing nothing, and a borrowed photograph would be the card
+ * inventing the one thing it is for.
  */
 .hotel-card-photo[data-empty='true'] {
-  background:
-    linear-gradient(135deg, var(--surface-2) 0%, var(--surface-3) 100%);
+  background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface-3) 100%);
 }
 
 .hotel-card-photo img {
@@ -2495,17 +2385,16 @@ select {
 }
 
 /*
- * A dot per photo, static: it says "there are more of these" without promising
- * a carousel the card does not have. Centred over the bottom of the image with
- * a scrim behind it so it reads on a bright photograph as well as a dark one.
+ * A dot per photo, static and inside the image: it says "there are more of these" without
+ * promising a carousel the card does not have. Capped at five in the markup.
  */
 .hotel-photo-dots {
   position: absolute;
   inset-inline: 0;
-  bottom: 0.45rem;
+  bottom: 8px;
   display: flex;
   justify-content: center;
-  gap: 0.28rem;
+  gap: 4px;
 }
 
 .hotel-photo-dot {
@@ -2520,26 +2409,42 @@ select {
   background: #fff;
 }
 
+/* `min-width: 0` is what makes the ellipsis on line 2 possible inside a grid track. */
 .hotel-card-main {
-  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 6px;
 }
 
+/* The `Selected` ribbon and, beside it, the pane's `Change` button. */
+.card-ribbon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Line 1: the name, the stars and the class, on one baseline. */
 .hotel-card-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.3rem 0.5rem;
+  gap: 2px 8px;
+  min-width: 0;
 }
 
 .hotel-card-name {
   font-family: var(--font-display), var(--font-body), sans-serif;
-  font-size: 1.05rem;
+  font-size: 18px;
   font-weight: 600;
   line-height: 1.25;
+  text-wrap: balance;
+  /* Two lines of a long hotel name, then an ellipsis: three lines of one name is the card
+     spending its height on the least surprising thing on it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
 
@@ -2548,138 +2453,162 @@ select {
   align-items: center;
 }
 
-/*
- * Amber, and the same size as the name beside it. The old #e7bd68 was a dulled
- * gold that disappeared next to a white name; a hotel's class is one of the two
- * things she scans a list for, and it has to be visible from across the row.
- */
+/* Amber, 14px: a stay's class is one of the two things she scans a list for. */
 .hotel-stars-glyphs {
   display: inline-flex;
   align-items: center;
-  gap: 0.05rem;
+  gap: 1px;
   color: var(--star);
-  font-size: 16px;
-}
-
-.hotel-card-type {
-  padding: 0.05rem 0.45rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-pill);
-  color: var(--ink-2);
-  font-size: 0.72rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.hotel-card-where {
-  color: var(--ink-2);
-  font-size: 0.86rem;
-}
-
-.hotel-card-transit,
-.hotel-card-essentials {
-  color: var(--ink-3);
-  font-size: 0.8rem;
-}
-
-.hotel-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.1rem;
-}
-
-.hotel-chip {
-  padding: 0.1rem 0.5rem;
-  border-radius: var(--r-pill);
-  background: var(--surface-2);
-  color: var(--ink-2);
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.hotel-card-side {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
-  padding-left: 1.1rem;
-  border-left: 1px solid var(--line);
-  min-width: 9.5rem;
+  font-size: 14px;
 }
 
 /*
- * The rating chip: the number on the accent, the word beside it. The number is
- * what a traveller compares and the word is what makes a single number mean
- * something, so they are one object rather than two lines.
+ * Section 4: small muted TEXT, not a bordered uppercase chip. `4-STAR HOTEL` in a pill beside
+ * four amber stars said the same thing twice and shouted the second one.
  */
-.hotel-rating {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+.hotel-card-type {
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
-/* White on the accent — `--accent-ink` is white since section 5, said here so
- * the one badge that must never lose contrast does not depend on that staying
- * true. */
+/* Line 2: where it is and how far the airport is, on ONE line, ellipsised. */
+.hotel-card-where {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hotel-card-essentials {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* Line 3: the amenity chips, a flowing row. */
+.hotel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hotel-chip {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/*
+ * The money column. `text-align: right` on the column rather than on each line, and NO vertical
+ * divider: a 1px rule between two columns already separated by 20px of space is a line the eye
+ * has to cross to read a price.
+ */
+.hotel-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: right;
+  gap: 2px;
+  min-width: 0;
+}
+
+/*
+ * The rating badge and its word on ONE line: the number is what a traveller compares and the
+ * word is what makes a single number mean something, so they are one object rather than two
+ * lines of the column.
+ */
+.hotel-rating {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* White on the accent — said here so the one badge that must never lose contrast does not
+ * depend on `--accent-ink` staying white. */
 .hotel-rating-score {
-  padding: 0.1rem 0.45rem;
+  padding: 1px 6px;
   border-radius: 8px;
   background: var(--accent);
   color: #ffffff;
-  font-size: 0.9rem;
+  font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .hotel-rating-word {
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 13px;
   font-weight: 500;
 }
 
-.hotel-reviews,
-.hotel-stay,
-.hotel-card-per,
-.hotel-card-age {
+.hotel-reviews {
   color: var(--ink-3);
-  font-size: 0.78rem;
-  text-align: right;
+  font-size: 12px;
 }
 
 .hotel-stay {
-  margin-top: 0.2rem;
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 12px;
 }
 
 .hotel-card-price {
   font-family: var(--font-display), var(--font-body), sans-serif;
-  font-size: 1.35rem;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.hotel-card-per {
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 .hotel-card-side .btn {
   width: 100%;
-  margin-top: 0.35rem;
+  height: 40px;
+  margin-top: 8px;
+}
+
+.hotel-card-age {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.hotel-card-chosen {
+  margin-top: 8px;
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 /*
- * Narrow: the photo goes full width above the text rather than shrinking to a
- * thumbnail, and the money column unfolds into a row along the bottom — the
- * same two moves `.flight-card` makes at the same breakpoint.
+ * Narrow: the photo goes full width above the text at 16:10, then the content, then the money as
+ * a row along the bottom.
+ *
+ * A CONTAINER query, not a viewport one: below 1280px the list has the whole pane, and above it
+ * the list is 55% of it beside a map — so the width that decides this layout is the LIST's, and
+ * a media query would stack the cards on a wide laptop and leave them three-column on a narrow
+ * one. `.hotel-split-list` declares the container.
  */
-@media (max-width: 760px) {
+@container (max-width: 720px) {
   .hotel-card {
-    flex-direction: column;
-    gap: 0.8rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 
   .hotel-card-photo {
     width: 100%;
-    height: 180px;
+    height: auto;
+    aspect-ratio: 16 / 10;
   }
 
   .hotel-card-side {
@@ -2687,16 +2616,19 @@ select {
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 0.5rem 0.9rem;
-    padding-left: 0;
-    padding-top: 0.7rem;
-    border-left: none;
-    border-top: 1px solid var(--line);
-    min-width: 0;
+    text-align: left;
+    gap: 8px 16px;
   }
 
   .hotel-card-side .btn {
     width: auto;
+    min-width: 7rem;
+    margin-top: 0;
+  }
+
+  .hotel-stay,
+  .hotel-card-age,
+  .hotel-card-chosen {
     margin-top: 0;
   }
 }
@@ -2708,73 +2640,6 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-}
-
-.result-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  background: var(--surface);
-}
-
-.result-row[data-chosen='true'] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.result-row-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.result-row-name {
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-
-.result-row-meta,
-.result-row-age {
-  color: var(--ink-3);
-  font-size: 0.85rem;
-}
-
-.result-row-side {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.5rem;
-}
-
-.result-row-price {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.result-row-chosen {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--ok);
-}
-
-@media (max-width: 600px) {
-  .result-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .result-row-side {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
 }
 
 /* ---------- choice card ---------- */
@@ -2820,80 +2685,150 @@ select {
   font-size: 0.82rem;
 }
 
-/* ---------- pinned summary ---------- */
+/* ---------- the pane's pinned cards, totals and action area (section 2) ---------- */
 
-.pinned-summary {
+.chosen-item-heading {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/*
+ * `Change`, in the ribbon row of the card it changes rather than as a link somewhere under it.
+ * The ribbon says "this is the one you chose"; the button beside it is the only thing a
+ * traveller wants from that sentence.
+ */
+.card-change {
+  margin: 0;
+  padding: 0 0.5rem;
+  min-height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.card-change:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+/* What the trip costs: each half, the total, and what that is each. */
+.trip-totals {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.3rem;
   padding: 0.9rem 1.1rem;
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
-  box-shadow: var(--shadow);
 }
 
-.pinned-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.trip-total-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.pinned-item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.pinned-item-name {
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-
-.pinned-item-dates {
-  color: var(--ink-3);
-  font-size: 0.85rem;
-  margin-right: auto;
-}
-
-.pinned-item-price {
-  font-weight: 600;
+  gap: 1rem;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.pinned-total {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin: 0;
+.trip-total-sum {
   padding-top: 0.5rem;
   border-top: 1px solid var(--line);
-  font-weight: 600;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
 }
 
-.pinned-total span:last-child {
-  font-family: var(--font-display), var(--font-body), sans-serif;
-  font-size: 1.15rem;
-  font-variant-numeric: tabular-nums;
+.trip-total-per {
+  margin: 0;
+  text-align: right;
+  color: var(--ink-3);
+  font-size: 0.8rem;
 }
 
-.pinned-links {
+/* Amber, and the reviewer's own words — never this file's paraphrase of them. */
+.trip-issues {
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--r-control);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
+.trip-issues p {
+  margin: 0 0 0.3rem;
+}
+
+.trip-issues ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.trip-action {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.trip-accept {
+  align-self: flex-start;
+  min-width: 14rem;
+  height: 44px;
+}
+
+.trip-action-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+.trip-links {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
-.pinned-links a.btn:hover {
+.trip-links a.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 44px;
   text-decoration: none;
+}
+
+/*
+ * The cashier replaced an item between her accept and the links. The badge is fixed copy — never
+ * a supplier's own explanation of why something is gone.
+ */
+.trip-updated {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.trip-updated-badge {
+  padding: 0.05rem 0.5rem;
+  border-radius: var(--r-pill);
+  background: var(--star);
+  color: #241a05;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* ---------- split shell (Task 10) ---------- */

@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { CaretDown, Minus, Plus } from '@phosphor-icons/react'
-import { formatMoney, money } from '@/src/money'
+import { formatMoneyShort, money } from '@/src/money'
 import type { Filter } from '@/src/results'
 import type { ResultItemLite } from '@/web/data'
 import { priceRange, airlineCounts, airlineNamesOf, isFilterSet } from '@/web/filters'
@@ -99,7 +99,7 @@ export function bagsLabel(filter: Filter): string {
 /** 'Max price' / 'Up to €845.00' — same reasoning as `bagsLabel`. */
 export function priceLabel(filter: Filter, currency: string): string {
   if (filter.maxPriceMinor === undefined) return 'Max price'
-  return `Up to ${formatMoney(money(BigInt(filter.maxPriceMinor), currency))}`
+  return `Up to ${formatMoneyShort(money(BigInt(filter.maxPriceMinor), currency))}`
 }
 
 /** 'Airlines' / 'Airlines (2)' — same reasoning as `bagsLabel`. */
@@ -445,7 +445,7 @@ export function FilterBar({ kind, items, filter, onChange, openPopover = null }:
         >
           <label className="filter-pop-title" htmlFor={`filter-bar-price-${kind}`}>Max price</label>
           <output className="filter-price-cap" htmlFor={`filter-bar-price-${kind}`}>
-            {formatMoney(money(capMinor, currency))}
+            {formatMoneyShort(money(capMinor, currency))}
           </output>
           <input
             id={`filter-bar-price-${kind}`}

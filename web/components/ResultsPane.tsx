@@ -225,6 +225,18 @@ export function matchesBySourceId(verdicts: ResultsView['verdicts']): Record<str
   return Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.matches]))
 }
 
+/**
+ * `sourceId` -> what Jev found WRONG with it.
+ *
+ * Section 4 puts these in the SAME chip row as the matches, in amber. They were only ever
+ * readable inside the collapsed `UnmatchedSection`'s own list before, which meant a card in that
+ * section carried no reason on the card itself.
+ */
+export function issuesBySourceId(verdicts: ResultsView['verdicts']): Record<string, string[]> {
+  if (!verdicts) return {}
+  return Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.issues]))
+}
+
 /** "3 flights didn't match what you asked" / "1 hotel didn't match what you asked". */
 export function unmatchedLabel(count: number, kind: 'flights' | 'hotels'): string {
   const noun = kind === 'flights'
@@ -501,6 +513,8 @@ export function ResultsPane(
     splitByVerdict(hotelItems, newestHotels?.verdicts)
   const flightMatchChips = matchesBySourceId(newestFlights?.verdicts)
   const hotelMatchChips = matchesBySourceId(newestHotels?.verdicts)
+  const flightIssueChips = issuesBySourceId(newestFlights?.verdicts)
+  const hotelIssueChips = issuesBySourceId(newestHotels?.verdicts)
 
   // Every OTHER card's Select goes dead while a choice is in flight: one press is one
   // instruction, and a second one would be refused with a 409 anyway (`submitAction`). The store
@@ -574,6 +588,7 @@ export function ResultsPane(
                 selectDisabled={choosing}
                 updating={updatingHotels}
                 matchesBySourceId={hotelMatchChips}
+                issuesBySourceId={hotelIssueChips}
                 highlightedSourceId={highlightedStay}
                 onHover={setHighlightedStay}
                 onChoose={(sourceId) => onChoose('hotel', sourceId)}
@@ -765,6 +780,7 @@ export function ResultsPane(
                 selectDisabled={choosing}
                 updating={updatingFlights}
                 matchesBySourceId={flightMatchChips}
+                issuesBySourceId={flightIssueChips}
                 onChoose={(sourceId) => onChoose('flight', sourceId)}
               />
             </UnmatchedSection>

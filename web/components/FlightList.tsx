@@ -27,6 +27,8 @@ export type FlightListProps = {
    * Trip-stage pass, section 2: what sits beside the `Selected` ribbon on the CHOSEN card — the
    * pane's `Change` button. Only the chosen card can show it; there is at most one per list.
    */
+  /** Section 7: `sourceId` -> what Jev found WRONG, for the amber chips in the same row. */
+  issuesBySourceId?: Record<string, string[]>
   ribbonAction?: ReactNode
   onChoose: (sourceId: string) => void
 }
@@ -47,7 +49,7 @@ export type FlightListProps = {
  */
 export function FlightList(
   {
-    items, adults, now, chosenSourceId, selectDisabled, updating, matchesBySourceId, ribbonAction,
+    items, adults, now, chosenSourceId, selectDisabled, updating, matchesBySourceId, issuesBySourceId, ribbonAction,
     onChoose,
   }: FlightListProps,
 ) {
@@ -66,6 +68,7 @@ export function FlightList(
           selectDisabled={selectDisabled}
           updating={updating}
           matches={matchesBySourceId?.[item.sourceId] ?? []}
+          issues={issuesBySourceId?.[item.sourceId] ?? []}
           ribbonAction={chosenSourceId != null && item.sourceId === chosenSourceId ? ribbonAction : undefined}
           onChoose={onChoose}
         />

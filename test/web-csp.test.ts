@@ -20,34 +20,55 @@ import { cspFor } from '../web/csp.js'
 const PROJECT_URL = 'https://fhqsiydgoqmwvihqsbap.supabase.co'
 
 describe('cspFor: img-src is pinned exactly', () => {
-  it('is exactly self, data: and the four image hosts this product renders, nothing wider', () => {
+  it('is exactly self, data:, blob: and the three image hosts this product renders', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
     expect(imgSrc).toBe(
-      "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://server.arcgisonline.com')
+      "img-src 'self' data: blob: https://images.kiwi.com https://lh3.googleusercontent.com"
+      + ' https://*.gstatic.com')
   })
 
-  it('names each host, never a scheme-wide source, and wildcards only two subdomains', () => {
+  it('names each host, never a scheme-wide source, and wildcards only one subdomain', () => {
     const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
     expect(imgSrc).not.toMatch(/https:(\s|$)/)
     // ONE subdomain wildcard, and it is unavoidable: Google numbers its thumbnail hosts
-    // (`encrypted-tbn0`, ...) with no stable single name to pin. The tile host is exact — the
-    // second wildcard went with CARTO, whose keyless CDN turned out to serve an "API KEY
-    // REQUIRED" watermark rather than a map.
+    // (`encrypted-tbn0`, ...) with no stable single name to pin.
     expect(imgSrc.match(/\*/g)).toHaveLength(1)
     expect(imgSrc).toContain('https://*.gstatic.com')
-    expect(imgSrc).toContain('https://server.arcgisonline.com')
+    // The three raster tile services went with Leaflet (trip-stage pass, section 5).
+    expect(cspFor(PROJECT_URL)).not.toContain('arcgisonline')
+    expect(cspFor(PROJECT_URL)).not.toContain('cartocdn')
+    expect(cspFor(PROJECT_URL)).not.toContain('tile.openstreetmap.org')
   })
 
-  it('does NOT widen script-src or style-src for the map: Leaflet is bundled', () => {
+  /*
+   * Trip-stage pass, section 5. MapLibre fetches the whole basemap — the style document, the
+   * vector tiles, the sprites and the glyphs — from ONE exact origin, and compiles its tile
+   * workers from a blob URL. Without both blob directives the map renders a blank canvas and
+   * says so only in the console, which is the failure mode this project has now hit three times.
+   */
+  it('admits the one tile origin and the blobs MapLibre\'s workers need, and nothing else', () => {
+    const directives = cspFor(PROJECT_URL).split('; ')
+    const connect = directives.find((d) => d.startsWith('connect-src '))!
+    expect(connect).toContain('https://tiles.openfreemap.org')
+    expect(connect).not.toContain('*')
+    expect(directives).toContain("worker-src 'self' blob:")
+    expect(directives).toContain("child-src 'self' blob:")
+  })
+
+  it('does NOT widen script-src or style-src for the map: MapLibre is bundled', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     expect(directives).toContain("style-src 'self' 'unsafe-inline'")
     expect(directives).toContain("script-src 'self' 'unsafe-inline'")
+    // `unsafe-eval` is a DEV-only widening (the webpack dev server evaluates its own modules;
+    // see `cspFor`). A production policy must never carry it, whatever `next.config.ts` passes.
+    expect(cspFor(PROJECT_URL)).not.toContain('unsafe-eval')
+    expect(cspFor(PROJECT_URL, { dev: false })).not.toContain('unsafe-eval')
+    expect(cspFor(PROJECT_URL, { dev: true })).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'")
     // The CDN host the tiles come from is an IMAGE origin and nothing else. This used to read
     // `not.toContain('cdn')` over the whole policy, which only worked while no third-party
     // origin happened to have "cdn" in its name; the claim it was making all along is this one.
-    for (const name of ['style-src', 'script-src', 'connect-src', 'default-src']) {
+    for (const name of ['style-src', 'script-src', 'default-src']) {
       const directive = directives.find((d) => d.startsWith(`${name} `))!
       expect(directive).not.toContain('cdn')
       expect(directive).not.toContain('unpkg')
@@ -81,9 +102,14 @@ describe('next.config.ts headers(): the real config object', () => {
     // The exact same string `cspFor` builds from the real project URL this
     // process is configured with — proves `next.config.ts` wires its own
     // `headers()` to `cspFor`, not a copy that has since drifted from it.
-    expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
+    // The `dev` flag follows `NODE_ENV`, exactly as `next.config.ts` passes it; under vitest
+    // that is `test`, which is not `production`, so the dev widening applies here too.
+    expect(csp).toBe(cspFor(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      { dev: process.env.NODE_ENV !== 'production' },
+    ))
     expect(csp!.split('; ')).toContain(
-      "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://server.arcgisonline.com')
+      "img-src 'self' data: blob: https://images.kiwi.com https://lh3.googleusercontent.com"
+      + ' https://*.gstatic.com')
   })
 })

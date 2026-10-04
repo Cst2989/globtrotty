@@ -15,10 +15,10 @@ import {
   transitLine, typeLabel,
 } from '../web/components/HotelCard.js'
 import {
+  ENGLISH_TEXT_FIELD,
   HotelMap,
-  TILE_ATTRIBUTION,
-  TILE_MAX_ZOOM,
-  TILE_URL,
+  MAP_ATTRIBUTION,
+  MAP_STYLE_URL,
   escapeHtml,
   pricePillHtml,
 } from '../web/components/HotelMap.js'
@@ -128,7 +128,7 @@ describe('FlightCard', () => {
     const html = renderToStaticMarkup(
       createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
     )
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).toContain('for 2 passengers')
     expect(html).toContain('Select')
     expect(html).toContain('found 10 min ago')
@@ -266,8 +266,8 @@ describe('HotelCard', () => {
     expect(html).toContain('Very good')
     expect(html).toContain('350 reviews')
     expect(html).toContain('16 nights, 2 adults')
-    expect(html).toContain('€1,120.00')
-    expect(html).toContain('€70.00 per night')
+    expect(html).toContain('€1,120')
+    expect(html).toContain('€70 per night')
     expect(html).toMatch(/Select/)
   })
 
@@ -467,7 +467,7 @@ describe('FilterBar', () => {
 
   it('says on the closed trigger what is set inside it', () => {
     expect(bar({ filter: { minCabinBags: 1 } })).toContain('Bags: 1 cabin')
-    expect(bar({ filter: { maxPriceMinor: '20000' } })).toContain('Up to €200.00')
+    expect(bar({ filter: { maxPriceMinor: '20000' } })).toContain('Up to €200')
     expect(bar({ filter: { airlines: ['QR', 'LH'] } })).toContain('Airlines (2)')
     // And marks it, so the row reads as filtered at a glance.
     expect(bar({ filter: { minCabinBags: 1 } })).toContain('data-set="true"')
@@ -540,7 +540,7 @@ describe('the filter bar\'s trigger labels', () => {
 
   it('names the cap that is set', () => {
     expect(priceLabel({}, 'EUR')).toBe('Max price')
-    expect(priceLabel({ maxPriceMinor: '250000' }, 'EUR')).toBe('Up to €2,500.00')
+    expect(priceLabel({ maxPriceMinor: '250000' }, 'EUR')).toBe('Up to €2,500')
   })
 
   it('counts the airlines that are set', () => {
@@ -587,9 +587,9 @@ describe('SortTabs', () => {
     expect(html).toContain('Best')
     expect(html).toContain('Cheapest')
     expect(html).toContain('Fastest')
-    // Best leads with the stored first item (€845.00, 14h 15m); Cheapest with the €200 one.
-    expect(html).toContain('€845.00 · 14h 15m')
-    expect(html).toContain('€200.00 · 20h 0m')
+    // Best leads with the stored first item (€845, 14h 15m); Cheapest with the €200 one.
+    expect(html).toContain('€845 · 14h 15m')
+    expect(html).toContain('€200 · 20h 0m')
   })
 
   it('marks only the active tab', () => {
@@ -601,8 +601,8 @@ describe('SortTabs', () => {
   })
 
   it('summarises a stay with its price and its rating — a hotel row has no duration', () => {
-    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120.00 · 4.4')
-    expect(tabSummary({ ...HOTEL_ITEM, hotel: hotelLite({ rating: null }) })).toBe('€1,120.00')
+    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120 · 4.4')
+    expect(tabSummary({ ...HOTEL_ITEM, hotel: hotelLite({ rating: null }) })).toBe('€1,120')
     expect(tabSummary(null)).toBe('—')
   })
 })
@@ -943,7 +943,7 @@ describe('expired prices', () => {
       item: EXPIRED_ITEM, adults: 2, now: LATER, updating: true, onChoose: () => {},
     }))
     expect(html).toContain('skeleton-line-price')
-    expect(html).not.toContain('€845.00')
+    expect(html).not.toContain('€845')
     expect(html).toContain('Updating prices')
     // Everything a ttl does not expire is still there.
     expect(html).toContain('07:05')
@@ -966,7 +966,7 @@ describe('expired prices', () => {
     const html = renderToStaticMarkup(createElement(FlightCard, {
       item: EXPIRED_ITEM, adults: 2, now: LATER, onChoose: () => {},
     }))
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).not.toContain('skeleton-line-price')
     expect(html).toContain('Prices from 2 h ago')
     expect(html).toContain('data-expired="true"')
@@ -1004,7 +1004,7 @@ describe('expired prices', () => {
     }))
     // Nothing shimmers and nothing is greyed just because a page was opened late.
     expect(html).not.toContain('skeleton-line-price')
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).toContain('Prices from 2 h ago')
     // A link in the bar, never the old banner across the top of the list.
     expect(html).not.toContain('stale-banner')
@@ -1055,7 +1055,7 @@ describe('expired prices', () => {
       results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
       onChoose: () => {}, onGetLinks: () => {},
     }))
-    expect(html).toContain('€845.00')
+    expect(html).toContain('€845')
     expect(html).not.toContain('skeleton-line-price')
     expect(html).not.toContain('Updating prices')
   })
@@ -1262,9 +1262,9 @@ describe('verified results', () => {
     // Collapsed on first render: the reasons and the second card are behind the toggle.
     expect(html).toContain('aria-expanded="false"')
     expect(html).not.toContain('Self-transfer risk')
-    // The tabs summarise the matched list only — €845.00 is F1's price, not F2's cheaper one.
-    expect(html).toContain('€845.00')
-    expect(html).not.toContain('€600.00')
+    // The tabs summarise the matched list only — €845 is F1's price, not F2's cheaper one.
+    expect(html).toContain('€845')
+    expect(html).not.toContain('€600')
     expect(html).not.toContain('Not checked against your request')
   })
 
@@ -1278,8 +1278,8 @@ describe('verified results', () => {
     expect(html).not.toContain('didn&#x27;t match what you asked')
     expect(html).not.toContain('match-chip')
     // Both cards are in the one list.
-    expect(html).toContain('€845.00')
-    expect(html).toContain('€600.00')
+    expect(html).toContain('€845')
+    expect(html).toContain('€600')
   })
 
   it('renders the chips on a stay too', () => {
@@ -1295,9 +1295,10 @@ describe('verified results', () => {
 })
 
 /**
- * Hotels pass, section 5. The map itself is Leaflet's imperative DOM and is not rendered here —
- * `ResultsPane` loads it through `next/dynamic` with `ssr: false` precisely because it cannot be.
- * What IS testable is the pure part, and the pure part is the one that builds markup by hand.
+ * Hotels pass, section 5, re-cut by the trip-stage pass. The map itself is MapLibre's imperative
+ * WebGL canvas and is not rendered here — `ResultsPane` loads it through `next/dynamic` with
+ * `ssr: false` precisely because it cannot be. What IS testable is the pure part, and the pure
+ * part is the one that builds markup by hand.
  */
 describe('HotelMap', () => {
   it('exports the component and its pure pill builder', () => {
@@ -1306,44 +1307,53 @@ describe('HotelMap', () => {
   })
 
   /*
-   * Polish pass, section 1, after TWO basemaps failed this page.
+   * Trip-stage pass, section 5, after THREE raster basemaps failed this page.
    *
    * OSM's own servers answered an anonymous deployment with a 403 and an "Access blocked"
    * picture on every tile. CARTO's CDN then answered every request with HTTP 200 and a
    * 2,513-byte tile reading "API KEY REQUIRED" — a broken map no status check can tell from a
-   * working one, caught only by looking at the screenshot. Esri's Dark Gray Canvas needs no key.
+   * working one, caught only by looking at the screenshot. Esri's Dark Gray Canvas did work, and
+   * was still the wrong answer: a flat grey raster with its own zoom ceiling and no way to ask
+   * it for English labels.
    *
-   * The URL is pinned here and the ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP
-   * does not admit fails exactly as silently as a blocked one.
+   * OpenFreeMap serves VECTOR tiles, free, with no key. The style URL is pinned here and the
+   * ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP does not admit fails exactly
+   * as silently as a blocked one.
    */
-  it('draws its tiles from a basemap that needs no key', () => {
-    expect(TILE_URL).toBe(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base'
-      + '/MapServer/tile/{z}/{y}/{x}',
-    )
-    expect(TILE_URL).not.toContain('openstreetmap.org')
-    expect(TILE_URL).not.toContain('cartocdn.com')
-    // Esri's REST tile path is row before column. Getting this the usual way round produces a
-    // map of somewhere else entirely, which renders perfectly and is completely wrong.
-    expect(TILE_URL.endsWith('{z}/{y}/{x}')).toBe(true)
-    // One host, so no subdomain sharding and an exact CSP origin rather than a wildcard.
-    expect(TILE_URL).not.toContain('{s}')
-    // Esri's terms want naming, and it is not optional.
-    expect(TILE_ATTRIBUTION).toBe('Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ')
-    // This layer's own ceiling: past it the server returns nothing at all.
-    expect(TILE_MAX_ZOOM).toBe(16)
+  it('draws its map from a keyless vector style, with no raster service left', () => {
+    expect(MAP_STYLE_URL).toBe('https://tiles.openfreemap.org/styles/dark')
+    expect(MAP_STYLE_URL).not.toContain('openstreetmap.org')
+    expect(MAP_STYLE_URL).not.toContain('cartocdn.com')
+    expect(MAP_STYLE_URL).not.toContain('arcgisonline.com')
+    // No `{z}/{x}/{y}` of our own: the style document names its own sources, which is the whole
+    // difference between this and the three that came before it.
+    expect(MAP_STYLE_URL).not.toContain('{z}')
+    // OpenStreetMap's licence wants naming, and it is not optional.
+    expect(MAP_ATTRIBUTION).toContain('OpenFreeMap')
+    expect(MAP_ATTRIBUTION).toContain('OpenStreetMap')
+  })
+
+  /*
+   * A map whose labels a traveller cannot read is a picture of a city rather than a map of one.
+   * `coalesce` falls back to the local name where the data has no English one, which is the
+   * honest answer — an empty label would be worse than a Japanese one.
+   */
+  it('asks the style for English labels, falling back rather than blanking them', () => {
+    expect(ENGLISH_TEXT_FIELD[0]).toBe('coalesce')
+    expect(ENGLISH_TEXT_FIELD).toContainEqual(['get', 'name:en'])
+    expect(ENGLISH_TEXT_FIELD[ENGLISH_TEXT_FIELD.length - 1]).toEqual(['get', 'name'])
   })
 
   it('builds a price pill, and marks the active one', () => {
     expect(pricePillHtml('113700', 'EUR', false))
-      .toBe('<span class="map-pill" data-active="false">€1,137.00</span>')
+      .toBe('<span class="map-pill" data-active="false">€1,137</span>')
     expect(pricePillHtml('113700', 'EUR', true)).toContain('data-active="true"')
   })
 
   it('escapes its text: no < from a price string survives into the markup', () => {
-    // `divIcon` takes an HTML STRING — the one path in this project with no React escaping on
-    // it. Nothing can put a `<` in a formatted price today; this is the guard for the next
-    // person who puts a NAME on a pill.
+    // A marker's element is filled with this HTML STRING — the one path in this project with no
+    // React escaping on it. Nothing can put a `<` in a formatted price today; this is the guard
+    // for the next person who puts a NAME on a pill.
     expect(escapeHtml('<script>alert(1)</script>'))
       .toBe('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(escapeHtml('a & b "c" \'d\'')).toBe('a &amp; b &quot;c&quot; &#39;d&#39;')
@@ -1354,12 +1364,25 @@ describe('HotelMap', () => {
     )
     expect(inner).not.toBeNull()
     expect(inner![1]).not.toContain('<')
-    expect(inner![1]).toBe('€1.00')
+    expect(inner![1]).toBe('€1')
   })
 
   it('gives every stay a card id a pin can scroll to, with nothing a supplier wrote left in it', () => {
     expect(stayCardId('tok:abc')).toBe('stay-tok-abc')
     expect(stayCardId('a"><script>')).toBe('stay-a---script-')
+  })
+
+  /* Leaflet is gone, and so is its stylesheet: nothing may import it back by accident. */
+  it('leaves no Leaflet behind', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+    expect(pkg.dependencies.leaflet).toBeUndefined()
+    expect(pkg.devDependencies['@types/leaflet']).toBeUndefined()
+    expect(pkg.dependencies['maplibre-gl']).toBeTruthy()
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
+    expect(css).not.toContain('leaflet')
   })
 })
 
@@ -1381,7 +1404,7 @@ describe('the hotels list and map split', () => {
     expect(html).toContain('data-split="false"')
     expect(html).toContain('data-view="list"')
     expect(html).toContain('hotel-split-list')
-    // The map is mounted only when it is on screen: Leaflet measures its container, and one
+    // The map is mounted only when it is on screen: a map measures its container, and one
     // built inside a hidden element comes up 0x0.
     expect(html).not.toContain('hotel-split-map')
   })
