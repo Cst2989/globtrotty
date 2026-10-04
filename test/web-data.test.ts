@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
   dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems, cityNamesFor,
-  naiveMinutesBetween,
+  naiveMinutesBetween, skeletonMode,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -418,5 +418,46 @@ describe('naiveMinutesBetween', () => {
   it('clamps a backwards or unreadable pair to zero rather than a negative flight', () => {
     expect(naiveMinutesBetween('2026-11-20T10:20:00', '2026-11-19T07:05:00')).toBe(0)
     expect(naiveMinutesBetween('nonsense', '2026-11-19T07:05:00')).toBe(0)
+  })
+})
+
+// Results UI pass 2, E. `skeletonMode` decides whether the results pane promises a shape before
+// there is anything to put in it — and, for 'full', whether the split renders at all.
+describe('skeletonMode', () => {
+  it('is null whenever nothing is running, however little there is to show', () => {
+    expect(skeletonMode({ status: 'active', resultKinds: [], latestAction: null })).toBeNull()
+    expect(skeletonMode({ status: 'awaiting_user', resultKinds: [], latestAction: null })).toBeNull()
+    expect(skeletonMode({ status: 'failed', resultKinds: ['flights'], latestAction: null })).toBeNull()
+  })
+
+  it('is "full" while the first search runs and there is nothing yet', () => {
+    expect(skeletonMode({ status: 'working', resultKinds: [], latestAction: null })).toBe('full')
+  })
+
+  it('is "hotels" after a flight was chosen and the hotel search is running', () => {
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights'], latestAction: { action: 'choose', kind: 'flight' },
+    })).toBe('hotels')
+  })
+
+  it('promises nothing for a turn with no list to promise — a question, or a typed filter', () => {
+    // Both answer in the thread, so a placeholder beside the flights she already has would be
+    // claiming a search that is not happening.
+    expect(skeletonMode({ status: 'working', resultKinds: ['flights'], latestAction: null })).toBeNull()
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights'], latestAction: { action: 'hand_off', kind: null },
+    })).toBeNull()
+  })
+
+  it('promises nothing once the hotels row has landed, even on the same choose action', () => {
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights', 'hotels'], latestAction: { action: 'choose', kind: 'flight' },
+    })).toBeNull()
+  })
+
+  it('does not mistake a chosen HOTEL for a hotel search', () => {
+    expect(skeletonMode({
+      status: 'working', resultKinds: ['flights'], latestAction: { action: 'choose', kind: 'hotel' },
+    })).toBeNull()
   })
 })

@@ -858,3 +858,62 @@ export async function loadResults(
     cityNames: cityNamesFor(r.content),
   }))
 }
+
+/* ---------- Results UI pass 2 (E): the skeleton's own two inputs ---------- */
+
+/**
+ * The newest `action` row's own two enum fields, or `null` when the conversation has none.
+ *
+ * Only the action NAME and (for a `choose`) its kind cross the server boundary — never the
+ * `sourceId`/`proposalId` the row also carries, the same posture `toThreadView` takes for the
+ * sentence it renders an action row as.
+ */
+export type LatestAction = { action: string; kind: 'flight' | 'hotel' | null }
+
+export async function loadLatestAction(
+  sb: SupabaseClient, conversationId: string,
+): Promise<LatestAction | null> {
+  const { data: rows, error } = await sb
+    .from('messages')
+    .select('content')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'action')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  const content = rows?.[0]?.content as string | undefined
+  if (content === undefined) return null
+  const action = parseAction(content)
+  if (!action) return null
+  return { action: action.action, kind: action.action === 'choose' ? action.kind : null }
+}
+
+/**
+ * Which skeleton the results pane should show, if any:
+ *
+ * - `'full'` — the whole pane, because a search is running and there is nothing yet. This is also
+ *   what makes the page render the split at all on a conversation with no `results` row, so the
+ *   layout does not jump from one column to two when the first row lands.
+ * - `'hotels'` — a hotel skeleton ABOVE the flights she already has, because she just chose a
+ *   flight and `handleChooseFlight` is off searching stays. The flights list stays where it is;
+ *   only the thing being fetched is a placeholder.
+ * - `null` — nothing is running, or something is running that the pane has no shape to promise
+ *   (a question for the driver, a typed filter, which both answer in the thread).
+ *
+ * Pure, so `test/web-data.test.ts` pins every branch without a live DB.
+ */
+export type SkeletonMode = 'full' | 'hotels' | null
+
+export function skeletonMode(input: {
+  /** `conversations.status`. */
+  status: string
+  /** Every `results` row's kind, oldest first — the order `loadResults` returns. */
+  resultKinds: ResultsContent['kind'][]
+  latestAction: LatestAction | null
+}): SkeletonMode {
+  if (input.status !== 'working') return null
+  if (input.resultKinds.length === 0) return 'full'
+  const newest = input.resultKinds[input.resultKinds.length - 1]
+  const choseFlight = input.latestAction?.action === 'choose' && input.latestAction.kind === 'flight'
+  return newest === 'flights' && choseFlight ? 'hotels' : null
+}

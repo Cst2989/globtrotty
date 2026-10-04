@@ -2036,6 +2036,166 @@ select {
   }
 }
 
+/* ---------- results skeleton (results UI pass 2, E) ---------- */
+
+/*
+ * The shape the answer will arrive in, shown the instant a search starts. The
+ * shimmer is behind `prefers-reduced-motion: no-preference`; with the
+ * preference set these stay flat blocks, which still read as "a list is
+ * coming".
+ */
+.results-skeleton .filter-rail,
+.results-skeleton .sort-tabs {
+  opacity: 0.55;
+}
+
+.results-skeleton-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.skeleton-card {
+  pointer-events: none;
+}
+
+.skeleton-pill,
+.skeleton-line,
+.skeleton-tab {
+  display: block;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+}
+
+.skeleton-pill {
+  height: 26px;
+  width: 7rem;
+}
+
+.skeleton-pill-wide {
+  width: 13rem;
+}
+
+.skeleton-pill-narrow {
+  width: 4.5rem;
+}
+
+.skeleton-tab {
+  height: 34px;
+  width: 6rem;
+  margin-bottom: 0.4rem;
+}
+
+.skeleton-line {
+  height: 14px;
+  width: 100%;
+}
+
+.skeleton-line-title {
+  height: 11px;
+  width: 4.5rem;
+}
+
+.skeleton-line-short {
+  width: 55%;
+}
+
+.skeleton-line-leg {
+  height: 34px;
+  border-radius: var(--r-control);
+}
+
+.skeleton-line-price {
+  height: 26px;
+  width: 6rem;
+}
+
+.results-skeleton .filter-rail {
+  gap: 0.6rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-pill,
+  .skeleton-line,
+  .skeleton-tab {
+    background: linear-gradient(
+      90deg,
+      var(--surface-2) 0%,
+      var(--surface-3) 50%,
+      var(--surface-2) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1400ms var(--ease) infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+/* ---------- view transitions (results UI pass 2, E) ---------- */
+
+/*
+ * The landing cross-fades into the split instead of cutting to it
+ * (`withViewTransition`, web/components/transition.ts). Each of the three
+ * regions is named so the browser pairs it across the navigation rather than
+ * cross-fading the whole document as one image.
+ *
+ * `.rail` is named only at desktop widths: below 901px it is a `position:
+ * fixed` drawer parked off-screen with a transform, and capturing that as a
+ * transition pair flashes it into view.
+ */
+/*
+ * A `view-transition-name` has to be UNIQUE in the document — a duplicate makes
+ * the browser skip the whole transition — and `.thread` lives INSIDE
+ * `.split-pane-chat` whenever the split is on screen. So the pane carries the
+ * name when it exists, and a bare thread (a conversation with no results and
+ * nothing running) carries it only as a direct child of `.shell-main`, which
+ * is the one place it appears without a pane around it.
+ */
+.split-pane-chat,
+.shell-main > .thread {
+  view-transition-name: thread;
+}
+
+.split-pane-results {
+  view-transition-name: results;
+}
+
+@media (min-width: 901px) {
+  .rail {
+    view-transition-name: rail;
+  }
+}
+
+::view-transition-old(thread),
+::view-transition-new(thread),
+::view-transition-old(results),
+::view-transition-new(results),
+::view-transition-old(rail),
+::view-transition-new(rail) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--ease);
+}
+
+/*
+ * `withViewTransition` already skips the API under this preference; this is
+ * the second half of the same promise, for a transition started any other way
+ * (a browser-driven back/forward, a future caller that forgets).
+ */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
 /* ---------- landing hero (photo wall) ---------- */
 
 .hero {

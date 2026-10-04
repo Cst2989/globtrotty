@@ -12,6 +12,7 @@ import { HotelList, ratingStars } from '../web/components/HotelList.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import { FilterRail, stopsModeOf, withStopsMode } from '../web/components/FilterRail.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
+import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
 import { ResultsPane } from '../web/components/ResultsPane.js'
 import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
@@ -624,5 +625,50 @@ describe('MessageBubble (plan 5 roles)', () => {
     )
     expect(html).not.toContain('<script>alert')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('ResultsSkeleton', () => {
+  it('renders the bar, the tabs, five cards and a line built from nothing she typed', () => {
+    const html = renderToStaticMarkup(createElement(ResultsSkeleton, { kind: 'flights' }))
+    expect(html).toContain('Searching flights…')
+    expect([...html.matchAll(/skeleton-card/g)]).toHaveLength(5)
+    expect(html).toContain('summary-bar')
+    expect(html).toContain('sort-tabs')
+    expect(html).toContain('filter-rail')
+  })
+
+  it('says hotels for the hotel pass', () => {
+    const html = renderToStaticMarkup(createElement(ResultsSkeleton, { kind: 'hotels' }))
+    expect(html).toContain('Searching hotels…')
+  })
+})
+
+describe('ResultsPane skeletons', () => {
+  it('replaces the whole pane while the first search runs', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [], proposal: null, now: NOW, pending: false, error: null, skeleton: 'full',
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('Searching flights…')
+    expect(html).not.toContain('Select')
+  })
+
+  it('puts a hotel skeleton ABOVE the flights she already has, leaving them in place', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, skeleton: 'hotels',
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html.indexOf('Searching hotels…')).toBeGreaterThan(-1)
+    expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
+    expect(html).toContain('Barcelona BCN → Tokyo HND')
+  })
+
+  it('shows no skeleton at all once the results are in', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, skeleton: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).not.toContain('Searching')
   })
 })

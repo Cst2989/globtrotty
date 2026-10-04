@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Filter } from '@/src/results'
-import type { ResultsView, ProposalRowLite, LinkLite } from '@/web/data'
+import type { ResultsView, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
 import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
@@ -11,6 +11,7 @@ import { FilterRail } from './FilterRail'
 import { SortTabs } from './SortTabs'
 import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
+import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './ProposalCard'
 
 export type ResultsPaneProps = {
@@ -22,6 +23,12 @@ export type ResultsPaneProps = {
   now?: Date
   pending: boolean
   error: string | null
+  /**
+   * `web/data.ts`'s `skeletonMode` (E): `'full'` replaces the whole pane with a placeholder
+   * while the first search runs, `'hotels'` puts a hotel placeholder above the flights she
+   * already has while `handleChooseFlight` searches stays, `null` shows just the results.
+   */
+  skeleton?: SkeletonMode
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
 }
@@ -64,7 +71,9 @@ const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
  * local `useState` below is the same pattern `ProposalCard` already uses, which that file's own
  * tests confirm is safe under static rendering (no router, no effects).
  */
-export function ResultsPane({ results, proposal, now, pending, error, onChoose, onGetLinks }: ResultsPaneProps) {
+export function ResultsPane(
+  { results, proposal, now, pending, error, skeleton = null, onChoose, onGetLinks }: ResultsPaneProps,
+) {
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
@@ -99,6 +108,17 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
   const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? null
   const hasChosen = proposal !== null && proposal.items.length > 0
 
+  // Nothing to show beside a placeholder, and nothing to put it above: the whole pane IS the
+  // skeleton. Returning early rather than rendering empty sections keeps the "searching" state
+  // from being a half-drawn version of the real one.
+  if (skeleton === 'full') {
+    return (
+      <div className="results-pane">
+        <ResultsSkeleton kind="flights" />
+      </div>
+    )
+  }
+
   return (
     <div className="results-pane">
       {hasChosen ? (
@@ -113,6 +133,8 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
           onGetLinks={onGetLinks}
         />
       ) : null}
+
+      {skeleton === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
 
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
@@ -170,6 +192,7 @@ export type ResultsPaneLiveProps = {
   conversationId: string
   results: ResultsView[]
   proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+  skeleton?: SkeletonMode
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
@@ -190,7 +213,7 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  * pick up the change, same pattern as every other `*Live` wrapper in this
  * codebase.
  */
-export function ResultsPaneLive({ conversationId, results, proposal }: ResultsPaneLiveProps) {
+export function ResultsPaneLive({ conversationId, results, proposal, skeleton = null }: ResultsPaneLiveProps) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -220,6 +243,7 @@ export function ResultsPaneLive({ conversationId, results, proposal }: ResultsPa
     <ResultsPane
       results={results}
       proposal={proposal}
+      skeleton={skeleton}
       pending={pending}
       error={error}
       onChoose={(kind, sourceId) => void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId })}

@@ -3,6 +3,7 @@
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowUp, CalendarBlank, UsersThree, Wallet } from '@phosphor-icons/react'
+import { withViewTransition } from './transition'
 
 export type MessageBoxProps = {
   /** The conversation to post to, or `'new'` for the landing box. */
@@ -168,7 +169,7 @@ export function MessageBox({
         if (res.status === 409 || res.status === 429) {
           const body = (await res.json()) as { conversationId: string }
           const location = nextLocation(conversationId, res.status, body)
-          if (location.type === 'push') router.push(location.url)
+          if (location.type === 'push') withViewTransition(() => router.push(location.url))
           else router.refresh()
           return
         }
@@ -181,7 +182,11 @@ export function MessageBox({
 
       const body = (await res.json()) as { conversationId: string }
       const location = nextLocation(conversationId, res.status, body)
-      if (location.type === 'push') router.push(location.url)
+      // E: `nextLocation` only ever returns a push for the LANDING box, which is exactly the
+      // navigation worth a transition — a full-bleed photo wall becoming the split view.
+      // `withViewTransition` falls through to a plain push without the API or under reduced
+      // motion; it never swallows the navigation.
+      if (location.type === 'push') withViewTransition(() => router.push(location.url))
       else router.refresh()
     } catch {
       setError(messageForStatus(0))

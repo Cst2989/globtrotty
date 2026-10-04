@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { StatusLine } from '../web/components/StatusLine.js'
+import { withViewTransition } from '../web/components/transition.js'
 import { ThreadView } from '../web/components/Thread.js'
 import { messageForStatus, nextLocation } from '../web/components/MessageBox.js'
 import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
@@ -88,6 +89,16 @@ describe('StatusLine', () => {
   it('maps the synthetic "sending" status to "Sending", with the same working tone and dots', () => {
     const html = renderToStaticMarkup(createElement(StatusLine, { status: 'sending', failReason: null }))
     expect(html).toContain('Sending')
+    expect(html).toContain('data-tone="working"')
+    expect(html).toContain('class="thinking"')
+  })
+
+  // Results UI pass 2, E: the other synthetic status — `ThreadView` substitutes it while the
+  // results pane is showing a search skeleton, so the line says what is actually happening
+  // instead of a generic "Thinking" beside five shimmering flight cards.
+  it('maps the synthetic "searching" status to "Searching", with the same working tone and dots', () => {
+    const html = renderToStaticMarkup(createElement(StatusLine, { status: 'searching', failReason: null }))
+    expect(html).toContain('Searching')
     expect(html).toContain('data-tone="working"')
     expect(html).toContain('class="thinking"')
   })
@@ -223,6 +234,34 @@ describe('ThreadView', () => {
     )
     expect(html.toLowerCase()).toContain('thinking')
     expect(html).not.toContain('Sending')
+  })
+
+  // E: `searching` wins over the generic "Thinking" for exactly the stretch that IS a search,
+  // and says nothing at all when the turn is not working.
+  it('shows "Searching" while working and the results pane is showing a skeleton', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'working', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [],
+        searching: true,
+      }),
+    )
+    expect(html).toContain('Searching')
+    expect(html.toLowerCase()).not.toContain('thinking<')
+  })
+
+  it('leaves the words alone when searching is true but the turn is not working', () => {
+    const html = renderToStaticMarkup(
+      createElement(ThreadView, {
+        conversation: { id: 'c1', title: 'Trip', status: 'active', updated_at: new Date().toISOString() },
+        latestTurn: null,
+        messages: [],
+        searching: true,
+      }),
+    )
+    expect(html).toContain('Ready for your next message')
+    expect(html).not.toContain('Searching')
   })
   // The fix wave's Task-10 gap: `ThreadView` never passed `conversationId` to
   // `MessageBubble`, so `MessageBubble` always took its inert `ChoiceCard` branch and no
@@ -540,5 +579,82 @@ describe('SwapPicker', () => {
       createElement(SwapPicker, { ...PICKER, alternatives: [] }),
     )
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Confirm swap<\/button>/)
+  })
+})
+
+// Results UI pass 2, E. `withViewTransition` is the landing send's one piece of browser
+// polish, and the thing that must never go wrong with it is swallowing the navigation — so
+// every fallback path is pinned here. `environment: 'node'` means there is no `document` or
+// `window` unless a test puts one there, which is itself the first case.
+describe('withViewTransition', () => {
+  const globals = globalThis as unknown as {
+    document?: unknown
+    window?: unknown
+  }
+
+  function withGlobals(
+    doc: unknown, reduced: boolean | 'throw', body: () => void,
+  ) {
+    const hadDocument = 'document' in globals
+    const hadWindow = 'window' in globals
+    const previousDocument = globals.document
+    const previousWindow = globals.window
+    globals.document = doc
+    globals.window = {
+      matchMedia: (query: string) => {
+        if (reduced === 'throw') throw new Error('no matchMedia')
+        return { matches: reduced && query.includes('reduce') }
+      },
+    }
+    try {
+      body()
+    } finally {
+      if (hadDocument) globals.document = previousDocument
+      else delete globals.document
+      if (hadWindow) globals.window = previousWindow
+      else delete globals.window
+    }
+  }
+
+  it('runs the navigation plainly when there is no document at all', () => {
+    const fn = vi.fn()
+    withViewTransition(fn)
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the navigation inside the transition when the browser has one', () => {
+    const start = vi.fn((callback: () => void) => { callback() })
+    const fn = vi.fn()
+    withGlobals({ startViewTransition: start }, false, () => withViewTransition(fn))
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the transition under prefers-reduced-motion, but still navigates', () => {
+    const start = vi.fn()
+    const fn = vi.fn()
+    withGlobals({ startViewTransition: start }, true, () => withViewTransition(fn))
+    expect(start).not.toHaveBeenCalled()
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('navigates plainly when the browser has no startViewTransition', () => {
+    const fn = vi.fn()
+    withGlobals({}, false, () => withViewTransition(fn))
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('navigates even when starting the transition throws', () => {
+    const fn = vi.fn()
+    withGlobals({ startViewTransition: () => { throw new Error('already running') } }, false,
+      () => withViewTransition(fn))
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a missing matchMedia as "no preference set", never as a reason not to navigate', () => {
+    const start = vi.fn((callback: () => void) => { callback() })
+    const fn = vi.fn()
+    withGlobals({ startViewTransition: start }, 'throw', () => withViewTransition(fn))
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 })
