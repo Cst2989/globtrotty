@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkFreshness, checkCurrency } from '../src/gates/checks.js'
 import { money } from '../src/money.js'
 import type { RehydratedItem } from '../src/gates/types.js'
+import { hotelDetail } from '../src/supplier/types.js'
 import type { SupplierItem } from '../src/supplier/types.js'
 
 const NOW = new Date('2026-08-16T12:00:00Z')
@@ -12,8 +13,7 @@ function item(over: Partial<SupplierItem> = {}, quantity = 1): RehydratedItem {
     price: over.price ?? money(10_000n, 'EUR'), priceBasis: 'total',
     fetchedAt: over.fetchedAt ?? new Date('2026-08-16T11:55:00Z'),
     ttlSeconds: over.ttlSeconds ?? 900, bookingUrl: null,
-    detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19',
-              nights: 7, rating: null, coordinates: null, offerSource: null },
+    detail: hotelDetail({ checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7 }),
     ...over,
   }
   return { ref: { sourceId: it.sourceId, quantity, slot: 'stay' }, item: { ...it, searchParams: null },

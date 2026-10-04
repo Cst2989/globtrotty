@@ -2,7 +2,19 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-export type Airport = { city: string; name: string }
+export type Airport = {
+  city: string
+  name: string
+  /** ISO 3166-1 alpha-2, straight from OurAirports' `iso_country`; `null` for a row without one. */
+  country: string | null
+  /**
+   * The `places.json` code this airport belongs to, or `null` for an airport that table does not
+   * cover. `metroFor` in scripts/build-airports.mjs derives it (three rules, documented there);
+   * `placeForAirport` (src/intake/places.ts) is what reads it, and it is the whole reason a
+   * flight into NRT can now search hotels in Tokyo instead of hotels in "NRT".
+   */
+  metro: string | null
+}
 
 /**
  * Airport code -> `{ city, name }`, from `airports.json` (built by

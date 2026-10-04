@@ -23,6 +23,8 @@ import type { IntakeDeps } from './intake.js'
 import { kiwiCabin } from './intake.js'
 import { nextStepsAttachment } from './nextSteps.js'
 import { rankItems } from '../intake/rank.js'
+import { hotelQuery, placeByName, type Place } from '../intake/places.js'
+import { withDistanceFromCentre } from './hotels.js'
 import { recordJevCall } from '../jev/record.js'
 import { readLatestUnfilteredResults } from '../repo/messages.js'
 import { loadNotebook } from '../repo/notebook.js'
@@ -80,17 +82,39 @@ export function flightParamsFor(query: ResultsContent['query']): FlightSearch | 
 }
 
 /**
- * The `HotelSearch` a stored hotels row implies. `query.place` is what `handleChooseFlight` sent
- * as the supplier's own `query` string (its `hotelQueryName`, the place table's name — never a
- * supplier's or hers), and `outbound`/`inbound` are the check-in and check-out it recorded.
- * `currency` comes from the notebook, the same place that search read it from.
+ * The `HotelSearch` a stored hotels row implies. `query.place` is the place table's own
+ * `hotelName` that `handleChooseFlight` searched for (never a supplier's string and never hers)
+ * and `query.country` is that place's ISO2; `hotelQuery` turns the pair back into the exact `q`
+ * the original search sent, and the code itself becomes the adapter's `gl`. `outbound`/`inbound`
+ * are the check-in and check-out the row recorded, and `currency` comes from the notebook — the
+ * same place that search read it from.
+ *
+ * The hotels pass: this used to send `q = query.place` on its own ("Tokyo"), which is a
+ * different search from the one it claims to be refreshing. Verified live on 2026-10-04,
+ * `q=Tokyo` comes back with vacation rentals in the United States — so the automatic refresh
+ * could quietly replace a list of real Tokyo hotels with exactly the bug this pass fixes.
  */
 export function hotelParamsFor(query: ResultsContent['query'], currency: string): HotelSearch | null {
   if (!query.place || !query.inbound) return null
+  const countryCode = query.country ?? null
   return {
-    kind: 'hotel', query: query.place, checkIn: query.outbound, checkOut: query.inbound,
-    adults: query.adults, currency,
+    kind: 'hotel', query: hotelQuery(query.place, countryCode),
+    checkIn: query.outbound, checkOut: query.inbound,
+    adults: query.adults, currency, countryCode,
   }
+}
+
+/**
+ * The destination place a stored hotels row names, or `null`.
+ *
+ * `query.place` is this table's own `hotelName` (written by `handleChooseFlight` from
+ * `Place.hotelName`), so `placeByName` resolves it back to the entry whose `center` the
+ * distance-from-centre figure is measured from. `null` for a row whose place the table no longer
+ * carries, and the distances then come back as `null` rather than as a lie about which city they
+ * are measured from.
+ */
+function placeForHotelsRow(query: ResultsContent['query']): Place | null {
+  return query.place ? placeByName(query.place) : null
 }
 
 /**
@@ -181,11 +205,17 @@ export async function handleRefresh(
       }
     }
 
-    const items = await search(deps, ctx, params)
+    const found = await search(deps, ctx, params)
+    // The refreshed stays get their distance from the centre stamped on exactly as the original
+    // search did (`handleChooseFlight`), from the stored row's own place — otherwise a refresh
+    // would quietly drop "3.2 km from centre" off every card.
+    const place = action.kind === 'hotel' ? placeForHotelsRow(base.query) : null
+    const items = place === null ? found : withDistanceFromCentre(found, place)
 
-    // Hotels are not re-ranked, here or in `handleChooseFlight`: `rankItems` scores flight
-    // itineraries against flight preferences and throws on anything else.
-    const ranked = action.kind === 'flight' && items.length > 1
+    // Both kinds are re-ranked by Jev now (the hotels pass): `rankItems` scores a stay against
+    // the stay preferences and an itinerary against the flight ones, and a hotels row left in
+    // SearchApi's own relevance order is six vacation rentals before the first real hotel.
+    const ranked = items.length > 1
       ? await rankItems({ jev: deps.jev }, briefForRank(base.query), items)
       : { ordered: items, request: null, response: null }
 

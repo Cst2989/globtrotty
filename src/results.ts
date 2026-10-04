@@ -57,6 +57,13 @@ export type ResultsContent = {
     from?: string
     to?: string
     place?: string
+    /**
+     * The destination's ISO 3166-1 alpha-2 country code, on a hotels row only (the hotels
+     * pass). `handleChooseFlight` writes it so `handleRefresh` can rebuild the IDENTICAL
+     * supplier query — `hotels in Tokyo, Japan` with `gl=jp` — off the stored row rather than
+     * re-deriving its own, which is how the two drifted apart before.
+     */
+    country?: string
     outbound: string
     inbound: string | null
     adults: number
@@ -129,6 +136,9 @@ export const ResultsContentSchema = z.strictObject({
     from: z.string().min(1).max(64).optional(),
     to: z.string().min(1).max(64).optional(),
     place: z.string().min(1).max(128).optional(),
+    // Exactly two letters: this is an ISO 3166-1 alpha-2 code from `places.json`, and it
+    // becomes a `gl` query parameter. Nothing else is a country code.
+    country: z.string().regex(/^[A-Z]{2}$/).optional(),
     outbound: z.string().regex(DATE_RE),
     inbound: z.string().regex(DATE_RE).nullable(),
     adults: z.number().int().min(1).max(20),

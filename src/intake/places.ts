@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { AIRPORTS } from './airports.js'
+import { countryName } from './countries.js'
 
 export type Region = 'europe' | 'north_america' | 'asia' | 'oceania' | 'africa' | 'south_america' | 'middle_east'
 
@@ -21,6 +23,13 @@ export type Place = {
   hotelName: string
   longHaulFrom?: string[]
   aliases: string[]
+  /**
+   * The city's own coordinates, geocoded once at build time (Nominatim, cached in
+   * scripts/.cache/geocode.json — see scripts/build-places.mjs). This is what "3.2 km from
+   * centre" on a hotel card is measured from. `null` for a place Nominatim could not answer
+   * for, and a null means the distance is not shown at all rather than shown as zero.
+   */
+  center: { lat: number; lon: number } | null
 }
 
 /**
@@ -93,4 +102,85 @@ export function isLongHaul(from: string, to: string): boolean {
   const b = REGION_BY_CODE.get(to)
   if (!a || !b) return false
   return a !== b
+}
+
+/**
+ * The metro a flight's ARRIVAL AIRPORT serves, or `null`.
+ *
+ * The hotels pass's bug 0: `handleChoose` derives the destination from the chosen flight's
+ * arrival airport code, and `CODE_MAP` is keyed on METRO codes. `CODE_MAP.get('NRT')` is
+ * therefore `undefined`, and the fallback sent the bare code to the supplier — a hotel search
+ * for `q=NRT`, which is how a Tokyo trip came back with vacation rentals in the United States.
+ * `airports.json` now carries the metro each airport belongs to (scripts/build-airports.mjs's
+ * `metroFor`), so this resolves NRT to the Tokyo entry.
+ *
+ * `null` for an airport the table does not place, and the caller must treat that as "no hotel
+ * search is possible here" rather than falling back to the code: the bare code is not a place
+ * name, and sending it to a hotel engine is worse than not searching, because the answer looks
+ * like results.
+ */
+export function placeForAirport(code: string): Place | null {
+  const metro = AIRPORTS[code.trim().toUpperCase()]?.metro ?? null
+  if (metro === null) return null
+  return CODE_MAP.get(metro) ?? null
+}
+
+/**
+ * The place one of this table's OWN names resolves to — `ALIAS_MAP`'s lookup, exposed as a
+ * function so callers do not each repeat the `normalise` step.
+ *
+ * The caller the hotels pass added is `handleRefresh` (src/agents/refresh.ts): a stored hotels
+ * row carries the `hotelName` it searched for, and the refresh needs that place's `center` back
+ * to recompute each stay's distance from the centre. Still this table's own string on both
+ * sides — the row was written from `Place.hotelName` in the first place.
+ */
+export function placeByName(name: string): Place | null {
+  const norm = normalise(name)
+  return norm === '' ? null : ALIAS_MAP.get(norm) ?? null
+}
+
+/**
+ * The place a flight leg's endpoint means, whether that endpoint is an airport code (what
+ * `LegSummary.from`/`to` carry) or already a metro code (what a stored `results` row's query
+ * carries). Airport first: `SHA` and `IST` are both, and the airport table's own answer for
+ * them is the metro anyway.
+ */
+export function placeForCode(code: string): Place | null {
+  return placeForAirport(code) ?? CODE_MAP.get(code.trim().toUpperCase()) ?? null
+}
+
+/**
+ * What a hotel search sends as its `q`. Verified live on 2026-10-04: `q=Tokyo` returns random
+ * US vacation rentals from SearchApi's `google_hotels` engine, while
+ * `q=hotels in Tokyo, Japan` with `gl=jp` returns real Tokyo hotels. The engine is a
+ * natural-language search, not a place-id lookup, so the words matter.
+ *
+ * Both halves come from this repo's own tables (`Place.hotelName`, `countries.json`) — never
+ * from a supplier's string and never from her typed message.
+ */
+export function hotelQuery(hotelName: string, countryCode: string | null): string {
+  const country = countryCode === null ? null : countryName(countryCode)
+  return country === null ? `hotels in ${hotelName}` : `hotels in ${hotelName}, ${country}`
+}
+
+const EARTH_RADIUS_KM = 6371
+
+const toRadians = (deg: number): number => (deg * Math.PI) / 180
+
+/**
+ * Great-circle distance in km, rounded to one decimal — the figure a card prints as
+ * "3.2 km from centre".
+ *
+ * A haversine rather than a flat-earth approximation because this is also used at long range
+ * (an airport 70 km out of town), and rounded here rather than at the renderer so the stored
+ * corpus value and the rendered one can never disagree.
+ */
+export function haversineKm(
+  a: { lat: number; lon: number }, b: { lat: number; lon: number },
+): number {
+  const dLat = toRadians(b.lat - a.lat)
+  const dLon = toRadians(b.lon - a.lon)
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRadians(a.lat)) * Math.cos(toRadians(b.lat)) * Math.sin(dLon / 2) ** 2
+  return Math.round(2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h))) * 10) / 10
 }

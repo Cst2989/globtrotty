@@ -34,12 +34,103 @@ export type FlightDetail = {
   totalDurationSeconds: number
   selfTransfer: boolean
 }
+/**
+ * One nearby place a property lists, with the travel time it quoted for it. Both strings are
+ * supplier-authored and masked at the adapter boundary (src/supplier/searchapi.ts), the same
+ * trust class as a carrier name.
+ */
+export type NearbyPlace = {
+  name: string
+  /** Minutes, or `null` when the property named the place without a duration. */
+  minutes: number | null
+  /** 'Taxi' / 'Public transport' / 'Walking' — the supplier's own transport word, masked. */
+  by: string | null
+}
+
+/**
+ * Everything a Booking-grade hotel card needs, which is a great deal more than the four fields
+ * this carried before the hotels pass. Each supplier-authored field is capped AND masked by the
+ * adapter rather than by the renderer, because the adapter is the boundary and the corpus
+ * (`tool_results.payload`) stores whatever lands here verbatim.
+ *
+ * Widening this needed no migration: the corpus stores the whole `SupplierItem` as JSON, so an
+ * older row simply lacks the new fields and `web/data.ts`'s reader defaults each one.
+ */
 export type HotelDetail = {
   kind: 'hotel'
   checkIn: string; checkOut: string; nights: number
   rating: number | null
   coordinates: { lat: number; lon: number } | null
   offerSource: string | null
+  /**
+   * SearchApi's own `type` field, narrowed to three values. `'other'` covers a type outside the
+   * two it documents — an unknown string never reaches a card as a label, and a "Hotel" badge on
+   * something that is not one is exactly the lie the Type filter exists to prevent.
+   */
+  propertyType: 'hotel' | 'rental' | 'other'
+  /** Hotel class in stars (`extracted_hotel_class`), 1-5, or `null` for an unclassified property. */
+  stars: number | null
+  /** How many reviews the rating is computed from; `null` when absent. */
+  reviews: number | null
+  /** SearchApi's own `location_rating`, 0-5, or `null`. */
+  locationRating: number | null
+  /**
+   * Up to 5 photo URLs, https only, and ONLY from Google's own image hosts — see
+   * `allowedImageUrl` in src/supplier/searchapi.ts. These end up in an `<img src>` under a CSP
+   * that names exactly those hosts, so a `javascript:` or `http://evil` URL is dropped at the
+   * adapter rather than left to be blocked later.
+   */
+  images: string[]
+  /** Up to 12 amenity labels, masked, each at most 40 characters. */
+  amenities: string[]
+  /** Up to 6 `essential_info` labels ("Entire house", "Sleeps 4"), masked, 40 characters each. */
+  essentials: string[]
+  /** Up to 3 nearby places, in the order the supplier listed them. */
+  nearby: NearbyPlace[]
+  /** The per-night price in minor units as a decimal string, or `null` when the supplier gave none. */
+  pricePerNightMinor: string | null
+  /**
+   * Kilometres from the destination place's own centre (`Place.center`), computed by the AGENT
+   * after the search — the adapter has no idea which city was searched for, only what came back.
+   * `null` when either end is unknown.
+   */
+  distanceKm: number | null
+}
+
+/**
+ * A `HotelDetail` from the four things every stay has, with every field the hotels pass added
+ * defaulted to "nothing known".
+ *
+ * Why a factory rather than making the new fields optional: `HotelDetail` is what the corpus
+ * stores and what every card, filter and gate reads, and an optional field is one a future
+ * adapter can forget to populate while the compiler says nothing. A required field plus one
+ * documented place listing the "nothing known" value means `SearchApiHotels` must still answer
+ * for all twelve of them, while the mock supplier, the drift monitor's golden fixtures and the
+ * tests stay one line each.
+ *
+ * Deliberately NOT used by `src/supplier/searchapi.ts`: the real adapter writes every field out
+ * explicitly, because the mapping from a supplier's JSON is exactly what its tests pin.
+ */
+export function hotelDetail(
+  core: Pick<HotelDetail, 'checkIn' | 'checkOut' | 'nights'> & Partial<HotelDetail>,
+): HotelDetail {
+  return {
+    kind: 'hotel',
+    rating: null,
+    coordinates: null,
+    offerSource: null,
+    propertyType: 'other',
+    stars: null,
+    reviews: null,
+    locationRating: null,
+    images: [],
+    amenities: [],
+    essentials: [],
+    nearby: [],
+    pricePerNightMinor: null,
+    distanceKm: null,
+    ...core,
+  }
 }
 
 export type SupplierItem = {
@@ -68,10 +159,18 @@ export type FlightSearch = {
 }
 export type HotelSearch = {
   kind: 'hotel'
+  /** `hotels in Tokyo, Japan` — built by `hotelQuery` (src/intake/places.ts); see it for why. */
   query: string
   checkIn: string; checkOut: string
   adults: number
   currency: string
+  /**
+   * ISO 3166-1 alpha-2 for the destination's country, which the adapter sends as `gl` (the
+   * market Google searches in). Verified live on 2026-10-04: without `gl=jp` a Tokyo query comes
+   * back with US vacation rentals. `null` for a destination whose country this office does not
+   * know, and the adapter then sends no `gl` at all rather than guessing a market.
+   */
+  countryCode: string | null
 }
 export type SearchParams = FlightSearch | HotelSearch
 

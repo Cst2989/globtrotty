@@ -17,17 +17,26 @@
 // in the current dataset, so a stale or mistyped code is caught rather than
 // silently shipped.
 //
+// Each entry also carries `center`: the city's own coordinates, geocoded once
+// through Nominatim and cached in scripts/.cache/geocode.json (committed, so a
+// rebuild is offline and nobody re-hammers a free service for an answer this
+// repo already has). The hotels pass needs it for "3.2 km from centre" on a
+// hotel card, which is a haversine from this point.
+//
 // Usage: node scripts/build-places.mjs
-// Writes: src/intake/places.json
+// Writes: src/intake/places.json, scripts/.cache/geocode.json
 
-import { writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const AIRPORTS_CSV_URL = 'https://davidmegginson.github.io/ourairports-data/airports.csv'
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OUT_PATH = path.join(__dirname, '..', 'src', 'intake', 'places.json')
+const CACHE_DIR = path.join(__dirname, '.cache')
+const GEOCODE_CACHE_PATH = path.join(CACHE_DIR, 'geocode.json')
 
 /** Minimal CSV line parser respecting double-quoted fields (handles embedded commas/quotes). */
 function parseCsvLine(line) {
@@ -291,6 +300,102 @@ const ALIASES_BY_CODE = {
   SJO: ['san jose costa rica', 'san josé costa rica'],
 }
 
+/**
+ * What to ask Nominatim for, where `<city>,<country>` is not the city.
+ *
+ * Three kinds of exception, all found by reading the misses from an actual
+ * run rather than guessed: a display name that is a disambiguation rather
+ * than a place ("Seoul-Incheon"), an entry whose `city` is the ISLAND or
+ * COUNTRY and whose centre should be its actual city (Mauritius -> Port
+ * Louis, Fiji -> Nadi, Malta -> Valletta), and a city whose English name
+ * Nominatim does not index ("Los Cabos" -> "San José del Cabo").
+ *
+ * Keyed by place code, because the display name is exactly what is being
+ * overridden here.
+ */
+const GEOCODE_QUERY_BY_CODE = {
+  ICN: 'Seoul, KR',
+  MRU: 'Port Louis, MU',
+  SEZ: 'Victoria, SC',
+  NAN: 'Nadi, FJ',
+  MLA: 'Valletta, MT',
+  SJD: 'San José del Cabo, MX',
+  LPA: 'Las Palmas de Gran Canaria, ES',
+  TFS: 'Santa Cruz de Tenerife, ES',
+  DPS: 'Denpasar, ID',
+  GOI: 'Panaji, IN',
+  AUA: 'Oranjestad, AW',
+  CUR: 'Willemstad, CW',
+  MJI: 'Tripoli, LY',
+  POS: 'Port of Spain, TT',
+}
+
+function loadGeocodeCache() {
+  if (!existsSync(GEOCODE_CACHE_PATH)) return {}
+  return JSON.parse(readFileSync(GEOCODE_CACHE_PATH, 'utf8'))
+}
+
+function saveGeocodeCache(cache) {
+  mkdirSync(CACHE_DIR, { recursive: true })
+  const sorted = Object.fromEntries(Object.entries(cache).sort(([a], [b]) => a.localeCompare(b)))
+  writeFileSync(GEOCODE_CACHE_PATH, JSON.stringify(sorted, null, 2) + '\n')
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * One Nominatim lookup, cached by the exact query string. Returns
+ * `{ lat, lon }` rounded to four decimals (~11 m, far finer than a city
+ * centre is even meaningful to) or `null` for a query it cannot answer — a
+ * null is cached too, so a rebuild does not retry a known miss and the
+ * misses are visible in the committed cache rather than only in a log.
+ *
+ * Nominatim's usage policy: at most one request a second, and a real
+ * `User-Agent`. Both are honoured here; `cached` tells the caller whether it
+ * owes the service that second of politeness.
+ */
+async function geocode(query, cache) {
+  if (Object.prototype.hasOwnProperty.call(cache, query)) return { center: cache[query], cached: true }
+  const url = new URL(NOMINATIM_URL)
+  url.searchParams.set('q', query)
+  url.searchParams.set('format', 'json')
+  url.searchParams.set('limit', '1')
+  const res = await fetch(url, { headers: { 'User-Agent': 'globetrotty-build' } })
+  if (!res.ok) throw new Error(`nominatim: HTTP ${res.status} for ${query}`)
+  const body = await res.json()
+  const first = Array.isArray(body) ? body[0] : undefined
+  const lat = first ? Number(first.lat) : NaN
+  const lon = first ? Number(first.lon) : NaN
+  const center = Number.isFinite(lat) && Number.isFinite(lon)
+    ? { lat: Math.round(lat * 1e4) / 1e4, lon: Math.round(lon * 1e4) / 1e4 }
+    : null
+  cache[query] = center
+  return { center, cached: false }
+}
+
+/** Fills `center` on every place, in place, and returns the queries that came back empty. */
+async function addCenters(places, warnings) {
+  const cache = loadGeocodeCache()
+  let fetched = 0
+  try {
+    for (const p of places) {
+      const query = GEOCODE_QUERY_BY_CODE[p.code] ?? `${p.city}, ${p.country}`
+      const { center, cached } = await geocode(query, cache)
+      p.center = center
+      if (center === null) warnings.push(`${p.city} (${p.code}): Nominatim had no result for "${query}"; center is null`)
+      if (!cached) {
+        fetched++
+        await sleep(1100)
+      }
+    }
+  } finally {
+    // Saved even on a throw: a part-finished run must not cost the places it
+    // already paid for.
+    saveGeocodeCache(cache)
+  }
+  console.log(`${fetched} place(s) geocoded live; ${places.length - fetched} came from scripts/.cache/geocode.json`)
+}
+
 async function main() {
   console.log(`Downloading ${AIRPORTS_CSV_URL} ...`)
   const res = await fetch(AIRPORTS_CSV_URL)
@@ -332,6 +437,8 @@ async function main() {
   for (const p of places) {
     p.aliases = [...new Set([...p.aliases, ...(ALIASES_BY_CITY[p.city] ?? []), ...(ALIASES_BY_CODE[p.code] ?? [])])]
   }
+
+  await addCenters(places, warnings)
 
   if (warnings.length > 0) {
     console.warn(`\n${warnings.length} warning(s):`)

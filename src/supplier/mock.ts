@@ -1,6 +1,6 @@
 import { money } from '../money.js'
 import { nightsBetween } from './dates.js'
-import { DEFAULT_MAX_AGE_SECONDS } from './types.js'
+import { DEFAULT_MAX_AGE_SECONDS, hotelDetail } from './types.js'
 import type {
   Supplier, SupplierItem, SupplierKind, SearchParams, QuoteOutcome, SupplierCapabilities,
 } from './types.js'
@@ -141,14 +141,19 @@ export class MockSupplier implements Supplier {
     }
     return {
       ...base,
-      detail: {
-        kind: 'hotel',
+      detail: hotelDetail({
         checkIn: params.checkIn, checkOut: params.checkOut,
         nights: nightsBetween(params.checkIn, params.checkOut),
         rating: 3 + (i % 3) * 0.5,
         coordinates: { lat: 37.02, lon: -7.93 },
         offerSource: 'mock.example',
-      },
+        // The hotels pass: enough of the new card fields for a mock list to render as a real one
+        // (a photo is deliberately absent — this supplier invents nothing it cannot host).
+        propertyType: i % 3 === 0 ? 'rental' : 'hotel',
+        stars: 3 + (i % 3),
+        reviews: 120 + i * 37,
+        amenities: ['Free Wi-Fi', 'Air conditioning'],
+      }),
     }
   }
 }

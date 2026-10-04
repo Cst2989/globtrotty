@@ -5,7 +5,11 @@
     "country": "CI",
     "region": "africa",
     "hotelName": "Abidjan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 5.3204,
+      "lon": -4.0161
+    }
   },
   {
     "code": "ABQ",
@@ -13,7 +17,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Albuquerque",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.0841,
+      "lon": -106.651
+    }
   },
   {
     "code": "ABV",
@@ -21,7 +29,11 @@
     "country": "NG",
     "region": "africa",
     "hotelName": "Abuja",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 9.0643,
+      "lon": 7.4893
+    }
   },
   {
     "code": "ACC",
@@ -29,7 +41,11 @@
     "country": "GH",
     "region": "africa",
     "hotelName": "Accra",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 5.5571,
+      "lon": -0.2012
+    }
   },
   {
     "code": "ADD",
@@ -37,7 +53,11 @@
     "country": "ET",
     "region": "africa",
     "hotelName": "Addis Ababa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 9.0358,
+      "lon": 38.7524
+    }
   },
   {
     "code": "ADL",
@@ -45,7 +65,11 @@
     "country": "AU",
     "region": "oceania",
     "hotelName": "Adelaide",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -34.9282,
+      "lon": 138.5999
+    }
   },
   {
     "code": "AGP",
@@ -53,7 +77,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Malaga",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.7648,
+      "lon": -4.4422
+    }
   },
   {
     "code": "AKL",
@@ -61,7 +89,11 @@
     "country": "NZ",
     "region": "oceania",
     "hotelName": "Auckland",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -36.8521,
+      "lon": 174.7632
+    }
   },
   {
     "code": "ALA",
@@ -69,7 +101,11 @@
     "country": "KZ",
     "region": "asia",
     "hotelName": "Almaty",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.2364,
+      "lon": 76.9457
+    }
   },
   {
     "code": "ALG",
@@ -77,7 +113,11 @@
     "country": "DZ",
     "region": "africa",
     "hotelName": "Algiers",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.7729,
+      "lon": 3.0588
+    }
   },
   {
     "code": "AMM",
@@ -85,7 +125,11 @@
     "country": "JO",
     "region": "middle_east",
     "hotelName": "Amman",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 31.9516,
+      "lon": 35.924
+    }
   },
   {
     "code": "AMS",
@@ -93,7 +137,11 @@
     "country": "NL",
     "region": "europe",
     "hotelName": "Amsterdam",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 52.3731,
+      "lon": 4.8925
+    }
   },
   {
     "code": "ANC",
@@ -101,7 +149,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Anchorage",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 61.2163,
+      "lon": -149.8949
+    }
   },
   {
     "code": "ASU",
@@ -109,7 +161,11 @@
     "country": "PY",
     "region": "south_america",
     "hotelName": "Asuncion",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -25.28,
+      "lon": -57.6344
+    }
   },
   {
     "code": "ATH",
@@ -119,7 +175,11 @@
     "hotelName": "Athens",
     "aliases": [
       "athina"
-    ]
+    ],
+    "center": {
+      "lat": 37.9756,
+      "lon": 23.7348
+    }
   },
   {
     "code": "ATL",
@@ -127,7 +187,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Atlanta",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.7545,
+      "lon": -84.3898
+    }
   },
   {
     "code": "AUA",
@@ -135,7 +199,11 @@
     "country": "AW",
     "region": "north_america",
     "hotelName": "Aruba",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 12.5201,
+      "lon": -70.0371
+    }
   },
   {
     "code": "AUH",
@@ -143,7 +211,11 @@
     "country": "AE",
     "region": "middle_east",
     "hotelName": "Abu Dhabi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 24.4538,
+      "lon": 54.3774
+    }
   },
   {
     "code": "AUS",
@@ -151,7 +223,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Austin",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.2711,
+      "lon": -97.7437
+    }
   },
   {
     "code": "BAH",
@@ -159,7 +235,11 @@
     "country": "BH",
     "region": "middle_east",
     "hotelName": "Manama",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 26.2235,
+      "lon": 50.5822
+    }
   },
   {
     "code": "BCN",
@@ -169,7 +249,11 @@
     "hotelName": "Barcelona",
     "aliases": [
       "barcelone"
-    ]
+    ],
+    "center": {
+      "lat": 41.3826,
+      "lon": 2.1771
+    }
   },
   {
     "code": "BEG",
@@ -177,7 +261,11 @@
     "country": "RS",
     "region": "europe",
     "hotelName": "Belgrade",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 44.8153,
+      "lon": 20.4457
+    }
   },
   {
     "code": "BER",
@@ -185,7 +273,11 @@
     "country": "DE",
     "region": "europe",
     "hotelName": "Berlin",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 52.5174,
+      "lon": 13.3951
+    }
   },
   {
     "code": "BEY",
@@ -193,7 +285,11 @@
     "country": "LB",
     "region": "middle_east",
     "hotelName": "Beirut",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.8892,
+      "lon": 35.5026
+    }
   },
   {
     "code": "BFS",
@@ -201,7 +297,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Belfast",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 54.5964,
+      "lon": -5.9302
+    }
   },
   {
     "code": "BGI",
@@ -209,7 +309,11 @@
     "country": "BB",
     "region": "north_america",
     "hotelName": "Bridgetown",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 13.0978,
+      "lon": -59.6184
+    }
   },
   {
     "code": "BGO",
@@ -217,7 +321,11 @@
     "country": "NO",
     "region": "europe",
     "hotelName": "Bergen",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 60.3943,
+      "lon": 5.3259
+    }
   },
   {
     "code": "BGW",
@@ -225,7 +333,11 @@
     "country": "IQ",
     "region": "middle_east",
     "hotelName": "Baghdad",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.3062,
+      "lon": 44.3872
+    }
   },
   {
     "code": "BHX",
@@ -233,7 +345,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Birmingham",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 52.4949,
+      "lon": -1.8518
+    }
   },
   {
     "code": "BIO",
@@ -241,7 +357,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Bilbao",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.263,
+      "lon": -2.935
+    }
   },
   {
     "code": "BJS",
@@ -249,7 +369,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Beijing",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.9057,
+      "lon": 116.3913
+    }
   },
   {
     "code": "BKK",
@@ -259,7 +383,11 @@
     "hotelName": "Bangkok",
     "aliases": [
       "bkk"
-    ]
+    ],
+    "center": {
+      "lat": 13.7525,
+      "lon": 100.4935
+    }
   },
   {
     "code": "BLQ",
@@ -267,7 +395,11 @@
     "country": "IT",
     "region": "europe",
     "hotelName": "Bologna",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 44.4938,
+      "lon": 11.3426
+    }
   },
   {
     "code": "BLR",
@@ -275,7 +407,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Bangalore",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 12.9768,
+      "lon": 77.5901
+    }
   },
   {
     "code": "BNA",
@@ -283,7 +419,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Nashville",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.1623,
+      "lon": -86.7743
+    }
   },
   {
     "code": "BNE",
@@ -291,7 +431,11 @@
     "country": "AU",
     "region": "oceania",
     "hotelName": "Brisbane",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -27.469,
+      "lon": 153.0235
+    }
   },
   {
     "code": "BOD",
@@ -299,7 +443,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Bordeaux",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 44.8412,
+      "lon": -0.58
+    }
   },
   {
     "code": "BOG",
@@ -307,7 +455,11 @@
     "country": "CO",
     "region": "south_america",
     "hotelName": "Bogota",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 4.6534,
+      "lon": -74.0836
+    }
   },
   {
     "code": "BOM",
@@ -315,7 +467,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Mumbai",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 19.055,
+      "lon": 72.8692
+    }
   },
   {
     "code": "BOS",
@@ -323,7 +479,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Boston",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 42.3588,
+      "lon": -71.0578
+    }
   },
   {
     "code": "BRS",
@@ -331,7 +491,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Bristol",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 51.443,
+      "lon": -2.5817
+    }
   },
   {
     "code": "BRU",
@@ -339,7 +503,11 @@
     "country": "BE",
     "region": "europe",
     "hotelName": "Brussels",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 50.8467,
+      "lon": 4.3525
+    }
   },
   {
     "code": "BSB",
@@ -347,7 +515,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Brasilia",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -15.794,
+      "lon": -47.8828
+    }
   },
   {
     "code": "BUD",
@@ -355,7 +527,11 @@
     "country": "HU",
     "region": "europe",
     "hotelName": "Budapest",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 47.4979,
+      "lon": 19.0402
+    }
   },
   {
     "code": "BUE",
@@ -363,7 +539,11 @@
     "country": "AR",
     "region": "south_america",
     "hotelName": "Buenos Aires",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -34.6096,
+      "lon": -58.3888
+    }
   },
   {
     "code": "BWI",
@@ -371,7 +551,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Baltimore",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.2909,
+      "lon": -76.6108
+    }
   },
   {
     "code": "BZE",
@@ -379,7 +563,11 @@
     "country": "BZ",
     "region": "north_america",
     "hotelName": "Belize City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 17.5003,
+      "lon": -88.1989
+    }
   },
   {
     "code": "CAI",
@@ -387,7 +575,11 @@
     "country": "EG",
     "region": "africa",
     "hotelName": "Cairo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.0444,
+      "lon": 31.2357
+    }
   },
   {
     "code": "CAN",
@@ -395,7 +587,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Guangzhou",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 23.1288,
+      "lon": 113.259
+    }
   },
   {
     "code": "CCS",
@@ -403,7 +599,11 @@
     "country": "VE",
     "region": "south_america",
     "hotelName": "Caracas",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 10.5061,
+      "lon": -66.9146
+    }
   },
   {
     "code": "CCU",
@@ -411,7 +611,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Kolkata",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 22.5726,
+      "lon": 88.3639
+    }
   },
   {
     "code": "CEB",
@@ -419,7 +623,11 @@
     "country": "PH",
     "region": "asia",
     "hotelName": "Cebu",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 10.47,
+      "lon": 123.83
+    }
   },
   {
     "code": "CGN",
@@ -430,7 +638,11 @@
     "aliases": [
       "köln",
       "koln"
-    ]
+    ],
+    "center": {
+      "lat": 50.9384,
+      "lon": 6.96
+    }
   },
   {
     "code": "CHC",
@@ -438,7 +650,11 @@
     "country": "NZ",
     "region": "oceania",
     "hotelName": "Christchurch",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -43.531,
+      "lon": 172.6364
+    }
   },
   {
     "code": "CHI",
@@ -446,7 +662,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Chicago",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.8756,
+      "lon": -87.6244
+    }
   },
   {
     "code": "CKG",
@@ -454,7 +674,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Chongqing",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.0552,
+      "lon": 107.8749
+    }
   },
   {
     "code": "CLE",
@@ -462,7 +686,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Cleveland",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.4997,
+      "lon": -81.6937
+    }
   },
   {
     "code": "CLJ",
@@ -472,7 +700,11 @@
     "hotelName": "Cluj-Napoca",
     "aliases": [
       "cluj"
-    ]
+    ],
+    "center": {
+      "lat": 46.7694,
+      "lon": 23.59
+    }
   },
   {
     "code": "CLO",
@@ -480,7 +712,11 @@
     "country": "CO",
     "region": "south_america",
     "hotelName": "Cali",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 3.4108,
+      "lon": -76.5812
+    }
   },
   {
     "code": "CLT",
@@ -488,7 +724,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Charlotte",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.2272,
+      "lon": -80.8431
+    }
   },
   {
     "code": "CMB",
@@ -496,7 +736,11 @@
     "country": "LK",
     "region": "asia",
     "hotelName": "Colombo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 6.9389,
+      "lon": 79.8542
+    }
   },
   {
     "code": "CMH",
@@ -504,7 +748,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Columbus",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.9623,
+      "lon": -83.0007
+    }
   },
   {
     "code": "CMN",
@@ -512,7 +760,11 @@
     "country": "MA",
     "region": "africa",
     "hotelName": "Casablanca",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.5945,
+      "lon": -7.62
+    }
   },
   {
     "code": "CNF",
@@ -520,7 +772,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Belo Horizonte",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -19.9227,
+      "lon": -43.9451
+    }
   },
   {
     "code": "CNX",
@@ -528,7 +784,11 @@
     "country": "TH",
     "region": "asia",
     "hotelName": "Chiang Mai",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 18.7883,
+      "lon": 98.9859
+    }
   },
   {
     "code": "COK",
@@ -536,7 +796,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Kochi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 9.9679,
+      "lon": 76.2444
+    }
   },
   {
     "code": "COR",
@@ -544,7 +808,11 @@
     "country": "AR",
     "region": "south_america",
     "hotelName": "Cordoba",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -31.4167,
+      "lon": -64.1834
+    }
   },
   {
     "code": "CPH",
@@ -555,7 +823,11 @@
     "aliases": [
       "kobenhavn",
       "københavn"
-    ]
+    ],
+    "center": {
+      "lat": 55.6867,
+      "lon": 12.5701
+    }
   },
   {
     "code": "CPT",
@@ -563,7 +835,11 @@
     "country": "ZA",
     "region": "africa",
     "hotelName": "Cape Town",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -33.9288,
+      "lon": 18.4172
+    }
   },
   {
     "code": "CTS",
@@ -571,7 +847,11 @@
     "country": "JP",
     "region": "asia",
     "hotelName": "Sapporo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.0619,
+      "lon": 141.3543
+    }
   },
   {
     "code": "CTU",
@@ -579,7 +859,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Chengdu",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.6599,
+      "lon": 104.0633
+    }
   },
   {
     "code": "CUN",
@@ -587,7 +871,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Cancun",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 21.1527,
+      "lon": -86.8426
+    }
   },
   {
     "code": "CUR",
@@ -595,7 +883,11 @@
     "country": "CW",
     "region": "north_america",
     "hotelName": "Curacao",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 12.1067,
+      "lon": -68.9351
+    }
   },
   {
     "code": "CVG",
@@ -603,7 +895,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Cincinnati",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.1013,
+      "lon": -84.5127
+    }
   },
   {
     "code": "CWB",
@@ -611,7 +907,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Curitiba",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -25.4296,
+      "lon": -49.2713
+    }
   },
   {
     "code": "DAC",
@@ -619,7 +919,11 @@
     "country": "BD",
     "region": "asia",
     "hotelName": "Dhaka",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 23.7644,
+      "lon": 90.389
+    }
   },
   {
     "code": "DAR",
@@ -627,7 +931,11 @@
     "country": "TZ",
     "region": "africa",
     "hotelName": "Dar es Salaam",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -6.8161,
+      "lon": 39.2804
+    }
   },
   {
     "code": "DBV",
@@ -635,7 +943,11 @@
     "country": "HR",
     "region": "europe",
     "hotelName": "Dubrovnik",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 42.6491,
+      "lon": 18.094
+    }
   },
   {
     "code": "DEL",
@@ -643,7 +955,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "New Delhi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 28.6139,
+      "lon": 77.209
+    }
   },
   {
     "code": "DEN",
@@ -651,7 +967,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Denver",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.7392,
+      "lon": -104.9849
+    }
   },
   {
     "code": "DFW",
@@ -659,7 +979,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Dallas",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.7763,
+      "lon": -96.7969
+    }
   },
   {
     "code": "DOH",
@@ -667,7 +991,11 @@
     "country": "QA",
     "region": "middle_east",
     "hotelName": "Doha",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.3109,
+      "lon": 51.5082
+    }
   },
   {
     "code": "DPS",
@@ -675,7 +1003,11 @@
     "country": "ID",
     "region": "asia",
     "hotelName": "Bali",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -8.6653,
+      "lon": 115.2176
+    }
   },
   {
     "code": "DSS",
@@ -683,7 +1015,11 @@
     "country": "SN",
     "region": "africa",
     "hotelName": "Dakar",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 14.6934,
+      "lon": -17.4479
+    }
   },
   {
     "code": "DTW",
@@ -691,7 +1027,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Detroit",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 42.3316,
+      "lon": -83.0466
+    }
   },
   {
     "code": "DUB",
@@ -699,7 +1039,11 @@
     "country": "IE",
     "region": "europe",
     "hotelName": "Dublin",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.3494,
+      "lon": -6.2606
+    }
   },
   {
     "code": "DUS",
@@ -707,7 +1051,11 @@
     "country": "DE",
     "region": "europe",
     "hotelName": "Dusseldorf",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 51.2254,
+      "lon": 6.7763
+    }
   },
   {
     "code": "DXB",
@@ -715,7 +1063,11 @@
     "country": "AE",
     "region": "middle_east",
     "hotelName": "Dubai",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.0743,
+      "lon": 55.1886
+    }
   },
   {
     "code": "EBB",
@@ -723,7 +1075,11 @@
     "country": "UG",
     "region": "africa",
     "hotelName": "Kampala",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 0.3177,
+      "lon": 32.5814
+    }
   },
   {
     "code": "EBL",
@@ -731,7 +1087,11 @@
     "country": "IQ",
     "region": "middle_east",
     "hotelName": "Erbil",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.1912,
+      "lon": 44.0094
+    }
   },
   {
     "code": "EDI",
@@ -739,7 +1099,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Edinburgh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 55.9533,
+      "lon": -3.1884
+    }
   },
   {
     "code": "EVN",
@@ -747,7 +1111,11 @@
     "country": "AM",
     "region": "asia",
     "hotelName": "Yerevan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.1777,
+      "lon": 44.5126
+    }
   },
   {
     "code": "FAO",
@@ -755,7 +1123,11 @@
     "country": "PT",
     "region": "europe",
     "hotelName": "Faro",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 37.0163,
+      "lon": -7.9352
+    }
   },
   {
     "code": "FIH",
@@ -763,7 +1135,11 @@
     "country": "CD",
     "region": "africa",
     "hotelName": "Kinshasa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -4.3197,
+      "lon": 15.3424
+    }
   },
   {
     "code": "FLL",
@@ -771,7 +1147,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Fort Lauderdale",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 26.1223,
+      "lon": -80.1434
+    }
   },
   {
     "code": "FLR",
@@ -781,7 +1161,11 @@
     "hotelName": "Florence",
     "aliases": [
       "firenze"
-    ]
+    ],
+    "center": {
+      "lat": 43.7698,
+      "lon": 11.2556
+    }
   },
   {
     "code": "FOR",
@@ -789,7 +1173,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Fortaleza",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -3.7932,
+      "lon": -38.528
+    }
   },
   {
     "code": "FRA",
@@ -797,7 +1185,11 @@
     "country": "DE",
     "region": "europe",
     "hotelName": "Frankfurt",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 50.1106,
+      "lon": 8.6821
+    }
   },
   {
     "code": "FUK",
@@ -805,7 +1197,11 @@
     "country": "JP",
     "region": "asia",
     "hotelName": "Fukuoka",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.6251,
+      "lon": 130.618
+    }
   },
   {
     "code": "GBE",
@@ -813,7 +1209,11 @@
     "country": "BW",
     "region": "africa",
     "hotelName": "Gaborone",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -24.6581,
+      "lon": 25.9088
+    }
   },
   {
     "code": "GDL",
@@ -821,7 +1221,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Guadalajara",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 20.672,
+      "lon": -103.3384
+    }
   },
   {
     "code": "GDN",
@@ -829,7 +1233,11 @@
     "country": "PL",
     "region": "europe",
     "hotelName": "Gdansk",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 54.3483,
+      "lon": 18.654
+    }
   },
   {
     "code": "GLA",
@@ -837,7 +1245,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Glasgow",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 55.8612,
+      "lon": -4.2502
+    }
   },
   {
     "code": "GOI",
@@ -845,7 +1257,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Goa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 15.499,
+      "lon": 73.8282
+    }
   },
   {
     "code": "GOT",
@@ -853,7 +1269,11 @@
     "country": "SE",
     "region": "europe",
     "hotelName": "Gothenburg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 57.7072,
+      "lon": 11.967
+    }
   },
   {
     "code": "GUA",
@@ -861,7 +1281,11 @@
     "country": "GT",
     "region": "north_america",
     "hotelName": "Guatemala City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 14.6416,
+      "lon": -90.5133
+    }
   },
   {
     "code": "GVA",
@@ -869,7 +1293,11 @@
     "country": "CH",
     "region": "europe",
     "hotelName": "Geneva",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 46.2018,
+      "lon": 6.1466
+    }
   },
   {
     "code": "GYD",
@@ -877,7 +1305,11 @@
     "country": "AZ",
     "region": "asia",
     "hotelName": "Baku",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.3756,
+      "lon": 49.8328
+    }
   },
   {
     "code": "GYE",
@@ -885,7 +1317,11 @@
     "country": "EC",
     "region": "south_america",
     "hotelName": "Guayaquil",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -2.1901,
+      "lon": -79.8869
+    }
   },
   {
     "code": "HAM",
@@ -893,7 +1329,11 @@
     "country": "DE",
     "region": "europe",
     "hotelName": "Hamburg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.5502,
+      "lon": 10.0013
+    }
   },
   {
     "code": "HAN",
@@ -901,7 +1341,11 @@
     "country": "VN",
     "region": "asia",
     "hotelName": "Hanoi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 21.0283,
+      "lon": 105.854
+    }
   },
   {
     "code": "HAV",
@@ -909,7 +1353,11 @@
     "country": "CU",
     "region": "north_america",
     "hotelName": "Havana",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 23.1353,
+      "lon": -82.359
+    }
   },
   {
     "code": "HEL",
@@ -917,7 +1365,11 @@
     "country": "FI",
     "region": "europe",
     "hotelName": "Helsinki",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 60.1666,
+      "lon": 24.9435
+    }
   },
   {
     "code": "HER",
@@ -925,7 +1377,11 @@
     "country": "GR",
     "region": "europe",
     "hotelName": "Heraklion",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.3391,
+      "lon": 25.1333
+    }
   },
   {
     "code": "HGH",
@@ -933,7 +1389,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Hangzhou",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.249,
+      "lon": 120.2052
+    }
   },
   {
     "code": "HKG",
@@ -943,7 +1403,11 @@
     "hotelName": "Hong Kong",
     "aliases": [
       "hk"
-    ]
+    ],
+    "center": {
+      "lat": 22.2818,
+      "lon": 114.1583
+    }
   },
   {
     "code": "HKT",
@@ -951,7 +1415,11 @@
     "country": "TH",
     "region": "asia",
     "hotelName": "Phuket",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 7.9366,
+      "lon": 98.3529
+    }
   },
   {
     "code": "HNL",
@@ -959,7 +1427,11 @@
     "country": "US",
     "region": "oceania",
     "hotelName": "Honolulu",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 21.3045,
+      "lon": -157.8557
+    }
   },
   {
     "code": "HRE",
@@ -967,7 +1439,11 @@
     "country": "ZW",
     "region": "africa",
     "hotelName": "Harare",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -17.8567,
+      "lon": 31.0602
+    }
   },
   {
     "code": "HYD",
@@ -975,7 +1451,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Hyderabad",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 17.3606,
+      "lon": 78.4741
+    }
   },
   {
     "code": "IAH",
@@ -983,7 +1463,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Houston",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 29.7589,
+      "lon": -95.3677
+    }
   },
   {
     "code": "IBZ",
@@ -991,7 +1475,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Ibiza",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 38.9744,
+      "lon": 1.4197
+    }
   },
   {
     "code": "ICN",
@@ -999,7 +1487,11 @@
     "country": "KR",
     "region": "asia",
     "hotelName": "Seoul-Incheon",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 37.5667,
+      "lon": 126.9783
+    }
   },
   {
     "code": "IKA",
@@ -1007,7 +1499,11 @@
     "country": "IR",
     "region": "middle_east",
     "hotelName": "Tehran",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.6893,
+      "lon": 51.3896
+    }
   },
   {
     "code": "IND",
@@ -1015,7 +1511,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Indianapolis",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.7683,
+      "lon": -86.1584
+    }
   },
   {
     "code": "ISB",
@@ -1023,7 +1523,11 @@
     "country": "PK",
     "region": "asia",
     "hotelName": "Islamabad",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.6938,
+      "lon": 73.0652
+    }
   },
   {
     "code": "IST",
@@ -1031,7 +1535,11 @@
     "country": "TR",
     "region": "europe",
     "hotelName": "Istanbul",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.0064,
+      "lon": 28.9759
+    }
   },
   {
     "code": "JED",
@@ -1039,7 +1547,11 @@
     "country": "SA",
     "region": "middle_east",
     "hotelName": "Jeddah",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 21.5504,
+      "lon": 39.1742
+    }
   },
   {
     "code": "JKT",
@@ -1047,7 +1559,11 @@
     "country": "ID",
     "region": "asia",
     "hotelName": "Jakarta",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -6.1754,
+      "lon": 106.8272
+    }
   },
   {
     "code": "JNB",
@@ -1055,7 +1571,11 @@
     "country": "ZA",
     "region": "africa",
     "hotelName": "Johannesburg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -26.205,
+      "lon": 28.0497
+    }
   },
   {
     "code": "KBP",
@@ -1063,7 +1583,11 @@
     "country": "UA",
     "region": "europe",
     "hotelName": "Kyiv",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 50.45,
+      "lon": 30.5241
+    }
   },
   {
     "code": "KEF",
@@ -1071,7 +1595,11 @@
     "country": "IS",
     "region": "europe",
     "hotelName": "Reykjavik",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 64.146,
+      "lon": -21.9422
+    }
   },
   {
     "code": "KGL",
@@ -1079,7 +1607,11 @@
     "country": "RW",
     "region": "africa",
     "hotelName": "Kigali",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -1.9534,
+      "lon": 30.114
+    }
   },
   {
     "code": "KHI",
@@ -1087,7 +1619,11 @@
     "country": "PK",
     "region": "asia",
     "hotelName": "Karachi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 24.8547,
+      "lon": 67.0207
+    }
   },
   {
     "code": "KIN",
@@ -1095,7 +1631,11 @@
     "country": "JM",
     "region": "north_america",
     "hotelName": "Kingston",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 17.9712,
+      "lon": -76.7928
+    }
   },
   {
     "code": "KMG",
@@ -1103,7 +1643,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Kunming",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.0399,
+      "lon": 102.7169
+    }
   },
   {
     "code": "KRK",
@@ -1111,7 +1655,11 @@
     "country": "PL",
     "region": "europe",
     "hotelName": "Krakow",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 50.0469,
+      "lon": 19.9972
+    }
   },
   {
     "code": "KRT",
@@ -1119,7 +1667,11 @@
     "country": "SD",
     "region": "africa",
     "hotelName": "Khartoum",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 15.5636,
+      "lon": 32.5349
+    }
   },
   {
     "code": "KTM",
@@ -1127,7 +1679,11 @@
     "country": "NP",
     "region": "asia",
     "hotelName": "Kathmandu",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 27.7083,
+      "lon": 85.3206
+    }
   },
   {
     "code": "KUL",
@@ -1135,7 +1691,11 @@
     "country": "MY",
     "region": "asia",
     "hotelName": "Kuala Lumpur",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 3.1517,
+      "lon": 101.6942
+    }
   },
   {
     "code": "KWI",
@@ -1143,7 +1703,11 @@
     "country": "KW",
     "region": "middle_east",
     "hotelName": "Kuwait City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 29.3797,
+      "lon": 47.9734
+    }
   },
   {
     "code": "LAD",
@@ -1151,7 +1715,11 @@
     "country": "AO",
     "region": "africa",
     "hotelName": "Luanda",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -8.8273,
+      "lon": 13.244
+    }
   },
   {
     "code": "LAS",
@@ -1159,7 +1727,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Las Vegas",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.1674,
+      "lon": -115.1484
+    }
   },
   {
     "code": "LAX",
@@ -1169,7 +1741,11 @@
     "hotelName": "Los Angeles",
     "aliases": [
       "la"
-    ]
+    ],
+    "center": {
+      "lat": 34.0537,
+      "lon": -118.2428
+    }
   },
   {
     "code": "LBA",
@@ -1177,7 +1753,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Leeds",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.7974,
+      "lon": -1.5438
+    }
   },
   {
     "code": "LED",
@@ -1185,7 +1765,11 @@
     "country": "RU",
     "region": "europe",
     "hotelName": "St. Petersburg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 59.9607,
+      "lon": 30.1587
+    }
   },
   {
     "code": "LHE",
@@ -1193,7 +1777,11 @@
     "country": "PK",
     "region": "asia",
     "hotelName": "Lahore",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 31.5657,
+      "lon": 74.3142
+    }
   },
   {
     "code": "LIM",
@@ -1201,7 +1789,11 @@
     "country": "PE",
     "region": "south_america",
     "hotelName": "Lima",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -12.046,
+      "lon": -77.0306
+    }
   },
   {
     "code": "LIS",
@@ -1212,7 +1804,11 @@
     "aliases": [
       "lisboa",
       "lisbonne"
-    ]
+    ],
+    "center": {
+      "lat": 38.7078,
+      "lon": -9.1366
+    }
   },
   {
     "code": "LJU",
@@ -1220,7 +1816,11 @@
     "country": "SI",
     "region": "europe",
     "hotelName": "Ljubljana",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 46.05,
+      "lon": 14.5069
+    }
   },
   {
     "code": "LON",
@@ -1228,7 +1828,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "London",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 51.5074,
+      "lon": -0.1278
+    }
   },
   {
     "code": "LOS",
@@ -1236,7 +1840,11 @@
     "country": "NG",
     "region": "africa",
     "hotelName": "Lagos",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 6.4551,
+      "lon": 3.3942
+    }
   },
   {
     "code": "LPA",
@@ -1244,7 +1852,11 @@
     "country": "ES",
     "region": "africa",
     "hotelName": "Gran Canaria",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 28.1289,
+      "lon": -15.4349
+    }
   },
   {
     "code": "LPB",
@@ -1252,7 +1864,11 @@
     "country": "BO",
     "region": "south_america",
     "hotelName": "La Paz",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -16.4955,
+      "lon": -68.1336
+    }
   },
   {
     "code": "LUN",
@@ -1260,7 +1876,11 @@
     "country": "ZM",
     "region": "africa",
     "hotelName": "Lusaka",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -15.4163,
+      "lon": 28.2818
+    }
   },
   {
     "code": "LUX",
@@ -1268,7 +1888,11 @@
     "country": "LU",
     "region": "europe",
     "hotelName": "Luxembourg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 49.6113,
+      "lon": 6.1298
+    }
   },
   {
     "code": "LYS",
@@ -1276,7 +1900,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Lyon",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.7578,
+      "lon": 4.832
+    }
   },
   {
     "code": "MAA",
@@ -1284,7 +1912,11 @@
     "country": "IN",
     "region": "asia",
     "hotelName": "Chennai",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 13.0801,
+      "lon": 80.2808
+    }
   },
   {
     "code": "MAD",
@@ -1292,7 +1924,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Madrid",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.4168,
+      "lon": -3.7035
+    }
   },
   {
     "code": "MAN",
@@ -1300,7 +1936,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Manchester",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.4425,
+      "lon": -2.2325
+    }
   },
   {
     "code": "MBJ",
@@ -1308,7 +1948,11 @@
     "country": "JM",
     "region": "north_america",
     "hotelName": "Montego Bay",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 18.4725,
+      "lon": -77.9217
+    }
   },
   {
     "code": "MCI",
@@ -1316,7 +1960,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Kansas City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.1001,
+      "lon": -94.5781
+    }
   },
   {
     "code": "MCO",
@@ -1324,7 +1972,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Orlando",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 28.5421,
+      "lon": -81.379
+    }
   },
   {
     "code": "MCT",
@@ -1332,7 +1984,11 @@
     "country": "OM",
     "region": "middle_east",
     "hotelName": "Muscat",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 23.6124,
+      "lon": 58.5938
+    }
   },
   {
     "code": "MDE",
@@ -1340,7 +1996,11 @@
     "country": "CO",
     "region": "south_america",
     "hotelName": "Medellin",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 6.2697,
+      "lon": -75.6026
+    }
   },
   {
     "code": "MEL",
@@ -1348,7 +2008,11 @@
     "country": "AU",
     "region": "oceania",
     "hotelName": "Melbourne",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -37.8142,
+      "lon": 144.9632
+    }
   },
   {
     "code": "MEM",
@@ -1356,7 +2020,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Memphis",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.146,
+      "lon": -90.0518
+    }
   },
   {
     "code": "MEX",
@@ -1364,7 +2032,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Mexico City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 19.3208,
+      "lon": -99.1515
+    }
   },
   {
     "code": "MGA",
@@ -1372,7 +2044,11 @@
     "country": "NI",
     "region": "north_america",
     "hotelName": "Managua",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 12.1547,
+      "lon": -86.2737
+    }
   },
   {
     "code": "MIA",
@@ -1380,7 +2056,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Miami",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.7742,
+      "lon": -80.1936
+    }
   },
   {
     "code": "MIL",
@@ -1388,7 +2068,11 @@
     "country": "IT",
     "region": "europe",
     "hotelName": "Milan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.4642,
+      "lon": 9.1896
+    }
   },
   {
     "code": "MJI",
@@ -1396,7 +2080,11 @@
     "country": "LY",
     "region": "africa",
     "hotelName": "Tripoli",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.8967,
+      "lon": 13.1778
+    }
   },
   {
     "code": "MLA",
@@ -1404,7 +2092,11 @@
     "country": "MT",
     "region": "europe",
     "hotelName": "Malta",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.899,
+      "lon": 14.5137
+    }
   },
   {
     "code": "MLE",
@@ -1412,7 +2104,11 @@
     "country": "MV",
     "region": "asia",
     "hotelName": "Male",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 4.178,
+      "lon": 73.5107
+    }
   },
   {
     "code": "MMX",
@@ -1420,7 +2116,11 @@
     "country": "SE",
     "region": "europe",
     "hotelName": "Malmo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 55.6053,
+      "lon": 13.0002
+    }
   },
   {
     "code": "MNL",
@@ -1428,7 +2128,11 @@
     "country": "PH",
     "region": "asia",
     "hotelName": "Manila",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 14.5904,
+      "lon": 120.9804
+    }
   },
   {
     "code": "MOW",
@@ -1436,7 +2140,11 @@
     "country": "RU",
     "region": "europe",
     "hotelName": "Moscow",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 55.6256,
+      "lon": 37.6064
+    }
   },
   {
     "code": "MPM",
@@ -1444,7 +2152,11 @@
     "country": "MZ",
     "region": "africa",
     "hotelName": "Maputo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -25.9662,
+      "lon": 32.5675
+    }
   },
   {
     "code": "MRS",
@@ -1452,7 +2164,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Marseille",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.2964,
+      "lon": 5.3778
+    }
   },
   {
     "code": "MRU",
@@ -1460,7 +2176,11 @@
     "country": "MU",
     "region": "africa",
     "hotelName": "Mauritius",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -20.1625,
+      "lon": 57.5028
+    }
   },
   {
     "code": "MSP",
@@ -1468,7 +2188,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Minneapolis",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 44.9773,
+      "lon": -93.2655
+    }
   },
   {
     "code": "MSQ",
@@ -1476,7 +2200,11 @@
     "country": "BY",
     "region": "europe",
     "hotelName": "Minsk",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.9025,
+      "lon": 27.5618
+    }
   },
   {
     "code": "MSY",
@@ -1484,7 +2212,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "New Orleans",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 29.9575,
+      "lon": -90.0629
+    }
   },
   {
     "code": "MTY",
@@ -1492,7 +2224,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Monterrey",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.6802,
+      "lon": -100.3153
+    }
   },
   {
     "code": "MUC",
@@ -1503,7 +2239,11 @@
     "aliases": [
       "münchen",
       "munchen"
-    ]
+    ],
+    "center": {
+      "lat": 48.1371,
+      "lon": 11.5754
+    }
   },
   {
     "code": "MVD",
@@ -1511,7 +2251,11 @@
     "country": "UY",
     "region": "south_america",
     "hotelName": "Montevideo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -34.9059,
+      "lon": -56.1913
+    }
   },
   {
     "code": "NAN",
@@ -1519,7 +2263,11 @@
     "country": "FJ",
     "region": "oceania",
     "hotelName": "Fiji",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -17.7993,
+      "lon": 177.4179
+    }
   },
   {
     "code": "NAP",
@@ -1529,7 +2277,11 @@
     "hotelName": "Naples",
     "aliases": [
       "napoli"
-    ]
+    ],
+    "center": {
+      "lat": 40.8359,
+      "lon": 14.2488
+    }
   },
   {
     "code": "NAS",
@@ -1537,7 +2289,11 @@
     "country": "BS",
     "region": "north_america",
     "hotelName": "Nassau",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.0782,
+      "lon": -77.3383
+    }
   },
   {
     "code": "NBO",
@@ -1545,7 +2301,11 @@
     "country": "KE",
     "region": "africa",
     "hotelName": "Nairobi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -1.3024,
+      "lon": 36.8289
+    }
   },
   {
     "code": "NCE",
@@ -1553,7 +2313,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Nice",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.7009,
+      "lon": 7.2684
+    }
   },
   {
     "code": "NCL",
@@ -1561,7 +2325,11 @@
     "country": "GB",
     "region": "europe",
     "hotelName": "Newcastle",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 54.9738,
+      "lon": -1.6132
+    }
   },
   {
     "code": "NGO",
@@ -1569,7 +2337,11 @@
     "country": "JP",
     "region": "asia",
     "hotelName": "Nagoya",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.1851,
+      "lon": 136.8998
+    }
   },
   {
     "code": "NKG",
@@ -1577,7 +2349,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Nanjing",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.0438,
+      "lon": 118.7789
+    }
   },
   {
     "code": "NTE",
@@ -1585,7 +2361,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Nantes",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 47.2186,
+      "lon": -1.5541
+    }
   },
   {
     "code": "NYC",
@@ -1595,7 +2375,11 @@
     "hotelName": "New York",
     "aliases": [
       "nyc"
-    ]
+    ],
+    "center": {
+      "lat": 40.7127,
+      "lon": -74.006
+    }
   },
   {
     "code": "OAK",
@@ -1603,7 +2387,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Oakland",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 37.8045,
+      "lon": -122.2714
+    }
   },
   {
     "code": "OKA",
@@ -1611,7 +2399,11 @@
     "country": "JP",
     "region": "asia",
     "hotelName": "Okinawa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 26.5708,
+      "lon": 128.0256
+    }
   },
   {
     "code": "OPO",
@@ -1619,7 +2411,11 @@
     "country": "PT",
     "region": "europe",
     "hotelName": "Porto",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.1502,
+      "lon": -8.6103
+    }
   },
   {
     "code": "OSA",
@@ -1627,7 +2423,11 @@
     "country": "JP",
     "region": "asia",
     "hotelName": "Osaka",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 34.6938,
+      "lon": 135.5015
+    }
   },
   {
     "code": "OSA",
@@ -1638,7 +2438,11 @@
     "aliases": [
       "kioto",
       "kyōto"
-    ]
+    ],
+    "center": {
+      "lat": 35.0116,
+      "lon": 135.7681
+    }
   },
   {
     "code": "OSL",
@@ -1646,7 +2450,11 @@
     "country": "NO",
     "region": "europe",
     "hotelName": "Oslo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 59.9133,
+      "lon": 10.739
+    }
   },
   {
     "code": "OTP",
@@ -1657,7 +2465,11 @@
     "aliases": [
       "bucuresti",
       "bucurești"
-    ]
+    ],
+    "center": {
+      "lat": 44.4361,
+      "lon": 26.1027
+    }
   },
   {
     "code": "PAR",
@@ -1665,7 +2477,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Paris",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 48.8589,
+      "lon": 2.32
+    }
   },
   {
     "code": "PDX",
@@ -1673,7 +2489,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Portland",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.5202,
+      "lon": -122.6742
+    }
   },
   {
     "code": "PER",
@@ -1681,7 +2501,11 @@
     "country": "AU",
     "region": "oceania",
     "hotelName": "Perth",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -31.9559,
+      "lon": 115.8606
+    }
   },
   {
     "code": "PHL",
@@ -1689,7 +2513,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Philadelphia",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.9527,
+      "lon": -75.1635
+    }
   },
   {
     "code": "PHX",
@@ -1697,7 +2525,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Phoenix",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 33.4484,
+      "lon": -112.0741
+    }
   },
   {
     "code": "PIT",
@@ -1705,7 +2537,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Pittsburgh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.4407,
+      "lon": -80.0026
+    }
   },
   {
     "code": "PMI",
@@ -1713,7 +2549,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Palma de Mallorca",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.5696,
+      "lon": 2.6501
+    }
   },
   {
     "code": "PMO",
@@ -1721,7 +2561,11 @@
     "country": "IT",
     "region": "europe",
     "hotelName": "Palermo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 38.1112,
+      "lon": 13.3524
+    }
   },
   {
     "code": "PNH",
@@ -1729,7 +2573,11 @@
     "country": "KH",
     "region": "asia",
     "hotelName": "Phnom Penh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 11.573,
+      "lon": 104.8578
+    }
   },
   {
     "code": "POA",
@@ -1737,7 +2585,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Porto Alegre",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -30.0325,
+      "lon": -51.2304
+    }
   },
   {
     "code": "POM",
@@ -1745,7 +2597,11 @@
     "country": "PG",
     "region": "oceania",
     "hotelName": "Port Moresby",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -9.4743,
+      "lon": 147.16
+    }
   },
   {
     "code": "POS",
@@ -1753,7 +2609,11 @@
     "country": "TT",
     "region": "north_america",
     "hotelName": "Port of Spain",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 10.6573,
+      "lon": -61.518
+    }
   },
   {
     "code": "PRG",
@@ -1763,7 +2623,11 @@
     "hotelName": "Prague",
     "aliases": [
       "praha"
-    ]
+    ],
+    "center": {
+      "lat": 50.0875,
+      "lon": 14.4213
+    }
   },
   {
     "code": "PTY",
@@ -1771,7 +2635,11 @@
     "country": "PA",
     "region": "north_america",
     "hotelName": "Panama City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 8.9714,
+      "lon": -79.5342
+    }
   },
   {
     "code": "PUJ",
@@ -1779,7 +2647,11 @@
     "country": "DO",
     "region": "north_america",
     "hotelName": "Punta Cana",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 18.5566,
+      "lon": -68.3692
+    }
   },
   {
     "code": "PUS",
@@ -1787,7 +2659,11 @@
     "country": "KR",
     "region": "asia",
     "hotelName": "Busan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.18,
+      "lon": 129.0752
+    }
   },
   {
     "code": "PVR",
@@ -1795,7 +2671,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Puerto Vallarta",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 20.6407,
+      "lon": -105.2203
+    }
   },
   {
     "code": "RAK",
@@ -1803,7 +2683,11 @@
     "country": "MA",
     "region": "africa",
     "hotelName": "Marrakesh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 31.6258,
+      "lon": -7.9892
+    }
   },
   {
     "code": "RDU",
@@ -1811,7 +2695,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Raleigh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 35.7804,
+      "lon": -78.6391
+    }
   },
   {
     "code": "REC",
@@ -1819,7 +2707,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Recife",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -8.0585,
+      "lon": -34.8848
+    }
   },
   {
     "code": "RGN",
@@ -1827,7 +2719,11 @@
     "country": "MM",
     "region": "asia",
     "hotelName": "Yangon",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 16.7967,
+      "lon": 96.161
+    }
   },
   {
     "code": "RHO",
@@ -1835,7 +2731,11 @@
     "country": "GR",
     "region": "asia",
     "hotelName": "Rhodes",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.1724,
+      "lon": 27.9195
+    }
   },
   {
     "code": "RIO",
@@ -1843,7 +2743,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Rio de Janeiro",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -22.911,
+      "lon": -43.2094
+    }
   },
   {
     "code": "RIX",
@@ -1851,7 +2755,11 @@
     "country": "LV",
     "region": "europe",
     "hotelName": "Riga",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 56.9494,
+      "lon": 24.1052
+    }
   },
   {
     "code": "ROM",
@@ -1861,7 +2769,11 @@
     "hotelName": "Rome",
     "aliases": [
       "roma"
-    ]
+    ],
+    "center": {
+      "lat": 41.8933,
+      "lon": 12.4829
+    }
   },
   {
     "code": "RUH",
@@ -1869,7 +2781,11 @@
     "country": "SA",
     "region": "middle_east",
     "hotelName": "Riyadh",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 24.6389,
+      "lon": 46.716
+    }
   },
   {
     "code": "SAL",
@@ -1877,7 +2793,11 @@
     "country": "SV",
     "region": "north_america",
     "hotelName": "San Salvador",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 13.6976,
+      "lon": -89.1912
+    }
   },
   {
     "code": "SAN",
@@ -1885,7 +2805,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "San Diego",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.7157,
+      "lon": -117.1638
+    }
   },
   {
     "code": "SAO",
@@ -1893,7 +2817,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Sao Paulo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -23.5507,
+      "lon": -46.6334
+    }
   },
   {
     "code": "SAT",
@@ -1901,7 +2829,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "San Antonio",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 29.4246,
+      "lon": -98.4951
+    }
   },
   {
     "code": "SCL",
@@ -1909,7 +2841,11 @@
     "country": "CL",
     "region": "south_america",
     "hotelName": "Santiago",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -33.4377,
+      "lon": -70.6511
+    }
   },
   {
     "code": "SDQ",
@@ -1917,7 +2853,11 @@
     "country": "DO",
     "region": "north_america",
     "hotelName": "Santo Domingo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 18.4714,
+      "lon": -69.8918
+    }
   },
   {
     "code": "SEA",
@@ -1925,7 +2865,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Seattle",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 47.6038,
+      "lon": -122.3301
+    }
   },
   {
     "code": "SEL",
@@ -1933,7 +2877,11 @@
     "country": "KR",
     "region": "asia",
     "hotelName": "Seoul",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 37.5667,
+      "lon": 126.9783
+    }
   },
   {
     "code": "SEZ",
@@ -1941,7 +2889,11 @@
     "country": "SC",
     "region": "africa",
     "hotelName": "Seychelles",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -4.6232,
+      "lon": 55.4524
+    }
   },
   {
     "code": "SFO",
@@ -1951,7 +2903,11 @@
     "hotelName": "San Francisco",
     "aliases": [
       "sf"
-    ]
+    ],
+    "center": {
+      "lat": 37.7879,
+      "lon": -122.4075
+    }
   },
   {
     "code": "SGN",
@@ -1959,7 +2915,11 @@
     "country": "VN",
     "region": "asia",
     "hotelName": "Ho Chi Minh City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 10.7737,
+      "lon": 106.7166
+    }
   },
   {
     "code": "SHA",
@@ -1967,7 +2927,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Shanghai",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 31.2313,
+      "lon": 121.47
+    }
   },
   {
     "code": "SIN",
@@ -1975,7 +2939,11 @@
     "country": "SG",
     "region": "asia",
     "hotelName": "Singapore",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 1.2899,
+      "lon": 103.8519
+    }
   },
   {
     "code": "SJC",
@@ -1983,7 +2951,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "San Jose",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 37.3362,
+      "lon": -121.8906
+    }
   },
   {
     "code": "SJD",
@@ -1991,7 +2963,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Los Cabos",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 23.0598,
+      "lon": -109.7025
+    }
   },
   {
     "code": "SJJ",
@@ -1999,7 +2975,11 @@
     "country": "BA",
     "region": "europe",
     "hotelName": "Sarajevo",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.8571,
+      "lon": 18.4126
+    }
   },
   {
     "code": "SJO",
@@ -2010,7 +2990,11 @@
     "aliases": [
       "san jose costa rica",
       "san josé costa rica"
-    ]
+    ],
+    "center": {
+      "lat": 9.9328,
+      "lon": -84.0796
+    }
   },
   {
     "code": "SJU",
@@ -2018,7 +3002,11 @@
     "country": "PR",
     "region": "north_america",
     "hotelName": "San Juan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 18.3842,
+      "lon": -66.0534
+    }
   },
   {
     "code": "SKG",
@@ -2026,7 +3014,11 @@
     "country": "GR",
     "region": "europe",
     "hotelName": "Thessaloniki",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.6403,
+      "lon": 22.9353
+    }
   },
   {
     "code": "SKP",
@@ -2034,7 +3026,11 @@
     "country": "MK",
     "region": "europe",
     "hotelName": "Skopje",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.9962,
+      "lon": 21.4319
+    }
   },
   {
     "code": "SLC",
@@ -2042,7 +3038,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Salt Lake City",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 40.7596,
+      "lon": -111.8868
+    }
   },
   {
     "code": "SMF",
@@ -2050,7 +3050,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Sacramento",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 38.5811,
+      "lon": -121.4939
+    }
   },
   {
     "code": "SOF",
@@ -2058,7 +3062,11 @@
     "country": "BG",
     "region": "europe",
     "hotelName": "Sofia",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 42.6977,
+      "lon": 23.3217
+    }
   },
   {
     "code": "SPU",
@@ -2066,7 +3074,11 @@
     "country": "HR",
     "region": "europe",
     "hotelName": "Split",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.5116,
+      "lon": 16.44
+    }
   },
   {
     "code": "SSA",
@@ -2074,7 +3086,11 @@
     "country": "BR",
     "region": "south_america",
     "hotelName": "Salvador",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -12.9822,
+      "lon": -38.4813
+    }
   },
   {
     "code": "STL",
@@ -2082,7 +3098,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "St. Louis",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 38.6254,
+      "lon": -90.19
+    }
   },
   {
     "code": "STO",
@@ -2090,7 +3110,11 @@
     "country": "SE",
     "region": "europe",
     "hotelName": "Stockholm",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 59.3251,
+      "lon": 18.0711
+    }
   },
   {
     "code": "STR",
@@ -2098,7 +3122,11 @@
     "country": "DE",
     "region": "europe",
     "hotelName": "Stuttgart",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 48.7784,
+      "lon": 9.18
+    }
   },
   {
     "code": "SVQ",
@@ -2108,7 +3136,11 @@
     "hotelName": "Seville",
     "aliases": [
       "sevilla"
-    ]
+    ],
+    "center": {
+      "lat": 37.3886,
+      "lon": -5.9953
+    }
   },
   {
     "code": "SYD",
@@ -2116,7 +3148,11 @@
     "country": "AU",
     "region": "oceania",
     "hotelName": "Sydney",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -33.8698,
+      "lon": 151.2083
+    }
   },
   {
     "code": "SZX",
@@ -2124,7 +3160,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Shenzhen",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 22.5446,
+      "lon": 114.0545
+    }
   },
   {
     "code": "TAO",
@@ -2132,7 +3172,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Qingdao",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.0663,
+      "lon": 120.3778
+    }
   },
   {
     "code": "TAS",
@@ -2140,7 +3184,11 @@
     "country": "UZ",
     "region": "asia",
     "hotelName": "Tashkent",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.3123,
+      "lon": 69.2787
+    }
   },
   {
     "code": "TBS",
@@ -2148,7 +3196,11 @@
     "country": "GE",
     "region": "asia",
     "hotelName": "Tbilisi",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 41.6935,
+      "lon": 44.8014
+    }
   },
   {
     "code": "TFS",
@@ -2156,7 +3208,11 @@
     "country": "ES",
     "region": "africa",
     "hotelName": "Tenerife",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 28.4672,
+      "lon": -16.2508
+    }
   },
   {
     "code": "TIJ",
@@ -2164,7 +3220,11 @@
     "country": "MX",
     "region": "north_america",
     "hotelName": "Tijuana",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.5365,
+      "lon": -117.0371
+    }
   },
   {
     "code": "TLL",
@@ -2172,7 +3232,11 @@
     "country": "EE",
     "region": "europe",
     "hotelName": "Tallinn",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 59.4372,
+      "lon": 24.7573
+    }
   },
   {
     "code": "TLS",
@@ -2180,7 +3244,11 @@
     "country": "FR",
     "region": "europe",
     "hotelName": "Toulouse",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.6045,
+      "lon": 1.4442
+    }
   },
   {
     "code": "TLV",
@@ -2188,7 +3256,11 @@
     "country": "IL",
     "region": "middle_east",
     "hotelName": "Tel Aviv",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 32.0853,
+      "lon": 34.7818
+    }
   },
   {
     "code": "TPA",
@@ -2196,7 +3268,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Tampa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 27.945,
+      "lon": -82.4583
+    }
   },
   {
     "code": "TPE",
@@ -2204,7 +3280,11 @@
     "country": "TW",
     "region": "asia",
     "hotelName": "Taipei",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 25.0375,
+      "lon": 121.5637
+    }
   },
   {
     "code": "TRN",
@@ -2212,7 +3292,11 @@
     "country": "IT",
     "region": "europe",
     "hotelName": "Turin",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.0678,
+      "lon": 7.6825
+    }
   },
   {
     "code": "TUN",
@@ -2220,7 +3304,11 @@
     "country": "TN",
     "region": "africa",
     "hotelName": "Tunis",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 36.8002,
+      "lon": 10.1858
+    }
   },
   {
     "code": "TYO",
@@ -2230,7 +3318,11 @@
     "hotelName": "Tokyo",
     "aliases": [
       "tokio"
-    ]
+    ],
+    "center": {
+      "lat": 35.6769,
+      "lon": 139.7639
+    }
   },
   {
     "code": "UIO",
@@ -2238,7 +3330,11 @@
     "country": "EC",
     "region": "south_america",
     "hotelName": "Quito",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -0.2202,
+      "lon": -78.5123
+    }
   },
   {
     "code": "ULN",
@@ -2246,7 +3342,11 @@
     "country": "MN",
     "region": "asia",
     "hotelName": "Ulaanbaatar",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 47.9185,
+      "lon": 106.9177
+    }
   },
   {
     "code": "VCE",
@@ -2256,7 +3356,11 @@
     "hotelName": "Venice",
     "aliases": [
       "venezia"
-    ]
+    ],
+    "center": {
+      "lat": 45.4372,
+      "lon": 12.3346
+    }
   },
   {
     "code": "VIE",
@@ -2266,7 +3370,11 @@
     "hotelName": "Vienna",
     "aliases": [
       "wien"
-    ]
+    ],
+    "center": {
+      "lat": 48.2084,
+      "lon": 16.3725
+    }
   },
   {
     "code": "VLC",
@@ -2274,7 +3382,11 @@
     "country": "ES",
     "region": "europe",
     "hotelName": "Valencia",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 39.4697,
+      "lon": -0.3763
+    }
   },
   {
     "code": "VNO",
@@ -2282,7 +3394,11 @@
     "country": "LT",
     "region": "europe",
     "hotelName": "Vilnius",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 54.687,
+      "lon": 25.2829
+    }
   },
   {
     "code": "VTE",
@@ -2290,7 +3406,11 @@
     "country": "LA",
     "region": "asia",
     "hotelName": "Vientiane",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 17.9641,
+      "lon": 102.6134
+    }
   },
   {
     "code": "VVI",
@@ -2298,7 +3418,11 @@
     "country": "BO",
     "region": "south_america",
     "hotelName": "Santa Cruz",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -17.7834,
+      "lon": -63.1821
+    }
   },
   {
     "code": "WAS",
@@ -2306,7 +3430,11 @@
     "country": "US",
     "region": "north_america",
     "hotelName": "Washington",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 38.8951,
+      "lon": -77.0364
+    }
   },
   {
     "code": "WAW",
@@ -2316,7 +3444,11 @@
     "hotelName": "Warsaw",
     "aliases": [
       "warszawa"
-    ]
+    ],
+    "center": {
+      "lat": 52.2334,
+      "lon": 21.0711
+    }
   },
   {
     "code": "WDH",
@@ -2324,7 +3456,11 @@
     "country": "NA",
     "region": "africa",
     "hotelName": "Windhoek",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -22.5336,
+      "lon": 17.0455
+    }
   },
   {
     "code": "WLG",
@@ -2332,7 +3468,11 @@
     "country": "NZ",
     "region": "oceania",
     "hotelName": "Wellington",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -41.2888,
+      "lon": 174.7772
+    }
   },
   {
     "code": "WRO",
@@ -2340,7 +3480,11 @@
     "country": "PL",
     "region": "europe",
     "hotelName": "Wroclaw",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 51.1263,
+      "lon": 16.9782
+    }
   },
   {
     "code": "WUH",
@@ -2348,7 +3492,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Wuhan",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 30.5789,
+      "lon": 114.2921
+    }
   },
   {
     "code": "XIY",
@@ -2356,7 +3504,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Xi'an",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 34.261,
+      "lon": 108.9423
+    }
   },
   {
     "code": "XMN",
@@ -2364,7 +3516,11 @@
     "country": "CN",
     "region": "asia",
     "hotelName": "Xiamen",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 24.4801,
+      "lon": 118.0853
+    }
   },
   {
     "code": "YEG",
@@ -2372,7 +3528,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Edmonton",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 53.5462,
+      "lon": -113.4912
+    }
   },
   {
     "code": "YHZ",
@@ -2380,7 +3540,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Halifax",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 44.6486,
+      "lon": -63.5859
+    }
   },
   {
     "code": "YOW",
@@ -2388,7 +3552,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Ottawa",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.4209,
+      "lon": -75.6901
+    }
   },
   {
     "code": "YUL",
@@ -2396,7 +3564,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Montreal",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.5032,
+      "lon": -73.5698
+    }
   },
   {
     "code": "YVR",
@@ -2404,7 +3576,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Vancouver",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 49.2609,
+      "lon": -123.114
+    }
   },
   {
     "code": "YWG",
@@ -2412,7 +3588,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Winnipeg",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 49.8955,
+      "lon": -97.1385
+    }
   },
   {
     "code": "YYC",
@@ -2420,7 +3600,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Calgary",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 51.0456,
+      "lon": -114.0575
+    }
   },
   {
     "code": "YYZ",
@@ -2428,7 +3612,11 @@
     "country": "CA",
     "region": "north_america",
     "hotelName": "Toronto",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 43.6535,
+      "lon": -79.3839
+    }
   },
   {
     "code": "ZAG",
@@ -2436,7 +3624,11 @@
     "country": "HR",
     "region": "europe",
     "hotelName": "Zagreb",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 45.8131,
+      "lon": 15.9773
+    }
   },
   {
     "code": "ZQN",
@@ -2444,7 +3636,11 @@
     "country": "NZ",
     "region": "oceania",
     "hotelName": "Queenstown",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": -45.0322,
+      "lon": 168.661
+    }
   },
   {
     "code": "ZRH",
@@ -2452,6 +3648,10 @@
     "country": "CH",
     "region": "europe",
     "hotelName": "Zurich",
-    "aliases": []
+    "aliases": [],
+    "center": {
+      "lat": 47.3744,
+      "lon": 8.541
+    }
   }
 ]

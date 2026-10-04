@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkTotals, checkBudget, checkDates, checkSlots, SLOT_KINDS } from '../src/gates/checks.js'
 import { money } from '../src/money.js'
 import type { RehydratedItem } from '../src/gates/types.js'
+import { hotelDetail } from '../src/supplier/types.js'
 import type { StoredItem, PriceBasis } from '../src/supplier/types.js'
 
 function hotel(id: string, minor: bigint, quantity = 1, basis: PriceBasis = 'total'): RehydratedItem {
@@ -9,8 +10,7 @@ function hotel(id: string, minor: bigint, quantity = 1, basis: PriceBasis = 'tot
     sourceId: id, supplier: 'mock', kind: 'hotel', name: id,
     price: money(minor, 'EUR'), priceBasis: basis,
     fetchedAt: new Date('2026-08-16T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
-    detail: { kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19',
-              nights: 7, rating: null, coordinates: null, offerSource: null },
+    detail: hotelDetail({ checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7 }),
     searchParams: null,
   }
   return { ref: { sourceId: id, quantity, slot: 'stay' }, item,
@@ -310,9 +310,8 @@ describe('checkDates', () => {
 
   it('checks hotel check-in and check-out too', () => {
     const late = hotel('H', 1n)
-    const shifted = { ...late, item: { ...late.item, detail: {
-      ...late.item.detail, kind: 'hotel' as const, checkIn: '2026-09-12',
-      checkOut: '2026-09-30', nights: 18, rating: null, coordinates: null, offerSource: null } } }
+    const shifted = { ...late, item: { ...late.item, detail: hotelDetail({
+      checkIn: '2026-09-12', checkOut: '2026-09-30', nights: 18 }) } }
     const v = checkDates([shifted], win)
     expect(v).toHaveLength(1)
     expect(v[0]!.sourceIds).toEqual(['H'])

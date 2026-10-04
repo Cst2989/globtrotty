@@ -71,11 +71,33 @@ function ctx(s: Seeded) {
   return { conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, state: { step: 0, messages: [] } }
 }
 
+/**
+ * A hand-built Jev stand-in for the hotel re-rank (the hotels pass): every option scores the
+ * same, so the order `rankItems` returns is its documented price-ascending tiebreak and the test
+ * does not depend on a model's judgment. A `fetchImpl` is not optional here — without one
+ * `askJev` would reach the real endpoint from a unit test.
+ */
+function jevScores(score = 2) {
+  return vi.fn(async (_url: unknown, init?: { body?: string }) => {
+    const body = JSON.parse(init?.body ?? '{}') as { questions: Record<string, unknown> }
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        model: 'jev-test',
+        answers: Object.fromEntries(
+          Object.keys(body.questions).map((k) => [k, { type: 'score', score, confidence: 0.9, probabilities: {} }]),
+        ),
+        usage: { input_tokens: 400, output_tokens: 100 },
+      }),
+    }
+  })
+}
+
 function makeDeps(sql: postgres.Sql, create: (r: unknown) => Promise<unknown>, hotels: MockSupplier) {
   return {
     sql, transport: { create }, flights: new MockSupplier({ kind: 'flight', now: () => NOW }), hotels,
     limits: DEFAULT_LIMITS, now: () => NOW.getTime(), notifier: new LogNotifier(() => {}),
-    jev: { apiKey: 'test-key' },
+    jev: { apiKey: 'test-key', fetchImpl: jevScores() as unknown as typeof fetch },
   }
 }
 
@@ -100,8 +122,12 @@ describeDb('handleChoose', () => {
       if (step.kind !== 'park') throw new Error('unreachable')
       expect(step.message).toBe('Flight noted. Here are hotels in Tokyo for 19 Nov to 6 Dec.')
       expect(searchSpy).toHaveBeenCalledTimes(1)
+      // The hotels pass, section 1: the chosen flight arrives at an AIRPORT code, and what goes
+      // out is the metro that airport serves, as words, with its market. `q=TYO` (and `q=Tokyo`)
+      // is what came back as US vacation rentals.
       expect(searchSpy.mock.calls[0]![0]).toMatchObject({
-        kind: 'hotel', query: 'Tokyo', checkIn: '2026-11-19', checkOut: '2026-12-06', adults: 2,
+        kind: 'hotel', query: 'hotels in Tokyo, Japan', countryCode: 'JP',
+        checkIn: '2026-11-19', checkOut: '2026-12-06', adults: 2,
       })
 
       // F2: the hotels row, then the next-step chips under the reply.
@@ -122,9 +148,17 @@ describeDb('handleChoose', () => {
       expect(proposals[0]!.itinerary.items[0]!.slot).toBe('flight')
 
       // Every hotel id in the attachment is actually in the corpus for this conversation.
-      const hotelRows = await sql`
-        select source_id from tool_results where conversation_id = ${s.conversationId} and kind = 'hotel'`
+      const hotelRows = await sql<{ source_id: string; payload: { distanceKm: number | null } }[]>`
+        select source_id, payload from tool_results where conversation_id = ${s.conversationId} and kind = 'hotel'`
       expect(hotelRows.map((r) => r.source_id).sort()).toEqual([...content.sourceIds].sort())
+      // The hotels pass: the distance from the destination's own centre is this office's
+      // arithmetic over the search, stamped on before the corpus row was written.
+      expect(hotelRows.every((r) => typeof r.payload.distanceKm === 'number')).toBe(true)
+
+      // One Jev call, on the rerank seat, for the hotel list's own order.
+      const jevCalls = await sql<{ seat: string }[]>`
+        select seat from model_calls where conversation_id = ${s.conversationId} and seat = 'rerank'`
+      expect(jevCalls).toHaveLength(1)
     })
   })
 
@@ -340,11 +374,15 @@ describeDb('handleChoose', () => {
       const s = await seed(sql, '04')
       const hotels = new MockSupplier({ kind: 'hotel', now: () => NOW })
       const hotelItems = await hotels.search({
-        kind: 'hotel', query: 'Tokyo', checkIn: '2026-11-19', checkOut: '2026-12-06', adults: 2, currency: 'EUR',
+        kind: 'hotel', query: 'hotels in Tokyo, Japan', checkIn: '2026-11-19', checkOut: '2026-12-06',
+        adults: 2, currency: 'EUR', countryCode: 'JP',
       })
       await recordResults(sql, {
         conversationId: s.conversationId, userId: s.userId, turnId: s.turnId,
-        params: { kind: 'hotel', query: 'Tokyo', checkIn: '2026-11-19', checkOut: '2026-12-06', adults: 2, currency: 'EUR' },
+        params: {
+          kind: 'hotel', query: 'hotels in Tokyo, Japan', checkIn: '2026-11-19', checkOut: '2026-12-06',
+          adults: 2, currency: 'EUR', countryCode: 'JP',
+        },
         items: hotelItems,
       })
       const create = vi.fn()

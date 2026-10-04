@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyFilter, describeFilter } from '../src/intake/filter.js'
 import { money } from '../src/money.js'
+import { hotelDetail } from '../src/supplier/types.js'
 import type { StoredItem } from '../src/supplier/types.js'
 
 /** A hand-built flight `StoredItem`, same pattern as test/intake-rank.test.ts's `buildItem`. */
@@ -41,7 +42,7 @@ function hotel(sourceId: string, priceMinor: number): StoredItem {
     sourceId, supplier: 'mock', kind: 'hotel', name: `hotel ${sourceId}`,
     price: money(BigInt(priceMinor), 'EUR'), priceBasis: 'total',
     fetchedAt: new Date('2026-10-03T12:00:00Z'), ttlSeconds: 900, bookingUrl: null, searchParams: null,
-    detail: { kind: 'hotel', checkIn: '2026-11-19', checkOut: '2026-12-06', nights: 17, rating: 4, coordinates: null, offerSource: null },
+    detail: hotelDetail({ checkIn: '2026-11-19', checkOut: '2026-12-06', nights: 17, rating: 4 }),
   }
 }
 

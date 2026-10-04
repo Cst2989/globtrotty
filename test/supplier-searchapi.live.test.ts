@@ -13,7 +13,8 @@ const checkIn = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10
 const checkOut = new Date(Date.now() + 67 * 86_400_000).toISOString().slice(0, 10)
 
 const params: HotelSearch = {
-  kind: 'hotel', query: 'Faro Portugal', checkIn, checkOut, adults: 2, currency: 'EUR',
+  kind: 'hotel', query: 'hotels in Faro, Portugal', checkIn, checkOut, adults: 2, currency: 'EUR',
+  countryCode: 'PT',
 }
 
 // The api-key check MUST live inside each `it`, never in the `describe`

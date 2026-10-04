@@ -30,9 +30,13 @@ import { rehydrate, recordResults } from '../repo/toolResults.js'
 import { readLatestResults } from '../repo/messages.js'
 import { countPriorGateRuns, beginToolCall, finishToolCall } from '../repo/toolCalls.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
-import { CODE_MAP } from '../intake/places.js'
+import { placeForCode, type Place } from '../intake/places.js'
 import { addDays } from '../intake/dates.js'
-import { isFlight, isHotel, type HotelSearch, type SupplierItem } from '../supplier/types.js'
+import { hotelSearchFor, withDistanceFromCentre } from './hotels.js'
+import { rankItems } from '../intake/rank.js'
+import { recordJevCall } from '../jev/record.js'
+import type { TripBrief } from '../intake/brief.js'
+import { isFlight, isHotel, type SupplierItem } from '../supplier/types.js'
 
 /** The router's own shape for a `choose` action, matching Task 7's own documented interface —
  * the full `ActionPayload` carries `action: 'choose'` too, but that field has already done its
@@ -83,17 +87,28 @@ function dateLabel(iso: string): string {
   return `${d} ${MONTH_ABBR[m - 1]}`
 }
 
-/** The place table's own city name for a code — what the message she reads says, and what
- * `ResultsContent.query.place` carries for display. Never her span, never a supplier's name. */
-function cityLabel(code: string): string {
-  return CODE_MAP.get(code)?.city ?? code
-}
+/**
+ * The arrival airport could not be matched to a city this office can search hotels in
+ * (`placeForAirport` returned null). The flight is still accepted, so this is a `park`, and it
+ * deliberately does not echo the code back: a `LegSummary.to` is supplier-authored, and "hotels
+ * in NRT" is the bug this whole pass exists to fix — printing the same code at her is no better.
+ */
+const UNKNOWN_DESTINATION_MESSAGE = 'Flight noted. I could not match that arrival airport to a city '
+  + 'I can search hotels in. Tell me the area you want to stay in.'
 
-/** Ledger ruling 3: `Place.hotelName` (defaulting to `city`) is what a hotel search sends as its
- * `query` — Kyoto's own entry is the one case where the two differ. */
-function hotelQueryName(code: string): string {
-  const p = CODE_MAP.get(code)
-  return p?.hotelName ?? p?.city ?? code
+/**
+ * The preferences a hotel re-rank is scored against (src/intake/rank.ts). Only THREE fields of a
+ * `TripBrief` reach a hotel option's scoring — `preferencesFor` there documents which, and why
+ * `hotels`, `cabinLong` and `maxStops` are not among them — so every other field is filled with
+ * `assembleBrief`'s own default and none of them leaves this function.
+ */
+function briefForHotelRank(args: { adults: number; checkIn: string; checkOut: string; place: Place }): TripBrief {
+  return {
+    origin: '', destination: args.place.code, sideTrip: null,
+    outbound: args.checkIn, inbound: args.checkOut, adults: args.adults,
+    cabinLong: 'economy', cabinShort: 'economy', maxStops: null,
+    hotels: false, arriveBy: false, assumptions: [],
+  }
 }
 
 /**
@@ -161,19 +176,28 @@ async function handleChooseFlight(
     proposalId: saved.id, conversationId: ctx.conversationId, decision: 'accept', now: new Date(deps.now()),
   })
 
-  const destinationCode = item.detail.outbound.to
+  // The chosen flight names an AIRPORT ("NRT"), and the place table is keyed on METROS ("TYO").
+  // `placeForCode` is what bridges the two (src/intake/places.ts); before the hotels pass this
+  // read `CODE_MAP.get('NRT')`, got nothing, and sent the bare code to the hotel engine.
+  const destination = placeForCode(item.detail.outbound.to)
   const checkIn = item.detail.outbound.arrivalLocal.slice(0, 10)
   const checkOut = item.detail.inbound
     ? item.detail.inbound.departureLocal.slice(0, 10)
     : addDays(checkIn, 7)
 
+  if (destination === null) {
+    return {
+      kind: 'park', message: UNKNOWN_DESTINATION_MESSAGE, costMicros: 0n,
+      recordedMicros: spent.micros,
+      attachments: [nextStepsAttachment('zero_hotels')],
+    }
+  }
+
   const latestResults = await readLatestResults(sql, ctx.conversationId, ctx.userId)
   const adults = notebook.partySize?.value.adults ?? latestResults?.query.adults ?? 1
   const currency = notebook.budget === null ? 'EUR' : notebook.budget.value.currency
 
-  const params: HotelSearch = {
-    kind: 'hotel', query: hotelQueryName(destinationCode), checkIn, checkOut, adults, currency,
-  }
+  const params = hotelSearchFor({ place: destination, checkIn, checkOut, adults, currency })
 
   try {
     const budget = await assertSupplierBudget(sql, ctx.turnId, deps.limits.maxSupplierCallsPerTurn)
@@ -204,13 +228,42 @@ async function handleChooseFlight(
         return found ? [found] : []
       })
     } else {
-      items = await deps.hotels.search(params)
+      // The distance from the city centre is this office's own arithmetic over the search it
+      // just ran, not the supplier's — so it is stamped on before `recordResults` writes the
+      // corpus row, and a replayed call gets it back from the corpus for free.
+      items = withDistanceFromCentre(await deps.hotels.search(params), destination)
       await finishToolCall(sql, ctx.turnId, callId, { sourceIds: items.map((i) => i.sourceId) })
     }
 
     await recordResults(sql, {
       conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
     })
+
+    // Jev's own re-rank, the same seat and the same four levels the flight list is ordered by.
+    // Without it the list is SearchApi's relevance order, which for a 16-night Tokyo window puts
+    // six vacation rentals above the first hotel she would actually book.
+    //
+    // A re-rank failure is NOT a turn failure here: the flight is accepted and the hotels are
+    // real, so the supplier's own order is shown rather than nothing. (Section 7's unverified
+    // line is the UI half of this same decision.)
+    let rerankCost = 0n
+    let ordered = items
+    if (items.length > 1) {
+      try {
+        const ranked = await rankItems(
+          { jev: deps.jev },
+          briefForHotelRank({ adults, checkIn, checkOut, place: destination }),
+          items,
+        )
+        ordered = ranked.ordered
+        rerankCost = await recordJevCall(sql, {
+          conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
+          seat: 'rerank', request: ranked.request, response: ranked.response,
+        })
+      } catch {
+        ordered = items
+      }
+    }
 
     // M1: a zero-item search used to reply "Here are hotels in Tokyo for 20 Nov to 6 Dec." with
     // a `results` attachment whose `sourceIds` was empty — `recordResults` short-circuits on an
@@ -220,9 +273,9 @@ async function handleChooseFlight(
     if (items.length === 0) {
       return {
         kind: 'park',
-        message: `I could not find hotels in ${cityLabel(destinationCode)} for those dates. `
+        message: `I could not find hotels in ${destination.city} for those dates. `
           + 'Tell me a different area or dates.',
-        costMicros: 0n,
+        costMicros: rerankCost,
         recordedMicros: spent.micros,
         // F2: no results row (M1 — there is no corpus to name), but still the two steps that can
         // turn an empty hotel search into a full one.
@@ -232,17 +285,22 @@ async function handleChooseFlight(
 
     return {
       kind: 'park',
-      message: `Flight noted. Here are hotels in ${cityLabel(destinationCode)} for `
+      message: `Flight noted. Here are hotels in ${destination.city} for `
         + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}.`,
-      costMicros: 0n,
+      costMicros: rerankCost,
       recordedMicros: spent.micros,
       attachments: [
         {
           role: 'results',
           content: {
             kind: 'hotels',
-            query: { place: cityLabel(destinationCode), outbound: checkIn, inbound: checkOut, adults },
-            sourceIds: items.map((i) => i.sourceId),
+            query: {
+              place: destination.hotelName, outbound: checkIn, inbound: checkOut, adults,
+              // What lets `handleRefresh` rebuild the SAME query (`hotels in Tokyo, Japan`) and
+              // the same `gl` from the stored row, instead of re-deriving a different one.
+              country: destination.country,
+            },
+            sourceIds: ordered.map((i) => i.sourceId),
             assumptions: [],
           },
         },

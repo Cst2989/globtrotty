@@ -40,7 +40,7 @@ import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
 const NOW = new Date('2026-09-13T12:00:00Z')
 const flight: FlightSearch = { kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12', returnDate: '2026-09-19',
   flexDays: 0, adults: 2, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false }
-const hotel: HotelSearch = { kind: 'hotel', query: 'Faro beach', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2, currency: 'EUR' }
+const hotel: HotelSearch = { kind: 'hotel', query: 'hotels in Faro, Portugal', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2, currency: 'EUR', countryCode: 'PT' }
 const usage = { input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 40 }
 const approve = () => ({ content: [{ type: 'text', text: JSON.stringify({ approved: true, issues: [] }) }], stop_reason: 'end_turn', model: 'claude-opus-5', _request_id: 'r', usage })
 const withBudget = (nb: Notebook): Notebook => ({ ...nb, budget: { value: money(10_000_00n, 'EUR'), source: 'user', at: NOW.toISOString() } })

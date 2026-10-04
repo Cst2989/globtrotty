@@ -21,6 +21,8 @@ import { researchDestination } from './scout.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
 import { handOff } from '../tools/cashier.js'
 import { escalate } from '../tools/escalate.js'
+import { hotelQuery, placeByName } from '../intake/places.js'
+import { hotelSearchFor, withDistanceFromCentre } from './hotels.js'
 import { listExpiredSourceIds, recordResults } from '../repo/toolResults.js'
 import { formatMoney } from '../money.js'
 import { maskControlChars, maskIdChars } from '../sanitize.js'
@@ -460,11 +462,26 @@ async function execute(
     }
     case 'explore_hotels': {
       const i = input as { query: string; checkIn: string; checkOut: string; adults: number }
-      const params: HotelSearch = {
-        kind: 'hotel', query: i.query, checkIn: i.checkIn, checkOut: i.checkOut,
-        adults: i.adults, currency: currencyOf(notebook),
-      }
-      const items = await deps.hotels.search(params)
+      // The hotels pass applies to this path too: `q=Tokyo` comes back with vacation rentals in
+      // the United States, and the model's `query` is a city name. When the place table
+      // recognises it, the search goes out as `hotels in Tokyo, Japan` with `gl=jp` — exactly
+      // what `handleChooseFlight` sends. When it does not, the words still get the `hotels in`
+      // framing, which is the half of the fix that needs no table at all.
+      const named = placeByName(i.query)
+      const params: HotelSearch = named !== null
+        ? hotelSearchFor({
+            place: named, checkIn: i.checkIn, checkOut: i.checkOut,
+            adults: i.adults, currency: currencyOf(notebook),
+          })
+        : {
+            kind: 'hotel', query: hotelQuery(i.query, null),
+            checkIn: i.checkIn, checkOut: i.checkOut,
+            adults: i.adults, currency: currencyOf(notebook), countryCode: null,
+          }
+      const found = await deps.hotels.search(params)
+      // The distance from the centre is this office's arithmetic, not the supplier's — same
+      // stamp `handleChooseFlight` applies, and only possible for a place the table knows.
+      const items = named === null ? found : withDistanceFromCentre(found, named)
       await recordResults(sql, {
         conversationId: ctx.conversationId, userId: ctx.userId, turnId: ctx.turnId, params, items,
       })

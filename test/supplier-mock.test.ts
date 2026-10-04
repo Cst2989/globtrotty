@@ -73,8 +73,8 @@ describe('MockSupplier', () => {
 
   it('produces hotel items with nights derived from the date range', async () => {
     const items = await new MockSupplier({ kind: 'hotel' }).search({
-      kind: 'hotel', query: 'Faro', checkIn: '2026-09-12',
-      checkOut: '2026-09-19', adults: 2, currency: 'EUR',
+      kind: 'hotel', query: 'hotels in Faro, Portugal', checkIn: '2026-09-12',
+      checkOut: '2026-09-19', adults: 2, currency: 'EUR', countryCode: 'PT',
     })
     expect(items[0]!.detail.kind).toBe('hotel')
     if (items[0]!.detail.kind === 'hotel') expect(items[0]!.detail.nights).toBe(7)
@@ -87,8 +87,8 @@ describe('MockSupplier', () => {
 
   it('rejects a quote whose params.kind does not match the configured kind', async () => {
     const hotelSearch: HotelSearch = {
-      kind: 'hotel', query: 'Faro', checkIn: '2026-09-12',
-      checkOut: '2026-09-19', adults: 2, currency: 'EUR',
+      kind: 'hotel', query: 'hotels in Faro, Portugal', checkIn: '2026-09-12',
+      checkOut: '2026-09-19', adults: 2, currency: 'EUR', countryCode: 'PT',
     }
     const s = new MockSupplier({ kind: 'flight' })
     await expect(s.quote('MOCK-flight-x-0', hotelSearch))

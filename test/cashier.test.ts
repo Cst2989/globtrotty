@@ -11,12 +11,13 @@ import { BookingUrlError } from '../src/supplier/urls.js'
 import { money } from '../src/money.js'
 import { emptyNotebook, type Notebook } from '../src/notebook.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
+import { hotelDetail } from '../src/supplier/types.js'
 import type { FlightSearch, HotelSearch } from '../src/supplier/types.js'
 
 const NOW = new Date('2026-09-13T12:00:00Z')
 const flight: FlightSearch = { kind: 'flight', from: 'BER', to: 'FAO', departureDate: '2026-09-12', returnDate: '2026-09-19',
   flexDays: 0, adults: 2, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false }
-const hotel: HotelSearch = { kind: 'hotel', query: 'Faro beach', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2, currency: 'EUR' }
+const hotel: HotelSearch = { kind: 'hotel', query: 'hotels in Faro, Portugal', checkIn: '2026-09-12', checkOut: '2026-09-19', adults: 2, currency: 'EUR', countryCode: 'PT' }
 const usage = { input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 40 }
 const approve = () => ({ content: [{ type: 'text', text: JSON.stringify({ approved: true, issues: [] }) }], stop_reason: 'end_turn', model: 'claude-opus-5', _request_id: 'r', usage })
 const withBudget = (nb: Notebook): Notebook => ({ ...nb, budget: { value: money(10_000_00n, 'EUR'), source: 'user', at: NOW.toISOString() } })
@@ -244,7 +245,7 @@ describeDb('cashier', () => {
   it('blocks a hotel whose stay dates moved, and passes an identical stay', () => {
     const stored = { slot: 'stay', quantity: 1, sourceId: 'H', supplier: 'mock', kind: 'hotel' as const, name: 'Casa Bela', priceMinor: '2000', currency: 'EUR', priceBasis: 'total' as const,
       fetchedAt: NOW.toISOString(), lineTotalMinor: '2000', bookingUrl: null, searchParams: null,
-      detail: { kind: 'hotel' as const, checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7, rating: null, coordinates: null, offerSource: null } }
+      detail: hotelDetail({ checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7 }) }
     const fresh = { sourceId: 'H', supplier: 'mock', kind: 'hotel' as const, name: 'Casa Bela', price: money(2000n, 'EUR'), priceBasis: 'total' as const, fetchedAt: NOW, ttlSeconds: 900, bookingUrl: null,
       detail: { ...stored.detail, checkOut: '2026-09-20' } }
     expect(sameIdentity(stored, fresh)).toBe(false)

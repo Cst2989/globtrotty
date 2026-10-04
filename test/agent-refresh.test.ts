@@ -37,7 +37,7 @@ const FLIGHT_QUERY: ResultsContent['query'] = {
 }
 
 const HOTEL_QUERY: ResultsContent['query'] = {
-  place: 'Tokyo', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2,
+  place: 'Tokyo', country: 'JP', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2,
 }
 
 type Seeded = { userId: string; conversationId: string; turnId: string }
@@ -107,10 +107,16 @@ describe('the supplier params a stored row implies', () => {
     expect(flightParamsFor({ ...FLIGHT_QUERY, to: undefined })).toBeNull()
   })
 
-  it('rebuilds the hotels search from the stored place name and its two dates', () => {
+  it('rebuilds the hotels search as the SAME query the original search sent, with its gl', () => {
     expect(hotelParamsFor(HOTEL_QUERY, 'EUR')).toEqual<HotelSearch>({
-      kind: 'hotel', query: 'Tokyo', checkIn: '2026-11-20', checkOut: '2026-12-06', adults: 2,
-      currency: 'EUR',
+      kind: 'hotel', query: 'hotels in Tokyo, Japan', checkIn: '2026-11-20', checkOut: '2026-12-06',
+      adults: 2, currency: 'EUR', countryCode: 'JP',
+    })
+    // A row written before the hotels pass carries no country: the words still get the
+    // `hotels in` framing, and no `gl` is guessed for a market we were never told.
+    expect(hotelParamsFor({ ...HOTEL_QUERY, country: undefined }, 'EUR')).toEqual<HotelSearch>({
+      kind: 'hotel', query: 'hotels in Tokyo', checkIn: '2026-11-20', checkOut: '2026-12-06',
+      adults: 2, currency: 'EUR', countryCode: null,
     })
     // No check-out is no stay to price.
     expect(hotelParamsFor({ ...HOTEL_QUERY, inbound: null }, 'EUR')).toBeNull()
@@ -194,7 +200,7 @@ describeDb('handleRefresh', () => {
     })
   })
 
-  it('re-runs a stored hotels search without a re-rank call', async () => {
+  it('re-runs a stored hotels search, re-ranked the same way the flights list is', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '03')
       const params = hotelParamsFor(HOTEL_QUERY, 'EUR')!
@@ -212,17 +218,22 @@ describeDb('handleRefresh', () => {
       const sup = suppliers(() => LATER)
       const hotelSpy = vi.spyOn(sup.hotels, 'search')
       const flightSpy = vi.spyOn(sup.flights, 'search')
-      const fetchImpl = vi.fn()
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse(RANK_FIXTURE))
 
       const step = await handleRefresh(deps(sql, fetchImpl, sup), ctx(s), { kind: 'hotel' })
 
       if (step.kind !== 'park') throw new Error('unreachable')
       expect(step.message).toBe('Prices refreshed.')
       expect(hotelSpy).toHaveBeenCalledTimes(1)
+      // The query it re-ran is the one the ORIGINAL search sent, words and market both.
+      expect(hotelSpy.mock.calls[0]![0]).toMatchObject({
+        kind: 'hotel', query: 'hotels in Tokyo, Japan', countryCode: 'JP',
+      })
       expect(flightSpy).not.toHaveBeenCalled()
-      // `rankItems` scores flight itineraries; a stay has nothing for it to score.
-      expect(fetchImpl).not.toHaveBeenCalled()
-      expect(step.costMicros).toBe(0n)
+      // The hotels pass: a stay IS re-ranked now (`rankItems` scores it against the stay
+      // preferences), so the refresh pays for one Jev call exactly as a flights refresh does.
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      expect(step.costMicros).toBeGreaterThan(0n)
       const attachment = step.attachments![0]!.content as ResultsContent
       expect(attachment.kind).toBe('hotels')
       expect(attachment.refreshed).toBe(true)

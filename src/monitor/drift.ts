@@ -22,6 +22,7 @@ import { WEB_SEARCH_TOOL, SCOUT_MAX_SEARCHES, SCOUT_SEARCH_RESULT_TOKENS } from 
 import { renderDriverPrompt } from '../agents/driver.js'
 import { addMoney, money, type Money } from '../money.js'
 import type { RehydratedItem } from '../gates/types.js'
+import { hotelDetail } from '../supplier/types.js'
 import type { StoredItem } from '../supplier/types.js'
 import type { Notifier, DriftAlarm } from '../notify.js'
 import { loadPrompt } from '../agents/prompts/load.js'
@@ -97,10 +98,7 @@ function goldenHotelItem(): StoredItem {
     sourceId: 'golden-hotel', supplier: 'mock', kind: 'hotel', name: 'Golden Stay',
     price: money(90_000n, 'EUR'), priceBasis: 'total',
     fetchedAt: GOLDEN_NOW, ttlSeconds: 900, bookingUrl: null,
-    detail: {
-      kind: 'hotel', checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7,
-      rating: null, coordinates: null, offerSource: null,
-    },
+    detail: hotelDetail({ checkIn: '2026-09-12', checkOut: '2026-09-19', nights: 7 }),
     searchParams: null,
   }
 }
