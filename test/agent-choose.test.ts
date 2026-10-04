@@ -120,7 +120,8 @@ describeDb('handleChoose', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.message).toBe('Flight noted. Here are hotels in Tokyo for 19 Nov to 6 Dec.')
+      expect(step.message).toBe(
+        'Nice choice. Here are hotels in Tokyo for 19 Nov to 6 Dec, 17 nights, two adults.')
       expect(searchSpy).toHaveBeenCalledTimes(1)
       // The hotels pass, section 1: the chosen flight arrives at an AIRPORT code, and what goes
       // out is the metro that airport serves, as words, with its market. `q=TYO` (and `q=Tokyo`)
@@ -135,7 +136,8 @@ describeDb('handleChoose', () => {
       const attachment = step.attachments![0]!
       const chips = step.attachments![1]!.content as { questionId: string; options: { id: string }[] }
       expect(chips.questionId).toBe('next')
-      expect(chips.options.map((o) => o.id)).toEqual(['central', 'cheaper_hotels', 'change_hotel_dates'])
+      expect(chips.options.map((o) => o.id))
+        .toEqual(['central', 'top_rated', 'cheaper_hotels', 'change_hotel_dates'])
       const content = attachment.content as { kind: string; sourceIds: string[] }
       expect(content.kind).toBe('hotels')
       expect(content.sourceIds.length).toBeGreaterThan(0)

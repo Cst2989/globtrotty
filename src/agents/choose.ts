@@ -33,6 +33,7 @@ import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { placeForCode, type Place } from '../intake/places.js'
 import { addDays } from '../intake/dates.js'
 import { hotelSearchFor, withDistanceFromCentre } from './hotels.js'
+import { nightsBetween } from '../supplier/dates.js'
 import { rankItems } from '../intake/rank.js'
 import { recordJevCall } from '../jev/record.js'
 import type { TripBrief } from '../intake/brief.js'
@@ -78,6 +79,20 @@ function rejectionMessage(pathText: string): string {
 const PATH_FAILED_MESSAGE = 'I could not finish checking that option just now. Please try again in a moment.'
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * 'two' for 2, '12' for 12.
+ *
+ * A party size is small and a sentence reads better with the word: "16 nights, two adults" is
+ * how a person says it, and "16 nights, 2 adults" is how a form prints it. Past nine the digit
+ * wins back, which is the ordinary convention and also where the words stop being shorter.
+ * `PartySize` is capped at 20 by `ResultsContentSchema`, so there is no third case.
+ */
+const SMALL_NUMBERS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
+
+export function countWord(n: number): string {
+  return n >= 0 && n < SMALL_NUMBERS.length ? SMALL_NUMBERS[n]! : String(n)
+}
 
 /** 'D Mon' — e.g. '2026-11-20' -> '20 Nov'. Same shape as src/agents/intake.ts's own `dateLabel`
  * (not exported there, so duplicated here rather than reached across a module boundary that
@@ -198,6 +213,9 @@ async function handleChooseFlight(
   const currency = notebook.budget === null ? 'EUR' : notebook.budget.value.currency
 
   const params = hotelSearchFor({ place: destination, checkIn, checkOut, adults, currency })
+  // The same arithmetic the adapter does for `HotelDetail.nights`, done once here for the
+  // sentence — the reply must say the same number the cards do.
+  const nights = nightsBetween(checkIn, checkOut)
 
   try {
     const budget = await assertSupplierBudget(sql, ctx.turnId, deps.limits.maxSupplierCallsPerTurn)
@@ -290,8 +308,10 @@ async function handleChooseFlight(
 
     return {
       kind: 'park',
-      message: `Flight noted. Here are hotels in ${destination.city} for `
-        + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}.`,
+      message: `Nice choice. Here are hotels in ${destination.city} for `
+        + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}, ${nights} `
+        + `${nights === 1 ? 'night' : 'nights'}, ${countWord(adults)} `
+        + `${adults === 1 ? 'adult' : 'adults'}.`,
       costMicros: rerankCost,
       recordedMicros: spent.micros,
       attachments: [

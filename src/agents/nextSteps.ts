@@ -12,8 +12,9 @@ import type { ChoicesContent } from '../results.js'
  * as it would if she had typed it (src/agents/router.ts's `next` arm).
  *
  * That is also why every label below has to be a sentence `routeMessage` can actually classify.
- * `direct_only`, `cheapest`, `evening` and `show_all` read as filters; `day_earlier`,
- * `change_dates`, `central`, `cheaper_hotels` and `change_hotel_dates` read as new searches.
+ * `direct_only`, `cheapest`, `evening`, `show_all` and `top_rated` read as filters;
+ * `day_earlier`, `change_dates`, `central`, `cheaper_hotels` and `change_hotel_dates` read as new
+ * searches.
  * The two exceptions are handled by the router itself rather than by Jev, because no typed
  * sentence could do what they do: `get_links` is a BUTTON on the summary, and `change_flight`
  * re-shows a stored row.
@@ -67,8 +68,11 @@ const SETS: Record<NextStepSet, { id: string; label: string }[]> = {
     { id: 'show_all', label: 'Show all flights again' },
     { id: 'evening', label: 'Evening departures' },
   ],
+  // Hotels pass, section 6: `Top rated` joins the three, which is the fourth thing she reaches
+  // for once a list of stays has ratings on it at all. Four is the ceiling spec section 3 sets.
   hotels: [
     { id: 'central', label: 'Near the centre' },
+    { id: 'top_rated', label: 'Top rated' },
     { id: 'cheaper_hotels', label: 'Cheaper hotels' },
     { id: 'change_hotel_dates', label: 'Change hotel dates' },
   ],
