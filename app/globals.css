@@ -1945,9 +1945,14 @@ select {
   display: inline-block;
   padding: 0.2rem 0.5rem;
   border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink);
+  /*
+   * White pill, dark text, on a DARK basemap: the pill has to be the brightest
+   * thing on the tile or forty prices disappear into the streets. It is not a
+   * surface token for that reason — it sits on CARTO's map, not on this page.
+   */
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: #ffffff;
+  color: #141312;
   font-size: 0.78rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1964,12 +1969,19 @@ select {
   z-index: 1;
 }
 
+.leaflet-container .map-pill-icon:hover .map-pill {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
 /*
  * The city centre every "3.2 km from centre" on a card is measured from.
  *
- * A ring rather than a pin, and a white halo under it: it is a reference point,
- * not an option she can pick, and it has to read on a pale street map as well
- * as on a green park without competing with the prices for attention.
+ * A ring rather than a pin, and a white halo around it: it is a reference
+ * point, not an option she can pick, and on CARTO's dark basemap it has to read
+ * against near-black streets and near-black parks alike without competing with
+ * the prices for attention.
  */
 .map-centre {
   display: block;
@@ -1977,8 +1989,10 @@ select {
   height: 18px;
   border-radius: 50%;
   border: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 0 10px 2px color-mix(in srgb, var(--accent) 70%, transparent);
   transform: translate(-50%, -50%);
 }
 

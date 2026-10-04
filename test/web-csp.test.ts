@@ -25,26 +25,32 @@ describe('cspFor: img-src is pinned exactly', () => {
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
     expect(imgSrc).toBe(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
+      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com')
   })
 
   it('names each host, never a scheme-wide source, and wildcards only two subdomains', () => {
     const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
     expect(imgSrc).not.toMatch(/https:(\s|$)/)
     // Two SUBDOMAIN wildcards, each on a single registrable domain and each unavoidable: Google
-    // numbers its thumbnail hosts (`encrypted-tbn0`, ...) and OSM serves tiles from a/b/c.
+    // numbers its thumbnail hosts (`encrypted-tbn0`, ...) and CARTO serves tiles from a/b/c/d.
     // Nothing else in the directive carries one.
     expect(imgSrc.match(/\*/g)).toHaveLength(2)
     expect(imgSrc).toContain('https://*.gstatic.com')
-    expect(imgSrc).toContain('https://*.tile.openstreetmap.org')
+    expect(imgSrc).toContain('https://*.basemaps.cartocdn.com')
   })
 
   it('does NOT widen script-src or style-src for the map: Leaflet is bundled', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     expect(directives).toContain("style-src 'self' 'unsafe-inline'")
     expect(directives).toContain("script-src 'self' 'unsafe-inline'")
-    expect(cspFor(PROJECT_URL)).not.toContain('unpkg')
-    expect(cspFor(PROJECT_URL)).not.toContain('cdn')
+    // The CDN host the tiles come from is an IMAGE origin and nothing else. This used to read
+    // `not.toContain('cdn')` over the whole policy, which only worked while no third-party
+    // origin happened to have "cdn" in its name; the claim it was making all along is this one.
+    for (const name of ['style-src', 'script-src', 'connect-src', 'default-src']) {
+      const directive = directives.find((d) => d.startsWith(`${name} `))!
+      expect(directive).not.toContain('cdn')
+      expect(directive).not.toContain('unpkg')
+    }
   })
 })
 
@@ -77,6 +83,6 @@ describe('next.config.ts headers(): the real config object', () => {
     expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
     expect(csp!.split('; ')).toContain(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
+      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com')
   })
 })

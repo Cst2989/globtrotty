@@ -43,7 +43,7 @@ describe('cspFor', () => {
   it('restricts images to self, data URIs and the Kiwi logo host', () => {
     expect(csp).toContain(
       "img-src 'self' data: https://images.kiwi.com https://lh3.googleusercontent.com"
-      + ' https://*.gstatic.com https://*.tile.openstreetmap.org')
+      + ' https://*.gstatic.com https://*.basemaps.cartocdn.com')
   })
 
   it('forbids framing', () => {
@@ -62,7 +62,7 @@ describe('cspFor', () => {
     // directive character for character.
     expect(csp.match(/\*/g)).toHaveLength(2)
     expect(csp).toContain('https://*.gstatic.com')
-    expect(csp).toContain('https://*.tile.openstreetmap.org')
+    expect(csp).toContain('https://*.basemaps.cartocdn.com')
   })
 
   it('restricts base-uri and form-action to self', () => {

@@ -22,9 +22,19 @@ export type HotelMapProps = {
   onPick: (sourceId: string) => void
 }
 
-/** Tiles and the attribution OpenStreetMap's licence requires; both pinned in web/csp.ts. */
-const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+/**
+ * CARTO's dark basemap, and the attribution both CARTO and OpenStreetMap's licence require; the
+ * origin is pinned in web/csp.ts.
+ *
+ * OSM's own tile servers answer this app with a 403 and an "Access blocked" tile: their usage
+ * policy is written for a named, contactable application, not for an anonymous deployment, and
+ * the correct fix is a CDN that exists to serve applications rather than arguing with it. CARTO's
+ * dark_all is also the right PICTURE for this page: a light street map under a dark page was a
+ * white rectangle shouting beside the list.
+ */
+export const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+export const TILE_SUBDOMAINS = 'abcd'
+export const TILE_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; CARTO'
 
 /**
  * `&`, `<`, `>`, `"` and `'` as entities.
@@ -105,7 +115,11 @@ export function HotelMap(
         attributionControl: true,
       })
       mapRef.current = map
-      L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19 }).addTo(map)
+      L.tileLayer(TILE_URL, {
+        attribution: TILE_ATTRIBUTION,
+        subdomains: TILE_SUBDOMAINS,
+        maxZoom: 19,
+      }).addTo(map)
       L.control.zoom({ position: 'bottomright' }).addTo(map)
 
       const points: [number, number][] = []

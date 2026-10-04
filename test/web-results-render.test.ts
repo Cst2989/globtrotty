@@ -13,7 +13,14 @@ import {
   HotelCard, amenityChips, essentialsLine, locationLine, ratingNumber, ratingWord, stayCardId,
   transitLine, typeLabel,
 } from '../web/components/HotelCard.js'
-import { HotelMap, escapeHtml, pricePillHtml } from '../web/components/HotelMap.js'
+import {
+  HotelMap,
+  TILE_ATTRIBUTION,
+  TILE_SUBDOMAINS,
+  TILE_URL,
+  escapeHtml,
+  pricePillHtml,
+} from '../web/components/HotelMap.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import {
   FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel, starsLabel,
@@ -1211,6 +1218,20 @@ describe('HotelMap', () => {
   it('exports the component and its pure pill builder', () => {
     expect(typeof HotelMap).toBe('function')
     expect(typeof pricePillHtml).toBe('function')
+  })
+
+  /*
+   * Polish pass, section 1. OSM's own tile servers answered this deployment with a 403 and an
+   * "Access blocked" picture on every tile, so the basemap is CARTO's dark one. The URL is
+   * pinned here and the ORIGIN is pinned in test/web-csp.test.ts: a tile host the CSP does not
+   * admit fails exactly as silently as a blocked one.
+   */
+  it("draws its tiles from CARTO's dark basemap, not from OSM", () => {
+    expect(TILE_URL).toBe('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png')
+    expect(TILE_URL).not.toContain('openstreetmap.org')
+    expect(TILE_SUBDOMAINS).toBe('abcd')
+    // CARTO's terms and OSM's licence both want naming; neither is optional.
+    expect(TILE_ATTRIBUTION).toBe('&copy; OpenStreetMap contributors &copy; CARTO')
   })
 
   it('builds a price pill, and marks the active one', () => {
