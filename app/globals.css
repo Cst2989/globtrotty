@@ -531,22 +531,24 @@ select {
 }
 
 /*
- * Task 10: the desktop rail collapse. `data-rail-collapsed` (set by
- * `AppShell`) shrinks the rail to a 56px icon strip — just the wordmark
- * mark, the "New trip" icon and this toggle, via `.rail-label` (the text
- * `Sidebar` wraps each of those two in) and the trip list/footer being
- * hidden outright. Hovering or focusing the collapsed rail re-expands it as
- * an absolutely-positioned overlay — the same drawer mechanics as mobile,
- * just triggered by `:hover`/`:focus-within` instead of `data-rail='open'`
- * — without moving the main column underneath it.
+ * The desktop rail collapse. `data-rail-collapsed` (set by `AppShell`) shrinks
+ * the rail to a 56px icon strip — just the wordmark mark, the "New trip" icon
+ * and the chevron that toggles it, via `.rail-label` (the text `Sidebar` wraps
+ * each of those two in) and the trip list/footer being hidden outright.
+ *
+ * Pass 3, section 2: expanding on `:hover`/`:focus-within`, as an absolutely
+ * positioned overlay, is gone. The rail is a real grid column at both widths,
+ * so expanding it makes room for the list instead of covering the thread, and
+ * only the chevron changes which width it is. That also means there is nothing
+ * here keyed on the pointer: the one transition is on the column itself.
  */
 @media (min-width: 901px) {
-  .shell[data-rail-collapsed='true'] {
-    grid-template-columns: 56px minmax(0, 1fr);
+  .shell {
+    transition: grid-template-columns 200ms var(--ease);
   }
 
-  .shell[data-rail-collapsed='true'] .rail {
-    overflow: hidden;
+  .shell[data-rail-collapsed='true'] {
+    grid-template-columns: 56px minmax(0, 1fr);
   }
 
   .shell[data-rail-collapsed='true'] .rail-label,
@@ -557,47 +559,27 @@ select {
     display: none;
   }
 
-  .shell[data-rail-collapsed='true'] .rail:hover,
-  .shell[data-rail-collapsed='true'] .rail:focus-within {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: var(--rail-width);
-    overflow: visible;
-    z-index: 25;
-    box-shadow: var(--shadow);
+  /* Collapsed, the chevron is the first thing in the strip, centred over the
+     wordmark mark; expanded, it sits at the top right of the rail's header. */
+  .shell[data-rail-collapsed='true'] .rail-collapse {
+    position: static;
+    margin: 0.6rem auto 0;
   }
 
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-label,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-label {
-    display: inline;
-  }
-
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-heading,
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-empty,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-heading,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-empty {
-    display: block;
-  }
-
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-list,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-list {
-    display: block;
-    width: var(--rail-width);
-  }
-
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-bottom,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-bottom {
-    display: flex;
-    width: var(--rail-width);
+  .shell[data-rail-collapsed='true'] .rail-top {
+    justify-content: center;
+    padding: 0.5rem 0 0.25rem;
   }
 
   .shell[data-rail-collapsed='true'] .rail-new {
     justify-content: center;
+    margin: 0.25rem 0.5rem 0.75rem;
   }
+}
 
-  .shell[data-rail-collapsed='true'] .rail:hover .rail-new,
-  .shell[data-rail-collapsed='true'] .rail:focus-within .rail-new {
-    justify-content: flex-start;
+@media (prefers-reduced-motion: reduce) {
+  .shell {
+    transition: none;
   }
 }
 

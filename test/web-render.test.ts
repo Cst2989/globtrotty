@@ -16,6 +16,7 @@ import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
 import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import { mergePending } from '../web/components/pending.js'
 import { SplitShell } from '../web/components/SplitShell.js'
+import { AppShell } from '../web/components/AppShell.js'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
@@ -160,6 +161,41 @@ describe('nextLocation', () => {
 // Pass 3, section 5. The author's loudest complaint: pressing send on the landing took about
 // three seconds before anything on screen changed — the POST, then a server-rendered
 // /c/[id]. Nothing in that wait is information the browser does not already have.
+// Pass 3, section 2: the rail used to expand on hover, as an overlay over the thread. It now
+// toggles on a click, and the expanded rail is a real grid column that pushes the content.
+describe('AppShell', () => {
+  function shell(collapsed: boolean) {
+    return renderToStaticMarkup(createElement(AppShell, {
+      rail: 'the trip list', title: 'Trip', collapsed, children: 'the thread',
+    }))
+  }
+
+  it('renders a real button with aria-expanded and aria-controls naming the rail', () => {
+    const html = shell(true)
+    expect(html).toContain('id="app-rail"')
+    expect(html).toContain('aria-controls="app-rail"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-label="Expand conversations"')
+    expect(html).toContain('<button')
+  })
+
+  it('flips the chevron and the labels with the state', () => {
+    const collapsed = shell(true)
+    const expanded = shell(false)
+    expect(collapsed).toContain('data-rail-collapsed="true"')
+    expect(expanded).toContain('data-rail-collapsed="false"')
+    expect(expanded).toContain('aria-expanded="true"')
+    expect(expanded).toContain('aria-label="Collapse conversations"')
+    // Different glyph per direction: CaretRight opens, CaretLeft closes.
+    expect(collapsed).not.toBe(expanded)
+  })
+
+  it('puts the toggle before the rail content, so the collapsed strip can stack it on top', () => {
+    const html = shell(true)
+    expect(html.indexOf('rail-collapse')).toBeLessThan(html.indexOf('the trip list'))
+  })
+})
+
 describe('LandingLive', () => {
   // The IDLE half is not rendered here: it mounts `MessageBox`, which calls `useRouter()`, and
   // there is no app-router context under `renderToStaticMarkup` (mocking next/navigation to get
