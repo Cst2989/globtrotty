@@ -1609,10 +1609,17 @@ select {
   font-size: 0.75rem;
 }
 
+/*
+ * White, not a surface token: these are the carriers' own marks, drawn in dark
+ * ink for a light background, and on `--surface-2` half of them disappeared
+ * into the card. A 2px inset keeps the mark off the edge of the disc.
+ */
 .airline-logo {
   display: block;
   border-radius: 50%;
-  background: var(--surface-2);
+  padding: 2px;
+  background: #fff;
+  object-fit: contain;
 }
 
 .airline-badge {
