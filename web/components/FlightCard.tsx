@@ -14,6 +14,13 @@ export type FlightCardProps = {
   chosen?: boolean
   /** Pass 3, section 6a: some OTHER card's Select is in flight, so this one is no longer an offer. */
   selectDisabled?: boolean
+  /**
+   * Pass 3 (author's correction to section 1): a refresh of this card's own search is in flight,
+   * so its PRICE is a shimmering block rather than a number. Everything else about the itinerary
+   * — the legs, the times, the stops, the bags, the carriers — is as true as it was, so it stays
+   * exactly where it is; the one thing a ttl expires is the money.
+   */
+  updating?: boolean
   onChoose: (sourceId: string) => void
 }
 
@@ -56,11 +63,15 @@ export function durationWords(minutes: number): string {
 
 /**
  * Pass 3: an expired card's Select says why it is disabled rather than just being dead. Pressing
- * it could never have worked — the freshness gate (src/gates/freshnessGate.ts) rejects a
- * proposal built on an expired price — so the button that CAN work is the one in the banner
- * above the list.
+ * it could never have worked anyway — the freshness gate (src/gates/freshnessGate.ts) rejects a
+ * proposal built on an expired price.
+ *
+ * `UPDATING` is the ordinary case and lasts a few seconds: the pane re-runs the search by itself
+ * the moment it notices the prices have aged out. `STALE` is what is left when that re-run
+ * failed, which is the one state with nothing useful to offer her but the truth.
  */
-const REFRESH_FIRST = 'Refresh prices first'
+const UPDATING = 'Updating prices'
+const STALE = 'These prices are out of date'
 
 /** How many carrier logos fit on one leg's line before the rest become a `+N`. */
 const MAX_LOGOS = 2
@@ -125,13 +136,27 @@ function LegRow({ label, leg, stops }: { label: string; leg: LegLite; stops: num
  * with `renderToStaticMarkup`. `AirlineLogo` is the one client island inside it, for its
  * `onError` fallback alone.
  */
-export function FlightCard({ item, adults, now, chosen = false, selectDisabled = false, onChoose }: FlightCardProps) {
+export function FlightCard(
+  { item, adults, now, chosen = false, selectDisabled = false, updating = false, onChoose }: FlightCardProps,
+) {
   const flight = item.flight
   if (!flight) return null
   const clock = now ?? new Date()
 
   return (
-    <li className="flight-card" data-chosen={chosen} data-expired={item.expired ? 'true' : undefined}>
+    <li
+      className="flight-card"
+      data-chosen={chosen}
+      data-expired={item.expired && !updating ? 'true' : undefined}
+      // What `useListFlip` (web/components/flip.ts) tracks this card's position by.
+      data-flip-id={item.sourceId}
+      // Pass 3: pairs this card with ITSELF across the re-render the refreshed row causes, so a
+      // card that Jev's new ranking moves up the list animates to its new place instead of the
+      // whole list redrawing. Keyed on the supplier's own id, with every character a
+      // `view-transition-name` cannot carry replaced — the name only has to be unique in the
+      // document, never readable.
+      style={{ viewTransitionName: `card-${item.sourceId.replace(/[^A-Za-z0-9]/g, '-')}` }}
+    >
       <div className="flight-card-main">
         {chosen ? <span className="flight-card-ribbon">Selected</span> : null}
         <LegRow label="Outbound" leg={flight.outbound} stops={flight.stops} />
@@ -165,21 +190,25 @@ export function FlightCard({ item, adults, now, chosen = false, selectDisabled =
         </div>
       </div>
       <div className="flight-card-side">
-        <span className="flight-card-price">{formatMoney(money(BigInt(item.priceMinor), item.currency))}</span>
+        {updating ? (
+          <span className="skeleton-line skeleton-line-price" aria-label="Updating the price" />
+        ) : (
+          <span className="flight-card-price">{formatMoney(money(BigInt(item.priceMinor), item.currency))}</span>
+        )}
         <span className="flight-card-per">for {adults} {adults === 1 ? 'passenger' : 'passengers'}</span>
         {chosen ? null : (
           <button
             type="button"
             className="btn btn-primary"
             disabled={item.expired || selectDisabled}
-            title={item.expired ? REFRESH_FIRST : undefined}
+            title={updating ? UPDATING : (item.expired ? STALE : undefined)}
             onClick={() => onChoose(item.sourceId)}
           >
             Select
           </button>
         )}
         <span className="flight-card-age">
-          {item.expired ? staleAgeText(item.fetchedAt, clock) : ageText(item.fetchedAt, clock)}
+          {updating ? UPDATING : (item.expired ? staleAgeText(item.fetchedAt, clock) : ageText(item.fetchedAt, clock))}
         </span>
       </div>
     </li>

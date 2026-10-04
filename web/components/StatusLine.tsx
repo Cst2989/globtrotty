@@ -10,6 +10,9 @@ export type StatusLineProps = {
  * skeleton, so the line says what is actually happening instead of a generic
  * "Thinking" beside five shimmering flight cards.
  *
+ * `updating` (pass 3) is the third: the results pane re-running an expired search by itself,
+ * which is neither her message being worked on nor a search she asked for.
+ *
  * `ThreadView` also substitutes `working`/`searching` for the real status
  * while an optimistic message or a just-clicked chip is in flight (its own
  * `sending` prop). Pass 3, section 5e dropped the separate "Sending" word
@@ -20,6 +23,7 @@ export type StatusLineProps = {
 const STATUS_WORDS: Record<string, string> = {
   active: 'Ready for your next message',
   searching: 'Searching',
+  updating: 'Updating prices',
   working: 'Thinking',
   awaiting_user: 'Waiting for your reply',
   limit_reached: "Today's limit has been reached",
@@ -42,7 +46,7 @@ const FAIL_REASON_WORDS: Record<string, string> = {
 
 /** Colour tone for the line; the CSS keys on `data-tone`. */
 function toneFor(status: string): 'working' | 'failed' | 'limit' | 'neutral' {
-  if (status === 'working' || status === 'searching') return 'working'
+  if (status === 'working' || status === 'searching' || status === 'updating') return 'working'
   if (status === 'failed') return 'failed'
   if (status === 'limit_reached' || status === 'escalated') return 'limit'
   return 'neutral'
@@ -66,7 +70,7 @@ export function StatusLine({ status, failReason }: StatusLineProps) {
         {words}
         {detail ? `: ${detail}.` : ''}
       </span>
-      {status === 'working' || status === 'searching' ? (
+      {status === 'working' || status === 'searching' || status === 'updating' ? (
         <span className="thinking" aria-hidden="true">
           <i />
           <i />

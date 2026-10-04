@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatMoney, money } from '@/src/money'
 import type { Filter } from '@/src/results'
@@ -14,7 +14,6 @@ import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './ProposalCard'
-import { ageWords } from './age'
 import { useActivity } from './activity'
 
 export type ResultsPaneProps = {
@@ -35,11 +34,6 @@ export type ResultsPaneProps = {
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
   /**
-   * Pass 3, section 1: "Refresh prices" on the stale banner, which this component renders above
-   * any list whose own prices have aged past their ttl (`ResultsView.stale`, web/data.ts).
-   */
-  onRefresh: (kind: 'flights' | 'hotels') => void
-  /**
    * Pass 3, section 6a: the card she just pressed Select on, set by `ResultsPaneLive`
    * SYNCHRONOUSLY — before its POST — and cleared only if that POST comes back unusable.
    *
@@ -54,11 +48,11 @@ export type ResultsPaneProps = {
    */
   pendingChoice?: PendingChoice | null
   /**
-   * Pass 3, section 6c: the kind whose "Refresh prices" button was just pressed. That section
-   * becomes the search skeleton in the same tick, rather than leaving the stale banner and the
-   * dimmed cards on screen while the turn runs.
+   * Pass 3 (author's correction to section 1): the kinds whose search is being re-run right now.
+   * Every card in those lists shows a shimmering block where its price was, and nothing else
+   * about it moves.
    */
-  refreshing?: 'flights' | 'hotels' | null
+  updatingKinds?: ('flights' | 'hotels')[]
 }
 
 export type PendingChoice = { kind: 'flight' | 'hotel'; sourceId: string }
@@ -79,24 +73,26 @@ export function outcomeForStatus(status: number): 'keep' | 'rollback' {
 }
 
 /**
- * The one thing on screen that says WHY a list of flights is dimmed and why every Select on it
- * is dead: the prices behind it are past the ttl the supplier gave them.
+ * Whether this row's prices should be re-run WITHOUT being asked (pass 3, the author's
+ * correction to section 1).
  *
- * It replaces nothing — before pass 3 there was no such state to be in, because `loadResults`
- * dropped every expired item and the pane rendered an empty list under a full summary bar. The
- * button is the only way back, so it is the primary one.
+ * The first version of this put a banner and a "Refresh prices" button above a stale list. The
+ * author's objection is the right one: she never wanted stale prices, she wanted current ones,
+ * and a button asking her to confirm that is the office making its own bookkeeping her problem.
+ * Nothing about the decision needs her — the row says it is past its ttl, the stored search says
+ * exactly what to re-run, and the whole thing costs one supplier call. So the pane just does it,
+ * and says so where she is already looking: a shimmer where each price was, and "Updating
+ * prices" on the status line.
+ *
+ * `status !== 'working'` is the one guard that matters: a turn already in flight would refuse
+ * this one with a 409 (`submitAction`'s one-active-turn index), and firing it anyway would
+ * replace real prices with a skeleton that is never going to fill. Everything else — once per
+ * row, never twice for the same one — is the caller's `useRef`.
+ *
+ * Pure, so `test/web-results-render.test.ts` pins every branch.
  */
-function StaleBanner(
-  { fetchedAt, now, onRefresh }: { fetchedAt: string; now: Date; onRefresh: () => void },
-) {
-  return (
-    <div className="stale-banner" role="status">
-      <span>These prices are from {ageWords(fetchedAt, now)} ago.</span>
-      <button type="button" className="btn btn-primary btn-sm" onClick={onRefresh}>
-        Refresh prices
-      </button>
-    </div>
-  )
+export function shouldAutoRefresh(view: { stale: boolean }, status: string): boolean {
+  return view.stale && status !== 'working'
 }
 
 /** The newest `ResultsView` of one kind, or `null` when there is none — `results` arrives oldest-first. */
@@ -190,11 +186,12 @@ function itemById(view: ResultsView | null, sourceId: string): ResultItemLite | 
  */
 export function ResultsPane(
   {
-    results, proposal, now, pending, error, skeleton = null, pendingChoice = null, refreshing = null,
-    onChoose, onGetLinks, onRefresh,
+    results, proposal, now, pending, error, skeleton = null, pendingChoice = null, updatingKinds = [],
+    onChoose, onGetLinks,
   }: ResultsPaneProps,
 ) {
-  const clock = now ?? new Date()
+  const updatingFlights = updatingKinds.includes('flights')
+  const updatingHotels = updatingKinds.includes('hotels')
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
@@ -277,17 +274,9 @@ export function ResultsPane(
       {skeleton === 'hotels' || pendingChoice?.kind === 'flight' ? <ResultsSkeleton kind="hotels" /> : null}
       {pendingChoice?.kind === 'hotel' ? <PendingTripSummary /> : null}
 
-      {newestHotels && refreshing === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
-
-      {newestHotels && refreshing !== 'hotels' ? (
+      {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
           <SummaryBar {...summaryBarPropsFor(newestHotels)} />
-          {newestHotels.stale && newestHotels.fetchedAt ? (
-            <StaleBanner
-              fetchedAt={newestHotels.fetchedAt} now={clock}
-              onRefresh={() => onRefresh('hotels')}
-            />
-          ) : null}
           <FilterBar
             kind="hotels" items={newestHotels.items}
             filter={hotelState.filter} onChange={setHotelFilter}
@@ -301,22 +290,15 @@ export function ResultsPane(
             now={now}
             chosenSourceId={chosenHotelSourceId}
             selectDisabled={choosing}
+            updating={updatingHotels}
             onChoose={(sourceId) => onChoose('hotel', sourceId)}
           />
         </section>
       ) : null}
 
-      {newestFlights && refreshing === 'flights' ? <ResultsSkeleton kind="flights" /> : null}
-
-      {newestFlights && refreshing !== 'flights' ? (
+      {newestFlights ? (
         <section className="results-section" aria-label="Flights">
           <SummaryBar {...summaryBarPropsFor(newestFlights)} />
-          {newestFlights.stale && newestFlights.fetchedAt ? (
-            <StaleBanner
-              fetchedAt={newestFlights.fetchedAt} now={clock}
-              onRefresh={() => onRefresh('flights')}
-            />
-          ) : null}
           <FilterBar
             kind="flights" items={newestFlights.items}
             filter={flightState.filter} onChange={setFlightFilter}
@@ -331,6 +313,7 @@ export function ResultsPane(
             now={now}
             chosenSourceId={chosenFlightSourceId}
             selectDisabled={choosing}
+            updating={updatingFlights}
             onChoose={(sourceId) => onChoose('flight', sourceId)}
           />
         </section>
@@ -344,6 +327,8 @@ export type ResultsPaneLiveProps = {
   results: ResultsView[]
   proposal: (ProposalRowLite & { links: LinkLite[] }) | null
   skeleton?: SkeletonMode
+  /** `conversations.status` — the one guard on the background refresh; see `shouldAutoRefresh`. */
+  status: string
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
@@ -364,13 +349,26 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  * pick up the change, same pattern as every other `*Live` wrapper in this
  * codebase.
  */
-export function ResultsPaneLive({ conversationId, results, proposal, skeleton = null }: ResultsPaneLiveProps) {
+export function ResultsPaneLive(
+  { conversationId, results, proposal, skeleton = null, status }: ResultsPaneLiveProps,
+) {
   const router = useRouter()
   const activity = useActivity()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
-  const [refreshing, setRefreshing] = useState<'flights' | 'hotels' | null>(null)
+  const [updatingKinds, setUpdatingKinds] = useState<('flights' | 'hotels')[]>([])
+  /**
+   * Every `results` row this instance has already fired a background refresh for, by
+   * `messageId`. A ref, not state: it must not cause a render, and it must survive both the
+   * re-render `router.refresh()` causes and React's Strict Mode running the effect below twice
+   * on the same instance — either of which would otherwise fire a second supplier call (which
+   * `submitAction` would refuse with a 409 anyway, leaving a skeleton that never fills).
+   *
+   * Never cleared. One row is re-run at most once per page; if that re-run fails, the correction
+   * is explicit about there being no retry.
+   */
+  const autoRefreshed = useRef<Set<string>>(new Set())
 
   /**
    * Pass 3, section 6: `rollback` runs on every path that leaves the screen claiming something
@@ -406,10 +404,59 @@ export function ResultsPaneLive({ conversationId, results, proposal, skeleton = 
     activity.setBusy(false)
   }
 
-  function rollbackRefresh() {
-    setRefreshing(null)
-    activity.setBusy(false)
+  /**
+   * The background refresh (pass 3, the author's correction to section 1). Fired from an effect
+   * rather than from an event, because nothing she did started it: the page simply loaded onto a
+   * row whose prices have expired.
+   *
+   * On success nothing is done here at all — no `router.refresh()`. The turn it queued flips the
+   * conversation to `working`, which `ThreadLive`'s Realtime subscription already refreshes on,
+   * and the new `results` row arrives through the same path every other row does. The price
+   * skeletons stay up until it does, because they are keyed on the row still being stale.
+   *
+   * On failure the skeletons come down and the OLD prices come back with their age text, which
+   * is the honest answer: these are the numbers we have, and this is how old they are.
+   */
+  async function autoRefresh(kind: 'flights' | 'hotels') {
+    setUpdatingKinds((current) => (current.includes(kind) ? current : [...current, kind]))
+    activity.setUpdating(true)
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind }),
+      })
+      if (res.ok) return
+    } catch {
+      // Same answer as a refused response: fall through to putting the old prices back.
+    }
+    setUpdatingKinds((current) => current.filter((k) => k !== kind))
+    activity.setUpdating(false)
   }
+
+  useEffect(() => {
+    for (const kind of ['flights', 'hotels'] as const) {
+      const view = newestOfKind(results, kind)
+      if (!view || !shouldAutoRefresh(view, status)) continue
+      if (autoRefreshed.current.has(view.messageId)) continue
+      autoRefreshed.current.add(view.messageId)
+      void autoRefresh(kind)
+    }
+    // `autoRefresh` closes over nothing but the setters, `activity` and `conversationId`, all of
+    // which are stable for a given mounted conversation; the rows and the status are what decide
+    // whether it should run at all.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, status])
+
+  // The refreshed row has landed (it is no longer stale), so the skeletons have nothing left to
+  // stand for and the status line goes back to what the conversation actually says.
+  const stillStale = updatingKinds.some((kind) => newestOfKind(results, kind)?.stale === true)
+  useEffect(() => {
+    if (updatingKinds.length > 0 && !stillStale) {
+      setUpdatingKinds([])
+      activity.setUpdating(false)
+    }
+  }, [updatingKinds, stillStale, activity])
 
   return (
     <ResultsPane
@@ -419,17 +466,12 @@ export function ResultsPaneLive({ conversationId, results, proposal, skeleton = 
       pending={pending}
       error={error}
       pendingChoice={pendingChoice}
-      refreshing={refreshing}
+      updatingKinds={updatingKinds}
       onChoose={(kind, sourceId) => {
         // Before the fetch, deliberately: this is the whole of section 6a.
         setPendingChoice({ kind, sourceId })
         activity.setBusy(true)
         void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId }, rollbackChoice)
-      }}
-      onRefresh={(kind) => {
-        setRefreshing(kind)
-        activity.setBusy(true)
-        void post(`/api/conversations/${conversationId}/refresh`, { kind }, rollbackRefresh)
       }}
       onGetLinks={() => {
         if (!proposal || proposal.decision !== null) return

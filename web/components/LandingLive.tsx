@@ -121,7 +121,7 @@ export function LandingLive({ phase: initialPhase = 'idle' }: LandingLiveProps) 
         results={(
           <ResultsPane
             results={[]} proposal={null} pending={false} error={null} skeleton="full"
-            onChoose={() => {}} onGetLinks={() => {}} onRefresh={() => {}}
+            onChoose={() => {}} onGetLinks={() => {}}
           />
         )}
       />

@@ -30,6 +30,14 @@ export type Activity = {
   /** True from the tick a click happens until the server's own status catches up. */
   busy: boolean
   setBusy: (value: boolean) => void
+  /**
+   * True while the results pane is re-running a search of its own accord, because the prices it
+   * loaded had expired (pass 3, the author's correction to section 1). Its own flag rather than
+   * `busy`, because the status line has a different and more specific thing to say about it —
+   * "Updating prices", not "Thinking" — and because she did not start it.
+   */
+  updating: boolean
+  setUpdating: (value: boolean) => void
   /** `ThreadLive` registers its optimistic-append on mount, and clears it on unmount. */
   register: (append: ((text: string) => void) | null) => void
   /** Show `text` as a pending user bubble in the thread, now. */
@@ -39,6 +47,8 @@ export type Activity = {
 const NOOP_ACTIVITY: Activity = {
   busy: false,
   setBusy: () => {},
+  updating: false,
+  setUpdating: () => {},
   register: () => {},
   optimistic: () => {},
 }
@@ -47,6 +57,7 @@ const ActivityContext = createContext<Activity>(NOOP_ACTIVITY)
 
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false)
+  const [updating, setUpdating] = useState(false)
   // A ref, not state: registering `ThreadLive`'s append must not re-render anything, and it
   // happens in an effect right after the first paint.
   const appendRef = useRef<((text: string) => void) | null>(null)
@@ -60,7 +71,10 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Memoised so the identity is stable: consumers put this object in effect dependency lists.
-  const value = useMemo<Activity>(() => ({ busy, setBusy, register, optimistic }), [busy, register, optimistic])
+  const value = useMemo<Activity>(
+    () => ({ busy, setBusy, updating, setUpdating, register, optimistic }),
+    [busy, updating, register, optimistic],
+  )
 
   return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>
 }

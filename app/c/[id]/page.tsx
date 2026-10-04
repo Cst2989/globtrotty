@@ -105,6 +105,7 @@ export default async function ConversationPage({
             results={(
               <ResultsPaneLive
                 conversationId={id} results={results} proposal={proposal} skeleton={skeleton}
+                status={thread.conversation.status}
               />
             )}
             latestResultsId={latestResultsId}

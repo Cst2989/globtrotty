@@ -49,6 +49,12 @@ export type ThreadViewProps = {
    */
   searching?: boolean
   /**
+   * Pass 3: the results pane is re-running an expired search of its own accord, so the line
+   * reads "Updating prices". It wins over everything else, including a real `working` status —
+   * the turn that IS working is the refresh.
+   */
+  updating?: boolean
+  /**
    * Task 10's LOAD-BEARING gap, closed by the final review's fix wave: without
    * this, `MessageBubble` always took its inert `ChoiceCard` branch with
    * `onPick={() => {}}`, so every choice card in production — intake's and the
@@ -75,10 +81,17 @@ export type ThreadViewProps = {
  * `test/web-render.test.ts` render it with `renderToStaticMarkup`.
  */
 export function ThreadView(
-  { conversation, messages, latestTurn, children, composer, tail, sending, searching, conversationId }: ThreadViewProps,
+  {
+    conversation, messages, latestTurn, children, composer, tail, sending, searching, updating,
+    conversationId,
+  }: ThreadViewProps,
 ) {
-  const working = conversation.status === 'working' || (sending === true && conversation.status !== 'working')
-  const effectiveStatus = working ? (searching ? 'searching' : 'working') : conversation.status
+  const working = updating === true
+    || conversation.status === 'working'
+    || (sending === true && conversation.status !== 'working')
+  const effectiveStatus = updating
+    ? 'updating'
+    : (working ? (searching ? 'searching' : 'working') : conversation.status)
 
   return (
     <div className="thread">
@@ -275,6 +288,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
       composer={liveComposer}
       sending={pendingMessages.length > 0 || activity.busy}
       searching={searching}
+      updating={activity.updating}
       tail={<div ref={tailRef} aria-hidden="true" />}
     >
       {children}

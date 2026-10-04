@@ -1177,23 +1177,14 @@ select {
 /*
  * Kiwi gives a flight price fifteen minutes. Past that the cards stay on
  * screen (web/data.ts's `loadResults` keeps them and flags them) rather than
- * vanishing, dimmed to say they are no longer current, and this banner is the
- * one control that can make them current again.
+ * vanishing, and the pane re-runs the search by itself — the price becomes a
+ * shimmering block for the few seconds that takes, and nothing else on the
+ * card moves, because a ttl expires the money and nothing else.
+ *
+ * `data-expired` is therefore the FAILED case, and only that: the refresh did
+ * not come back, so these are the numbers we have and the card says how old
+ * they are.
  */
-.stale-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.6rem 0.9rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-card);
-  background: var(--surface-2);
-  color: var(--ink);
-  font-size: 0.9rem;
-}
-
 .flight-card[data-expired='true'] .flight-card-main,
 .flight-card[data-expired='true'] .flight-card-price,
 .flight-card[data-expired='true'] .flight-card-per,
@@ -1457,6 +1448,36 @@ select {
   .filter-pop-panel {
     left: auto;
     right: 0;
+  }
+}
+
+/*
+ * A card that is NEW to the list — the first render, or one a refreshed search
+ * brought back that the previous one did not have — fades up into place. React
+ * keys the cards by `sourceId`, so a card that merely MOVED keeps its DOM node
+ * and never re-runs this; `useListFlip` (web/components/flip.ts) is what
+ * animates those to their new positions.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .flight-card,
+  .hotel-list .result-row {
+    animation: card-in 240ms var(--ease) both;
+  }
+
+  .skeleton-card {
+    animation: none;
+  }
+
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 
