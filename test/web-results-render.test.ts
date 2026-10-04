@@ -828,6 +828,16 @@ describe('expired prices', () => {
     expect(html).toContain('1 stop, Doha')
   })
 
+  it('shimmers the sort tabs\' own summaries too, so no row advertises a hidden price', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [EXPIRED_ITEM], stale: true })],
+      proposal: null, now: LATER, pending: false, error: null, updatingKinds: ['flights'],
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('sort-tab-skeleton')
+    expect(html).not.toContain('sort-tab-summary')
+  })
+
   it('shows real prices again once the refreshed row has landed', () => {
     const html = renderToStaticMarkup(createElement(ResultsPane, {
       results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,

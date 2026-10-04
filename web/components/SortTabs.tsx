@@ -9,6 +9,13 @@ export type SortTabsProps = {
   /** Which sorts to offer, in order. Flights get all three; a hotel list has no "fastest". */
   sorts: Sort[]
   active: Sort
+  /**
+   * Pass 3: this list's prices are being re-run, so each tab's summary is a shimmer rather than a
+   * figure. A tab cannot go on advertising "€845.00 · 14h 15m" while every card under it has
+   * hidden its own price — that is the row claiming to know something the list has just said it
+   * does not.
+   */
+  updating?: boolean
   onChange: (sort: Sort) => void
 }
 
@@ -42,7 +49,7 @@ export function tabSummary(item: ResultItemLite | null): string {
  *
  * Pure. `test/web-results-render.test.ts` renders it directly.
  */
-export function SortTabs({ items, sorts, active, onChange }: SortTabsProps) {
+export function SortTabs({ items, sorts, active, updating = false, onChange }: SortTabsProps) {
   const leaders = leadersBySort(items, sorts)
 
   return (
@@ -56,7 +63,11 @@ export function SortTabs({ items, sorts, active, onChange }: SortTabsProps) {
           onClick={() => onChange(sort)}
         >
           <span className="sort-tab-label">{LABELS[sort]}</span>
-          <span className="sort-tab-summary">{tabSummary(leaders.get(sort) ?? null)}</span>
+          {updating ? (
+            <span className="skeleton-line sort-tab-skeleton" aria-label="Updating the prices" />
+          ) : (
+            <span className="sort-tab-summary">{tabSummary(leaders.get(sort) ?? null)}</span>
+          )}
         </button>
       ))}
     </div>

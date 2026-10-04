@@ -283,7 +283,7 @@ export function ResultsPane(
           />
           <SortTabs
             items={hotelItems} sorts={HOTEL_SORTS}
-            active={hotelState.sort} onChange={setHotelSort}
+            active={hotelState.sort} updating={updatingHotels} onChange={setHotelSort}
           />
           <HotelList
             items={hotelItems}
@@ -305,7 +305,7 @@ export function ResultsPane(
           />
           <SortTabs
             items={flightItems} sorts={FLIGHT_SORTS}
-            active={flightState.sort} onChange={setFlightSort}
+            active={flightState.sort} updating={updatingFlights} onChange={setFlightSort}
           />
           <FlightList
             items={flightItems}

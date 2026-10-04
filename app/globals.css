@@ -1523,6 +1523,12 @@ select {
   font-weight: 600;
 }
 
+.sort-tab-skeleton {
+  height: 13px;
+  width: 7rem;
+  margin: 0.15rem 0;
+}
+
 .sort-tab-summary {
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
