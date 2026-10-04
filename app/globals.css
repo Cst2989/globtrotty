@@ -1176,14 +1176,264 @@ select {
   font-size: 0.85rem;
 }
 
-/* ---------- filter chips ---------- */
+/* ---------- results layout: the filter rail beside the list ---------- */
 
-.filter-chips {
+/*
+ * A 240px rail to the left of the list at wide widths; below 1100px the grid
+ * collapses to one column and the rail becomes a compact wrapping strip ABOVE
+ * the list (it is first in the DOM, so nothing has to move for that).
+ */
+.results-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.results-main {
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.filter-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.filter-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 0.5rem;
 }
+
+.filter-rail-title {
+  margin: 0;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.filter-rail-head .link-button {
+  font-size: 0.8rem;
+}
+
+.filter-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.filter-group-title {
+  padding: 0;
+  color: var(--ink-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.filter-radio,
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.filter-radio:hover,
+.filter-check:hover {
+  color: var(--ink);
+}
+
+.filter-radio input,
+.filter-check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.filter-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-check-count {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.bag-stepper-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.bag-stepper-value {
+  min-width: 1.25rem;
+  text-align: center;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-stepper .btn {
+  min-height: 26px;
+  width: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+}
+
+.filter-price-cap {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-price-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+@media (max-width: 1100px) {
+  .results-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-rail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.75rem 1.5rem;
+  }
+
+  .filter-rail-head {
+    flex-basis: 100%;
+  }
+
+  .filter-group {
+    flex: 0 1 auto;
+  }
+
+  /* Four radios down a column is fine in a rail and wasteful in a strip. */
+  .filter-group:has(.filter-radio) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+  }
+
+  .filter-group:has(.filter-radio) .filter-group-title {
+    flex-basis: 100%;
+  }
+
+  .filter-group:has(.filter-check) {
+    flex-basis: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
+  }
+
+  .filter-group:has(.filter-check) .filter-check {
+    flex: 0 1 auto;
+  }
+
+  .filter-group:has(.filter-check) .filter-check-name {
+    flex: 0 1 auto;
+  }
+
+  .filter-group:has(.filter-price-slider) {
+    flex: 1 1 14rem;
+  }
+}
+
+/* ---------- sort tabs ---------- */
+
+/*
+ * Three ways to read the same list, each saying what it would lead with, so
+ * the row is a comparison and not just a control. `Best` is the stored order
+ * (Jev's own re-rank against the brief), which is why it reorders nothing.
+ */
+.sort-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.sort-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  text-align: left;
+  cursor: pointer;
+  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+}
+
+.sort-tab:hover {
+  color: var(--ink-2);
+}
+
+.sort-tab[aria-pressed='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.sort-tab-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sort-tab-summary {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- filter chips ---------- */
 
 .chip {
   display: inline-flex;
@@ -1213,18 +1463,10 @@ select {
   color: var(--ink);
 }
 
-.chip-select {
-  display: inline-flex;
-}
-
-.chip-select select {
-  min-height: 40px;
-  padding: 0 0.75rem;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink-2);
-  font-size: 0.85rem;
+.chip-sm {
+  min-height: 32px;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
 }
 
 /* ---------- flight cards (results UI pass 2) ---------- */

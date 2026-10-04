@@ -26,15 +26,30 @@ function inWindow(hour: number, window: NonNullable<Filter['departure']>): boole
  * comment in src/supplier/types.ts for why no multiplication belongs here either). `airlines`:
  * ANY leg's carrier list intersecting the filter's list keeps the item.
  *
+ * `minCabinBags`/`minCheckedBags`: the fare's own included allowance (`detail.baggage`) must be
+ * at least that many. `minRating`: a stay's own rating must be at least that, and a stay with NO
+ * rating is excluded — "4 stars and up" is a claim about the place, and an unrated one has not
+ * made it. (Results UI pass 2, D; `web/filters.ts` mirrors all three.)
+ *
  * A hotel item (`detail.kind !== 'flight'`) has none of `nonstop`/`maxStops`/`departure`/
- * `airlines` to check — those filters pass it through untouched — but `maxPriceMinor` still
- * applies; price is the one dimension both kinds share.
+ * `airlines`/`minCabinBags`/`minCheckedBags` to check — those filters pass it through untouched —
+ * but `maxPriceMinor` still applies; price is the one dimension both kinds share. `minRating`
+ * runs the other way round: nothing about a flight answers it, so a flight passes it untouched.
  */
 export function applyFilter(items: StoredItem[], f: Filter): StoredItem[] {
   return items.filter((item) => {
     if (f.maxPriceMinor !== undefined && item.price.minor > BigInt(f.maxPriceMinor)) return false
 
-    if (!isFlight(item)) return true
+    if (!isFlight(item)) {
+      if (f.minRating !== undefined) {
+        const rating = item.detail.kind === 'hotel' ? item.detail.rating : null
+        if (rating === null || rating < f.minRating) return false
+      }
+      return true
+    }
+
+    if (f.minCabinBags !== undefined && item.detail.baggage.cabinBag < f.minCabinBags) return false
+    if (f.minCheckedBags !== undefined && item.detail.baggage.checkedBag < f.minCheckedBags) return false
 
     const legs = item.detail.inbound ? [item.detail.outbound, item.detail.inbound] : [item.detail.outbound]
 
@@ -72,6 +87,13 @@ export function describeFilter(f: Filter): string {
   }
   if (f.departure) parts.push(f.departure)
   if (f.maxPriceMinor !== undefined) parts.push(`under ${minorToMajor(f.maxPriceMinor)}`)
+  if (f.minCabinBags !== undefined && f.minCabinBags > 0) {
+    parts.push(f.minCabinBags === 1 ? 'with a cabin bag' : `with ${f.minCabinBags} cabin bags`)
+  }
+  if (f.minCheckedBags !== undefined && f.minCheckedBags > 0) {
+    parts.push(f.minCheckedBags === 1 ? 'with a checked bag' : `with ${f.minCheckedBags} checked bags`)
+  }
+  if (f.minRating !== undefined && f.minRating > 0) parts.push(`rated ${f.minRating}+`)
   if (f.airlines && f.airlines.length > 0) parts.push(f.airlines.map(maskUntrustedText).join(', '))
   return parts.length > 0 ? parts.join(', ') : 'all results'
 }

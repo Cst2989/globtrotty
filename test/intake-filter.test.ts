@@ -6,7 +6,10 @@ import type { StoredItem } from '../src/supplier/types.js'
 /** A hand-built flight `StoredItem`, same pattern as test/intake-rank.test.ts's `buildItem`. */
 function flight(
   sourceId: string, priceMinor: number,
-  opts: { outboundStops?: number; inboundStops?: number; outboundHour?: number; carriers?: string[]; oneWay?: boolean } = {},
+  opts: {
+    outboundStops?: number; inboundStops?: number; outboundHour?: number; carriers?: string[]
+    oneWay?: boolean; cabinBag?: number; checkedBag?: number
+  } = {},
 ): StoredItem {
   return {
     sourceId, supplier: 'mock', kind: 'flight', name: `flight ${sourceId}`,
@@ -26,7 +29,7 @@ function flight(
         stops: opts.inboundStops ?? 0, route: ['TYO', 'BCN'], cabinClass: 'Economy',
         carriers: opts.carriers ?? ['ZZ'], flightNumbers: ['ZZ2'],
       },
-      baggage: { personalItem: 1, cabinBag: 1, checkedBag: 1 },
+      baggage: { personalItem: 1, cabinBag: opts.cabinBag ?? 1, checkedBag: opts.checkedBag ?? 1 },
       totalDurationSeconds: 12_600,
       selfTransfer: false,
     },
@@ -87,6 +90,31 @@ describe('applyFilter', () => {
     ]
     expect(applyFilter(items, { maxStops: 1 }).map((i) => i.sourceId)).toEqual(['direct', 'one-stop'])
   })
+
+  // Results UI pass 2, D. `minCabinBags`/`minCheckedBags` live on `Filter` rather than in the
+  // rail's own state so a typed "with a checked bag" can reach the same code; this is the src
+  // half of the pin, and `test/web-filters.test.ts` holds the two modules against each other.
+  it('minCabinBags/minCheckedBags read the fare\'s own included allowance', () => {
+    const items = [
+      flight('no-bags', 1000, { cabinBag: 0, checkedBag: 0 }),
+      flight('cabin-only', 1000, { cabinBag: 1, checkedBag: 0 }),
+      flight('both', 1000, { cabinBag: 1, checkedBag: 1 }),
+    ]
+    expect(applyFilter(items, { minCabinBags: 1 }).map((i) => i.sourceId)).toEqual(['cabin-only', 'both'])
+    expect(applyFilter(items, { minCheckedBags: 1 }).map((i) => i.sourceId)).toEqual(['both'])
+    expect(applyFilter(items, { minCabinBags: 0 })).toHaveLength(3)
+  })
+
+  it('minRating keeps a rated stay and drops both an unrated one and nothing else', () => {
+    const rated = (sourceId: string, rating: number | null): StoredItem => {
+      const base = hotel(sourceId, 50_000)
+      return { ...base, detail: { ...base.detail, rating } as typeof base.detail }
+    }
+    const items = [rated('h3', 3), rated('h4', 4), rated('h0', null), flight('f', 50_000)]
+    // A flight has nothing to answer a rating with, so it passes through untouched.
+    expect(applyFilter(items, { minRating: 4 }).map((i) => i.sourceId)).toEqual(['h4', 'f'])
+    expect(applyFilter(items, { minRating: 3 }).map((i) => i.sourceId)).toEqual(['h3', 'h4', 'f'])
+  })
 })
 
 describe('describeFilter', () => {
@@ -96,5 +124,13 @@ describe('describeFilter', () => {
     expect(describeFilter({ departure: 'evening' })).toBe('evening')
     expect(describeFilter({ maxPriceMinor: '50000' })).toBe('under 500')
     expect(describeFilter({ nonstop: true, departure: 'morning', airlines: ['LH'] })).toBe('nonstop, morning, LH')
+  })
+
+  it('names the bag minimums and the rating, and says nothing for a zero minimum', () => {
+    expect(describeFilter({ minCabinBags: 1 })).toBe('with a cabin bag')
+    expect(describeFilter({ minCheckedBags: 2 })).toBe('with 2 checked bags')
+    expect(describeFilter({ minRating: 4 })).toBe('rated 4+')
+    expect(describeFilter({ minCabinBags: 0, minCheckedBags: 0 })).toBe('all results')
+    expect(describeFilter({ nonstop: true, minCheckedBags: 1 })).toBe('nonstop, with a checked bag')
   })
 })

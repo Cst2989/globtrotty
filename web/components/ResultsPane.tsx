@@ -4,10 +4,11 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Filter } from '@/src/results'
 import type { ResultsView, ProposalRowLite, LinkLite } from '@/web/data'
-import { applyFilterLite } from '@/web/filters'
+import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
-import { FilterChips } from './FilterChips'
+import { FilterRail } from './FilterRail'
+import { SortTabs } from './SortTabs'
 import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { errorForStatus } from './ProposalCard'
@@ -34,52 +35,65 @@ function newestOfKind(results: ResultsView[], kind: 'flights' | 'hotels'): Resul
 }
 
 /**
- * The chip state for one kind, tagged with the `results` row it was derived from — see the
- * reset in `ResultsPane` for why the tag is needed.
+ * The rail and tab state for one kind, tagged with the `results` row it was derived from — see
+ * the reset in `ResultsPane` for why the tag is needed.
  */
-type KindFilter = { messageId: string | null; filter: Filter }
+type KindState = { messageId: string | null; filter: Filter; sort: Sort }
 
-function chipsFor(view: ResultsView | null): KindFilter {
-  return { messageId: view?.messageId ?? null, filter: view?.filter ?? {} }
+function stateFor(view: ResultsView | null): KindState {
+  return { messageId: view?.messageId ?? null, filter: view?.filter ?? {}, sort: 'best' }
 }
 
+const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
+/** No "fastest" for a stay: nothing about a hotel row has a duration to be fast. */
+const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
+
 /**
- * Spec §5's results pane: the pinned summary once anything is chosen, then
- * the newest hotels list (if any), then the newest flights list — each list
- * under its own `SummaryBar` (what was searched for, plus the assumption
- * line that replaced the old row of "Assumed: …" chips). Every piece here is pure
- * (callbacks as props); the filter chips' state is lifted to this component
- * (one `Filter` per kind, since the flight-only fields — nonstop, stops,
- * departure, airlines — mean nothing for a hotel list) and applied with
- * `applyFilterLite`. `test/web-results-render.test.ts` renders this directly
- * with `renderToStaticMarkup` — the local `useState` below is the same
- * pattern `ProposalCard` already uses, which that file's own tests confirm
- * is safe under static rendering (no router, no effects).
+ * Spec §5's results pane: the pinned summary once anything is chosen, then the newest hotels
+ * list (if any), then the newest flights list.
+ *
+ * Each list is one section: a `SummaryBar` (what was searched for, and what had to be guessed),
+ * then a `FilterRail` beside it and `SortTabs` above it (results UI pass 2, D). Every piece here
+ * is pure (callbacks as props); the rail's filter and the tabs' sort are lifted to this
+ * component, one pair per kind — the flight-only fields (stops, bags, departure, airlines) mean
+ * nothing for a stay, and a stay's rating means nothing for a flight — and applied with
+ * `applyFilterLite` then `sortItemsLite`, in that order, so the tab summaries describe the
+ * filtered list rather than the whole corpus.
+ *
+ * `test/web-results-render.test.ts` renders this directly with `renderToStaticMarkup` — the
+ * local `useState` below is the same pattern `ProposalCard` already uses, which that file's own
+ * tests confirm is safe under static rendering (no router, no effects).
  */
 export function ResultsPane({ results, proposal, now, pending, error, onChoose, onGetLinks }: ResultsPaneProps) {
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
-  // M4: the chips used to start empty whatever the row said, so after a TYPED filter the chips
-  // rendered unselected while the list below them was narrowed — two different stories about
-  // the same list. `ResultsView.filter` is the row's own filter, so the chips start from it.
+  // M4: the rail used to start empty whatever the row said, so after a TYPED filter it rendered
+  // unselected while the list beside it was narrowed — two different stories about the same
+  // list. `ResultsView.filter` is the row's own filter, so the rail starts from it.
   //
   // Tracked against the row's `messageId` and reset during render (React's documented
   // adjust-state-when-props-change pattern) rather than with `useState`'s initializer alone: a
   // typed filter arrives through `router.refresh()`, which re-renders this instance instead of
-  // remounting it, so an initializer-only version would keep showing the PREVIOUS row's chips.
-  // Her own chip clicks are kept while the row is unchanged, which is the whole point of the
-  // state. No effect is involved, so `renderToStaticMarkup` is unaffected.
-  const [flightChips, setFlightChips] = useState<KindFilter>(() => chipsFor(newestFlights))
-  const [hotelChips, setHotelChips] = useState<KindFilter>(() => chipsFor(newestHotels))
-  if (flightChips.messageId !== (newestFlights?.messageId ?? null)) setFlightChips(chipsFor(newestFlights))
-  if (hotelChips.messageId !== (newestHotels?.messageId ?? null)) setHotelChips(chipsFor(newestHotels))
-  const flightFilter = flightChips.filter
-  const hotelFilter = hotelChips.filter
-  const setFlightFilter = (filter: Filter) =>
-    setFlightChips({ messageId: newestFlights?.messageId ?? null, filter })
-  const setHotelFilter = (filter: Filter) =>
-    setHotelChips({ messageId: newestHotels?.messageId ?? null, filter })
+  // remounting it, so an initializer-only version would keep showing the PREVIOUS row's state.
+  // Her own clicks are kept while the row is unchanged, which is the whole point of the state —
+  // and the sort tab resets with it, because "Cheapest" over last search's corpus is not an
+  // answer about this one. No effect is involved, so `renderToStaticMarkup` is unaffected.
+  const [flightState, setFlightState] = useState<KindState>(() => stateFor(newestFlights))
+  const [hotelState, setHotelState] = useState<KindState>(() => stateFor(newestHotels))
+  if (flightState.messageId !== (newestFlights?.messageId ?? null)) setFlightState(stateFor(newestFlights))
+  if (hotelState.messageId !== (newestHotels?.messageId ?? null)) setHotelState(stateFor(newestHotels))
+  const setFlightFilter = (filter: Filter) => setFlightState({ ...flightState, filter })
+  const setHotelFilter = (filter: Filter) => setHotelState({ ...hotelState, filter })
+  const setFlightSort = (sort: Sort) => setFlightState({ ...flightState, sort })
+  const setHotelSort = (sort: Sort) => setHotelState({ ...hotelState, sort })
+
+  const flightItems = newestFlights
+    ? sortItemsLite(applyFilterLite(newestFlights.items, flightState.filter), flightState.sort)
+    : []
+  const hotelItems = newestHotels
+    ? sortItemsLite(applyFilterLite(newestHotels.items, hotelState.filter), hotelState.sort)
+    : []
 
   const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? null
   const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? null
@@ -103,27 +117,49 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
           <SummaryBar {...summaryBarPropsFor(newestHotels)} />
-          <FilterChips items={newestHotels.items} filter={hotelFilter} onChange={setHotelFilter} />
-          <HotelList
-            items={applyFilterLite(newestHotels.items, hotelFilter)}
-            now={now}
-            chosenSourceId={chosenHotelSourceId}
-            onChoose={(sourceId) => onChoose('hotel', sourceId)}
-          />
+          <div className="results-layout">
+            <FilterRail
+              kind="hotels" items={newestHotels.items}
+              filter={hotelState.filter} onChange={setHotelFilter}
+            />
+            <div className="results-main">
+              <SortTabs
+                items={hotelItems} sorts={HOTEL_SORTS}
+                active={hotelState.sort} onChange={setHotelSort}
+              />
+              <HotelList
+                items={hotelItems}
+                now={now}
+                chosenSourceId={chosenHotelSourceId}
+                onChoose={(sourceId) => onChoose('hotel', sourceId)}
+              />
+            </div>
+          </div>
         </section>
       ) : null}
 
       {newestFlights ? (
         <section className="results-section" aria-label="Flights">
           <SummaryBar {...summaryBarPropsFor(newestFlights)} />
-          <FilterChips items={newestFlights.items} filter={flightFilter} onChange={setFlightFilter} />
-          <FlightList
-            items={applyFilterLite(newestFlights.items, flightFilter)}
-            adults={newestFlights.query.adults}
-            now={now}
-            chosenSourceId={chosenFlightSourceId}
-            onChoose={(sourceId) => onChoose('flight', sourceId)}
-          />
+          <div className="results-layout">
+            <FilterRail
+              kind="flights" items={newestFlights.items}
+              filter={flightState.filter} onChange={setFlightFilter}
+            />
+            <div className="results-main">
+              <SortTabs
+                items={flightItems} sorts={FLIGHT_SORTS}
+                active={flightState.sort} onChange={setFlightSort}
+              />
+              <FlightList
+                items={flightItems}
+                adults={newestFlights.query.adults}
+                now={now}
+                chosenSourceId={chosenFlightSourceId}
+                onChoose={(sourceId) => onChoose('flight', sourceId)}
+              />
+            </div>
+          </div>
         </section>
       ) : null}
     </div>

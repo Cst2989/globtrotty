@@ -10,7 +10,8 @@ import { FlightList } from '../web/components/FlightList.js'
 import { FlightCard, stopsWords, durationWords, timeHM, dayOffset } from '../web/components/FlightCard.js'
 import { HotelList, ratingStars } from '../web/components/HotelList.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
-import { FilterChips } from '../web/components/FilterChips.js'
+import { FilterRail, stopsModeOf, withStopsMode } from '../web/components/FilterRail.js'
+import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
 import { ResultsPane } from '../web/components/ResultsPane.js'
 import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
@@ -241,24 +242,119 @@ describe('ChoiceCard', () => {
   })
 })
 
-describe('FilterChips', () => {
+describe('FilterRail', () => {
   const items: ResultItemLite[] = [
     FLIGHT_ITEM,
-    { ...FLIGHT_ITEM, sourceId: 'F2', priceMinor: '20000', flight: { ...FLIGHT_ITEM.flight!, airlines: ['LH'] } },
+    {
+      ...FLIGHT_ITEM, sourceId: 'F2', priceMinor: '20000',
+      flight: { ...FLIGHT_ITEM.flight!, airlines: ['LH'], airlineNames: ['Lufthansa'] },
+    },
   ]
 
-  it('renders a chip per airline and a price cap select', () => {
-    const html = renderToStaticMarkup(createElement(FilterChips, { items, filter: {}, onChange: () => {} }))
-    expect(html).toContain('QR')
-    expect(html).toContain('LH')
-    expect(html).toContain('<select')
-    expect(html).toContain('Nonstop')
-    expect(html).toContain('Up to 1 stop')
+  it('renders the stops radios, the bag steppers, the departure chips and a price slider', () => {
+    const html = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
+    expect(html).toContain('Stops')
+    for (const label of ['Any', 'Direct', 'Up to 1 stop', 'Up to 2 stops']) expect(html).toContain(label)
+    expect([...html.matchAll(/type="radio"/g)]).toHaveLength(4)
+    expect(html).toContain('Cabin bags')
+    expect(html).toContain('Checked bags')
+    expect(html).toContain('Morning')
+    expect(html).toContain('type="range"')
   })
 
-  it('marks the active chip aria-pressed="true"', () => {
-    const html = renderToStaticMarkup(createElement(FilterChips, { items, filter: { nonstop: true }, onChange: () => {} }))
-    expect(html).toMatch(/aria-pressed="true"[^]*?>Nonstop</)
+  it('names each airline and how many results carry it, rather than printing the bare code', () => {
+    const html = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
+    expect(html).toContain('Qatar Airways')
+    expect(html).toContain('Lufthansa')
+    expect([...html.matchAll(/type="checkbox"/g)]).toHaveLength(2)
+  })
+
+  it('starts on "Any" with no filter, and checks the matching radio for one that is set', () => {
+    const any = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
+    expect(/<input[^>]*checked[^>]*value="any"/.test(any)).toBe(true)
+
+    const direct = renderToStaticMarkup(
+      createElement(FilterRail, { kind: 'flights', items, filter: { nonstop: true }, onChange: () => {} }),
+    )
+    expect(/<input[^>]*checked[^>]*value="direct"/.test(direct)).toBe(true)
+  })
+
+  it('offers "Clear filters" only once something is set', () => {
+    const clean = renderToStaticMarkup(createElement(FilterRail, { kind: 'flights', items, filter: {}, onChange: () => {} }))
+    expect(clean).not.toContain('Clear filters')
+
+    const set = renderToStaticMarkup(
+      createElement(FilterRail, { kind: 'flights', items, filter: { minCheckedBags: 1 }, onChange: () => {} }),
+    )
+    expect(set).toContain('Clear filters')
+  })
+
+  it('gives a hotel rail the rating radios and the price slider, and none of the flight sections', () => {
+    const html = renderToStaticMarkup(
+      createElement(FilterRail, { kind: 'hotels', items: [HOTEL_ITEM], filter: {}, onChange: () => {} }),
+    )
+    expect(html).toContain('Rating')
+    expect(html).toContain('3+')
+    expect(html).toContain('4+')
+    expect(html).toContain('type="range"')
+    expect(html).not.toContain('Stops')
+    expect(html).not.toContain('Cabin bags')
+    expect(html).not.toContain('Airlines')
+  })
+})
+
+describe('stopsModeOf / withStopsMode', () => {
+  it('reads the one stops answer out of a filter', () => {
+    expect(stopsModeOf({})).toBe('any')
+    expect(stopsModeOf({ nonstop: true })).toBe('direct')
+    // A typed message can set `maxStops: 0`, which says the same thing as `nonstop`.
+    expect(stopsModeOf({ maxStops: 0 })).toBe('direct')
+    expect(stopsModeOf({ maxStops: 1 })).toBe('max1')
+    expect(stopsModeOf({ maxStops: 2 })).toBe('max2')
+  })
+
+  it('writes `nonstop` for Direct, the field a typed "only direct flights" also sets', () => {
+    expect(withStopsMode({}, 'direct')).toEqual({ nonstop: true })
+    expect(withStopsMode({}, 'max1')).toEqual({ maxStops: 1 })
+    expect(withStopsMode({ nonstop: true }, 'any')).toEqual({})
+  })
+
+  it('leaves every other field of the filter alone', () => {
+    expect(withStopsMode({ nonstop: true, airlines: ['QR'], minCheckedBags: 1 }, 'max2'))
+      .toEqual({ maxStops: 2, airlines: ['QR'], minCheckedBags: 1 })
+  })
+})
+
+describe('SortTabs', () => {
+  const cheap = {
+    ...FLIGHT_ITEM, sourceId: 'F2', priceMinor: '20000',
+    flight: { ...FLIGHT_ITEM.flight!, durationMinutes: 1200 },
+  }
+
+  it('renders one tab per sort, each summarising the item it would lead with', () => {
+    const html = renderToStaticMarkup(createElement(SortTabs, {
+      items: [FLIGHT_ITEM, cheap], sorts: ['best', 'cheapest', 'fastest'],
+      active: 'best', onChange: () => {},
+    }))
+    expect(html).toContain('Best')
+    expect(html).toContain('Cheapest')
+    expect(html).toContain('Fastest')
+    // Best leads with the stored first item (€845.00, 14h 15m); Cheapest with the €200 one.
+    expect(html).toContain('€845.00 · 14h 15m')
+    expect(html).toContain('€200.00 · 20h 0m')
+  })
+
+  it('marks only the active tab', () => {
+    const html = renderToStaticMarkup(createElement(SortTabs, {
+      items: [FLIGHT_ITEM], sorts: ['best', 'cheapest'], active: 'cheapest', onChange: () => {},
+    }))
+    expect([...html.matchAll(/aria-pressed="true"/g)]).toHaveLength(1)
+    expect(/aria-pressed="true"[\s\S]*?Cheapest/.test(html)).toBe(true)
+  })
+
+  it('summarises a stay with its price alone — a hotel row has no duration', () => {
+    expect(tabSummary(HOTEL_ITEM)).toBe('€1,120.00')
+    expect(tabSummary(null)).toBe('—')
   })
 })
 
@@ -447,9 +543,8 @@ describe('ResultsPane', () => {
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    // The Nonstop chip is pressed...
-    expect(html).toContain('aria-pressed="true"')
-    expect(/aria-pressed="true"[^>]*>\s*Nonstop/.test(html)).toBe(true)
+    // The rail's Direct radio is checked...
+    expect(/<input[^>]*checked[^>]*value="direct"/.test(html)).toBe(true)
     // ...and FLIGHT_ITEM (one stop, via Doha) is filtered out of the list below it, leaving only
     // the direct card. Source ids are not rendered, so the cards are counted and the excluded
     // item is identified by its own stops line.
@@ -458,14 +553,41 @@ describe('ResultsPane', () => {
     expect(html).not.toContain('1 stop, Doha')
   })
 
-  it('leaves every chip unpressed when the row carries no filter', () => {
+  it('leaves the rail on its defaults when the row carries no filter', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(html).not.toContain('aria-pressed="true"')
+    expect(/<input[^>]*checked[^>]*value="any"/.test(html)).toBe(true)
+    expect(html).not.toContain('Clear filters')
+  })
+
+  // D: the sort tabs read the FILTERED list, so a tab's summary never advertises a price the
+  // list below it does not contain.
+  it('puts the sort tabs above the list, starting on Best', () => {
+    const html = renderToStaticMarkup(
+      createElement(ResultsPane, {
+        results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
+        onChoose: () => {}, onGetLinks: () => {},
+      }),
+    )
+    expect(html.indexOf('sort-tabs')).toBeLessThan(html.indexOf('flight-card'))
+    expect(/aria-pressed="true"[\s\S]*?Best/.test(html)).toBe(true)
+    expect(html).toContain('Fastest')
+  })
+
+  it('gives the hotels section its own rail, with no flight sections in it', () => {
+    const html = renderToStaticMarkup(
+      createElement(ResultsPane, {
+        results: [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
+        proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
+      }),
+    )
+    expect(html).toContain('Rating')
+    expect(html).not.toContain('Cabin bags')
+    expect(html).not.toContain('Fastest')
   })
 
 describe('MessageBubble (plan 5 roles)', () => {

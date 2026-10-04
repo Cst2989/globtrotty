@@ -26,12 +26,29 @@ import type { Cabin, Assumption } from './intake/brief.js'
 // same names.
 export type { Cabin, Assumption }
 
+/**
+ * What the filter rail (and a typed "only direct flights") narrows the stored results by. One
+ * type, three implementations that MUST agree: `applyFilter` (src/intake/filter.ts, over
+ * `StoredItem`), `applyFilterLite` (web/filters.ts, over `ResultItemLite`) and this schema. A
+ * change to any field belongs in all three in the same commit.
+ *
+ * `minCabinBags`/`minCheckedBags`/`minRating` are results UI pass 2 (D). The rail is what sets
+ * them today, but they live here rather than in the pane's own state so a typed "with a checked
+ * bag" or "only 4 star hotels" can reach the same code later without a second notion of what a
+ * filter is — the mistake the final review's I3 was made of.
+ */
 export type Filter = {
   nonstop?: boolean
   maxStops?: number
   departure?: 'morning' | 'afternoon' | 'evening'
   maxPriceMinor?: string
   airlines?: string[]
+  /** Hide a flight including fewer than this many cabin bags. Flights only. */
+  minCabinBags?: number
+  /** Hide a flight including fewer than this many checked bags. Flights only. */
+  minCheckedBags?: number
+  /** Hide a stay rated below this, and one with no rating at all. Hotels only. */
+  minRating?: number
 }
 
 export type ResultsContent = {
@@ -81,6 +98,13 @@ const FilterSchema = z.strictObject({
   // (the same reason `describeFilter` masks each entry before rendering it);
   // the schema is the boundary, so the masking belongs here too.
   airlines: z.array(z.string().min(1).max(64).transform(maskUntrustedText)).optional(),
+  // Bounded well above anything a fare includes (two checked bags is the top of the rail's own
+  // stepper) for the same reason every other number here is bounded: this is a value that can
+  // reach the model through `renderResultsNote`'s sibling renderers, so the schema is where its
+  // range is settled rather than the UI that happens to write it today.
+  minCabinBags: z.number().int().min(0).max(9).optional(),
+  minCheckedBags: z.number().int().min(0).max(9).optional(),
+  minRating: z.number().min(0).max(5).optional(),
 })
 
 /**
