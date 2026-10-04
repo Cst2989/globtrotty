@@ -418,6 +418,8 @@ export function ResultsPane(
   const split = useMediaQuery(SPLIT_QUERY)
   const [hotelView, setHotelView] = useState<HotelView>('list')
   const [highlightedStay, setHighlightedStay] = useState<string | null>(null)
+  /** Section 3: the flights list, once it has collapsed, reopened by "Change flight". */
+  const [flightsOpen, setFlightsOpen] = useState(false)
 
   // Pass 3, section 6a: her click counts as chosen immediately, exactly as the proposal row
   // will once it lands. The proposal wins when both exist — it is the server's own answer.
@@ -432,6 +434,15 @@ export function ResultsPane(
   const pendingItem = pendingChoice === null
     ? null
     : itemById(pendingChoice.kind === 'flight' ? newestFlights : newestHotels, pendingChoice.sourceId)
+
+  // Section 3. The flights list collapses the moment a flight is chosen — into the pinned card
+  // above, with one link to bring it back. `chosenFlightItem` is null when the chosen id is not
+  // in the newest row (a refreshed list that no longer carries it), and the list then stays open
+  // rather than collapsing into a card that cannot be drawn.
+  const chosenFlightItem = chosenFlightSourceId === null
+    ? null
+    : itemById(newestFlights, chosenFlightSourceId)
+  const flightsCollapsed = chosenFlightItem !== null && !flightsOpen
 
   // Nothing to show beside a placeholder, and nothing to put it above: the whole pane IS the
   // skeleton. Returning early rather than rendering empty sections keeps the "searching" state
@@ -460,8 +471,10 @@ export function ResultsPane(
       ) : null}
 
       {/* Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It
-          stands in for `PinnedSummary` above, never beside it. */}
-      {!hasChosen && pendingItem && pendingChoice ? (
+          stands in for `PinnedSummary` above, never beside it — and, since section 3, only for a
+          HOTEL: a chosen flight gets the richer `Chosen flight` block below, which is the same
+          card she pressed rather than a two-line summary of it. */}
+      {!hasChosen && pendingItem && pendingChoice?.kind === 'hotel' ? (
         <PendingPinned item={pendingItem} kind={pendingChoice.kind} />
       ) : null}
 
@@ -470,6 +483,27 @@ export function ResultsPane(
           round trip later, so whichever arrives first renders the same shape. */}
       {skeleton === 'hotels' || pendingChoice?.kind === 'flight' ? <ResultsSkeleton kind="hotels" /> : null}
       {pendingChoice?.kind === 'hotel' ? <PendingTripSummary /> : null}
+
+      {/* Section 3: once a flight is chosen the flights list collapses into THIS — the same
+          FlightCard she picked, with its `Selected` ribbon, pinned above the stays. Two full
+          result sections stacked was the complaint, and it was the right one: the list she has
+          finished with was taking the top half of the pane away from the one she is working in,
+          and nothing on screen said which flight she had actually chosen. */}
+      {chosenFlightItem && newestFlights ? (
+        <section className="results-section chosen-flight" aria-label="Chosen flight">
+          <h2 className="chosen-flight-heading">Chosen flight</h2>
+          <FlightList
+            items={[chosenFlightItem]}
+            adults={newestFlights.query.adults}
+            now={now}
+            chosenSourceId={chosenFlightSourceId}
+            selectDisabled={choosing}
+            updating={updatingFlights}
+            matchesBySourceId={flightMatchChips}
+            onChoose={(sourceId) => onChoose('flight', sourceId)}
+          />
+        </section>
+      ) : null}
 
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
@@ -549,8 +583,29 @@ export function ResultsPane(
         </section>
       ) : null}
 
-      {newestFlights ? (
+      {newestFlights && flightsCollapsed ? (
+        <button
+          type="button"
+          className="change-flight"
+          aria-expanded={false}
+          onClick={() => setFlightsOpen(true)}
+        >
+          Change flight
+        </button>
+      ) : null}
+
+      {newestFlights && !flightsCollapsed ? (
         <section className="results-section" aria-label="Flights">
+          {chosenFlightItem ? (
+            <button
+              type="button"
+              className="change-flight"
+              aria-expanded
+              onClick={() => setFlightsOpen(false)}
+            >
+              Hide the other flights
+            </button>
+          ) : null}
           <SummaryBar
             {...summaryBarPropsFor(newestFlights)}
             stale={newestFlights.stale} refreshing={updatingFlights}

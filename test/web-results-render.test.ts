@@ -4,6 +4,7 @@
 // is pure (callbacks as props, no router, no fetch), which is what makes
 // this possible.
 import { createElement } from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { FlightList } from '../web/components/FlightList.js'
@@ -1088,6 +1089,47 @@ describe('outcomeForStatus', () => {
   })
 })
 
+/*
+ * Section 3's layout bug, which CSS gave no way to catch. A comment block inserted during the
+ * hotels pass landed INSIDE the selector list it used to head, so `.flight-list,` was left
+ * dangling and joined `.filter-bar-row` — the list inherited `display: flex` with no
+ * `flex-direction` and laid its cards out in a row. On the author's screen that was three flight
+ * cards squeezed into narrow columns with "1 stop" broken into one letter per line.
+ *
+ * A stylesheet is not type-checked, imported or rendered by anything these tests run, so the
+ * only defence available is to read it: the two declarations that were lost, and the one that
+ * did the shredding.
+ */
+describe('the stylesheet rules the flight list cannot do without', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
+
+  function block(selector: string): string {
+    const at = css.indexOf(`\n${selector} {`)
+    expect(at, `${selector} has no rule of its own`).toBeGreaterThan(-1)
+    return css.slice(at, css.indexOf('}', at))
+  }
+
+  it('stacks the flight cards down the page, never across it', () => {
+    const rule = block('.flight-list')
+    expect(rule).toContain('display: flex')
+    expect(rule).toContain('flex-direction: column')
+  })
+
+  it('never breaks a stop count mid-word to fit a column it should not be in', () => {
+    const rule = block('.leg-stops')
+    expect(rule).toContain('white-space: nowrap')
+    expect(rule).not.toContain('overflow-wrap: anywhere')
+  })
+
+  it('gives each results section the full width of the pane', () => {
+    // The hotels' 55%/45% split belongs to `.hotel-split` alone. A flights section laid out
+    // inside it is the other half of the same screenshot.
+    const pane = block('.results-pane')
+    expect(pane).toContain('flex-direction: column')
+    expect(block('.hotel-split[data-split=\'true\'] .hotel-split-list')).toContain('55%')
+  })
+})
+
 describe('ResultsPane with a pendingChoice', () => {
   const SECOND_FLIGHT: ResultItemLite = {
     ...FLIGHT_ITEM, sourceId: 'F2', name: 'Finnair',
@@ -1103,18 +1145,22 @@ describe('ResultsPane with a pendingChoice', () => {
     }))
   }
 
-  it('ribbons the chosen card, disables every other Select, and pins the choice at the top', () => {
+  it('collapses the list into the chosen card the moment she picks one', () => {
     const html = paneWith({ kind: 'flight', sourceId: 'F1' })
-    // The one she picked: the ribbon, and no button at all on that card.
+    // Section 3: one card on screen — hers, ribboned — and no list under it. Two full result
+    // sections stacked was the complaint, and the list she has finished with is the one to go.
     expect(html).toContain('Selected')
     expect([...html.matchAll(/flight-card-ribbon/g)]).toHaveLength(1)
-    // One Select left (the other card's), and it is dead.
-    expect([...html.matchAll(/>Select</g)]).toHaveLength(1)
-    expect(html).toContain('disabled=""')
-    // The pinned block, with her card's own name and price — above the lists.
+    expect([...html.matchAll(/flight-card"/g)]).toHaveLength(1)
+    // Nothing left to press, because there is nothing left to choose between.
+    expect([...html.matchAll(/>Select</g)]).toHaveLength(0)
+    // The pinned block, with her card's own name and price — above the lists — and one link
+    // back to the list she came from.
     expect(html).toContain('Chosen flight')
     expect(html).toContain('€845.00')
-    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('flight-card'))
+    // The card is pinned ABOVE the way back to the list, not under it.
+    expect(html).toContain('Change flight')
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Change flight'))
   })
 
   it('promises the hotel search a chosen flight starts', () => {

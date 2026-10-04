@@ -1227,6 +1227,41 @@ select {
   color: var(--ink-2);
 }
 
+/*
+ * Section 3: the chosen flight, pinned above the stays, and the one link back to the list.
+ *
+ * Both full result sections used to stay on screen, stacked, so the list she had finished with
+ * took the top half of the pane away from the one she was working in — and nothing said which
+ * flight she had actually chosen. This is the card she picked, with its `Selected` ribbon, and
+ * nothing else.
+ */
+.chosen-flight-heading {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.change-flight {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.change-flight:hover {
+  color: var(--ink);
+}
+
 /* ---------- the filter bar above the list (pass 3, section 3) ---------- */
 
 /*
@@ -1762,11 +1797,17 @@ select {
   letter-spacing: 0.02em;
 }
 
+/*
+ * `nowrap`, not `overflow-wrap: anywhere`. "1 stop" is three characters and a word; breaking it
+ * mid-word to fit a column it should never have been in turned the card into a ransom note. If
+ * the text does not fit, the LAYOUT is wrong, and it should look wrong rather than quietly
+ * shredding the words.
+ */
 .leg-stops {
   color: var(--ink-3);
   font-size: 0.8rem;
   text-align: center;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .leg-stops[data-direct='true'] {
@@ -1881,9 +1922,26 @@ select {
   }
 }
 
-/* ---------- hotel list ---------- */
+/*
+ * The flight list: one card per row, down the page.
+ *
+ * This rule went missing. A comment block inserted during the hotels pass landed INSIDE the
+ * selector list it used to head — `.flight-list,` was left dangling and joined `.filter-bar-row`
+ * instead, so the list inherited `display: flex` with no `flex-direction` and laid its cards out
+ * in a ROW. That is the author's second screenshot exactly: three flight cards squeezed into
+ * narrow columns with "1 stop" broken into one letter per line by `.leg-stops`'s
+ * `overflow-wrap: anywhere`. CSS has no way to warn about this; the only defence is that the
+ * rule now says what it is for.
+ */
+.flight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
 
-.flight-list,
 /* ---------- the map beside the list (hotels pass, section 5) ---------- */
 
 /*
