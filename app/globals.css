@@ -1964,14 +1964,21 @@ select {
   z-index: 1;
 }
 
-/* The city centre every "3.2 km from centre" on a card is measured from. */
+/*
+ * The city centre every "3.2 km from centre" on a card is measured from.
+ *
+ * A ring rather than a pin, and a white halo under it: it is a reference point,
+ * not an option she can pick, and it has to read on a pale street map as well
+ * as on a green park without competing with the prices for attention.
+ */
 .map-centre {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  border: 2px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  border: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
   transform: translate(-50%, -50%);
 }
 
