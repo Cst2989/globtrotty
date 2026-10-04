@@ -6,7 +6,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { FlightList, legTimeRange, stopsWords, durationWords } from '../web/components/FlightList.js'
+import { FlightList } from '../web/components/FlightList.js'
+import { FlightCard, stopsWords, durationWords, timeHM, dayOffset } from '../web/components/FlightCard.js'
 import { HotelList, ratingStars } from '../web/components/HotelList.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import { FilterChips } from '../web/components/FilterChips.js'
@@ -23,13 +24,18 @@ const FLIGHT_ITEM: ResultItemLite = {
   sourceId: 'F1', name: 'Qatar Airways', priceMinor: '84500', currency: 'EUR',
   fetchedAt: '2026-11-18T08:50:00.000Z', ttlSeconds: 900,
   flight: {
-    outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'] },
+    outbound: {
+      from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
+      via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'],
+      durationMinutes: 855,
+    },
     inbound: null,
     stops: 1,
     inboundStops: null,
     durationMinutes: 855,
     airlines: ['QR'],
-    bags: { cabin: 1, checked: 1 },
+    airlineNames: ['Qatar Airways'],
+    bags: { personal: 1, cabin: 1, checked: 1 },
     selfTransfer: false,
   },
 }
@@ -40,67 +46,142 @@ const HOTEL_ITEM: ResultItemLite = {
   hotel: { rating: 4, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
 }
 
-describe('FlightList', () => {
-  it('renders airline, times, stops, duration, bags, price, age and a Choose button', () => {
+const INBOUND_LEG = {
+  from: 'HND', to: 'BCN', departureLocal: '2026-12-06T11:00:00', arrivalLocal: '2026-12-06T22:30:00',
+  via: [], viaCities: [], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 690,
+}
+
+describe('FlightCard', () => {
+  it('renders the leg row: times over codes, the duration, the stop cities and the airline logo', () => {
     const html = renderToStaticMarkup(
-      createElement(FlightList, { items: [FLIGHT_ITEM], now: NOW, onChoose: () => {} }),
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
     )
-    expect(html).toContain('QR')
-    expect(html).toContain('07:05 BCN')
-    expect(html).toContain('10:20+1 HND')
-    expect(html).toContain('1 stop, DOH')
+    expect(html).toContain('Outbound')
+    expect(html).toContain('07:05')
+    expect(html).toContain('BCN')
+    expect(html).toContain('10:20')
+    expect(html).toContain('HND')
     expect(html).toContain('14h 15m')
-    expect(html).toContain('found 10 min ago')
-    expect(html).toMatch(/Choose/)
-    expect(html).toContain('€845.00')
+    // The CITY, never the bare airport code, is what the stops line says.
+    expect(html).toContain('1 stop, Doha')
+    expect(html).not.toContain('1 stop, DOH')
+    // The logo is the Kiwi CDN url with the airline NAME as its alt text.
+    expect(html).toContain('https://images.kiwi.com/airlines/64/QR.png')
+    expect(html).toContain('alt="Qatar Airways"')
   })
 
-  it('renders a chosen item pinned, with a Chosen state and no Choose button', () => {
+  it('marks a next-day arrival with a superscript day offset', () => {
     const html = renderToStaticMarkup(
-      createElement(FlightList, { items: [FLIGHT_ITEM], now: NOW, chosenSourceId: 'F1', onChoose: () => {} }),
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('<sup class="leg-day-offset">+1</sup>')
+  })
+
+  it('renders no Inbound row for a one-way, and one for a return', () => {
+    const oneWay = renderToStaticMarkup(
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(oneWay).not.toContain('Inbound')
+
+    const roundTrip = renderToStaticMarkup(createElement(FlightCard, {
+      item: { ...FLIGHT_ITEM, flight: { ...FLIGHT_ITEM.flight!, inbound: INBOUND_LEG, inboundStops: 0 } },
+      adults: 2, now: NOW, onChoose: () => {},
+    }))
+    expect(roundTrip).toContain('Inbound')
+    expect(roundTrip).toContain('11h 30m')
+    expect(roundTrip).toContain('Direct')
+  })
+
+  it('shows the price, the party size, a Select button and the fetched age', () => {
+    const html = renderToStaticMarkup(
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('€845.00')
+    expect(html).toContain('for 2 passengers')
+    expect(html).toContain('Select')
+    expect(html).toContain('found 10 min ago')
+  })
+
+  it('says "for 1 passenger" in the singular', () => {
+    const html = renderToStaticMarkup(
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 1, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toContain('for 1 passenger')
+  })
+
+  it('renders all three bag counts, dimming the ones that are not included', () => {
+    const html = renderToStaticMarkup(createElement(FlightCard, {
+      item: { ...FLIGHT_ITEM, flight: { ...FLIGHT_ITEM.flight!, bags: { personal: 1, cabin: 1, checked: 0 } } },
+      adults: 2, now: NOW, onChoose: () => {},
+    }))
+    expect([...html.matchAll(/class="flight-bag"/g)]).toHaveLength(3)
+    expect([...html.matchAll(/data-included="false"/g)]).toHaveLength(1)
+  })
+
+  it('warns about a self-transfer itinerary', () => {
+    const html = renderToStaticMarkup(createElement(FlightCard, {
+      item: { ...FLIGHT_ITEM, flight: { ...FLIGHT_ITEM.flight!, selfTransfer: true } },
+      adults: 2, now: NOW, onChoose: () => {},
+    }))
+    expect(html).toContain('Self-transfer')
+  })
+
+  it('renders a chosen card with a Selected ribbon and no button', () => {
+    const html = renderToStaticMarkup(
+      createElement(FlightCard, { item: FLIGHT_ITEM, adults: 2, now: NOW, chosen: true, onChoose: () => {} }),
     )
     expect(html).toContain('data-chosen="true"')
-    expect(html).toContain('Chosen')
+    expect(html).toContain('Selected')
     expect(html).not.toContain('<button')
   })
 
+  it('renders nothing at all for an item with no flight payload', () => {
+    const html = renderToStaticMarkup(
+      createElement(FlightCard, { item: HOTEL_ITEM, adults: 2, now: NOW, onChoose: () => {} }),
+    )
+    expect(html).toBe('')
+  })
+})
+
+describe('FlightList', () => {
   it('drops a non-flight item silently rather than rendering a broken row', () => {
     const html = renderToStaticMarkup(
-      createElement(FlightList, { items: [HOTEL_ITEM], now: NOW, onChoose: () => {} }),
+      createElement(FlightList, { items: [HOTEL_ITEM], adults: 1, now: NOW, onChoose: () => {} }),
     )
     expect(html).not.toContain('Hotel Gracery')
   })
 
-  it('a nonstop filter reduces the rendered rows', () => {
+  it('a nonstop filter reduces the rendered cards', () => {
     const items = [
       FLIGHT_ITEM,
       { ...FLIGHT_ITEM, sourceId: 'F2', flight: { ...FLIGHT_ITEM.flight!, stops: 0 } },
     ]
-    const full = renderToStaticMarkup(createElement(FlightList, { items, now: NOW, onChoose: () => {} }))
+    const full = renderToStaticMarkup(createElement(FlightList, { items, adults: 1, now: NOW, onChoose: () => {} }))
     const filtered = renderToStaticMarkup(
-      createElement(FlightList, { items: applyFilterLite(items, { nonstop: true }), now: NOW, onChoose: () => {} }),
+      createElement(FlightList, { items: applyFilterLite(items, { nonstop: true }), adults: 1, now: NOW, onChoose: () => {} }),
     )
-    const countRows = (html: string) => [...html.matchAll(/class="result-row"/g)].length
-    expect(countRows(filtered)).toBeLessThan(countRows(full))
-    expect(countRows(filtered)).toBe(1)
+    const countCards = (html: string) => [...html.matchAll(/class="flight-card"/g)].length
+    expect(countCards(filtered)).toBeLessThan(countCards(full))
+    expect(countCards(filtered)).toBe(1)
   })
 })
 
-describe('legTimeRange / stopsWords / durationWords', () => {
-  it('formats a next-day arrival as "+1"', () => {
-    expect(legTimeRange(FLIGHT_ITEM.flight!.outbound)).toBe('07:05 BCN → 10:20+1 HND')
+describe('timeHM / dayOffset / stopsWords / durationWords', () => {
+  it('reads the hour and minute straight off a naive ISO local time', () => {
+    expect(timeHM('2026-11-19T07:05:00')).toBe('07:05')
+    expect(timeHM('not a time')).toBe('--:--')
   })
 
-  it('formats a same-day arrival with no offset suffix', () => {
-    const leg = { from: 'LIS', to: 'OPO', departureLocal: '2026-11-19T07:00:00', arrivalLocal: '2026-11-19T08:00:00', via: [] }
-    expect(legTimeRange(leg)).toBe('07:00 LIS → 08:00 OPO')
+  it('counts whole calendar days between two naive date-times', () => {
+    expect(dayOffset('2026-11-19T07:05:00', '2026-11-20T10:20:00')).toBe(1)
+    expect(dayOffset('2026-11-19T07:00:00', '2026-11-19T08:00:00')).toBe(0)
   })
 
-  it('stopsWords: Nonstop, "1 stop, X", "N stops"', () => {
-    expect(stopsWords(0, [])).toBe('Nonstop')
-    expect(stopsWords(1, ['DOH'])).toBe('1 stop, DOH')
+  it('stopsWords: Direct, "1 stop, City", "N stops, City, City"', () => {
+    expect(stopsWords(0, [])).toBe('Direct')
+    expect(stopsWords(1, ['Doha'])).toBe('1 stop, Doha')
     expect(stopsWords(1, [])).toBe('1 stop')
-    expect(stopsWords(2, ['DOH', 'IST'])).toBe('2 stops')
+    expect(stopsWords(2, ['Doha', 'Istanbul'])).toBe('2 stops, Doha, Istanbul')
   })
 
   it('durationWords formats minutes as "Hh Mm"', () => {
@@ -331,16 +412,16 @@ describe('ResultsPane', () => {
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    // `FlightList` renders the airline code, not the supplier's `name`
-    // field (the flight row has no single "name" the way a hotel row does).
+    // A flight card renders no supplier `name` field at all (an itinerary has no single name
+    // the way a hotel does), so it is identified by the card's own class.
     const hotelIndex = html.indexOf('Hotel Gracery')
-    const flightIndex = html.indexOf('result-row-airlines')
+    const flightIndex = html.indexOf('flight-card')
     expect(hotelIndex).toBeGreaterThan(-1)
     expect(flightIndex).toBeGreaterThan(-1)
     expect(hotelIndex).toBeLessThan(flightIndex)
   })
 
-  it('calls onChoose with the kind and sourceId when a Choose button exists', () => {
+  it('calls onChoose with the kind and sourceId when a Select button exists', () => {
     const onChoose = vi.fn()
     // Can't simulate a click under renderToStaticMarkup; this just pins that
     // the callback wiring compiles and the row renders with it attached.
@@ -349,7 +430,7 @@ describe('ResultsPane', () => {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null, onChoose, onGetLinks: () => {},
       }),
     )
-    expect(html).toContain('Choose')
+    expect(html).toContain('Select')
   })
 })
 
@@ -369,12 +450,12 @@ describe('ResultsPane', () => {
     // The Nonstop chip is pressed...
     expect(html).toContain('aria-pressed="true"')
     expect(/aria-pressed="true"[^>]*>\s*Nonstop/.test(html)).toBe(true)
-    // ...and FLIGHT_ITEM (one stop, via DOH) is filtered out of the list below it, leaving
-    // only the nonstop row. Source ids are not rendered, so the rows are counted and the
-    // excluded item is identified by its own "1 stop via DOH" meta line.
-    expect(html.match(/class="result-row"/g)).toHaveLength(1)
-    expect(html).toContain('Nonstop ·')
-    expect(html).not.toContain('via DOH')
+    // ...and FLIGHT_ITEM (one stop, via Doha) is filtered out of the list below it, leaving only
+    // the direct card. Source ids are not rendered, so the cards are counted and the excluded
+    // item is identified by its own stops line.
+    expect(html.match(/class="flight-card"/g)).toHaveLength(1)
+    expect(html).toContain('>Direct<')
+    expect(html).not.toContain('1 stop, Doha')
   })
 
   it('leaves every chip unpressed when the row carries no filter', () => {

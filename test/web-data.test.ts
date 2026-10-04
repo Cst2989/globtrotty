@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
   dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems, cityNamesFor,
+  naiveMinutesBetween,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -261,13 +262,21 @@ describe('newestResultItemPerSourceId', () => {
     expect(item.name).toBe('Qatar Airways')
     expect(item.flight).toBeDefined()
     expect(item.flight!.outbound).toEqual({
-      from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'],
+      from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
+      via: ['DOH'],
+      // Resolved server-side, because both tables read off disk and the card is a client
+      // component: the stop's city and the carrier's name.
+      viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'],
+      // A one-way's single leg IS the itinerary, so this is the supplier's own exact figure
+      // rather than the difference between two naive local clocks.
+      durationMinutes: 855,
     })
     expect(item.flight!.inbound).toBeNull()
     expect(item.flight!.stops).toBe(1)
     expect(item.flight!.inboundStops).toBeNull()   // a one-way has only the outbound leg
     expect(item.flight!.airlines).toEqual(['QR'])
-    expect(item.flight!.bags).toEqual({ cabin: 1, checked: 1 })
+    expect(item.flight!.airlineNames).toEqual(['Qatar Airways'])
+    expect(item.flight!.bags).toEqual({ personal: 1, cabin: 1, checked: 1 })
     expect(item.flight!.durationMinutes).toBe(855)
     expect(item.flight!.selfTransfer).toBe(false)
     expect(item.hotel).toBeUndefined()
@@ -288,6 +297,25 @@ describe('newestResultItemPerSourceId', () => {
     })])
     expect(out[0]!.flight!.stops).toBe(1)
     expect(out[0]!.flight!.inboundStops).toBe(2)
+    // A return trip has no per-leg figure from the supplier, so each leg's duration is the
+    // difference between its own two naive local clocks — see `LegLite.durationMinutes` for the
+    // timezone skew that costs, and why the itinerary total is what the Fastest tab sorts on.
+    expect(out[0]!.flight!.inbound!.durationMinutes).toBe(11 * 60)
+    expect(out[0]!.flight!.outbound.durationMinutes).toBe(27 * 60 + 15)
+    expect(out[0]!.flight!.durationMinutes).toBe(855)
+    // `airlines` is the union across both legs; each leg still carries its own.
+    expect(out[0]!.flight!.inbound!.viaCities).toEqual(['Doha', 'Madrid'])
+  })
+
+  it('falls back to the bare code for a stop or a carrier no table knows', () => {
+    const out = newestResultItemPerSourceId([row({
+      payload: {
+        ...flightPayload,
+        outbound: { ...flightPayload.outbound, route: ['BCN', 'ZZZ', 'HND'], carriers: ['ZZ'] },
+      },
+    })])
+    expect(out[0]!.flight!.outbound.viaCities).toEqual(['ZZZ'])
+    expect(out[0]!.flight!.airlineNames).toEqual(['ZZ'])
   })
 
   it('defaults an unreadable inbound stops count to 0 rather than dropping the leg', () => {
@@ -378,5 +406,17 @@ describe('cityNamesFor', () => {
       query: { place: 'Tokyo', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2 },
       sourceIds: [], assumptions: [],
     })).toEqual({})
+  })
+})
+
+describe('naiveMinutesBetween', () => {
+  it('reads both times field by field, never through a zoned Date', () => {
+    expect(naiveMinutesBetween('2026-11-19T07:05:00', '2026-11-20T10:20:00')).toBe(27 * 60 + 15)
+    expect(naiveMinutesBetween('2026-11-19T07:00:00', '2026-11-19T08:30:00')).toBe(90)
+  })
+
+  it('clamps a backwards or unreadable pair to zero rather than a negative flight', () => {
+    expect(naiveMinutesBetween('2026-11-20T10:20:00', '2026-11-19T07:05:00')).toBe(0)
+    expect(naiveMinutesBetween('nonsense', '2026-11-19T07:05:00')).toBe(0)
   })
 })

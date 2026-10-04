@@ -119,6 +119,7 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
           <FilterChips items={newestFlights.items} filter={flightFilter} onChange={setFlightFilter} />
           <FlightList
             items={applyFilterLite(newestFlights.items, flightFilter)}
+            adults={newestFlights.query.adults}
             now={now}
             chosenSourceId={chosenFlightSourceId}
             onChoose={(sourceId) => onChoose('flight', sourceId)}

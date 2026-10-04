@@ -6,6 +6,8 @@ import {
 } from '@/src/results'
 import { maskUntrustedText } from '@/src/sanitize'
 import { CODE_MAP } from '@/src/intake/places'
+import { airportCity } from '@/src/intake/airports'
+import { airlineName } from '@/src/intake/airlines'
 
 /**
  * Server-side reads for the chat UI, through the RLS-scoped client
@@ -509,6 +511,36 @@ export type LegLite = {
   departureLocal: string
   arrivalLocal: string
   via: string[]
+  /**
+   * `via`, as city names — `airportCity` (src/intake/airports.ts) per entry, falling back to the
+   * code itself for an airport that table does not know. Resolved here because that table reads
+   * `airports.json` off disk at import time and `FlightCard` is a client component. Same length
+   * and order as `via`, always, so the two can be read in step.
+   */
+  viaCities: string[]
+  /**
+   * This leg's own carrier codes, in the supplier's own order — `LegSummary.carriers`. Kept per
+   * leg as well as unioned onto `flight.airlines` (which is what the airline FILTER reads),
+   * because a card puts a logo on each leg's own line and the two legs are often flown by
+   * different carriers.
+   */
+  carriers: string[]
+  /** `carriers`, as airline names, code as the fallback — same length and order. */
+  carrierNames: string[]
+  /**
+   * This leg's own elapsed time, in minutes.
+   *
+   * KNOWN LIMIT, and the reason this is computed rather than stored: the supplier gives
+   * `totalDurationSeconds` for the WHOLE itinerary and nothing per leg, and `departureLocal`/
+   * `arrivalLocal` are naive local times with no offset (see `LegSummary`). So for a one-way —
+   * where the one leg IS the itinerary — this is the supplier's own exact figure; for a return
+   * trip it is the difference between the two local clocks, which overstates the outbound by
+   * the UTC offset between the two cities and understates the inbound by the same amount. The
+   * errors cancel in the pair, which is why `flight.durationMinutes` (the itinerary total, from
+   * the supplier) is what the Fastest tab sorts on. Fixing the per-leg figure needs a timezone
+   * per airport, which no table in this repo carries yet.
+   */
+  durationMinutes: number
 }
 
 /**
@@ -546,9 +578,17 @@ export type ResultItemLite = {
      * answers. `worstLegStops` (web/filters.ts) is what the filters read.
      */
     inboundStops: number | null
+    /** The whole itinerary's duration, the supplier's own figure — what the Fastest tab sorts on. */
     durationMinutes: number
     airlines: string[]
-    bags: { cabin: number; checked: number }
+    /**
+     * `airlines`, as airline names — `airlineName` (src/intake/airlines.ts) per entry, falling
+     * back to the code for a carrier that table does not know. Same length and order as
+     * `airlines`, so the card can pair a logo with the name it is the logo OF.
+     */
+    airlineNames: string[]
+    /** `FlightDetail.baggage` — a personal item, a cabin bag and a checked bag, as counts. */
+    bags: { personal: number; cabin: number; checked: number }
     selfTransfer: boolean
   }
   hotel?: {
@@ -620,27 +660,62 @@ function viaFromRoute(route: unknown): string[] {
   return route.slice(1, -1).filter((v): v is string => typeof v === 'string').map(maskUntrustedText)
 }
 
-/** `null` when `raw` does not carry a recognisable `LegSummary` shape. */
-function legLite(raw: unknown): LegLite | null {
+/** A `LegSummary.carriers` array, masked — supplier-origin strings, same boundary as every other. */
+function carriersOf(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').map(maskUntrustedText) : []
+}
+
+/**
+ * Minutes between two naive local ISO date-times, read field by field so neither is ever parsed
+ * as a zoned `Date` (the rule this codebase applies to every supplier timestamp). Negative
+ * differences clamp to 0 — a garbled pair is not a negative flight.
+ */
+export function naiveMinutesBetween(fromIso: string, toIso: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/
+  const a = m.exec(fromIso)
+  const b = m.exec(toIso)
+  if (!a || !b) return 0
+  const at = Date.UTC(Number(a[1]), Number(a[2]) - 1, Number(a[3]), Number(a[4]), Number(a[5]))
+  const bt = Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3]), Number(b[4]), Number(b[5]))
+  return Math.max(0, Math.round((bt - at) / 60_000))
+}
+
+/**
+ * `null` when `raw` does not carry a recognisable `LegSummary` shape.
+ *
+ * `exactMinutes` is the supplier's own itinerary duration, passed only when this leg IS the whole
+ * itinerary (a one-way) — see `LegLite.durationMinutes` for why the computed figure is otherwise
+ * the best available.
+ */
+function legLite(raw: unknown, exactMinutes: number | null): LegLite | null {
   if (!isRecord(raw)) return null
   const { from, to, departureLocal, arrivalLocal, route } = raw
   if (
     typeof from !== 'string' || typeof to !== 'string'
     || typeof departureLocal !== 'string' || typeof arrivalLocal !== 'string'
   ) return null
+  const via = viaFromRoute(route)
+  const carriers = carriersOf(raw.carriers)
   return {
     from: maskUntrustedText(from), to: maskUntrustedText(to),
     departureLocal: maskUntrustedText(departureLocal), arrivalLocal: maskUntrustedText(arrivalLocal),
-    via: viaFromRoute(route),
+    via,
+    viaCities: via.map((code) => airportCity(code) ?? code),
+    carriers,
+    carrierNames: carriers.map((code) => airlineName(code) ?? code),
+    durationMinutes: exactMinutes ?? naiveMinutesBetween(departureLocal, arrivalLocal),
   }
 }
 
 /** `undefined` when `payload` is not a `FlightDetail` (src/supplier/types.ts) this reader recognises. */
 function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefined {
   if (payload.kind !== 'flight') return undefined
-  const outbound = legLite(payload.outbound)
+  const durationSeconds = typeof payload.totalDurationSeconds === 'number' ? payload.totalDurationSeconds : 0
+  const durationMinutes = Math.round(durationSeconds / 60)
+  const oneWay = payload.inbound === null
+  const outbound = legLite(payload.outbound, oneWay ? durationMinutes : null)
   if (!outbound) return undefined
-  const inbound = payload.inbound === null ? null : legLite(payload.inbound)
+  const inbound = oneWay ? null : legLite(payload.inbound, null)
   const outboundRaw = isRecord(payload.outbound) ? payload.outbound : {}
   const inboundRaw = isRecord(payload.inbound) ? payload.inbound : {}
   const stops = typeof outboundRaw.stops === 'number' ? outboundRaw.stops : 0
@@ -651,18 +726,17 @@ function flightLite(payload: UnknownRecord): ResultItemLite['flight'] | undefine
   const inboundStops = payload.inbound === null
     ? null
     : (typeof inboundRaw.stops === 'number' ? inboundRaw.stops : 0)
-  const carriersOf = (v: unknown): string[] =>
-    Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').map(maskUntrustedText) : []
-  const airlines = [...new Set([...carriersOf(outboundRaw.carriers), ...carriersOf(inboundRaw.carriers)])]
+  const airlines = [...new Set([...outbound.carriers, ...(inbound?.carriers ?? [])])]
   const baggage = isRecord(payload.baggage) ? payload.baggage : {}
+  const personal = typeof baggage.personalItem === 'number' ? baggage.personalItem : 0
   const cabin = typeof baggage.cabinBag === 'number' ? baggage.cabinBag : 0
   const checked = typeof baggage.checkedBag === 'number' ? baggage.checkedBag : 0
-  const durationSeconds = typeof payload.totalDurationSeconds === 'number' ? payload.totalDurationSeconds : 0
   return {
     outbound, inbound, stops, inboundStops,
-    durationMinutes: Math.round(durationSeconds / 60),
+    durationMinutes,
     airlines,
-    bags: { cabin, checked },
+    airlineNames: airlines.map((code) => airlineName(code) ?? code),
+    bags: { personal, cabin, checked },
     selfTransfer: payload.selfTransfer === true,
   }
 }

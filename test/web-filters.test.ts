@@ -20,13 +20,13 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
     sourceId: 'F1', name: 'Qatar Airways', priceMinor: '45600', currency: 'EUR',
     fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
     flight: {
-      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'] },
+      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600 },
       inbound: null,
       stops: 1,
       inboundStops: null,
       durationMinutes: 855,
-      airlines: ['QR'],
-      bags: { cabin: 1, checked: 1 },
+      airlines: ['QR'], airlineNames: ['Qatar Airways'],
+      bags: { personal: 1, cabin: 1, checked: 1 },
       selfTransfer: false,
       ...flightOverrides,
     },
@@ -67,8 +67,8 @@ describe('applyFilterLite', () => {
   })
 
   it('departure window matches the outbound leg\'s local hour, read without parsing a Date', () => {
-    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [] } } })
-    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
     expect(applyFilterLite([morning, evening], { departure: 'morning' }).map((i) => i.sourceId)).toEqual(['FA'])
     expect(applyFilterLite([morning, evening], { departure: 'evening' }).map((i) => i.sourceId)).toEqual(['FB'])
   })
@@ -172,7 +172,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('both modules classify the morning (9), afternoon (14) and evening (20) hour the same way', () => {
     for (const [window, hour] of Object.entries(HOURS) as ['morning' | 'afternoon' | 'evening', number][]) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
 
       const liteMatches = applyFilterLite([lite], { departure: window }).length === 1
@@ -185,7 +185,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('each hour matches exactly one of the three windows in both modules', () => {
     for (const hour of Object.values(HOURS)) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
       const windows: Array<'morning' | 'afternoon' | 'evening'> = ['morning', 'afternoon', 'evening']
 
@@ -212,8 +212,8 @@ describe('stops reconciliation (web/filters.ts vs src/intake/filter.ts)', () => 
     return flight({
       sourceId,
       flight: {
-        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [] },
-        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [] },
+        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
+        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
         stops: out,
         inboundStops: back,
       },

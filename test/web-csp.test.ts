@@ -12,17 +12,24 @@
 // header applies to, not merely that some substring is present somewhere in
 // the string. A future edit that widens `img-src` to `'self' data: https:`
 // (still `toContain`s `"'self' data:"`) would slip past a substring check
-// but fails the equality assertion here.
+// but fails the equality assertion here — which is the whole point now that
+// the directive carries a third-party host at all (the Kiwi logo CDN).
 import { describe, expect, it } from 'vitest'
 import { cspFor } from '../web/csp.js'
 
 const PROJECT_URL = 'https://fhqsiydgoqmwvihqsbap.supabase.co'
 
 describe('cspFor: img-src is pinned exactly', () => {
-  it('is exactly "self" and data:, nothing wider', () => {
+  it('is exactly self, data: and the Kiwi logo host, nothing wider', () => {
     const directives = cspFor(PROJECT_URL).split('; ')
     const imgSrc = directives.find((d) => d.startsWith('img-src '))
-    expect(imgSrc).toBe("img-src 'self' data:")
+    expect(imgSrc).toBe("img-src 'self' data: https://images.kiwi.com")
+  })
+
+  it('names that host exactly, never a scheme-wide or wildcard source', () => {
+    const imgSrc = cspFor(PROJECT_URL).split('; ').find((d) => d.startsWith('img-src '))!
+    expect(imgSrc).not.toMatch(/https:(\s|$)/)
+    expect(imgSrc).not.toContain('*')
   })
 })
 
@@ -53,6 +60,6 @@ describe('next.config.ts headers(): the real config object', () => {
     // process is configured with — proves `next.config.ts` wires its own
     // `headers()` to `cspFor`, not a copy that has since drifted from it.
     expect(csp).toBe(cspFor(process.env.NEXT_PUBLIC_SUPABASE_URL!))
-    expect(csp!.split('; ')).toContain("img-src 'self' data:")
+    expect(csp!.split('; ')).toContain("img-src 'self' data: https://images.kiwi.com")
   })
 })
