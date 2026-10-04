@@ -1,6 +1,7 @@
 import { parseChoices } from '@/src/results'
 import { NEXT_QUESTION_ID } from '@/src/agents/nextSteps'
 import { ChoiceCard, ChoiceCardLive } from './ChoiceCard'
+import { StreamedText } from './StreamedText'
 
 export type MessageRole = 'user' | 'agent' | 'action' | 'results' | 'choices'
 
@@ -16,6 +17,23 @@ export type MessageBubbleProps = {
   conversationId?: string
   /** Task 10: an optimistic row `ThreadLive` has not yet matched to a server one — renders with `data-pending="true"`. */
   pending?: boolean
+  /**
+   * Streamed reveal: true for a just-arrived agent reply (`ThreadLive` sets this for an `agent`
+   * row whose id was not already on the page at mount) — the content streams in through
+   * `StreamedText` instead of appearing all at once. Ignored for every other role.
+   */
+  animate?: boolean
+  /** Fired once `StreamedText`'s reveal finishes. Only meaningful alongside `animate`. */
+  onRevealed?: () => void
+  /**
+   * True while the agent reply this row follows is still revealing, so a `results`/`action`
+   * marker or a `choices` row (the chips included) that landed in the SAME turn stays out of the
+   * way until the words it is a reaction to have actually finished appearing. `inert` (React 19)
+   * keeps it out of the accessibility tree and unclickable while hidden, not just visually faded;
+   * `app/globals.css` fades it in over 150ms once `gated` goes back to false (instant under
+   * `prefers-reduced-motion: reduce`).
+   */
+  gated?: boolean
 }
 
 /**
@@ -41,7 +59,7 @@ export type MessageBubbleProps = {
  * or four next steps it is offering, and a card with a question heading would claim it is waiting
  * for one of them. Every OTHER `questionId` is a real question and keeps the card.
  */
-export function MessageBubble({ role, content, conversationId, pending }: MessageBubbleProps) {
+export function MessageBubble({ role, content, conversationId, pending, animate, onRevealed, gated }: MessageBubbleProps) {
   if (role === 'choices') {
     const parsed = parseChoices(content)
     if (!parsed) {
@@ -50,7 +68,7 @@ export function MessageBubble({ role, content, conversationId, pending }: Messag
       // something our own writer produces, and its raw JSON must not leak
       // to the browser as if it were prose.
       return (
-        <div className="message-row" data-role="choices">
+        <div className="message-row" data-role="choices" data-gated={gated ? 'true' : undefined} inert={gated || undefined}>
           <p className="message message-action" data-role="choices">
             A question was recorded
           </p>
@@ -59,7 +77,13 @@ export function MessageBubble({ role, content, conversationId, pending }: Messag
     }
     const variant = parsed.questionId === NEXT_QUESTION_ID ? 'chips' : 'card'
     return (
-      <div className="message-row" data-role="choices" data-variant={variant}>
+      <div
+        className="message-row"
+        data-role="choices"
+        data-variant={variant}
+        data-gated={gated ? 'true' : undefined}
+        inert={gated || undefined}
+      >
         {conversationId ? (
           <ChoiceCardLive
             conversationId={conversationId}
@@ -77,9 +101,15 @@ export function MessageBubble({ role, content, conversationId, pending }: Messag
 
   const isMarker = role === 'action' || role === 'results'
   return (
-    <div className="message-row" data-role={role} data-pending={pending ? 'true' : undefined}>
+    <div
+      className="message-row"
+      data-role={role}
+      data-pending={pending ? 'true' : undefined}
+      data-gated={isMarker && gated ? 'true' : undefined}
+      inert={(isMarker && gated) || undefined}
+    >
       <p className={isMarker ? 'message message-action' : 'message'} data-role={role}>
-        {content}
+        {role === 'agent' ? <StreamedText text={content} animate={animate === true} onDone={onRevealed} /> : content}
       </p>
     </div>
   )

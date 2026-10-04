@@ -19,6 +19,8 @@ import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import { mergePending } from '../web/components/pending.js'
 import { SplitShell } from '../web/components/SplitShell.js'
 import { AppShell } from '../web/components/AppShell.js'
+import { revealSchedule, visibleSlice } from '../web/components/stream.js'
+import { StreamedText } from '../web/components/StreamedText.js'
 import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
@@ -402,6 +404,47 @@ describe('ThreadView', () => {
     expect(inert).toHaveLength(2)
     expect(inert.every((p) => p.conversationId === undefined)).toBe(true)
   })
+
+  // Streamed reveal: a `results`/`choices` row that lands in the same turn as an agent reply
+  // still streaming stays hidden and inert until that reply's `revealed` flag goes true —
+  // `ThreadLive` is what flips it (via `StreamedText`'s `onDone`), but the gating itself lives
+  // here, in the hook-free `ThreadView`, from the two plain props alone.
+  it('hides a results marker that follows a still-revealing agent message, then shows it once revealed', () => {
+    const base = {
+      conversation: { id: 'c1', title: 'Trip', status: 'active' as const, updated_at: '' },
+      latestTurn: null,
+    }
+    const stillRevealing = renderToStaticMarkup(createElement(ThreadView, {
+      ...base,
+      messages: [
+        { id: 'm1', role: 'agent' as const, content: 'Here is the plan', created_at: '', animate: true, revealed: false },
+        { id: 'm2', role: 'results' as const, content: '5 flights shown', created_at: '' },
+      ],
+    }))
+    expect(stillRevealing).toMatch(/data-role="results"[^>]*data-gated="true"/)
+    expect(stillRevealing).toContain('inert=""')
+
+    const done = renderToStaticMarkup(createElement(ThreadView, {
+      ...base,
+      messages: [
+        { id: 'm1', role: 'agent' as const, content: 'Here is the plan', created_at: '', animate: true, revealed: true },
+        { id: 'm2', role: 'results' as const, content: '5 flights shown', created_at: '' },
+      ],
+    }))
+    expect(done).not.toContain('data-gated')
+    expect(done).not.toContain('inert=""')
+
+    // A message that never animated (the ordinary, already-on-the-page case) never gates
+    // anything that follows it.
+    const neverAnimated = renderToStaticMarkup(createElement(ThreadView, {
+      ...base,
+      messages: [
+        { id: 'm1', role: 'agent' as const, content: 'Here is the plan', created_at: '' },
+        { id: 'm2', role: 'results' as const, content: '5 flights shown', created_at: '' },
+      ],
+    }))
+    expect(neverAnimated).not.toContain('data-gated')
+  })
 })
 
 describe('mergePending (Task 10)', () => {
@@ -726,6 +769,86 @@ describe('MessageBubble: next-step chips vs the question card', () => {
     expect(html).toContain('choice-card')
     expect(html).toContain('Which city did you mean?')
     expect(html).not.toContain('next-chips')
+  })
+})
+
+// Streamed reveal: the pure timing math behind `StreamedText`.
+describe('revealSchedule', () => {
+  const sixtyWords = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
+
+  it('is monotonic in both `at` and `upTo`, and ends at the full text length', () => {
+    const schedule = revealSchedule(sixtyWords)
+    expect(schedule).toHaveLength(60)
+    for (let i = 1; i < schedule.length; i++) {
+      expect(schedule[i]!.at).toBeGreaterThan(schedule[i - 1]!.at)
+      expect(schedule[i]!.upTo).toBeGreaterThan(schedule[i - 1]!.upTo)
+    }
+    expect(schedule[schedule.length - 1]!.upTo).toBe(sixtyWords.length)
+  })
+
+  it('reveals a 60-word message in between 0.6s and 3s, ramping rather than ticking at one fixed rate', () => {
+    const schedule = revealSchedule(sixtyWords)
+    const lastAt = schedule[schedule.length - 1]!.at
+    expect(lastAt).toBeGreaterThanOrEqual(600)
+    expect(lastAt).toBeLessThanOrEqual(3000)
+    // The ramp: the first word takes longer to arrive than the time between two words once it is
+    // up to speed (25 wps at the start vs 70 wps after a second) — never a flat cadence throughout.
+    const firstGap = schedule[0]!.at
+    const laterGap = schedule[59]!.at - schedule[58]!.at
+    expect(firstGap).toBeGreaterThan(laterGap)
+  })
+
+  it('returns nothing to reveal for text with no words', () => {
+    expect(revealSchedule('')).toEqual([])
+    expect(revealSchedule('   ')).toEqual([])
+  })
+})
+
+describe('visibleSlice', () => {
+  const text = 'the quick brown fox jumps over the lazy dog'
+
+  it('never splits a word: every slice is the empty string or ends exactly at a scheduled word boundary', () => {
+    const schedule = revealSchedule(text)
+    const validEndings = new Set([0, ...schedule.map((s) => s.upTo)])
+    for (let ms = 0; ms <= schedule[schedule.length - 1]!.at + 50; ms += 7) {
+      const slice = visibleSlice(text, ms)
+      expect(validEndings.has(slice.length)).toBe(true)
+      // And the characters it does show are always the text's own prefix — never a different cut.
+      expect(text.startsWith(slice)).toBe(true)
+    }
+  })
+
+  it('shows nothing at elapsed 0 and the full text once elapsed reaches the schedule\'s end', () => {
+    const schedule = revealSchedule(text)
+    expect(visibleSlice(text, 0)).toBe('')
+    expect(visibleSlice(text, schedule[schedule.length - 1]!.at)).toBe(text)
+  })
+
+  it('returns the whole text unchanged when there is nothing to schedule (no words)', () => {
+    expect(visibleSlice('', 0)).toBe('')
+  })
+})
+
+describe('StreamedText', () => {
+  it('renders the whole text instantly, as a plain text child, when animate is false', () => {
+    const html = renderToStaticMarkup(createElement(StreamedText, { text: 'hello agent', animate: false }))
+    expect(html).toBe('hello agent')
+  })
+
+  it('renders a visually-hidden full copy and the blinking cursor when animate is true', () => {
+    const html = renderToStaticMarkup(createElement(StreamedText, { text: 'hello agent', animate: true }))
+    // No `requestAnimationFrame` has run (there are no effects under `renderToStaticMarkup`), so
+    // this is the reveal's very first frame: nothing visible yet, cursor already showing, and the
+    // full text held in reserve for assistive tech.
+    expect(html).toContain('stream-cursor')
+    expect(html).toContain('class="visually-hidden"')
+    expect(html).toContain('>hello agent<')
+  })
+
+  it('never reaches for dangerouslySetInnerHTML to render either half', () => {
+    const html = renderToStaticMarkup(createElement(StreamedText, { text: '<b>hi</b>', animate: true }))
+    expect(html).not.toContain('<b>hi</b>')
+    expect(html).toContain('&lt;b&gt;hi&lt;/b&gt;')
   })
 })
 
