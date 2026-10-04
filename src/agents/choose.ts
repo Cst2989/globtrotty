@@ -23,6 +23,7 @@
 import type { AgentContext, AgentStep } from '../worker.js'
 import type { IntakeDeps } from './intake.js'
 import { runProposalPath } from './proposalPath.js'
+import { nextStepsAttachment } from './nextSteps.js'
 import { loadNotebook } from '../repo/notebook.js'
 import { decideProposal, loadNewestAcceptedItinerary, loadNewestProposalForTurn } from '../repo/proposals.js'
 import { rehydrate, recordResults } from '../repo/toolResults.js'
@@ -223,6 +224,9 @@ async function handleChooseFlight(
           + 'Tell me a different area or dates.',
         costMicros: 0n,
         recordedMicros: spent.micros,
+        // F2: no results row (M1 — there is no corpus to name), but still the two steps that can
+        // turn an empty hotel search into a full one.
+        attachments: [nextStepsAttachment('zero_hotels')],
       }
     }
 
@@ -232,15 +236,18 @@ async function handleChooseFlight(
         + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}.`,
       costMicros: 0n,
       recordedMicros: spent.micros,
-      attachments: [{
-        role: 'results',
-        content: {
-          kind: 'hotels',
-          query: { place: cityLabel(destinationCode), outbound: checkIn, inbound: checkOut, adults },
-          sourceIds: items.map((i) => i.sourceId),
-          assumptions: [],
+      attachments: [
+        {
+          role: 'results',
+          content: {
+            kind: 'hotels',
+            query: { place: cityLabel(destinationCode), outbound: checkIn, inbound: checkOut, adults },
+            sourceIds: items.map((i) => i.sourceId),
+            assumptions: [],
+          },
         },
-      }],
+        nextStepsAttachment('hotels'),
+      ],
     }
   } catch {
     // The flight proposal is already durable and accepted by this point —
@@ -329,6 +336,10 @@ async function handleChooseHotel(
     message: 'Trip summary ready. Use "Get booking links" when you want to book.',
     costMicros: 0n,
     recordedMicros: spent.micros,
+    // F2: the summary's own two steps. Both are answered by the router itself rather than by Jev
+    // — `get_links` names a button and `change_flight` re-shows a stored row — see
+    // `ROUTER_HANDLED_NEXT` (src/agents/nextSteps.ts).
+    attachments: [nextStepsAttachment('summary')],
   }
 }
 

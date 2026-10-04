@@ -27,6 +27,7 @@ import { applyFilter, describeFilter } from '../intake/filter.js'
 import type { Filter, ResultsContent } from '../results.js'
 import { isFlight, type StoredItem } from '../supplier/types.js'
 import { runIntakeTurn, type IntakeDeps } from './intake.js'
+import { nextStepsAttachment, NEXT_QUESTION_ID } from './nextSteps.js'
 import { makeDriver } from './driver.js'
 import { handleChoose } from './choose.js'
 import { faqAnswer } from './frontDesk.js'
@@ -205,6 +206,121 @@ async function withExtraCost(
 }
 
 /**
+ * An ordinary typed message: one Jev call classifies it, and the router records that call itself
+ * (seat `router`) before dispatching further.
+ *
+ * Factored out of `makeRouter` for results UI pass 2 (F3): a `next` chip click arrives as an
+ * `action` row, is validated against the stored `choices` row like any other click, and then runs
+ * through exactly this path on the option's LABEL — "Direct flights only" is classified the same
+ * way whether she clicked it or typed it, which is the whole point of the chips. `text` is a
+ * parameter for that reason rather than being read off the transcript in here.
+ */
+async function routeTyped(
+  deps: IntakeDeps, driver: Agent, ctx: AgentContext, text: string,
+): Promise<AgentStep> {
+  const { sql } = deps
+  const latest = await readLatestResults(sql, ctx.conversationId, ctx.userId)
+
+  // I1: the newest row tells us WHICH search she is looking at (its kind and query); the
+  // corpus a filter applies over is the newest UNFILTERED row of that kind, so two successive
+  // typed filters do not compound and "show me all flights" can widen back to everything.
+  // `?? latest` covers a conversation whose only row of this kind is itself filtered — not a
+  // shape this office writes (every search writes its unfiltered results first), so this
+  // preserves the old behaviour rather than losing the corpus entirely.
+  const base = latest === null
+    ? null
+    : (await readLatestUnfilteredResults(sql, ctx.conversationId, ctx.userId, latest.kind)) ?? latest
+
+  // Rehydrated from the BASE, which is also what `matchAirlines` wants: a carrier an earlier
+  // filter removed is still a carrier she can name.
+  let storedItems: StoredItem[] = []
+  if (base) {
+    const stored = await rehydrate(sql, ctx.conversationId, base.sourceIds)
+    storedItems = base.sourceIds.flatMap((id) => {
+      const item = stored.get(id)
+      return item ? [item] : []
+    })
+  }
+  const carriers = [...new Set(
+    storedItems.flatMap((i) => (isFlight(i)
+      ? [...i.detail.outbound.carriers, ...(i.detail.inbound?.carriers ?? [])]
+      : [])),
+  )]
+
+  const result = await routeMessage(
+    { jev: deps.jev }, text, latest !== null, { lastQuery: latest?.query ?? null, carriers },
+  )
+  const cost = await recordJevCall(sql, {
+    conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
+    seat: 'router', request: result.request, response: result.response,
+  })
+
+  switch (result.intent) {
+    case 'filter': {
+      // `hasResults` was false whenever `latest` is null, and `routeMessage` has no reason to
+      // answer 'filter' with nothing to filter — but Jev's answer is still a guess, never a
+      // guarantee, so this falls back to the driver rather than crash on a missing results row.
+      if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
+      const filtered = applyFilter(storedItems, result.filter ?? {})
+      return {
+        kind: 'park',
+        message: `Showing ${filtered.length} of ${storedItems.length}: ${describeFilter(result.filter ?? {})}.`,
+        costMicros: cost,
+        attachments: [
+          {
+            role: 'results',
+            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
+          },
+          // F2: after a filter, the two steps that matter are widening back out and the one
+          // filter she has not tried yet.
+          nextStepsAttachment('filter'),
+        ],
+      }
+    }
+    case 'new_search': {
+      const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
+      const lastOrigin = notebook.originCity?.value ?? await readLastOrigin(sql, ctx.userId)
+      const step = await runIntakeTurn(deps, ctx, { text, lastOrigin })
+      return withExtraCost(sql, ctx, step, cost)
+    }
+    case 'question':
+    case 'chat':
+      return withExtraCost(sql, ctx, await driver(ctx), cost)
+    case 'faq':
+      return { kind: 'park', message: faqAnswer(text), costMicros: cost }
+}
+}
+
+/**
+ * `get_links`'s own answer. The hand-off is a BUTTON (`PinnedSummary`'s "Get booking links" ->
+ * `POST /api/proposals/[id]/decide` -> the `hand_off` action -> the driver -> the cashier), so no
+ * sentence typed into the composer can start it, and handing this label to `routeMessage` would
+ * classify it as chat and spend a driver turn saying nothing useful. A fixed line pointing at the
+ * button is both cheaper and true.
+ */
+const GET_LINKS_REPLY = 'Press "Get booking links" on the summary to the right.'
+
+/** What `change_flight` says when there is no stored flight list left to go back to. */
+const NO_FLIGHTS_TO_RESHOW = 'I do not have a flight list to go back to. Tell me the trip again.'
+
+/**
+ * `change_flight`: re-show the newest UNFILTERED flights row. A read, not an intent — there is
+ * nothing to classify and nothing to search, so this costs no model call of any kind.
+ *
+ * Unfiltered on purpose, for the same reason a typed filter reads that row (the final review's
+ * I1): she is backing out of a choice, and the list she should land on is every flight that
+ * search found, not whatever a filter had narrowed it to before she picked one.
+ */
+async function reshowFlights(sql: postgres.Sql, ctx: AgentContext): Promise<AgentStep> {
+  const base = await readLatestUnfilteredResults(sql, ctx.conversationId, ctx.userId, 'flights')
+  if (!base) return { kind: 'park', message: NO_FLIGHTS_TO_RESHOW, costMicros: 0n }
+  return {
+    kind: 'park', message: 'Pick another flight.', costMicros: 0n,
+    attachments: [{ role: 'results', content: base }, nextStepsAttachment('flights')],
+  }
+}
+
+/**
  * `makeRouter(deps)`: the agent that now runs on every `desk === 'planning'` step. First checks
  * whether the newest STORED row (not the hydrated transcript — see `readNewestMessage`'s own doc
  * comment) is an `action`:
@@ -238,6 +354,19 @@ export function makeRouter(deps: IntakeDeps): Agent {
         if (latestChoices === null || !offered) {
           return { kind: 'park', message: 'That option is no longer available. Tell me in your own words.', costMicros: 0n }
         }
+        // F3: a `next` chip is NOT an answer to a question this office asked, so it must never
+        // become an intake override. Two of its ids the router answers itself (see
+        // `GET_LINKS_REPLY` and `reshowFlights`); every other one is a sentence she could have
+        // typed, and the `userNote` row `submitAction` wrote already carries that label — so the
+        // rest of this turn is the ordinary typed path, running on her click as if typed.
+        if (action.questionId === NEXT_QUESTION_ID) {
+          if (action.optionId === 'get_links') {
+            return { kind: 'park', message: GET_LINKS_REPLY, costMicros: 0n }
+          }
+          if (action.optionId === 'change_flight') return reshowFlights(sql, ctx)
+          return routeTyped(deps, driver, ctx, lastUserText(ctx.state))
+        }
+
         const overrides: Partial<Record<'origin' | 'destination' | 'outbound', string>> = {}
         if (action.questionId === 'origin' || action.questionId === 'destination' || action.questionId === 'outbound') {
           overrides[action.questionId] = action.optionId
@@ -267,71 +396,7 @@ export function makeRouter(deps: IntakeDeps): Agent {
       return driver(ctx)
     }
 
-    const text = lastUserText(ctx.state)
-    const latest = await readLatestResults(sql, ctx.conversationId, ctx.userId)
-
-    // I1: the newest row tells us WHICH search she is looking at (its kind and query); the
-    // corpus a filter applies over is the newest UNFILTERED row of that kind, so two successive
-    // typed filters do not compound and "show me all flights" can widen back to everything.
-    // `?? latest` covers a conversation whose only row of this kind is itself filtered — not a
-    // shape this office writes (every search writes its unfiltered results first), so this
-    // preserves the old behaviour rather than losing the corpus entirely.
-    const base = latest === null
-      ? null
-      : (await readLatestUnfilteredResults(sql, ctx.conversationId, ctx.userId, latest.kind)) ?? latest
-
-    // Rehydrated from the BASE, which is also what `matchAirlines` wants: a carrier an earlier
-    // filter removed is still a carrier she can name.
-    let storedItems: StoredItem[] = []
-    if (base) {
-      const stored = await rehydrate(sql, ctx.conversationId, base.sourceIds)
-      storedItems = base.sourceIds.flatMap((id) => {
-        const item = stored.get(id)
-        return item ? [item] : []
-      })
-    }
-    const carriers = [...new Set(
-      storedItems.flatMap((i) => (isFlight(i)
-        ? [...i.detail.outbound.carriers, ...(i.detail.inbound?.carriers ?? [])]
-        : [])),
-    )]
-
-    const result = await routeMessage(
-      { jev: deps.jev }, text, latest !== null, { lastQuery: latest?.query ?? null, carriers },
-    )
-    const cost = await recordJevCall(sql, {
-      conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
-      seat: 'router', request: result.request, response: result.response,
-    })
-
-    switch (result.intent) {
-      case 'filter': {
-        // `hasResults` was false whenever `latest` is null, and `routeMessage` has no reason to
-        // answer 'filter' with nothing to filter — but Jev's answer is still a guess, never a
-        // guarantee, so this falls back to the driver rather than crash on a missing results row.
-        if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
-        const filtered = applyFilter(storedItems, result.filter ?? {})
-        return {
-          kind: 'park',
-          message: `Showing ${filtered.length} of ${storedItems.length}: ${describeFilter(result.filter ?? {})}.`,
-          costMicros: cost,
-          attachments: [{
-            role: 'results',
-            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
-          }],
-        }
-      }
-      case 'new_search': {
-        const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
-        const lastOrigin = notebook.originCity?.value ?? await readLastOrigin(sql, ctx.userId)
-        const step = await runIntakeTurn(deps, ctx, { text, lastOrigin })
-        return withExtraCost(sql, ctx, step, cost)
-      }
-      case 'question':
-      case 'chat':
-        return withExtraCost(sql, ctx, await driver(ctx), cost)
-      case 'faq':
-        return { kind: 'park', message: faqAnswer(text), costMicros: cost }
-    }
+    return routeTyped(deps, driver, ctx, lastUserText(ctx.state))
   }
 }
+

@@ -12,7 +12,9 @@ import type postgres from 'postgres'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 import type { TurnState } from '../engine.js'
 import type { DriverDeps } from './driver.js'
-import { runIntake, type TripBrief, type Cabin, type Assumption } from '../intake/brief.js'
+import { runIntake, type TripBrief, type Cabin } from '../intake/brief.js'
+import { assumptionSentence } from '../intake/assumptions.js'
+import { nextStepsAttachment } from './nextSteps.js'
 import { rankItems } from '../intake/rank.js'
 import type { JevDeps } from '../jev/client.js'
 import { recordJevCall } from '../jev/record.js'
@@ -23,7 +25,6 @@ import { applyRequirementsPatch } from '../repo/notebook.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { beginToolCall, finishToolCall } from '../repo/toolCalls.js'
 import { CODE_MAP } from '../intake/places.js'
-import { addDays } from '../intake/dates.js'
 import type { FlightSearch, SupplierItem } from '../supplier/types.js'
 
 export type IntakeDeps = DriverDeps & { jev: JevDeps }
@@ -73,53 +74,44 @@ function placeLabel(code: string): string {
   return CODE_MAP.get(code)?.city ?? code
 }
 
-function ordinal(n: number): string {
-  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`
-  switch (n % 10) {
-    case 1: return `${n}st`
-    case 2: return `${n}nd`
-    case 3: return `${n}rd`
-    default: return `${n}th`
-  }
-}
-
 function cabinLabel(c: Cabin): string {
   return c === 'premium_economy' ? 'premium economy' : c.replace('_', ' ')
 }
 
 /**
- * One fixed phrase per `Assumption.field` (src/intake/brief.ts's `assembleBrief` is the only
- * writer of this list) — `null` for a field this reply never mentions. The 'outbound' phrase is
- * the one `assembleBrief` writes exactly once, when an arrival deadline moves the departure a day
- * earlier: `a.value` is the ADJUSTED (departure) date, so the day she arrives is one later.
- */
-function assumptionPhrase(a: Assumption): string | null {
-  switch (a.field) {
-    case 'year': return `the year ${a.value.slice(0, 4)}`
-    case 'outbound': return `leaving a day early so you arrive on the ${ordinal(Number(addDays(a.value, 1).slice(8, 10)))}`
-    case 'origin': return `flying from ${placeLabel(a.value)}`
-    case 'inbound': return `a week there if you did not say when you are back`
-    case 'adults': return 'just the one of you'
-    case 'cabin_long': return 'economy for the long flights'
-    case 'cabin_short': return 'economy for the short flights'
-    default: return null
-  }
-}
-
-/**
  * Fixed English, built only from the brief's own enum/ISO values and the place table's names —
- * never from her text, same trust-boundary instinct as `src/results.ts`'s renderers. `resultCount`
- * decides only the opening clause; everything else is identical whether the search found
- * anything or not.
+ * never from her text, same trust-boundary instinct as `src/results.ts`'s renderers.
+ *
+ * Results UI pass 2 (F1) rewrote it. The old line read "Here are flights for 2 adults, Barcelona
+ * to Tokyo, 19 Nov to 6 Dec, premium economy. I assumed: the year 2026; leaving a day early so
+ * you arrive on the 20th. Change anything with the chips above the list or just tell me." — a
+ * database row read aloud, party size first, semicolons, and a closing sentence about CHIPS that
+ * are now a filter rail. This one opens by saying what is happening, states the trip in the order
+ * she said it, and ends by saying what happens after she picks:
+ *
+ *   Great, let's start with flights. Barcelona to Tokyo, 19 Nov to 6 Dec, 2 adults, premium
+ *   economy on the long legs. Assumed: the year 2026, and leaving on the 19th to arrive by the
+ *   20th. Pick one and I'll line up hotels next.
+ *
+ * The assumption sentence is `assumptionSentence`'s (src/intake/assumptions.ts), word for word
+ * the line the results pane prints under its summary bar — one guess, said once, in one wording.
+ *
+ * `resultCount === 0` keeps its own opening and its own closing: there is nothing to pick, so
+ * telling her to pick one would be the reply not reading what it sent.
  */
 export function replyText(b: TripBrief, resultCount: number): string {
   const adults = `${b.adults} adult${b.adults === 1 ? '' : 's'}`
   const dates = b.inbound ? `${dateLabel(b.outbound)} to ${dateLabel(b.inbound)}` : `${dateLabel(b.outbound)}, one way`
-  const trip = `${adults}, ${placeLabel(b.origin)} to ${placeLabel(b.destination)}, ${dates}, ${cabinLabel(b.cabinLong)}`
-  const head = resultCount === 0 ? `I could not find flights for ${trip}.` : `Here are flights for ${trip}.`
-  const phrases = [...new Set(b.assumptions.map(assumptionPhrase).filter((s): s is string => s !== null))]
-  const assumed = phrases.length > 0 ? ` I assumed: ${phrases.join('; ')}.` : ''
-  return `${head}${assumed} Change anything with the chips above the list or just tell me.`
+  const trip = `${placeLabel(b.origin)} to ${placeLabel(b.destination)}, ${dates}, ${adults}, `
+    + `${cabinLabel(b.cabinLong)} on the long legs.`
+  const assumed = assumptionSentence(b.assumptions, placeLabel)
+  const assumedPart = assumed === '' ? '' : ` ${assumed}`
+  if (resultCount === 0) {
+    return `I could not find flights for that. ${trip}${assumedPart} `
+      + 'Try leaving a day earlier, or give me different dates.'
+  }
+  return `Great, let's start with flights. ${trip}${assumedPart} `
+    + "Pick one and I'll line up hotels next."
 }
 
 /**
@@ -306,18 +298,23 @@ export async function runIntakeTurn(
 
     return {
       kind: 'park', message: replyText(b, ranked.ordered.length), costMicros: cost,
-      attachments: [{
-        role: 'results',
-        content: {
-          kind: 'flights',
-          query: {
-            from: b.origin, to: b.destination, outbound: b.outbound, inbound: b.inbound,
-            adults: b.adults, cabin: b.cabinLong,
+      attachments: [
+        {
+          role: 'results',
+          content: {
+            kind: 'flights',
+            query: {
+              from: b.origin, to: b.destination, outbound: b.outbound, inbound: b.inbound,
+              adults: b.adults, cabin: b.cabinLong,
+            },
+            sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
+            assumptions: b.assumptions,
           },
-          sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
-          assumptions: b.assumptions,
         },
-      }],
+        // F2: the three or four things she most often wants next, as chips under the reply. An
+        // empty search gets its own set — narrowing nothing is not a next step.
+        nextStepsAttachment(ranked.ordered.length === 0 ? 'zero_flights' : 'flights'),
+      ],
     }
   } catch (err) {
     // No `costMicros` on the `fail` arm (src/worker.ts): a failing step's spend must already be

@@ -1850,6 +1850,25 @@ select {
   gap: 0.5rem;
 }
 
+/*
+ * The next-step chips (results UI pass 2, F3). Deliberately the `.suggestion`
+ * look the landing page already uses for "here is something you could say":
+ * nothing was asked, so these must not read as a question waiting for an
+ * answer the way `.choice-card` does.
+ */
+.next-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 85%;
+}
+
+.next-chips .suggestion {
+  min-height: 32px;
+  padding: 0 0.75rem;
+  font-size: 0.82rem;
+}
+
 /* ---------- pinned summary ---------- */
 
 .pinned-summary {

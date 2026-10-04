@@ -586,6 +586,34 @@ describe('SwapPicker', () => {
 // polish, and the thing that must never go wrong with it is swallowing the navigation — so
 // every fallback path is pinned here. `environment: 'node'` means there is no `document` or
 // `window` unless a test puts one there, which is itself the first case.
+// Results UI pass 2, F3: a `next` row is not a question, so it renders as a row of ghost
+// suggestion chips rather than the question card — and every OTHER questionId keeps the card.
+describe('MessageBubble: next-step chips vs the question card', () => {
+  const row = (questionId: string) => JSON.stringify({
+    questionId, question: questionId === 'next' ? 'What next?' : 'Which city did you mean?',
+    options: [{ id: 'direct_only', label: 'Direct flights only' }, { id: 'cheapest', label: 'Cheapest first' }],
+  })
+
+  it('renders a `next` row as suggestion chips, with no question heading', () => {
+    const html = renderToStaticMarkup(createElement(MessageBubble, { role: 'choices', content: row('next') }))
+    expect(html).toContain('next-chips')
+    expect(html).toContain('class="suggestion"')
+    expect(html).toContain('Direct flights only')
+    // The question text is the group's label only — never a heading claiming the office is
+    // waiting for an answer.
+    expect(html).not.toContain('choice-card')
+    expect(html).not.toContain('choice-question')
+    expect(html).toContain('aria-label="What next?"')
+  })
+
+  it('keeps the question card for every other questionId', () => {
+    const html = renderToStaticMarkup(createElement(MessageBubble, { role: 'choices', content: row('destination') }))
+    expect(html).toContain('choice-card')
+    expect(html).toContain('Which city did you mean?')
+    expect(html).not.toContain('next-chips')
+  })
+})
+
 describe('withViewTransition', () => {
   const globals = globalThis as unknown as {
     document?: unknown
