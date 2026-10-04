@@ -11,7 +11,8 @@ import { HotelList, ratingStars } from '../web/components/HotelList.js'
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import { FilterChips } from '../web/components/FilterChips.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
-import { ResultsPane, assumptionChipText } from '../web/components/ResultsPane.js'
+import { ResultsPane } from '../web/components/ResultsPane.js'
+import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
 import type { ResultItemLite, ResultsView, ProposalRowLite, LinkLite } from '../web/data.js'
@@ -227,31 +228,81 @@ function resultsView(overrides: Partial<ResultsView> = {}): ResultsView {
     messageId: 'm1', kind: 'flights',
     query: { from: 'BCN', to: 'HND', outbound: '2026-11-19', inbound: null, adults: 1 },
     assumptions: [], filter: undefined, items: [FLIGHT_ITEM],
+    cityNames: { BCN: 'Barcelona', HND: 'Tokyo' },
     ...overrides,
   }
 }
 
-describe('assumptionChipText', () => {
-  it('formats a year assumption', () => {
-    expect(assumptionChipText({ field: 'year', value: '2026-11-19', reason: 'year' })).toBe('Assumed: 2026')
+describe('SummaryBar', () => {
+  const FLIGHT_QUERY = {
+    from: 'BCN', to: 'HND', outbound: '2026-11-19', inbound: '2026-12-06',
+    adults: 2, cabin: 'premium_economy' as const,
+  }
+  const CITIES = { BCN: 'Barcelona', HND: 'Tokyo' }
+
+  it('builds the flight segments from the query, with weekdays computed from the ISO dates', () => {
+    expect(summarySegments('flights', FLIGHT_QUERY, CITIES)).toEqual([
+      'Barcelona BCN → Tokyo HND',
+      'Thu 19 Nov to Sun 6 Dec',
+      '2 adults',
+      'Premium economy',
+    ])
   })
 
-  it('formats an arrive-by-shifted outbound assumption', () => {
-    expect(assumptionChipText({ field: 'outbound', value: '2026-11-19', reason: 'defaulted' })).toBe(
-      'Leaving 19 Nov to arrive by the 20th',
-    )
+  it('says "one way" instead of a return date for a one-way query', () => {
+    expect(summarySegments('flights', { ...FLIGHT_QUERY, inbound: null }, CITIES)[1]).toBe('Thu 19 Nov, one way')
+  })
+
+  it('falls back to the bare code for a place the table does not know', () => {
+    expect(summarySegments('flights', FLIGHT_QUERY, {})[0]).toBe('BCN BCN → HND HND')
+  })
+
+  it('builds the hotel segments with the night count and no cabin', () => {
+    expect(summarySegments('hotels', { place: 'Tokyo', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2 }, {})).toEqual([
+      'Tokyo',
+      '20 Nov to 6 Dec',
+      '16 nights',
+      '2 adults',
+    ])
+  })
+
+  it('counts nights in UTC, never the viewer\'s own timezone', () => {
+    expect(nightsBetween('2026-11-20', '2026-12-06')).toBe(16)
+    expect(nightsBetween('2026-11-20', '2026-11-21')).toBe(1)
+  })
+
+  it('renders the assumptions as one muted sentence, not one chip each', () => {
+    const html = renderToStaticMarkup(createElement(SummaryBar, {
+      kind: 'flights', query: FLIGHT_QUERY, cityNames: CITIES,
+      assumptions: [
+        { field: 'year', value: '2026', reason: 'year' },
+        { field: 'outbound', value: '2026-11-19', reason: 'defaulted' },
+      ],
+    }))
+    expect(html).toContain('Assumed: the year 2026, and leaving on the 19th to arrive by the 20th.')
+    expect([...html.matchAll(/summary-assumed/g)]).toHaveLength(1)
+  })
+
+  it('prints no assumption line at all when nothing was assumed', () => {
+    const html = renderToStaticMarkup(createElement(SummaryBar, {
+      kind: 'flights', query: FLIGHT_QUERY, cityNames: CITIES, assumptions: [],
+    }))
+    expect(html).not.toContain('summary-assumed')
+    expect(html).not.toContain('Assumed')
   })
 })
 
 describe('ResultsPane', () => {
-  it('shows assumption chips at the top', () => {
+  it('shows the summary bar with the assumption sentence above the list', () => {
     const html = renderToStaticMarkup(
       createElement(ResultsPane, {
-        results: [resultsView({ assumptions: [{ field: 'year', value: '2026-11-19', reason: 'year' }] })],
+        results: [resultsView({ assumptions: [{ field: 'year', value: '2026', reason: 'year' }] })],
         proposal: null, now: NOW, pending: false, error: null, onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(html).toContain('Assumed: 2026')
+    expect(html).toContain('Barcelona BCN → Tokyo HND')
+    expect(html).toContain('Assumed: the year 2026.')
+    expect(html).not.toContain('assumption-chip')
   })
 
   it('shows the pinned summary only once something is chosen', () => {

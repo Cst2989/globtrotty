@@ -1132,20 +1132,46 @@ select {
   gap: 0.75rem;
 }
 
-.assumption-chips {
+/*
+ * The summary bar (results UI pass 2, B) replaced a row of dashed "Assumed: …"
+ * chips: static pills saying what was searched for, with every guess on one
+ * muted line under them.
+ */
+.summary-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.summary-pills {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-.assumption-chip {
-  padding: 0.3rem 0.8rem;
+.summary-pill {
+  padding: 0.3rem 0.75rem;
   border-radius: var(--r-pill);
-  border: 1px dashed var(--line-strong);
-  background: var(--surface);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.summary-pill:first-child {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  border-color: var(--line-strong);
+}
+
+.summary-assumed {
+  margin: 0;
   color: var(--ink-3);
   font-size: 0.85rem;
 }

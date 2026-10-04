@@ -5,6 +5,7 @@ import {
   type ResultsContent, type Filter, type Assumption,
 } from '@/src/results'
 import { maskUntrustedText } from '@/src/sanitize'
+import { CODE_MAP } from '@/src/intake/places'
 
 /**
  * Server-side reads for the chat UI, through the RLS-scoped client
@@ -565,6 +566,38 @@ export type ResultsView = {
   assumptions: Assumption[]
   filter: Filter | undefined
   items: ResultItemLite[]
+  /**
+   * Place-table city names for every metro code this row names — `query.from`, `query.to`, and
+   * any place-code assumption value. Resolved HERE, server-side, because
+   * `src/intake/places.ts` reads `places.json` off disk at import time and the components that
+   * render this (`SummaryBar` under `ResultsPane`) are client components that only ever import
+   * `web/data.ts` for its types.
+   *
+   * A code the table does not know is simply absent, and the renderer falls back to the code —
+   * the same posture `placeLabel` (src/agents/intake.ts) already takes.
+   */
+  cityNames: Record<string, string>
+}
+
+/**
+ * The city names a `results` row needs to render its summary bar and its assumption line. Pure
+ * and exported so `test/web-data.test.ts` can pin which codes get resolved without a live DB.
+ */
+export function cityNamesFor(content: ResultsContent): Record<string, string> {
+  const codes = [
+    content.query.from,
+    content.query.to,
+    // `assumptions` is the only other place a bare metro code travels: `assembleBrief` writes
+    // `{ field: 'origin', value: <code> }` when it defaulted the origin to her last one.
+    ...content.assumptions.filter((a) => a.field === 'origin').map((a) => a.value),
+  ]
+  const out: Record<string, string> = {}
+  for (const code of codes) {
+    if (!code) continue
+    const place = CODE_MAP.get(code)
+    if (place) out[code] = place.city
+  }
+  return out
 }
 
 
@@ -748,5 +781,6 @@ export async function loadResults(
     items: r.content.sourceIds
       .map((id) => bySourceId.get(id))
       .filter((i): i is ResultItemLite => i !== undefined),
+    cityNames: cityNamesFor(r.content),
   }))
 }

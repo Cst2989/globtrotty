@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
-  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems,
+  dropExpiredAlternatives, newestResultItemPerSourceId, dropExpiredResultItems, cityNamesFor,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -352,5 +352,31 @@ describe('dropExpiredResultItems', () => {
   it('drops an id past its own ttl', () => {
     const expired = item({ fetchedAt: '2026-09-13T11:40:00.000Z', ttlSeconds: 300 }) // 20 min ago, ttl 5 min
     expect(dropExpiredResultItems([expired], NOW)).toEqual([])
+  })
+})
+
+describe('cityNamesFor', () => {
+  it('resolves query.from/to and a defaulted-origin assumption against the place table', () => {
+    expect(cityNamesFor({
+      kind: 'flights',
+      query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: '2026-12-06', adults: 2 },
+      sourceIds: [], assumptions: [{ field: 'origin', value: 'MAD', reason: 'defaulted' }],
+    })).toEqual({ BCN: 'Barcelona', TYO: 'Tokyo', MAD: 'Madrid' })
+  })
+
+  it('omits a code the table does not know rather than inventing a name', () => {
+    expect(cityNamesFor({
+      kind: 'flights',
+      query: { from: 'ZZZ', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+      sourceIds: [], assumptions: [],
+    })).toEqual({ TYO: 'Tokyo' })
+  })
+
+  it('reads nothing out of a hotels row that carries only a place NAME', () => {
+    expect(cityNamesFor({
+      kind: 'hotels',
+      query: { place: 'Tokyo', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2 },
+      sourceIds: [], assumptions: [],
+    })).toEqual({})
   })
 })
