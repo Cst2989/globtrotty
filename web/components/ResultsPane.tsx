@@ -438,7 +438,16 @@ export function ResultsPane(
   const hasStay = proposal?.items.some((i) => i.kind === 'hotel') ?? false
   // Every OTHER card's Select goes dead while a choice is in flight: one press is one
   // instruction, and a second one would be refused with a 409 anyway (`submitAction`).
-  const choosing = pendingChoice !== null
+  // Hotfix 2026-10-04: a pending choice the server has ALREADY answered must not keep the
+  // pane frozen. The flight choice has landed once a hotels row exists (or the proposal holds a
+  // flight); the hotel choice has landed once the proposal holds a stay. Before this, the flag
+  // survived the successful round trip, so the hotels skeleton rendered above the real list and
+  // every Select stayed disabled for good.
+  const pendingLanded = pendingChoice !== null && (
+    (pendingChoice.kind === 'flight' && (newestHotels !== null || chosenFlightSourceId === pendingChoice.sourceId && proposal !== null))
+    || (pendingChoice.kind === 'hotel' && hasStay)
+  )
+  const choosing = pendingChoice !== null && !pendingLanded
   const pendingItem = pendingChoice === null
     ? null
     : itemById(pendingChoice.kind === 'flight' ? newestFlights : newestHotels, pendingChoice.sourceId)
@@ -489,8 +498,9 @@ export function ResultsPane(
       {/* The placeholder for what the office does next with her choice: hotels after a flight,
           the trip summary after a hotel. The server's own `skeleton` says the same thing one
           round trip later, so whichever arrives first renders the same shape. */}
-      {skeleton === 'hotels' || pendingChoice?.kind === 'flight' ? <ResultsSkeleton kind="hotels" /> : null}
-      {pendingChoice?.kind === 'hotel' ? <PendingTripSummary /> : null}
+      {(skeleton === 'hotels' || (pendingChoice?.kind === 'flight' && !pendingLanded)) && newestHotels === null
+        ? <ResultsSkeleton kind="hotels" /> : null}
+      {pendingChoice?.kind === 'hotel' && !pendingLanded ? <PendingTripSummary /> : null}
 
       {/* Section 3: once a flight is chosen the flights list collapses into THIS — the same
           FlightCard she picked, with its `Selected` ribbon, pinned above the stays. Two full
@@ -791,6 +801,25 @@ export function ResultsPaneLive(
   const landed = updatingKinds.filter(
     (kind) => (newestOfKind(results, kind)?.messageId ?? null) !== (refreshedFrom.current.get(kind) ?? null),
   )
+  // Hotfix 2026-10-04: drop the pending choice once the server has answered it (a hotels row
+  // after a flight choice; a stay in the proposal after a hotel choice), and after 20 s no
+  // matter what, so the pane can never stay frozen on a flag the server already satisfied.
+  const choiceLanded = pendingChoice !== null && (
+    (pendingChoice.kind === 'flight' && newestOfKind(results, 'hotels') !== null)
+    || (pendingChoice.kind === 'hotel' && (proposal?.items.some((i) => i.kind === 'hotel') ?? false))
+  )
+  useEffect(() => {
+    if (!choiceLanded) return
+    setPendingChoice(null)
+    activity.setBusy(false)
+  }, [choiceLanded])
+  useEffect(() => {
+    if (pendingChoice === null) return
+    const t = setTimeout(() => { setPendingChoice(null); activity.setBusy(false) }, REFRESH_TIMEOUT_MS)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChoice])
+
   const landedKey = landed.join(',')
   useEffect(() => {
     for (const kind of landed) stopUpdating(kind)
