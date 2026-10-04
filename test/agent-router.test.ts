@@ -11,6 +11,7 @@ import { money } from '../src/money.js'
 import type { SupplierItem } from '../src/supplier/types.js'
 import type { ResultsContent, ChoicesContent } from '../src/results.js'
 import type { ActionPayload } from '../src/actions.js'
+import { NO_FILTER_MESSAGE } from '../src/agents/stage.js'
 
 type Seeded = { userId: string; conversationId: string; turnId: string }
 
@@ -573,6 +574,112 @@ describeDb('makeRouter', () => {
       expect(BigInt(turn!.spend_usd_micros)).toBe(billed)
     })
   })
+
+  // The bug: "I don't want to stop in China or the Middle East" used to classify as `filter`,
+  // resolve to an empty `Filter` (nothing matched), and reply "Showing 10 of 10: all results."
+  // as though the office had understood and agreed. An empty `Filter` now gets the honest
+  // admission instead — the conversation's own stage chips, and no `results` attachment, since
+  // the list on screen never changed.
+  it('filter: a message nothing resolves to gets the honest admission, not "all results"', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '12')
+      const items: SupplierItem[] = [flightItem('F1', 20_000, 0), flightItem('F2', 20_000, 1)]
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, items,
+        params: {
+          kind: 'flight', from: 'BCN', to: 'TYO', departureDate: '2026-11-19', returnDate: null, flexDays: 0,
+          adults: 1, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+        },
+      })
+      const resultsContent: ResultsContent = {
+        kind: 'flights', query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+        sourceIds: items.map((i) => i.sourceId), assumptions: [],
+      }
+      await insertMessage(sql, s, 'results', JSON.stringify(resultsContent))
+      await insertMessage(sql, s, 'user', 'make it sparkle')
+
+      const flights = new MockSupplier({ kind: 'flight' })
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { intent: { type: 'choice', choice: 'filter', confidence: 0.9, probabilities: {} } },
+        usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(ctx(s, 'make it sparkle'))
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe(NO_FILTER_MESSAGE)
+      // Stage chips, never `nextStepsAttachment('filter')` — and no `results` attachment, since
+      // nothing was actually filtered.
+      expect(step.attachments).toHaveLength(1)
+      expect(step.attachments![0]!.role).toBe('choices')
+      const chips = step.attachments![0]!.content as ChoicesContent
+      expect(chips.options.map((o) => o.id)).not.toContain('show_all')
+    })
+  })
+
+  // Section 8c's own instinct, now for the connections filter: say what was applied AND the
+  // best of what is left, described by its airline and where it connects — never the masked
+  // supplier `name`, which says nothing about why this one survived the filter she just typed.
+  it('filter: avoiding the Middle East names the cheapest survivor by airline and via city', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '13')
+      const viaDoha = (sourceId: string, priceMinor: number): SupplierItem => ({
+        sourceId, supplier: 'mock', kind: 'flight', name: 'Masked Supplier Name',
+        price: money(BigInt(priceMinor), 'EUR'), priceBasis: 'total',
+        fetchedAt: new Date('2026-10-03T12:00:00Z'), ttlSeconds: 900, bookingUrl: null,
+        detail: {
+          kind: 'flight',
+          outbound: {
+            from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T08:00:00', arrivalLocal: '2026-11-19T20:00:00',
+            stops: 1, route: ['BCN', 'DOH', 'TYO'], cabinClass: 'Economy', carriers: ['QR'], flightNumbers: ['QR1'],
+          },
+          inbound: null,
+          baggage: { personalItem: 1, cabinBag: 0, checkedBag: 1 }, totalDurationSeconds: 30_000, selfTransfer: false,
+        },
+      })
+      const items: SupplierItem[] = [viaDoha('F1', 50_000), flightItem('F2', 40_000, 0)]
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, items,
+        params: {
+          kind: 'flight', from: 'BCN', to: 'TYO', departureDate: '2026-11-19', returnDate: null, flexDays: 0,
+          adults: 1, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null, allowSelfTransfer: false,
+        },
+      })
+      const resultsContent: ResultsContent = {
+        kind: 'flights', query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+        sourceIds: items.map((i) => i.sourceId), assumptions: [],
+      }
+      await insertMessage(sql, s, 'results', JSON.stringify(resultsContent))
+      await insertMessage(sql, s, 'user', 'i dont want to stop in the middle east')
+
+      const flights = new MockSupplier({ kind: 'flight' })
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: {
+          intent: { type: 'choice', choice: 'filter', confidence: 0.95, probabilities: {} },
+          avoid_connections: { type: 'noul', noul: 0.95 },
+        },
+        usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(
+        ctx(s, 'i dont want to stop in the middle east'),
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      // F1 (via Doha) is excluded; F2 is the only, and therefore cheapest, survivor — the
+      // supplier's own masked `name` ("flight F2") never appears.
+      const content = step.attachments![0]!.content as ResultsContent
+      expect(content.sourceIds).toEqual(['F2'])
+      expect(content.filter?.avoidRegions).toEqual(['middle_east'])
+      expect(step.message).not.toContain('Masked Supplier Name')
+      expect(step.message).not.toContain('flight F2')
+      expect(step.message).toBe('Showing 1 of 2: no connections in the Middle East. The cheapest is ZZ at €400.00.')
+    })
+  })
 })
 
 describe('routeMessage', () => {
@@ -642,6 +749,68 @@ describe('routeMessage', () => {
       'actually make it Lisbon instead', true)
     expect(result.intent).toBe('new_search')
     expect(result.filter).toBeUndefined()
+  })
+
+  // The bug: this exact sentence used to classify as `filter` and change nothing at all,
+  // because no dimension named a connection's own country. `avoid_connections` firing resolves
+  // the alias table (`resolveConnectionsAvoidance`, src/intake/regions.ts) over the raw text.
+  it('"i dont want to stop in china or the middle east" resolves to avoidRegions china, middle_east', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+      model: 'jev-test',
+      answers: {
+        ...FILTER_ANSWERS, nonstop: { type: 'noul', noul: 0.1 }, avoid_connections: { type: 'noul', noul: 0.95 },
+      },
+      usage: { input_tokens: 200, output_tokens: 50 },
+    }))
+    const result = await routeMessage({ jev: { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch } },
+      'i dont want to stop in china or the middle east', true)
+    expect(result.intent).toBe('filter')
+    expect(result.filter).toEqual({ avoidRegions: ['china', 'middle_east'] })
+  })
+
+  it('an unrecognised filter message resolves to an empty Filter, not a guess', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+      model: 'jev-test',
+      answers: { intent: { type: 'choice', choice: 'filter', confidence: 0.9, probabilities: {} } },
+      usage: { input_tokens: 200, output_tokens: 50 },
+    }))
+    const result = await routeMessage({ jev: { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch } },
+      'make it sparkle', true)
+    expect(result.intent).toBe('filter')
+    expect(result.filter).toEqual({})
+  })
+
+  it('"direct" and a bare "no connections" both map to nonstop', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { intent: { type: 'choice', choice: 'filter', confidence: 0.9, probabilities: {} } },
+        usage: { input_tokens: 200, output_tokens: 50 },
+      }))
+      .mockResolvedValueOnce(jevResponse({
+        model: 'jev-test',
+        answers: { intent: { type: 'choice', choice: 'filter', confidence: 0.9, probabilities: {} } },
+        usage: { input_tokens: 200, output_tokens: 50 },
+      }))
+    const jev = { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch }
+    const direct = await routeMessage({ jev }, 'direct flights please', true)
+    expect(direct.filter).toEqual({ nonstop: true })
+    const noConnections = await routeMessage({ jev }, 'no connections please', true)
+    expect(noConnections.filter).toEqual({ nonstop: true })
+  })
+
+  it('"no connections in china" is the connections filter, not nonstop', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+      model: 'jev-test',
+      answers: {
+        intent: { type: 'choice', choice: 'filter', confidence: 0.9, probabilities: {} },
+        avoid_connections: { type: 'noul', noul: 0.95 },
+      },
+      usage: { input_tokens: 200, output_tokens: 50 },
+    }))
+    const result = await routeMessage({ jev: { apiKey: 'k', fetchImpl: fetchImpl as unknown as typeof fetch } },
+      'no connections in china', true)
+    expect(result.filter).toEqual({ avoidRegions: ['china'] })
   })
 })
 

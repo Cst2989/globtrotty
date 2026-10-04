@@ -24,7 +24,10 @@ import { loadNotebook } from '../repo/notebook.js'
 import { recordSpend } from '../repo/spend.js'
 import { parseAction } from '../actions.js'
 import { applyFilter, describeFilter } from '../intake/filter.js'
-import { filterReply } from './stage.js'
+import { resolveConnectionsAvoidance } from '../intake/connectionsAlias.js'
+import { airlineName } from '../intake/airlines.js'
+import { airportCity } from '../intake/airports.js'
+import { filterReply, conversationStage, nextStepsForStage, NO_FILTER_MESSAGE } from './stage.js'
 import { formatMoney } from '../money.js'
 import type { Filter, ResultsContent } from '../results.js'
 import { isFlight, type StoredItem } from '../supplier/types.js'
@@ -67,6 +70,13 @@ function buildRouterQuestions(): Record<string, JevQuestion> {
     one_stop_ok: noulQ('She accepts at most one stop (a single connection is fine, two is not)'),
     departure: choiceQ('A departure time of day she asks for', { morning: null, afternoon: null, evening: null, none: 'None' }),
     cheaper: noulQ('She asks for cheaper options or a price cap'),
+    // The bug this question exists for: "I don't want to stop in China or the Middle East"
+    // used to classify as `filter` and change nothing, because nothing above asks about WHERE
+    // she connects, only whether/how many times. Code, not Jev, resolves which country or
+    // region she means (`resolveConnectionsAvoidance`) — Jev cannot extract free values (the
+    // same division of labour `extractPriceMinor` documents), so this only tells the router
+    // THAT she named one.
+    avoid_connections: noulQ('She wants to avoid connecting through a specific country or region'),
   }
 }
 
@@ -118,6 +128,40 @@ function extractPriceMinor(text: string): bigint | null {
 }
 
 /**
+ * "direct"/"nonstop" always mean `nonstop`; a BARE "no connections" does too, but only when
+ * nothing after it names a place — "no connections in China" is the connections filter below,
+ * not this one, and the negative lookahead is what keeps the two apart.
+ */
+const MAPS_TO_NONSTOP = /\b(?:direct|non-?stop)\b|\bno\s+connections?\b(?!\s*(?:in|through|via|near|to|at)\b)/i
+
+/**
+ * "Show me all flights" / "Show all flights again" (the `show_all` chip's own label, F2's own
+ * "widen it back out" step) — a deliberate CLEAR, not a narrowing attempt, so the `Filter` it
+ * resolves to being empty is the right answer, not a failure to understand. The router's own
+ * empty-`Filter` honesty check (below, in `routeTyped`) carves this phrasing out for exactly
+ * that reason: an empty `Filter` otherwise means "nothing in `routeMessage` recognised this".
+ */
+const WIDENS_FILTER = /\bshow\s+(?:me\s+)?all\b|\ball\s+(?:flights|hotels|results)\b|\bclear\b.*\bfilters?\b|\bremove\b.*\bfilters?\b/i
+
+/**
+ * What `filterReply` calls the cheapest surviving item: the supplier's own masked `name`
+ * ordinarily, but — once a connections filter is active — the airline and the city it
+ * connects through instead, because that is the one thing a traveller who just asked "not
+ * through China or the Middle East" actually wants to hear confirmed, and a hotel-brand-shaped
+ * `name` string says nothing about it. Reads the FIRST leg's first carrier and every leg's own
+ * via airports, same tables `web/data.ts` already resolves client-side (`airlineName`,
+ * `airportCity`) so the two never name a stop two different ways.
+ */
+function describeCheapestForReply(item: StoredItem, hasConnectionsFilter: boolean): string {
+  if (!hasConnectionsFilter || !isFlight(item)) return item.name
+  const legs = item.detail.inbound ? [item.detail.outbound, item.detail.inbound] : [item.detail.outbound]
+  const carrier = legs.flatMap((leg) => leg.carriers)[0]
+  const airline = carrier ? (airlineName(carrier) ?? carrier) : item.name
+  const viaCities = [...new Set(legs.flatMap((leg) => leg.route.slice(1, -1)))].map((code) => airportCity(code) ?? code)
+  return viaCities.length > 0 ? `${airline} via ${viaCities.join(' and ')}` : airline
+}
+
+/**
  * One Jev call, classifying her message and (for `filter`) building the `Filter` to apply. Pure
  * with respect to the database — the caller is the one who records the call (seat `router`) and
  * who knows what to do with the result; this function only talks to Jev. `carriers` is the set of
@@ -149,6 +193,16 @@ export async function routeMessage(
   // `describeFilter` would otherwise print both.
   else if (noulOf(answers, 'one_stop_ok') > NOUL_GATE) filter.maxStops = 1
 
+  // Code-side backstop, not a Jev question: "direct" and a bare "no connections" (one with
+  // nothing after it naming a place — that reads as `avoid_connections` below instead) mean
+  // the same thing `nonstop` already does, and a terse message is exactly the shape the Noul
+  // gate above is most likely to miss. Wins over `one_stop_ok` when both somehow fired, since
+  // the literal word is stronger evidence than a Noul guess.
+  if (!filter.nonstop && MAPS_TO_NONSTOP.test(text)) {
+    filter.nonstop = true
+    delete filter.maxStops
+  }
+
   const departureAnswer = choiceOf(answers, 'departure')
   if (departureAnswer && departureAnswer.confidence >= CONFIDENCE_GATE && departureAnswer.choice !== 'none') {
     filter.departure = departureAnswer.choice as 'morning' | 'afternoon' | 'evening'
@@ -160,6 +214,17 @@ export async function routeMessage(
   if (noulOf(answers, 'cheaper') > NOUL_GATE) {
     const maxPrice = extractPriceMinor(text)
     if (maxPrice !== null) filter.maxPriceMinor = maxPrice.toString()
+  }
+
+  // The bug this office was filed for: resolved only when the Noul signal above fired, exactly
+  // the same gating `cheaper`'s own price extraction already uses — Jev says THAT she named a
+  // place to avoid connecting through, code says WHICH one, off the fixed alias table
+  // (`resolveConnectionsAvoidance`, src/intake/connectionsAlias.ts). Never from the free text
+  // directly.
+  if (noulOf(answers, 'avoid_connections') > NOUL_GATE) {
+    const { countries, regions } = resolveConnectionsAvoidance(text)
+    if (countries.length > 0) filter.avoidCountries = countries.slice(0, 10)
+    if (regions.length > 0) filter.avoidRegions = regions.slice(0, 10)
   }
 
   return { intent: 'filter', filter, request, response }
@@ -264,28 +329,59 @@ async function routeTyped(
       // answer 'filter' with nothing to filter — but Jev's answer is still a guess, never a
       // guarantee, so this falls back to the driver rather than crash on a missing results row.
       if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
-      const filtered = applyFilter(storedItems, result.filter ?? {})
+      const filter = result.filter ?? {}
+
+      // The bug this office was filed for: "I don't want to stop in China or the Middle East"
+      // used to classify as `filter` and change NOTHING, because no dimension matched — and
+      // the reply that followed ("Showing 10 of 10: all results.") read as though the office
+      // had understood and agreed, rather than as the honest "I didn't follow that" it should
+      // have been. An empty `Filter` (nothing in `routeMessage` recognised) gets the fixed
+      // admission instead, with whatever chips the conversation's own STAGE calls for — never
+      // `nextStepsAttachment('filter')`, since nothing was actually filtered — and no `results`
+      // attachment, since the list on screen has not changed. `WIDENS_FILTER` is the one carve
+      // out: "show me all flights" also resolves to an empty `Filter`, but it is a deliberate
+      // clear, not a failure to understand, and widening back over the unfiltered `base` is
+      // exactly what the old "Showing N of N: all results" sentence below is for.
+      if (Object.keys(filter).length === 0 && !WIDENS_FILTER.test(text)) {
+        const stage = await conversationStage(sql, ctx.conversationId, ctx.userId)
+        return {
+          kind: 'park',
+          message: NO_FILTER_MESSAGE,
+          costMicros: cost,
+          attachments: [nextStepsAttachment(nextStepsForStage(stage))],
+        }
+      }
+
+      const filtered = applyFilter(storedItems, filter)
       // Section 8c: the same pattern as the hotels reply — say what is left AND what the best
-      // of it is, rather than only the arithmetic. The name is supplier-authored and goes
-      // through `maskDisplayName` inside `filterReply`; the price is this office's own
-      // `formatMoney` output.
+      // of it is, rather than only the arithmetic. The price is this office's own `formatMoney`
+      // output.
       const cheapest = [...filtered].sort(
         (a, b) => (a.price.minor < b.price.minor ? -1 : a.price.minor > b.price.minor ? 1 : 0),
       )[0] ?? null
+      // The connections filter's own honesty: the supplier's masked NAME says nothing about
+      // why this flight survived "no connections in China or the Middle East", so the cheapest
+      // one is described by its airline and where it connects instead — never the supplier's
+      // `name`, which `describeCheapestForReply` falls back to only when there is no connections
+      // filter active (every other filter keeps the old, supplier-named sentence).
+      const hasConnectionsFilter = (filter.avoidCountries?.length ?? 0) > 0 || (filter.avoidRegions?.length ?? 0) > 0
       return {
         kind: 'park',
         message: filterReply(
-          filtered.length, storedItems.length, describeFilter(result.filter ?? {}),
-          cheapest === null ? null : { name: cheapest.name, price: formatMoney(cheapest.price) },
+          filtered.length, storedItems.length, describeFilter(filter),
+          cheapest === null ? null
+            : { name: describeCheapestForReply(cheapest, hasConnectionsFilter), price: formatMoney(cheapest.price) },
         ),
         costMicros: cost,
         attachments: [
           {
             role: 'results',
-            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
+            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter },
           },
           // F2: after a filter, the two steps that matter are widening back out and the one
-          // filter she has not tried yet.
+          // filter she has not tried yet. The connections filter's own "Show all flights
+          // again" chip is this same set — `SETS.filter` (src/agents/nextSteps.ts) already
+          // carries it.
           nextStepsAttachment('filter'),
         ],
       }

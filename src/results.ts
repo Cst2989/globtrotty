@@ -3,6 +3,7 @@ import { maskIdChars, maskControlChars, maskUntrustedText } from './sanitize.js'
 import { isKnownVerdictLabel } from './intake/verdicts.js'
 import { AMENITY_KEYS } from './intake/amenities.js'
 import type { Cabin, Assumption } from './intake/brief.js'
+import type { AvoidRegion } from './intake/regions.js'
 
 /**
  * `results` and `choices` rows (plan 5): two more `messages.role` values
@@ -68,6 +69,24 @@ export type Filter = {
   amenities?: string[]
   /** Keep only stays within `NEAR_CENTRE_KM` of the city centre; one with no distance is excluded. */
   nearCentre?: boolean
+  /**
+   * The bug this filter exists for: "I don't want to stop in China or the Middle East" used to
+   * classify as `filter` and change nothing, because no dimension above named a connection's own
+   * country. Exclude an itinerary when ANY leg's via airport is in one of these ISO 3166-1
+   * alpha-2 countries. Flights only; a hotel item has no leg to judge this against, so it passes
+   * through untouched (same posture as `nonstop`/`airlines`). Capped at 10 — well past anything
+   * a typed message or the filter bar's own checklist would ever set at once.
+   */
+  avoidCountries?: string[]
+  /**
+   * Same exclusion as `avoidCountries`, by the ten buckets `src/intake/regions.ts` defines
+   * (`AvoidRegion`) rather than a single country — "the Middle East" or "China" instead of
+   * naming every member country by hand. A via airport excludes the item when its OWN country's
+   * bucket (`regionOfCountry`) is in this list, or when its country is directly in
+   * `avoidCountries` — either is enough, and an itinerary can be excluded by both at once (she
+   * can say "not China or Japan" in one sentence).
+   */
+  avoidRegions?: AvoidRegion[]
 }
 
 export type ResultsContent = {
@@ -172,6 +191,19 @@ const FilterSchema = z.strictObject({
   // refuses anything outside it at the boundary.
   amenities: z.array(z.string().refine((k) => AMENITY_KEYS.includes(k))).max(8).optional(),
   nearCentre: z.boolean().optional(),
+  // Exactly two letters, same shape as `query.country` above — an ISO 3166-1 alpha-2 code,
+  // never a free-form place name. Capped at 10: `routeMessage`'s own alias match
+  // (src/agents/router.ts) never produces more, and the filter bar's checklist is bounded by
+  // how many countries actually appear among the via airports of one results row.
+  avoidCountries: z.array(z.string().regex(/^[A-Z]{2}$/)).max(10).optional(),
+  // `src/intake/regions.ts`'s own ten-member vocabulary — duplicated here as literal strings
+  // (rather than imported) for the same reason `CabinSchema` duplicates `Cabin`'s own members:
+  // the schema is the boundary, and it is the one place a surprise is refused whatever module
+  // produced the value.
+  avoidRegions: z.array(z.enum([
+    'china', 'middle_east', 'russia', 'usa',
+    'europe', 'north_america', 'asia', 'oceania', 'africa', 'south_america',
+  ])).max(10).optional(),
 })
 
 /**

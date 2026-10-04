@@ -25,7 +25,7 @@ import {
 import { ChoiceCard } from '../web/components/ChoiceCard.js'
 import {
   FilterBar, stopsModeOf, withStopsMode, bagsLabel, priceLabel, airlinesLabel, starsLabel,
-  amenitiesLabel,
+  amenitiesLabel, connectionsLabel,
 } from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
@@ -47,7 +47,8 @@ const FLIGHT_ITEM: ResultItemLite = {
   flight: {
     outbound: {
       from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
-      via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'],
+      via: ['DOH'], viaCities: ['Doha'], viaCountries: ['QA'], viaCountryNames: ['Qatar'],
+      carriers: ['QR'], carrierNames: ['Qatar Airways'],
       durationMinutes: 855,
     },
     inbound: null,
@@ -80,7 +81,8 @@ const HOTEL_ITEM: ResultItemLite = {
 
 const INBOUND_LEG = {
   from: 'HND', to: 'BCN', departureLocal: '2026-12-06T11:00:00', arrivalLocal: '2026-12-06T22:30:00',
-  via: [], viaCities: [], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 690,
+  via: [], viaCities: [], viaCountries: [], viaCountryNames: [],
+  carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 690,
 }
 
 describe('FlightCard', () => {
@@ -440,7 +442,8 @@ describe('FilterBar', () => {
     expect(html).not.toContain('Cabin bags')
     expect(html).not.toContain('type="range"')
     expect(html).not.toContain('Qatar Airways')
-    expect([...html.matchAll(/aria-expanded="false"/g)]).toHaveLength(3)
+    // Bags, Max price, Airlines, Connections — every item here connects through Doha.
+    expect([...html.matchAll(/aria-expanded="false"/g)]).toHaveLength(4)
   })
 
   it('opens exactly the one popover it is asked to, with its own contents', () => {
@@ -457,6 +460,13 @@ describe('FilterBar', () => {
     expect(airlines).toContain('Qatar Airways')
     expect(airlines).toContain('Lufthansa')
     expect([...airlines.matchAll(/type="checkbox"/g)]).toHaveLength(2)
+
+    // Both items connect through Doha (Qatar), so the Middle East region and Qatar itself are
+    // both offered — a region and the specific country it covers, at once.
+    const connections = bar({ openPopover: 'connections' })
+    expect(connections).toContain('the Middle East')
+    expect(connections).toContain('Qatar')
+    expect([...connections.matchAll(/type="checkbox"/g)]).toHaveLength(2)
   })
 
   it('presses the matching segment for the stops option that is set', () => {
@@ -548,6 +558,15 @@ describe('the filter bar\'s trigger labels', () => {
     expect(airlinesLabel({ airlines: [] })).toBe('Airlines')
     expect(airlinesLabel({ airlines: ['QR'] })).toBe('Airlines (1)')
     expect(airlinesLabel({ airlines: ['QR', 'LH'] })).toBe('Airlines (2)')
+  })
+
+  it('counts the regions and countries avoided, across both fields at once', () => {
+    expect(connectionsLabel({})).toBe('Connections')
+    expect(connectionsLabel({ avoidRegions: [] })).toBe('Connections')
+    expect(connectionsLabel({ avoidRegions: ['china'] })).toBe('Connections (1 avoided)')
+    expect(connectionsLabel({ avoidCountries: ['JP'] })).toBe('Connections (1 avoided)')
+    expect(connectionsLabel({ avoidRegions: ['china', 'middle_east'], avoidCountries: ['JP'] }))
+      .toBe('Connections (3 avoided)')
   })
 })
 

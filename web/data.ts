@@ -7,8 +7,9 @@ import {
 import { maskDisplayName, maskUntrustedText } from '@/src/sanitize'
 import { allowedImageUrl } from '@/src/supplier/searchapi'
 import { CODE_MAP, placeByName, placeForCode } from '@/src/intake/places'
-import { airportCity } from '@/src/intake/airports'
+import { airportCity, airportCountry } from '@/src/intake/airports'
 import { airlineName } from '@/src/intake/airlines'
+import { countryName } from '@/src/intake/countries'
 
 /**
  * Server-side reads for the chat UI, through the RLS-scoped client
@@ -600,6 +601,19 @@ export type LegLite = {
    */
   viaCities: string[]
   /**
+   * `via`, as each stop's own ISO 3166-1 alpha-2 country — `airportCountry`
+   * (src/intake/airports.ts) per entry, `null` for a stop that table cannot place by country.
+   * Same length and order as `via`. Resolved here for the same reason `viaCities` is: the
+   * connections filter (`web/filters.ts`'s `applyFilterLite`) and the filter bar's own
+   * Connections popover both need it, and `airports.json` is read off disk at import time —
+   * Node-only, so a client component cannot resolve it itself.
+   */
+  viaCountries: (string | null)[]
+  /** `viaCountries`, as country names — `countryName` (src/intake/countries.ts) per entry,
+   * falling back to the code itself for a country that table does not name, and staying `null`
+   * where `viaCountries` is. Same length and order as `via`. */
+  viaCountryNames: (string | null)[]
+  /**
    * This leg's own carrier codes, in the supplier's own order — `LegSummary.carriers`. Kept per
    * leg as well as unioned onto `flight.airlines` (which is what the airline FILTER reads),
    * because a card puts a logo on each leg's own line and the two legs are often flown by
@@ -829,12 +843,15 @@ function legLite(raw: unknown, exactMinutes: number | null): LegLite | null {
     || typeof departureLocal !== 'string' || typeof arrivalLocal !== 'string'
   ) return null
   const via = viaFromRoute(route)
+  const viaCountries = via.map((code) => airportCountry(code))
   const carriers = carriersOf(raw.carriers)
   return {
     from: maskUntrustedText(from), to: maskUntrustedText(to),
     departureLocal: maskUntrustedText(departureLocal), arrivalLocal: maskUntrustedText(arrivalLocal),
     via,
     viaCities: via.map((code) => airportCity(code) ?? code),
+    viaCountries,
+    viaCountryNames: viaCountries.map((code) => (code === null ? null : (countryName(code) ?? code))),
     carriers,
     carrierNames: carriers.map((code) => airlineName(code) ?? code),
     durationMinutes: exactMinutes ?? naiveMinutesBetween(departureLocal, arrivalLocal),

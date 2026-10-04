@@ -3,6 +3,7 @@ import { applyFilter, describeFilter } from '../src/intake/filter.js'
 import { money } from '../src/money.js'
 import { hotelDetail } from '../src/supplier/types.js'
 import type { StoredItem } from '../src/supplier/types.js'
+import type { Filter } from '../src/results.js'
 
 /** A hand-built flight `StoredItem`, same pattern as test/intake-rank.test.ts's `buildItem`. */
 function flight(
@@ -10,6 +11,8 @@ function flight(
   opts: {
     outboundStops?: number; inboundStops?: number; outboundHour?: number; carriers?: string[]
     oneWay?: boolean; cabinBag?: number; checkedBag?: number
+    /** Via airports between BCN and TYO — connections-filter tests only. */
+    outboundRoute?: string[]; inboundRoute?: string[]
   } = {},
 ): StoredItem {
   return {
@@ -22,12 +25,12 @@ function flight(
         from: 'BCN', to: 'TYO',
         departureLocal: `2026-11-19T${String(opts.outboundHour ?? 8).padStart(2, '0')}:00:00`,
         arrivalLocal: '2026-11-19T20:00:00',
-        stops: opts.outboundStops ?? 0, route: ['BCN', 'TYO'], cabinClass: 'Economy',
+        stops: opts.outboundStops ?? 0, route: opts.outboundRoute ?? ['BCN', 'TYO'], cabinClass: 'Economy',
         carriers: opts.carriers ?? ['ZZ'], flightNumbers: ['ZZ1'],
       },
       inbound: opts.oneWay ? null : {
         from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T18:00:00', arrivalLocal: '2026-12-07T06:00:00',
-        stops: opts.inboundStops ?? 0, route: ['TYO', 'BCN'], cabinClass: 'Economy',
+        stops: opts.inboundStops ?? 0, route: opts.inboundRoute ?? ['TYO', 'BCN'], cabinClass: 'Economy',
         carriers: opts.carriers ?? ['ZZ'], flightNumbers: ['ZZ2'],
       },
       baggage: { personalItem: 1, cabinBag: opts.cabinBag ?? 1, checkedBag: opts.checkedBag ?? 1 },
@@ -116,6 +119,44 @@ describe('applyFilter', () => {
     expect(applyFilter(items, { minRating: 4 }).map((i) => i.sourceId)).toEqual(['h4', 'f'])
     expect(applyFilter(items, { minRating: 3 }).map((i) => i.sourceId)).toEqual(['h3', 'h4', 'f'])
   })
+
+  // The bug this filter exists for: "I don't want to stop in China or the Middle East" used to
+  // classify as `filter` and change nothing, because no dimension answered WHERE a connection
+  // is. `test/web-filters.test.ts` holds this same set of items against `applyFilterLite`.
+  it('avoidRegions excludes an item whose via airport\'s country is in that region', () => {
+    const items = [
+      flight('doha', 1000, { outboundStops: 1, outboundRoute: ['BCN', 'DOH', 'TYO'] }), // middle_east
+      flight('shanghai', 1000, { outboundStops: 1, outboundRoute: ['BCN', 'PVG', 'TYO'] }), // china
+      flight('direct', 1000, { outboundStops: 0 }),
+    ]
+    expect(applyFilter(items, { avoidRegions: ['middle_east'] }).map((i) => i.sourceId))
+      .toEqual(['shanghai', 'direct'])
+    expect(applyFilter(items, { avoidRegions: ['china'] }).map((i) => i.sourceId))
+      .toEqual(['doha', 'direct'])
+    expect(applyFilter(items, { avoidRegions: ['china', 'middle_east'] }).map((i) => i.sourceId))
+      .toEqual(['direct'])
+  })
+
+  it('avoidCountries excludes by the exact country, checking the INBOUND leg\'s via too', () => {
+    const items = [
+      flight('out-doha', 1000, { outboundRoute: ['BCN', 'DOH', 'TYO'] }),
+      flight('back-doha', 1000, { inboundRoute: ['TYO', 'DOH', 'BCN'] }),
+      flight('clean', 1000, {}),
+    ]
+    expect(applyFilter(items, { avoidCountries: ['QA'] }).map((i) => i.sourceId)).toEqual(['clean'])
+  })
+
+  it('an airport neither table places by country is never excluded', () => {
+    const items = [flight('unknown', 1000, { outboundRoute: ['BCN', 'ZZZ', 'TYO'] })]
+    const everyRegion: NonNullable<Filter['avoidRegions']> = [
+      'china', 'middle_east', 'russia', 'usa', 'europe', 'asia', 'africa', 'south_america', 'north_america', 'oceania',
+    ]
+    expect(applyFilter(items, { avoidRegions: everyRegion })).toHaveLength(1)
+  })
+
+  it('a hotel passes the connections filter untouched — it has no leg to judge it against', () => {
+    expect(applyFilter([hotel('h', 1000)], { avoidRegions: ['china'] })).toHaveLength(1)
+  })
 })
 
 describe('describeFilter', () => {
@@ -133,5 +174,15 @@ describe('describeFilter', () => {
     expect(describeFilter({ minRating: 4 })).toBe('rated 4+')
     expect(describeFilter({ minCabinBags: 0, minCheckedBags: 0 })).toBe('all results')
     expect(describeFilter({ nonstop: true, minCheckedBags: 1 })).toBe('nonstop, with a checked bag')
+  })
+
+  it('names the avoided regions and countries by their fixed English names, never a code', () => {
+    expect(describeFilter({ avoidRegions: ['china'] })).toBe('no connections in China')
+    expect(describeFilter({ avoidRegions: ['china', 'middle_east'] }))
+      .toBe('no connections in China, the Middle East')
+    expect(describeFilter({ avoidCountries: ['JP'] })).toBe('no connections in Japan')
+    expect(describeFilter({ avoidRegions: ['middle_east'], avoidCountries: ['JP'] }))
+      .toBe('no connections in the Middle East, Japan')
+    expect(describeFilter({ nonstop: true, avoidRegions: ['china'] })).toBe('nonstop, no connections in China')
   })
 })

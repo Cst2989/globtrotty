@@ -346,8 +346,10 @@ describe('newestResultItemPerSourceId', () => {
       from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
       via: ['DOH'],
       // Resolved server-side, because both tables read off disk and the card is a client
-      // component: the stop's city and the carrier's name.
-      viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'],
+      // component: the stop's city, its country (and that country's name), and the carrier's
+      // name. Doha is in Qatar (QA), one of the brief's own eleven Middle East countries.
+      viaCities: ['Doha'], viaCountries: ['QA'], viaCountryNames: ['Qatar'],
+      carriers: ['QR'], carrierNames: ['Qatar Airways'],
       // A one-way's single leg IS the itinerary, so this is the supplier's own exact figure
       // rather than the difference between two naive local clocks.
       durationMinutes: 855,
@@ -397,6 +399,10 @@ describe('newestResultItemPerSourceId', () => {
     })], NOW_ROWS)
     expect(out[0]!.flight!.outbound.viaCities).toEqual(['ZZZ'])
     expect(out[0]!.flight!.airlineNames).toEqual(['ZZ'])
+    // An airport neither table places by country stays `null` rather than guessing one — the
+    // connections filter (`web/filters.ts`) treats that the same as "not excluded".
+    expect(out[0]!.flight!.outbound.viaCountries).toEqual([null])
+    expect(out[0]!.flight!.outbound.viaCountryNames).toEqual([null])
   })
 
   it('defaults an unreadable inbound stops count to 0 rather than dropping the leg', () => {
