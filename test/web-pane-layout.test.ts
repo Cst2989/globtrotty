@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { paneLayout, UPDATED_REASON, type PaneLayoutInput } from '../web/components/paneLayout.js'
 import type { ProposalRowLite, LinkLite, ResultsView } from '../web/data.js'
 import type { PendingAction } from '../web/components/pending.js'
+import { failWords } from '../web/components/StatusLine.js'
 
 const NOW_ISO = '2026-10-04T12:00:00.000Z'
 
@@ -176,8 +177,14 @@ describe('the accepted stage', () => {
     expect(l.stage).toBe('accepted')
     expect(l.changeable).toBe(false)
     expect(l.action).toBe('book')
+    // Past choosing: neither list is offered, however she left them.
     expect(l.hotelsOpen).toBe(false)
     expect(l.hotelsCollapsible).toBe(false)
+    expect(l.flightsOpen).toBe(false)
+    expect(layout({
+      results, proposal: accepted, acceptedProposal: accepted,
+      flightsExpanded: true, hotelsExpanded: true,
+    }).flightsOpen).toBe(false)
     expect(l.totals).toBe(true)
   })
 
@@ -185,6 +192,18 @@ describe('the accepted stage', () => {
     const noLinks = { ...accepted, links: [] }
     const l = layout({ results, proposal: noLinks, acceptedProposal: noLinks, status: 'working' })
     expect(l.action).toBe('working')
+  })
+
+  /*
+   * The browser harness sat in front of `Checking prices and getting your booking links…` for
+   * three minutes while the office had already finished: the stay sold out between her accept
+   * and the cashier's re-quote, and the desk had asked her which replacement to take. The turn
+   * is over, so the pane must stop claiming it is still working and point at the question.
+   */
+  it('stops claiming to be working once the turn has finished without links', () => {
+    const noLinks = { ...accepted, links: [] }
+    const l = layout({ results, proposal: noLinks, acceptedProposal: noLinks, status: 'awaiting_user' })
+    expect(l.action).toBe('answer')
   })
 
   /*
@@ -207,6 +226,19 @@ describe('the accepted stage', () => {
   it('offers a way out when the turn failed', () => {
     const l = layout({ results, proposal: accepted, acceptedProposal: accepted, status: 'failed' })
     expect(l.action).toBe('retry')
+  })
+
+  /*
+   * The hand-off failed after the decision was already durable, so a second `decide` is a 409
+   * and nothing else. `Try again` asks the desk, in her own words, to try the links again — a
+   * request the driver can act on with the tool it already has.
+   */
+  it('says what went wrong in the status line\'s own words', () => {
+    expect(failWords('provider_down')).toBe('Something went wrong: a travel provider was unavailable.')
+    expect(failWords('deadline_exceeded')).toBe('Something went wrong: the turn took too long.')
+    // A code this office has not been taught yet falls back to itself rather than to silence.
+    expect(failWords('something_new')).toBe('Something went wrong: something_new.')
+    expect(failWords(null)).toBe('That turn did not finish.')
   })
 
   /*

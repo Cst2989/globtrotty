@@ -34,6 +34,14 @@ export type PaneAction =
   | 'accept_updated'
   /** `Checking prices and getting your booking links…`. */
   | 'working'
+  /**
+   * The hand-off stopped WITHOUT links and the desk is waiting for her — the stay sold out
+   * between her accept and the cashier's re-quote, and the question with the replacements is in
+   * the chat. Found by the browser harness, which sat in front of
+   * `Checking prices and getting your booking links…` for three minutes while the office had
+   * already finished and asked her something.
+   */
+  | 'answer'
   /** One primary button per item, from `proposal.links`. */
   | 'book'
   /** The turn failed; the reason and `Try again`. */
@@ -170,7 +178,7 @@ export function paneLayout(input: PaneLayoutInput): PaneLayout {
   const pinFlight = stage !== 'flights' && flightItemPresent
   const pinHotel = (stage === 'trip' || stage === 'accepted') && hotelItemPresent
 
-  const flightsOpen = fullSkeleton
+  const flightsOpen = fullSkeleton || stage === 'accepted'
     ? false
     : stage === 'flights'
       ? newestFlights !== null
@@ -198,7 +206,9 @@ export function paneLayout(input: PaneLayoutInput): PaneLayout {
         : swapped
           ? 'accept_updated'
           : stage === 'accepted'
-            ? (links.length > 0 ? 'book' : 'working')
+            // No links and nothing running: the office has finished and is waiting for her, so
+            // the pane must stop claiming it is still working.
+            ? (links.length > 0 ? 'book' : 'answer')
             : 'accept'
 
   const shown = swapped ? proposal : (stage === 'accepted' ? acceptedProposal : proposal)

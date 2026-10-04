@@ -81,7 +81,7 @@ const SETS: Record<NextStepSet, { id: string; label: string }[]> = {
     { id: 'change_hotel_dates', label: 'Change hotel dates' },
   ],
   summary: [
-    { id: 'get_links', label: 'Get booking links' },
+    { id: 'get_links', label: 'Accept the trip' },
     { id: 'change_flight', label: 'Change the flight' },
   ],
 }

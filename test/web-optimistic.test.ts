@@ -276,11 +276,20 @@ describe('the chat, reading the store', () => {
     expect(html).toContain('<button')
   })
 
-  it('offers nothing to press on a bubble that is simply still in flight', () => {
+  it('offers nothing to press on a bubble that is simply still in flight, just a muted tick', () => {
     const html = renderToStaticMarkup(createElement(MessageBubble, {
       role: 'user', content: 'a week in Lisbon', pending: true,
     }))
     expect(html).not.toContain('Not sent, tap to retry')
     expect(html).toContain('data-pending="true"')
+    // The convention every chat client uses for "sent, not acknowledged".
+    expect(html).toContain('message-tick')
+  })
+
+  it('takes the tick away once the bubble is offering a retry instead', () => {
+    const html = renderToStaticMarkup(createElement(MessageBubble, {
+      role: 'user', content: 'a week in Lisbon', pending: true, failed: true,
+    }))
+    expect(html).not.toContain('message-tick')
   })
 })

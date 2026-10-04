@@ -132,6 +132,7 @@ export default async function ConversationPage({
                 conversationId={id} results={results} proposal={proposal}
                 acceptedProposal={acceptedProposal} skeleton={skeleton}
                 status={thread.conversation.status}
+                failReason={thread.latestTurn?.fail_reason ?? null}
               />
             )}
             latestResultsId={latestResultsId}

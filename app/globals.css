@@ -1156,6 +1156,14 @@ select {
   max-width: 28rem;
 }
 
+/* A single muted tick under a bubble the server has not confirmed yet. */
+.message-tick {
+  display: inline-flex;
+  align-self: flex-end;
+  margin-top: 0.15rem;
+  color: var(--ink-3);
+}
+
 /*
  * Section 1: an optimistic bubble whose POST came back unusable. The retry re-posts with the
  * SAME idempotency key, so pressing it twice cannot write her words twice.
@@ -2609,6 +2617,12 @@ select {
     width: 100%;
     height: auto;
     aspect-ratio: 16 / 10;
+    /*
+     * 16:10 of a 560px list is a 350px-tall photograph, which is a card that is mostly picture
+     * with its price below the fold — the harness screenshot is what made that obvious. The
+     * ratio holds up to the cap; past it `object-fit: cover` crops rather than letterboxes.
+     */
+    max-height: 220px;
   }
 
   .hotel-card-side {
@@ -2686,6 +2700,12 @@ select {
 }
 
 /* ---------- the pane's pinned cards, totals and action area (section 2) ---------- */
+
+.chosen-item {
+  /* Section 4 again: the pinned card's layout follows ITS width, not the list's. Without a
+     container of its own the `@container` query below would simply never match here. */
+  container-type: inline-size;
+}
 
 .chosen-item-heading {
   margin: 0;

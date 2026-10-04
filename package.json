@@ -8,14 +8,15 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "dev": "node scripts/copy-maplibre.mjs && next dev --webpack",
+    "build": "node scripts/copy-maplibre.mjs && next build --webpack",
     "test": "vitest run",
     "test:watch": "vitest",
     "ci:migrate": "bash scripts/ci-migrate.sh",
     "typecheck": "tsc -p tsconfig.harness.json --noEmit && tsc --noEmit && tsc -p tsconfig.webtests.json --noEmit",
     "lint": "eslint .",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "e2e": "bash scripts/e2e.sh"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",

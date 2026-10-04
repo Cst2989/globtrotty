@@ -82,6 +82,17 @@ export function pricePillHtml(priceMinor: string, currency: string, active: bool
 const CENTRE_PIN_HTML = '<span class="map-centre" aria-hidden="true"></span>'
 
 /**
+ * Where MapLibre's tile worker is actually served from.
+ *
+ * Its own default builds the URL out of `import.meta.url`, which webpack rewrites to the PAGE's
+ * URL — so the map asked for `/c/<conversation-id>/maplibre-gl-worker.mjs`, got a 404, and left
+ * a blank canvas with one console line to explain it. `scripts/copy-maplibre.mjs` puts the
+ * worker and the chunk it imports here before every dev and every build; `worker-src 'self'`
+ * (web/csp.ts) is what admits it.
+ */
+export const MAP_WORKER_URL = '/maplibre/maplibre-gl-worker.mjs'
+
+/**
  * Every label layer, asked for English where the style's data has it.
  *
  * SearchApi returns plenty of Tokyo in Japanese and so does OpenStreetMap, and a map whose
@@ -143,6 +154,7 @@ export function HotelMap(
     void (async () => {
       const maplibre = await import('maplibre-gl')
       if (cancelled || !containerRef.current) return
+      maplibre.setWorkerUrl(MAP_WORKER_URL)
 
       const map = new maplibre.Map({
         container: containerRef.current,

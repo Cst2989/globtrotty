@@ -12,3 +12,6 @@ deno.lock
 
 # The browser harness writes its screenshots here (trip-stage pass, section 6g).
 test/e2e/out/
+
+# Copied from node_modules before every dev/build (scripts/copy-maplibre.mjs).
+public/maplibre/

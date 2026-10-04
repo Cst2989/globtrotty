@@ -1,3 +1,4 @@
+import { Check } from '@phosphor-icons/react/dist/ssr'
 import { parseChoices } from '@/src/results'
 import { NEXT_QUESTION_ID } from '@/src/agents/nextSteps'
 import { ChoiceCard, ChoiceCardLive } from './ChoiceCard'
@@ -121,6 +122,14 @@ export function MessageBubble({
       <p className={isMarker ? 'message message-action' : 'message'} data-role={role}>
         {role === 'agent' ? <StreamedText text={content} animate={animate === true} onDone={onRevealed} /> : content}
       </p>
+      {/* Section 1: a single muted tick on a message the server has not confirmed yet — the
+          convention every chat client uses for "sent, not acknowledged". It goes the moment the
+          store settles the entry against her own row arriving. */}
+      {pending && !failed ? (
+        <span className="message-tick" aria-label="Sending">
+          <Check size={12} weight="bold" aria-hidden="true" />
+        </span>
+      ) : null}
       {failed ? (
         <button type="button" className="message-retry" onClick={onRetry}>
           Not sent, tap to retry

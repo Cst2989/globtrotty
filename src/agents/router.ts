@@ -26,7 +26,7 @@ import { parseAction } from '../actions.js'
 import { applyFilter, describeFilter } from '../intake/filter.js'
 import { filterReply } from './stage.js'
 import { formatMoney } from '../money.js'
-import type { Filter, ResultsContent } from '../results.js'
+import { filterKind, type Filter, type ResultsContent } from '../results.js'
 import { isFlight, type StoredItem } from '../supplier/types.js'
 import { runIntakeTurn, type IntakeDeps } from './intake.js'
 import { nextStepsAttachment, NEXT_QUESTION_ID } from './nextSteps.js'
@@ -208,6 +208,17 @@ async function withExtraCost(
   return { ...step, costMicros: step.costMicros + extra }
 }
 
+/** `rehydrate`, kept in the row's own order and with anything the corpus has lost dropped. */
+async function rehydrateInOrder(
+  sql: postgres.Sql, conversationId: string, sourceIds: string[],
+): Promise<StoredItem[]> {
+  const stored = await rehydrate(sql, conversationId, sourceIds)
+  return sourceIds.flatMap((id) => {
+    const item = stored.get(id)
+    return item ? [item] : []
+  })
+}
+
 /**
  * An ordinary typed message: one Jev call classifies it, and the router records that call itself
  * (seat `router`) before dispatching further.
@@ -236,14 +247,9 @@ async function routeTyped(
 
   // Rehydrated from the BASE, which is also what `matchAirlines` wants: a carrier an earlier
   // filter removed is still a carrier she can name.
-  let storedItems: StoredItem[] = []
-  if (base) {
-    const stored = await rehydrate(sql, ctx.conversationId, base.sourceIds)
-    storedItems = base.sourceIds.flatMap((id) => {
-      const item = stored.get(id)
-      return item ? [item] : []
-    })
-  }
+  const storedItems: StoredItem[] = base
+    ? await rehydrateInOrder(sql, ctx.conversationId, base.sourceIds)
+    : []
   const carriers = [...new Set(
     storedItems.flatMap((i) => (isFlight(i)
       ? [...i.detail.outbound.carriers, ...(i.detail.inbound?.carriers ?? [])]
@@ -264,7 +270,20 @@ async function routeTyped(
       // answer 'filter' with nothing to filter — but Jev's answer is still a guess, never a
       // guarantee, so this falls back to the driver rather than crash on a missing results row.
       if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
-      const filtered = applyFilter(storedItems, result.filter ?? {})
+      /*
+       * A filter names its own kind (`filterKind`), and that is the list it applies to — not
+       * whichever row happens to be newest. The browser harness caught the other way round: a
+       * typed "only direct flights" at the hotels stage narrowed the HOTELS row and the desk
+       * answered "Showing 19 of 19: nonstop" about a list of Tokyo hotels.
+       */
+      const wanted = filterKind(result.filter ?? {})
+      const target = wanted === null || wanted === base.kind
+        ? base
+        : (await readLatestUnfilteredResults(sql, ctx.conversationId, ctx.userId, wanted)) ?? base
+      const targetItems = target === base
+        ? storedItems
+        : await rehydrateInOrder(sql, ctx.conversationId, target.sourceIds)
+      const filtered = applyFilter(targetItems, result.filter ?? {})
       // Section 8c: the same pattern as the hotels reply — say what is left AND what the best
       // of it is, rather than only the arithmetic. The name is supplier-authored and goes
       // through `maskDisplayName` inside `filterReply`; the price is this office's own
@@ -275,14 +294,14 @@ async function routeTyped(
       return {
         kind: 'park',
         message: filterReply(
-          filtered.length, storedItems.length, describeFilter(result.filter ?? {}),
+          filtered.length, targetItems.length, describeFilter(result.filter ?? {}),
           cheapest === null ? null : { name: cheapest.name, price: formatMoney(cheapest.price) },
         ),
         costMicros: cost,
         attachments: [
           {
             role: 'results',
-            content: { ...base, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
+            content: { ...target, sourceIds: filtered.map((i) => i.sourceId), filter: result.filter ?? {} },
           },
           // F2: after a filter, the two steps that matter are widening back out and the one
           // filter she has not tried yet.
@@ -305,13 +324,13 @@ async function routeTyped(
 }
 
 /**
- * `get_links`'s own answer. The hand-off is a BUTTON (`PinnedSummary`'s "Get booking links" ->
+ * `get_links`'s own answer. The hand-off is a BUTTON (the pane's "Accept this trip" ->
  * `POST /api/proposals/[id]/decide` -> the `hand_off` action -> the driver -> the cashier), so no
  * sentence typed into the composer can start it, and handing this label to `routeMessage` would
  * classify it as chat and spend a driver turn saying nothing useful. A fixed line pointing at the
  * button is both cheaper and true.
  */
-const GET_LINKS_REPLY = 'Press "Get booking links" on the summary to the right.'
+const GET_LINKS_REPLY = 'Press "Accept this trip" on the summary to the right.'
 
 /** What `change_flight` says when there is no stored flight list left to go back to. */
 const NO_FLIGHTS_TO_RESHOW = 'I do not have a flight list to go back to. Tell me the trip again.'

@@ -19,6 +19,7 @@ import { SortTabs } from './SortTabs'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './errors'
+import { failWords } from './StatusLine'
 import { useOptimistic } from './optimistic'
 import { paneLayout, UPDATED_REASON, type PaneLayout } from './paneLayout'
 import type { PendingAction } from './pending'
@@ -41,8 +42,12 @@ export type ResultsPaneProps = {
   skeleton?: SkeletonMode
   /** `conversations.status`, for the failed and hand-off-in-flight states. */
   status?: string
+  /** `turns.fail_reason` for the newest turn — the words the `Try again` block prints. */
+  failReason?: string | null
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
+  /** `Try again` after a failed hand-off — see `ActionArea`. Absent in a static render. */
+  onRetry?: () => void
   /** "Refresh prices", pressed on the bar above one list. Absent in a static render. */
   onRefresh?: (kind: 'flights' | 'hotels') => void
   /**
@@ -388,12 +393,13 @@ function UpdatedBadge() {
  * for every state in between. `layout.action` decides which; nothing here re-derives it.
  */
 function ActionArea(
-  { layout, proposal, failReason, pending, onAccept }: {
+  { layout, proposal, failReason, pending, onAccept, onRetry }: {
     layout: PaneLayout
     proposal: (ProposalRowLite & { links: LinkLite[] }) | null
     failReason: string | null
     pending: boolean
     onAccept: () => void
+    onRetry: () => void
   },
 ) {
   if (layout.action === 'none') return null
@@ -404,11 +410,30 @@ function ActionArea(
     )
   }
 
+  if (layout.action === 'answer') {
+    /*
+     * The hand-off finished without links, which in practice means the stay sold out between her
+     * accept and the cashier's re-quote and the desk has asked her which replacement to take.
+     * The answer is a card in the CHAT, so this points at it rather than offering a second,
+     * competing button for the same decision.
+     */
+    return (
+      <p className="trip-action-note" role="status">
+        The desk has asked you something in the chat. Answer there and your links follow.
+      </p>
+    )
+  }
+
   if (layout.action === 'retry') {
+    /*
+     * The hand-off failed after the decision was already durable, so pressing `decide` again is
+     * a 409 and nothing else. `onRetry` asks the DESK to try the booking links again, in her own
+     * words, which is a request the driver can actually act on with the tool it already has.
+     */
     return (
       <div className="trip-action">
-        <p className="alert" role="alert">{failReason ?? 'That turn did not finish.'}</p>
-        <button type="button" className="btn btn-primary" disabled={pending} onClick={onAccept}>
+        <p className="alert" role="alert">{failWords(failReason)}</p>
+        <button type="button" className="btn btn-primary" disabled={pending} onClick={onRetry}>
           Try again
         </button>
       </div>
@@ -459,7 +484,8 @@ function ActionArea(
 export function ResultsPane(
   {
     results, proposal, acceptedProposal = null, now, pending, error, skeleton = null, status,
-    pendingAction = null, updatingKinds = [], onChoose, onGetLinks, onRefresh,
+    failReason = null, pendingAction = null, updatingKinds = [],
+    onChoose, onGetLinks, onRetry, onRefresh,
   }: ResultsPaneProps,
 ) {
   const updatingFlights = updatingKinds.includes('flights')
@@ -681,9 +707,10 @@ export function ResultsPane(
       <ActionArea
         layout={layout}
         proposal={shownProposal}
-        failReason={error}
+        failReason={failReason}
         pending={pending}
         onAccept={onGetLinks}
+        onRetry={onRetry ?? onGetLinks}
       />
 
       {error && layout.action !== 'retry' ? <p className="alert" role="alert">{error}</p> : null}
@@ -799,6 +826,8 @@ export type ResultsPaneLiveProps = {
   skeleton?: SkeletonMode
   /** `conversations.status` — what tells a failed turn from a hand-off still running. */
   status: string
+  /** `turns.fail_reason` for the newest turn. */
+  failReason: string | null
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
@@ -813,7 +842,9 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  * server read pick up the change, the same pattern as every other `*Live` wrapper here.
  */
 export function ResultsPaneLive(
-  { conversationId, results, proposal, acceptedProposal, skeleton = null, status }: ResultsPaneLiveProps,
+  {
+    conversationId, results, proposal, acceptedProposal, skeleton = null, status, failReason,
+  }: ResultsPaneLiveProps,
 ) {
   const router = useRouter()
   const optimistic = useOptimistic()
@@ -916,6 +947,7 @@ export function ResultsPaneLive(
       acceptedProposal={acceptedProposal}
       skeleton={skeleton}
       status={status}
+      failReason={failReason}
       pending={pending}
       error={error}
       pendingAction={optimistic.pendingAction}
@@ -934,6 +966,18 @@ export function ResultsPaneLive(
         )
       }}
       onRefresh={(kind) => void refreshPrices(kind)}
+      onRetry={() => {
+        // Her own words, posted the way a chip's are: the hand-off is a tool the driver has, and
+        // a second `decide` on a proposal that is already decided is a 409 and nothing else.
+        const text = 'Please try the booking links again.'
+        const idempotencyKey = crypto.randomUUID()
+        const entry = optimistic.add({ kind: 'message', text, idempotencyKey })
+        void post(
+          `/api/conversations/${conversationId}/messages`,
+          { text, idempotencyKey },
+          () => optimistic.fail(entry),
+        )
+      }}
       onGetLinks={() => {
         const target = proposal ?? acceptedProposal
         if (!target || target.decision !== null) return

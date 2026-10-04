@@ -70,6 +70,35 @@ export type Filter = {
   nearCentre?: boolean
 }
 
+/**
+ * Which LIST a filter is about, or `null` for one whose fields apply to either (a price cap).
+ *
+ * Trip-stage pass, found by the browser harness. A typed "only direct flights" at the hotels
+ * stage was applied to the newest row, which was the HOTELS one, and the desk answered
+ * "Showing 19 of 19: nonstop" about a list of Tokyo hotels — the same fault, in the other
+ * direction, as the `Direct flights only` chips the polish pass took off a hotels reply. A
+ * filter names its own kind; nothing about where she happens to be looking changes it.
+ *
+ * Pure, so `test/web-filters.test.ts` pins every field without a database.
+ */
+export function filterKind(filter: Filter): 'flights' | 'hotels' | null {
+  const flights = filter.nonstop !== undefined
+    || filter.maxStops !== undefined
+    || filter.departure !== undefined
+    || filter.airlines !== undefined
+    || filter.minCabinBags !== undefined
+    || filter.minCheckedBags !== undefined
+  const hotels = filter.minRating !== undefined
+    || filter.stars !== undefined
+    || filter.propertyType !== undefined
+    || filter.amenities !== undefined
+    || filter.nearCentre !== undefined
+  // Both at once is a filter Jev built out of two different lists' vocabularies, which is a
+  // guess about a screen that does not exist. The row she is looking at decides it.
+  if (flights === hotels) return null
+  return flights ? 'flights' : 'hotels'
+}
+
 export type ResultsContent = {
   kind: 'flights' | 'hotels'
   query: {
