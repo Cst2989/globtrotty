@@ -8,8 +8,33 @@
  * Trust boundary: every string here comes from this repo's own bundled tables (`places.json`,
  * `countries.json`) — never from a supplier's response and never from her typed message.
  */
-import { haversineKm, hotelQuery, type Place } from '../intake/places.js'
-import type { HotelSearch, SupplierItem } from '../supplier/types.js'
+import { addDays } from '../intake/dates.js'
+import { haversineKm, hotelQuery, placeForCode, type Place } from '../intake/places.js'
+import type { FlightDetail, HotelSearch, SupplierItem } from '../supplier/types.js'
+
+/**
+ * The destination and the window a CHOSEN FLIGHT implies: check-in is the outbound leg's own
+ * arrival date, check-out the inbound leg's own departure date (or seven nights for a one-way).
+ * `null` when the arrival airport is one the bundled place table cannot name a city for.
+ *
+ * Polish pass, section 2. This used to live inside `handleChooseFlight` alone, so `handleRefresh`
+ * had no way to ask the same question and rebuilt the stay search out of the stored `results`
+ * row instead. A row written before the airport-to-metro fix says `NRT`, and SearchApi answers
+ * "NRT" with vacation rentals in the United States — so a refresh could replace a list of Tokyo
+ * hotels with the exact bug the previous pass removed. One function, both callers.
+ *
+ * The airport-to-metro step is the load-bearing one: a chosen flight names an AIRPORT ("NRT")
+ * and the place table is keyed on METROS ("TYO").
+ */
+export function stayWindowForFlight(
+  detail: FlightDetail,
+): { place: Place; checkIn: string; checkOut: string } | null {
+  const place = placeForCode(detail.outbound.to)
+  if (place === null) return null
+  const checkIn = detail.outbound.arrivalLocal.slice(0, 10)
+  const checkOut = detail.inbound ? detail.inbound.departureLocal.slice(0, 10) : addDays(checkIn, 7)
+  return { place, checkIn, checkOut }
+}
 
 /**
  * The `HotelSearch` for one destination place and window.

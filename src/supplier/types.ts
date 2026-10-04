@@ -212,6 +212,21 @@ export type SupplierCapabilities = {
  */
 export const DEFAULT_MAX_AGE_SECONDS = 900
 
+/**
+ * A hotel quote is good for a day (polish pass, the author's ruling with section 7).
+ *
+ * A flight fare really does move within the quarter of an hour Kiwi gives it: the seat inventory
+ * behind it is being sold, and `900` is that supplier's own honest answer. A room rate is not
+ * that kind of number. SearchApi was quoting an hour out of caution, which meant a traveller who
+ * came back to her own trip after lunch found every stay marked out of date and nothing on the
+ * screen she could act on — a warning that said far more about our ttl than about the price.
+ *
+ * Everything downstream reads the ttl off the stored row: `ResultItemLite.expired`,
+ * `staleAgeText`, the freshness gate, and the cache window in src/agents/searchCache.ts. This
+ * constant is the only place the number lives.
+ */
+export const HOTEL_MAX_AGE_SECONDS = 86_400
+
 export type QuoteOutcome =
   | { status: 'ok'; item: SupplierItem }
   | { status: 'gone' }                          // searched and absent → genuinely unavailable

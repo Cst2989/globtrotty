@@ -401,6 +401,85 @@ describeDb('handleChoose', () => {
     })
   })
 
+  /*
+   * Polish pass, section 7. The author could not select ANY hotel: every card on her screen was
+   * past its ttl and an expired card disabled its own Select with "Refresh prices first", so her
+   * one list was a list of dead buttons. Select is live now, and the handler does the work.
+   */
+  it('re-quotes an expired flight first, and goes on with it when it comes back', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '06')
+      // Quoted an hour before `NOW`, with Kiwi's own quarter-hour ttl: expired by any reading.
+      const stale = new MockSupplier({ kind: 'flight', now: () => new Date(NOW.getTime() - 3_600_000) })
+      const staleItems = await stale.search(flightParams)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId,
+        params: flightParams, items: staleItems,
+      })
+      await sql`insert into messages (conversation_id, user_id, role, content)
+                values (${s.conversationId}, ${s.userId}, 'results', ${JSON.stringify({
+                  kind: 'flights',
+                  query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: '2026-12-06', adults: 2, cabin: 'premium_economy' },
+                  sourceIds: staleItems.map((i) => i.sourceId), assumptions: [],
+                })})`
+
+      const hotels = new MockSupplier({ kind: 'hotel', now: () => NOW })
+      const deps = makeDeps(sql, vi.fn().mockResolvedValue(approve()), hotels)
+      // The re-quote runs against a supplier answering AT `NOW`, and the mock is deterministic
+      // on its params — so the same sourceIds come back, fresh.
+      const flightSpy = vi.spyOn(deps.flights, 'search')
+
+      const step = await handleChoose(deps, ctx(s), { kind: 'flight', sourceId: staleItems[0]!.sourceId })
+
+      expect(flightSpy).toHaveBeenCalledTimes(1)
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      // The normal flow continued: a flights-only proposal was accepted and hotels were searched.
+      expect(step.message).toContain('Here are hotels in Tokyo')
+      const [accepted] = await sql`
+        select decision from proposals where conversation_id = ${s.conversationId}`
+      expect(accepted!.decision).toBe('accept')
+    })
+  })
+
+  it('answers an expired option that is really gone with the updated list, and writes no proposal', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '07')
+      const stale = new MockSupplier({ kind: 'flight', now: () => new Date(NOW.getTime() - 3_600_000) })
+      const staleItems = await stale.search(flightParams)
+      // One id the corpus holds, expired, that NO re-run will ever return: a fare withdrawn.
+      const gone = { ...staleItems[0]!, sourceId: 'MOCK-flight-withdrawn' }
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId,
+        params: flightParams, items: [gone],
+      })
+      await sql`insert into messages (conversation_id, user_id, role, content)
+                values (${s.conversationId}, ${s.userId}, 'results', ${JSON.stringify({
+                  kind: 'flights',
+                  query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: '2026-12-06', adults: 2, cabin: 'premium_economy' },
+                  sourceIds: [gone.sourceId], assumptions: [],
+                })})`
+
+      const hotels = new MockSupplier({ kind: 'hotel', now: () => NOW })
+      const create = vi.fn()
+      const deps = makeDeps(sql, create, hotels)
+
+      const step = await handleChoose(deps, ctx(s), { kind: 'flight', sourceId: gone.sourceId })
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('That one is no longer available at that price. Here is the updated list.')
+      // The fresh list rides along, so she is not left looking at the one that just failed.
+      const results = step.attachments!.find((a) => a.role === 'results')!
+      expect((results.content as { sourceIds: string[] }).sourceIds.length).toBeGreaterThan(0)
+      expect((results.content as { sourceIds: string[] }).sourceIds).not.toContain(gone.sourceId)
+      // And nothing was proposed on a price we could not stand behind.
+      expect(create).not.toHaveBeenCalled()
+      const proposals = await sql`select 1 from proposals where conversation_id = ${s.conversationId}`
+      expect(proposals).toHaveLength(0)
+    })
+  })
+
   it('an unknown sourceId is refused without reaching the gates', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '05')

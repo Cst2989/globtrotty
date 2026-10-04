@@ -37,6 +37,8 @@ export type ResultsPaneProps = {
   skeleton?: SkeletonMode
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
+  /** "Refresh prices", pressed on the bar above one list. Absent in a static render. */
+  onRefresh?: (kind: 'flights' | 'hotels') => void
   /**
    * Pass 3, section 6a: the card she just pressed Select on, set by `ResultsPaneLive`
    * SYNCHRONOUSLY — before its POST — and cleared only if that POST comes back unusable.
@@ -77,26 +79,48 @@ export function outcomeForStatus(status: number): 'keep' | 'rollback' {
 }
 
 /**
- * Whether this row's prices should be re-run WITHOUT being asked (pass 3, the author's
- * correction to section 1).
+ * How long an optimistic price skeleton is allowed to stand before the old prices come back.
  *
- * The first version of this put a banner and a "Refresh prices" button above a stale list. The
- * author's objection is the right one: she never wanted stale prices, she wanted current ones,
- * and a button asking her to confirm that is the office making its own bookkeeping her problem.
- * Nothing about the decision needs her — the row says it is past its ttl, the stored search says
- * exactly what to re-run, and the whole thing costs one supplier call. So the pane just does it,
- * and says so where she is already looking: a shimmer where each price was, and "Updating
- * prices" on the status line.
- *
- * `status !== 'working'` is the one guard that matters: a turn already in flight would refuse
- * this one with a 409 (`submitAction`'s one-active-turn index), and firing it anyway would
- * replace real prices with a skeleton that is never going to fill. Everything else — once per
- * row, never twice for the same one — is the caller's `useRef`.
- *
- * Pure, so `test/web-results-render.test.ts` pins every branch.
+ * A refresh that worked replaces the row within a second or two: the turn lands, Realtime fires,
+ * `router.refresh()` brings a new row and `settled` arrives through the props. This is the
+ * backstop for every path that is NOT that — a Realtime message that never comes, a turn that
+ * failed somewhere this component cannot see, a laptop that slept. Twenty seconds is long enough
+ * that a real refresh is never cut off and short enough that nobody sits in front of a shimmer
+ * wondering whether the page is broken, which is exactly what the author did.
  */
-export function shouldAutoRefresh(view: { stale: boolean }, status: string): boolean {
-  return view.stale && status !== 'working'
+export const REFRESH_TIMEOUT_MS = 20_000
+
+/**
+ * The price-skeleton state machine, as a pure function of what happened and when.
+ *
+ * `idle` draws real prices with their age. `refreshing` draws the shimmer. `settled` and
+ * `timed_out` both draw the real prices again — they are kept apart because they are different
+ * facts about the same screen, and the caller clears its own state on either.
+ *
+ * `rowChanged` is the signal that matters: the pane does not get told "your refresh finished",
+ * it gets told "here is a different newest row for that kind". Anything else — a non-OK POST, a
+ * Realtime update that brings no new row of that kind, or simply time passing — leaves the
+ * prices she already had on screen, which is the honest answer: these are the numbers we have,
+ * and this is how old they are.
+ *
+ * Pure, so `test/web-results-render.test.ts` pins every transition without a timer or a fetch.
+ */
+export type RefreshPhase = 'idle' | 'refreshing' | 'settled' | 'timed_out'
+
+export function refreshPhase(input: {
+  /** The POST was fired and has not been refused. */
+  started: boolean
+  /** The response came back non-OK, or the fetch threw. */
+  refused: boolean
+  /** A newest row of this kind, different from the one the refresh was fired against. */
+  rowChanged: boolean
+  /** Milliseconds since the POST went out. */
+  elapsedMs: number
+}): RefreshPhase {
+  if (!input.started) return 'idle'
+  if (input.refused) return 'settled'
+  if (input.rowChanged) return 'settled'
+  return input.elapsedMs >= REFRESH_TIMEOUT_MS ? 'timed_out' : 'refreshing'
 }
 
 /** The newest `ResultsView` of one kind, or `null` when there is none — `results` arrives oldest-first. */
@@ -342,7 +366,7 @@ function itemById(view: ResultsView | null, sourceId: string): ResultItemLite | 
 export function ResultsPane(
   {
     results, proposal, now, pending, error, skeleton = null, pendingChoice = null, updatingKinds = [],
-    onChoose, onGetLinks,
+    onChoose, onGetLinks, onRefresh,
   }: ResultsPaneProps,
 ) {
   const updatingFlights = updatingKinds.includes('flights')
@@ -449,7 +473,11 @@ export function ResultsPane(
 
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
-          <SummaryBar {...summaryBarPropsFor(newestHotels)} />
+          <SummaryBar
+            {...summaryBarPropsFor(newestHotels)}
+            stale={newestHotels.stale} refreshing={updatingHotels}
+            onRefresh={onRefresh ? () => onRefresh('hotels') : undefined}
+          />
           <div className="filter-bar-row">
             <FilterBar
               kind="hotels" items={newestHotels.items}
@@ -523,7 +551,11 @@ export function ResultsPane(
 
       {newestFlights ? (
         <section className="results-section" aria-label="Flights">
-          <SummaryBar {...summaryBarPropsFor(newestFlights)} />
+          <SummaryBar
+            {...summaryBarPropsFor(newestFlights)}
+            stale={newestFlights.stale} refreshing={updatingFlights}
+            onRefresh={onRefresh ? () => onRefresh('flights') : undefined}
+          />
           <FilterBar
             kind="flights" items={newestFlights.items}
             filter={flightState.filter} onChange={setFlightFilter}
@@ -600,16 +632,12 @@ export function ResultsPaneLive(
   const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
   const [updatingKinds, setUpdatingKinds] = useState<('flights' | 'hotels')[]>([])
   /**
-   * Every `results` row this instance has already fired a background refresh for, by
-   * `messageId`. A ref, not state: it must not cause a render, and it must survive both the
-   * re-render `router.refresh()` causes and React's Strict Mode running the effect below twice
-   * on the same instance — either of which would otherwise fire a second supplier call (which
-   * `submitAction` would refuse with a 409 anyway, leaving a skeleton that never fills).
-   *
-   * Never cleared. One row is re-run at most once per page; if that re-run fails, the correction
-   * is explicit about there being no retry.
+   * The `messageId` each in-flight refresh was fired against, so the skeleton can come down the
+   * moment a DIFFERENT newest row of that kind arrives — see `refreshPhase`. A ref rather than
+   * state because it must not cause a render of its own; the `updatingKinds` change that follows
+   * it does.
    */
-  const autoRefreshed = useRef<Set<string>>(new Set())
+  const refreshedFrom = useRef<Map<'flights' | 'hotels', string | null>>(new Map())
 
   /**
    * Pass 3, section 6: `rollback` runs on every path that leaves the screen claiming something
@@ -646,21 +674,39 @@ export function ResultsPaneLive(
   }
 
   /**
-   * The background refresh (pass 3, the author's correction to section 1). Fired from an effect
-   * rather than from an event, because nothing she did started it: the page simply loaded onto a
-   * row whose prices have expired.
+   * "Refresh prices", pressed.
    *
-   * On success nothing is done here at all — no `router.refresh()`. The turn it queued flips the
-   * conversation to `working`, which `ThreadLive`'s Realtime subscription already refreshes on,
-   * and the new `results` row arrives through the same path every other row does. The price
-   * skeletons stay up until it does, because they are keyed on the row still being stale.
+   * It used to run by itself, from an effect, on every aged-out row the page loaded onto. The
+   * author's ruling removed that outright and she is right about every part of it: opening a
+   * conversation started a TURN, which flipped the chat to `working`, wrote "You asked to
+   * refresh prices" into a thread she had not touched, and answered itself with "Prices
+   * refreshed." and flight chips under a list of hotels. Two of them fired at once on a page
+   * with both lists, the second was refused with a 409 by `submitAction`'s one-active-turn
+   * index, and the row it was meant to replace kept its skeleton with nothing left to come and
+   * fill it. Navigating between chats now makes no request to the agent at all: the page renders
+   * the rows it has, with their prices and how old they are.
    *
-   * On failure the skeletons come down and the OLD prices come back with their age text, which
-   * is the honest answer: these are the numbers we have, and this is how old they are.
+   * So this is an event handler again, and the only thing that calls it is her press.
+   *
+   * On success nothing is done here — no `router.refresh()`. The turn flips the conversation to
+   * `working`, which `ThreadLive`'s Realtime subscription already refreshes on, and the new row
+   * arrives through the same path every other row does. On a refusal, a thrown fetch, or twenty
+   * seconds of nothing (`REFRESH_TIMEOUT_MS`), the old prices come back.
    */
-  async function autoRefresh(kind: 'flights' | 'hotels') {
+  function stopUpdating(kind: 'flights' | 'hotels') {
+    setUpdatingKinds((current) => {
+      const next = current.filter((k) => k !== kind)
+      if (next.length === 0) activity.setUpdating(false)
+      return next
+    })
+  }
+
+  async function refreshPrices(kind: 'flights' | 'hotels') {
+    if (updatingKinds.includes(kind)) return
+    refreshedFrom.current.set(kind, newestOfKind(results, kind)?.messageId ?? null)
     setUpdatingKinds((current) => (current.includes(kind) ? current : [...current, kind]))
     activity.setUpdating(true)
+    window.setTimeout(() => stopUpdating(kind), REFRESH_TIMEOUT_MS)
     try {
       const res = await fetch(`/api/conversations/${conversationId}/refresh`, {
         method: 'POST',
@@ -668,36 +714,27 @@ export function ResultsPaneLive(
         body: JSON.stringify({ kind }),
       })
       if (res.ok) return
+      setError(errorForStatus(res.status))
     } catch {
-      // Same answer as a refused response: fall through to putting the old prices back.
+      setError(GENERIC_ERROR)
     }
-    setUpdatingKinds((current) => current.filter((k) => k !== kind))
-    activity.setUpdating(false)
+    stopUpdating(kind)
   }
 
+  // A DIFFERENT newest row of that kind has arrived, which is the only evidence this component
+  // ever gets that a refresh finished — see `refreshPhase`. Staleness is not that evidence: a
+  // re-quote can legitimately come back with prices that are themselves already past a
+  // fifteen-minute ttl, and keying on it is how a skeleton outlives the turn that caused it.
+  const landed = updatingKinds.filter(
+    (kind) => (newestOfKind(results, kind)?.messageId ?? null) !== (refreshedFrom.current.get(kind) ?? null),
+  )
+  const landedKey = landed.join(',')
   useEffect(() => {
-    for (const kind of ['flights', 'hotels'] as const) {
-      const view = newestOfKind(results, kind)
-      if (!view || !shouldAutoRefresh(view, status)) continue
-      if (autoRefreshed.current.has(view.messageId)) continue
-      autoRefreshed.current.add(view.messageId)
-      void autoRefresh(kind)
-    }
-    // `autoRefresh` closes over nothing but the setters, `activity` and `conversationId`, all of
-    // which are stable for a given mounted conversation; the rows and the status are what decide
-    // whether it should run at all.
+    for (const kind of landed) stopUpdating(kind)
+    // `landedKey` is the whole of what this effect depends on; `landed` itself is a fresh array
+    // on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, status])
-
-  // The refreshed row has landed (it is no longer stale), so the skeletons have nothing left to
-  // stand for and the status line goes back to what the conversation actually says.
-  const stillStale = updatingKinds.some((kind) => newestOfKind(results, kind)?.stale === true)
-  useEffect(() => {
-    if (updatingKinds.length > 0 && !stillStale) {
-      setUpdatingKinds([])
-      activity.setUpdating(false)
-    }
-  }, [updatingKinds, stillStale, activity])
+  }, [landedKey])
 
   return (
     <ResultsPane
@@ -714,6 +751,7 @@ export function ResultsPaneLive(
         activity.setBusy(true)
         void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId }, rollbackChoice)
       }}
+      onRefresh={(kind) => void refreshPrices(kind)}
       onGetLinks={() => {
         if (!proposal || proposal.decision !== null) return
         // `pending` (set first thing in `post`, synchronously) is what turns the button into

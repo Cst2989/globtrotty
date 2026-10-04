@@ -228,17 +228,22 @@ export function describeResultsForUi(r: ResultsContent): string {
 }
 
 export function toThreadView(rows: ThreadMessage[]): ThreadMessage[] {
-  return rows.map((r) => {
+  return rows.flatMap((r) => {
     if (r.role === 'action') {
       const action = parseAction(r.content)
-      return { ...r, content: action ? describeActionForUi(action) : 'A card action was recorded' }
+      if (!action) return [{ ...r, content: 'A card action was recorded' }]
+      const text = describeActionForUi(action)
+      // `null` means the action is real but is not part of the conversation — a `refresh`
+      // today. The row stays in the database and in the model's transcript; it just stops
+      // narrating our own bookkeeping back at her. See `describeActionForUi`.
+      return text === null ? [] : [{ ...r, content: text }]
     }
     if (r.role === 'results') {
       const results = parseResults(r.content)
-      return { ...r, content: results ? describeResultsForUi(results) : 'Results were recorded' }
+      return [{ ...r, content: results ? describeResultsForUi(results) : 'Results were recorded' }]
     }
     // `choices` passes through unchanged — see this type's own doc comment.
-    return r
+    return [r]
   })
 }
 

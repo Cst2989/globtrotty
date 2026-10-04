@@ -30,7 +30,7 @@ import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
 import {
-  ResultsPane, outcomeForStatus, shouldAutoRefresh, splitByVerdict, unmatchedLabel,
+  REFRESH_TIMEOUT_MS, ResultsPane, outcomeForStatus, refreshPhase, splitByVerdict, unmatchedLabel,
 } from '../web/components/ResultsPane.js'
 import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
 import { MessageBubble } from '../web/components/MessageBubble.js'
@@ -913,22 +913,37 @@ describe('ResultsSkeleton', () => {
   })
 })
 
-// Pass 3, section 1 + the author's correction to it. The bug: a page refresh fifteen minutes
-// after a search rendered an EMPTY list, because `loadResults` dropped every expired item. The
-// items now stay; their PRICES become shimmer while the pane re-runs the search by itself. No
-// banner, no button: she never wanted stale prices, she wanted current ones.
-describe('shouldAutoRefresh', () => {
-  it('re-runs a stale row without being asked', () => {
-    expect(shouldAutoRefresh({ stale: true }, 'active')).toBe(true)
-    expect(shouldAutoRefresh({ stale: true }, 'awaiting_user')).toBe(true)
+/*
+ * Polish pass, section 2 (the author's ruling). The pane used to re-run an aged-out search by
+ * ITSELF, from an effect, on every page load — which meant opening a conversation started a
+ * turn, wrote "You asked to refresh prices" into a thread she had not touched, and left price
+ * skeletons over a row the refusal had no way to replace. `shouldAutoRefresh` is gone with it.
+ * What is left is a state machine for the one refresh she asks for.
+ */
+describe('refreshPhase', () => {
+  const base = { started: true, refused: false, rowChanged: false, elapsedMs: 0 }
+
+  it('is idle until she presses the link', () => {
+    expect(refreshPhase({ ...base, started: false })).toBe('idle')
   })
 
-  it('leaves a fresh row alone', () => {
-    expect(shouldAutoRefresh({ stale: false }, 'active')).toBe(false)
+  it('shimmers while the POST and its turn are in flight', () => {
+    expect(refreshPhase(base)).toBe('refreshing')
+    expect(refreshPhase({ ...base, elapsedMs: REFRESH_TIMEOUT_MS - 1 })).toBe('refreshing')
   })
 
-  it('never fires while a turn is already in flight — it would be refused with a 409', () => {
-    expect(shouldAutoRefresh({ stale: true }, 'working')).toBe(false)
+  it('settles on a new row of that kind', () => {
+    expect(refreshPhase({ ...base, rowChanged: true })).toBe('settled')
+  })
+
+  it('settles on a refusal, rather than shimmering over prices nothing is coming to replace', () => {
+    expect(refreshPhase({ ...base, refused: true })).toBe('settled')
+    // A refusal wins even inside the window: there is no turn left to wait for.
+    expect(refreshPhase({ ...base, refused: true, elapsedMs: 10 })).toBe('settled')
+  })
+
+  it('times out when the row never changes, so the old prices and their age come back', () => {
+    expect(refreshPhase({ ...base, elapsedMs: REFRESH_TIMEOUT_MS })).toBe('timed_out')
   })
 })
 
@@ -948,8 +963,9 @@ describe('expired prices', () => {
     expect(html).toContain('1 stop, Doha')
     expect(html).toContain('alt="Qatar Airways"')
     expect(html).toContain('personal items included')
-    // And nothing can be acted on until the number comes back.
-    expect(html).toContain('disabled=""')
+    // Select stays LIVE even here (section 7): her press means "I want this one", and
+    // `quoteForChoice` re-quotes it server-side before anything is committed.
+    expect(html).not.toContain('disabled=""')
   })
 
   it('pairs each card with itself across the re-render, so the new order animates', () => {
@@ -959,7 +975,7 @@ describe('expired prices', () => {
     expect(html).toContain('view-transition-name:card-F1')
   })
 
-  it('puts the old prices back with their age when the refresh has failed', () => {
+  it('shows an expired price in full, with its age, and a Select that still works', () => {
     const html = renderToStaticMarkup(createElement(FlightCard, {
       item: EXPIRED_ITEM, adults: 2, now: LATER, onChoose: () => {},
     }))
@@ -967,7 +983,11 @@ describe('expired prices', () => {
     expect(html).not.toContain('skeleton-line-price')
     expect(html).toContain('Prices from 2 h ago')
     expect(html).toContain('data-expired="true"')
-    expect(html).toContain('title="These prices are out of date"')
+    // Section 7, the author's "I cannot select any hotel": no dead button, and no sentence
+    // telling her to go and fix our bookkeeping first.
+    expect(html).not.toContain('disabled')
+    expect(html).not.toContain('These prices are out of date')
+    expect(html).not.toContain('Refresh prices first')
   })
 
   it('leaves a fresh card alone', () => {
@@ -989,19 +1009,48 @@ describe('expired prices', () => {
     expect(html).toContain('Hotel Gracery')
   })
 
-  it('renders a stale row as price skeletons, with no banner and no button anywhere', () => {
+  it('renders a stale row with its real prices, and one small Refresh prices link', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [EXPIRED_ITEM], stale: true })],
+      proposal: null, now: LATER, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+    // Nothing shimmers and nothing is greyed just because a page was opened late.
+    expect(html).not.toContain('skeleton-line-price')
+    expect(html).toContain('€845.00')
+    expect(html).toContain('Prices from 2 h ago')
+    // A link in the bar, never the old banner across the top of the list.
+    expect(html).not.toContain('stale-banner')
+    expect(html).toContain('summary-refresh')
+    expect(html).toContain('Refresh prices')
+    expect(html).toContain('flight-card')
+    expect(html).toContain('1 stop, Doha')
+  })
+
+  it('offers no refresh link on a fresh row, and none at all without a handler', () => {
+    const fresh = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
+    }))
+    expect(fresh).not.toContain('Refresh prices')
+
+    const static_ = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [EXPIRED_ITEM], stale: true })],
+      proposal: null, now: LATER, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(static_).not.toContain('Refresh prices')
+  })
+
+  it('shimmers only the row being refreshed, once she has pressed the link', () => {
     const html = renderToStaticMarkup(createElement(ResultsPane, {
       results: [resultsView({ items: [EXPIRED_ITEM], stale: true })],
       proposal: null, now: LATER, pending: false, error: null, updatingKinds: ['flights'],
-      onChoose: () => {}, onGetLinks: () => {},
+      onChoose: () => {}, onGetLinks: () => {}, onRefresh: () => {},
     }))
     expect(html).toContain('skeleton-line-price')
     expect(html).toContain('Updating prices')
-    expect(html).not.toContain('stale-banner')
-    expect(html).not.toContain('Refresh prices')
-    // The list itself is there from the first frame — that is the whole fix.
-    expect(html).toContain('flight-card')
-    expect(html).toContain('1 stop, Doha')
+    expect(html).toContain('Refreshing prices…')
   })
 
   it('shimmers the sort tabs\' own summaries too, so no row advertises a hidden price', () => {

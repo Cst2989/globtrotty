@@ -123,8 +123,18 @@ export function renderActionMessage(a: ActionPayload): string {
   }
 }
 
-/** The text the UI shows the traveller for her own action. Ids stay server-side. */
-export function describeActionForUi(a: ActionPayload): string {
+/**
+ * The text the UI shows the traveller for her own action, or `null` for an action that has no
+ * business appearing in the transcript at all. Ids stay server-side either way.
+ *
+ * `refresh` is the `null` (polish pass, sections 8a and 12). The row is still written, and the
+ * MODEL still reads it through `renderActionNote` above — the office must know a search was
+ * re-run. But "You asked to refresh prices" in her thread is a sentence about our bookkeeping
+ * wearing her name: pressing a small link that says `Refresh prices` is not a message she sent,
+ * and while the automatic version existed she had not even done that much. `toThreadView`
+ * (web/data.ts) drops the row from what she reads.
+ */
+export function describeActionForUi(a: ActionPayload): string | null {
   switch (a.action) {
     case 'hand_off':
       return 'You accepted the proposal'
@@ -135,7 +145,7 @@ export function describeActionForUi(a: ActionPayload): string {
     case 'choose':
       return a.kind === 'flight' ? 'You chose a flight' : 'You chose a hotel'
     case 'refresh':
-      return 'You asked to refresh prices'
+      return null
     case 'choice':
       return 'You answered a question'
   }

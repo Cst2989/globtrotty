@@ -137,7 +137,18 @@ describe('actions', () => {
     expect(describeActionForUi({ action: 'choose', kind: 'flight', sourceId: 'kiwi:a' })).toBe('You chose a flight')
     expect(describeActionForUi({ action: 'choose', kind: 'hotel', sourceId: 'booking:y' })).toBe('You chose a hotel')
     expect(describeActionForUi({ action: 'choice', questionId: 'origin', optionId: 'BCN' })).toBe('You answered a question')
-    expect(describeActionForUi({ action: 'refresh', kind: 'flight' })).toBe('You asked to refresh prices')
-    expect(describeActionForUi({ action: 'refresh', kind: 'hotel' })).toBe('You asked to refresh prices')
+  })
+
+  /*
+   * Polish pass, sections 8a and 12. The thread used to read "You asked to refresh prices" over
+   * and over on conversations she had only opened: the pane re-ran aged-out searches by itself,
+   * and every one of them wore her name. The row is still written and the MODEL still reads it
+   * through `renderActionNote` — the office has to know a search was re-run — but it is not part
+   * of the conversation she is having.
+   */
+  it('shows the traveller nothing for a refresh, while the model still gets its note', () => {
+    expect(describeActionForUi({ action: 'refresh', kind: 'flight' })).toBeNull()
+    expect(describeActionForUi({ action: 'refresh', kind: 'hotel' })).toBeNull()
+    expect(renderActionMessage({ action: 'refresh', kind: 'hotel' })).toContain('re-running the search')
   })
 })

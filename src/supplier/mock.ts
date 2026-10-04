@@ -1,6 +1,6 @@
 import { money } from '../money.js'
 import { nightsBetween } from './dates.js'
-import { DEFAULT_MAX_AGE_SECONDS, hotelDetail } from './types.js'
+import { DEFAULT_MAX_AGE_SECONDS, HOTEL_MAX_AGE_SECONDS, hotelDetail } from './types.js'
 import type {
   Supplier, SupplierItem, SupplierKind, SearchParams, QuoteOutcome, SupplierCapabilities,
 } from './types.js'
@@ -38,7 +38,11 @@ export class MockSupplier implements Supplier {
     this.capabilities = {
       live: cfg.live ?? true,
       mayRequote: cfg.mayRequote ?? true,
-      maxAgeSeconds: cfg.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS,
+      // Per kind, so the mock ages exactly as the real adapters do: Kiwi's quarter of an hour
+      // for a fare, SearchApi's day for a room. A test that wants a specific window still names
+      // one; this is only the default.
+      maxAgeSeconds: cfg.maxAgeSeconds
+        ?? (cfg.kind === 'hotel' ? HOTEL_MAX_AGE_SECONDS : DEFAULT_MAX_AGE_SECONDS),
       pricePersistence: 'session',
     }
   }

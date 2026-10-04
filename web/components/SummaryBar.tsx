@@ -8,6 +8,14 @@ export type SummaryBarProps = {
   assumptions: Assumption[]
   /** `web/data.ts`'s `cityNamesFor` — code to place-table city name, resolved server-side. */
   cityNames: Record<string, string>
+  /**
+   * This list's prices are past their ttl, so the bar offers to re-run the search. Absent (or
+   * with no `onRefresh`) there is no link at all: nothing to offer, nothing to say.
+   */
+  stale?: boolean
+  /** That re-run is in flight; the link says so and stops accepting presses. */
+  refreshing?: boolean
+  onRefresh?: () => void
 }
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -96,7 +104,9 @@ export function summarySegments(
  *
  * Pure. `test/web-results-render.test.ts` renders it directly with `renderToStaticMarkup`.
  */
-export function SummaryBar({ kind, query, assumptions, cityNames }: SummaryBarProps) {
+export function SummaryBar(
+  { kind, query, assumptions, cityNames, stale = false, refreshing = false, onRefresh }: SummaryBarProps,
+) {
   const segments = summarySegments(kind, query, cityNames)
   const assumed = assumptionSentence(assumptions, (code) => cityNames[code] ?? code)
 
@@ -109,6 +119,16 @@ export function SummaryBar({ kind, query, assumptions, cityNames }: SummaryBarPr
           </li>
         ))}
       </ul>
+      {/* A text link at the end of the line, not a banner across the top of the list.
+          The banner was there to carry an apology; there is nothing to apologise for. The
+          cards already say how old their prices are, Select re-quotes before it commits
+          (`quoteForChoice`, src/agents/choose.ts), and this is simply the one thing she
+          might want to do about it, where she is already reading what was searched for. */}
+      {stale && onRefresh ? (
+        <button type="button" className="summary-refresh" disabled={refreshing} onClick={onRefresh}>
+          {refreshing ? 'Refreshing prices…' : 'Refresh prices'}
+        </button>
+      ) : null}
       {assumed ? <p className="summary-assumed">{assumed}</p> : null}
     </div>
   )

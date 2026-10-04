@@ -40,9 +40,8 @@ export function stayCardId(sourceId: string): string {
   return `stay-${sourceId.replace(/[^A-Za-z0-9_-]/g, '-')}`
 }
 
-/** Same two sentences `FlightCard` puts on a disabled Select, for the same two states. */
+/** The same sentence `FlightCard` puts on a price being re-quoted, for the same reason. */
 const UPDATING = 'Updating prices'
-const STALE = 'These prices are out of date'
 
 /** How many amenity chips fit on one card before the rest are dropped. */
 const MAX_CHIPS = 5
@@ -282,8 +281,8 @@ export function HotelCard(
           <button
             type="button"
             className="btn btn-primary"
-            disabled={item.expired || selectDisabled}
-            title={updating ? UPDATING : (item.expired ? STALE : undefined)}
+            disabled={selectDisabled}
+            title={updating ? UPDATING : undefined}
             onClick={() => onChoose(item.sourceId)}
           >
             Select

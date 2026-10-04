@@ -5,7 +5,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type postgres from 'postgres'
 import { withTestDb, describeDb } from './helpers/db.js'
-import { handleRefresh, flightParamsFor, hotelParamsFor } from '../src/agents/refresh.js'
+import { handleRefresh } from '../src/agents/refresh.js'
+import { flightParamsFor, hotelParamsFor } from '../src/agents/research.js'
 import { nextSteps } from '../src/agents/nextSteps.js'
 import { recordResults } from '../src/repo/toolResults.js'
 import { MockSupplier } from '../src/supplier/mock.js'
@@ -200,6 +201,79 @@ describeDb('handleRefresh', () => {
     })
   })
 
+  /*
+   * Polish pass, section 2 (Critical). What the author saw: she reloaded, "Prices refreshed · 10
+   * flights" arrived, and the hotels list still showed the OLD search — Antler Ridge, Mountain
+   * Creek, US vacation rentals — because the stored hotels row predated the airport-to-metro fix
+   * and still said `q = NRT`. A refresh rebuilt from that row searched SearchApi for "NRT" and
+   * got Colorado. The chosen flight is the durable, correct source, and it is the one
+   * `handleChooseFlight` itself reads.
+   */
+  it('rebuilds the hotels query from the CHOSEN FLIGHT, not from a stale row that says NRT', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seed(sql, '09')
+
+      // A flight BCN -> NRT in the corpus, and an accepted flights-only proposal naming it.
+      const flightSupplier = new MockSupplier({ kind: 'flight', now: () => THEN })
+      const toNarita = { ...flightParamsFor(FLIGHT_QUERY)!, to: 'NRT' }
+      const flights = await flightSupplier.search(toNarita)
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId,
+        params: toNarita, items: flights,
+      })
+      const itinerary = {
+        schemaVersion: 1,
+        items: [{
+          slot: 'flight', quantity: 1, sourceId: flights[0]!.sourceId, supplier: 'mock',
+          name: flights[0]!.name, priceMinor: '10000', currency: 'EUR', priceBasis: 'total',
+        }],
+      }
+      await sql`
+        insert into proposals
+          (conversation_id, user_id, turn_id, itinerary, itinerary_schema_version,
+           requirements_snapshot, total_minor, currency, gate_outcome, review_rounds,
+           review_issues, prompt_version, model_config_id, parent_proposal_id, decision, decided_at)
+        values (${s.conversationId}, ${s.userId}, ${s.turnId}, ${sql.json(itinerary as never)}, 1,
+                ${sql.json({} as never)}, ${'10000'}, ${'EUR'}, ${'approved'}, 0,
+                ${sql.array([] as string[])}, ${'t'}, ${'t'}, ${null}, ${'accept'}, ${THEN})`
+
+      // The poisoned row: written before the fix, naming the AIRPORT as the place.
+      const bad: ResultsContent = {
+        kind: 'hotels',
+        query: { place: 'NRT', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2 },
+        sourceIds: [], assumptions: [],
+      }
+      await sql`insert into messages (conversation_id, user_id, role, content)
+                values (${s.conversationId}, ${s.userId}, 'results', ${JSON.stringify(bad)})`
+
+      const sup = suppliers(() => LATER)
+      const hotelSpy = vi.spyOn(sup.hotels, 'search')
+      const step = await handleRefresh(
+        deps(sql, vi.fn().mockResolvedValueOnce(jevResponse(RANK_FIXTURE)), sup), ctx(s), { kind: 'hotel' },
+      )
+
+      expect(hotelSpy).toHaveBeenCalledTimes(1)
+      // The search the ORIGINAL hotels search would have sent, rebuilt from the flight.
+      expect(hotelSpy.mock.calls[0]![0]).toMatchObject({
+        kind: 'hotel', query: 'hotels in Tokyo, Japan', countryCode: 'JP',
+      })
+      expect(JSON.stringify(hotelSpy.mock.calls[0]![0])).not.toContain('NRT')
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      // Section 8b: the flight is chosen, so the stage is `hotels` and the chips are the stay
+      // ones — never `Direct flights only` under a list of places to sleep.
+      expect(step.attachments!.find((a) => a.role === 'choices')!.content)
+        .toEqual(nextSteps('hotels'))
+      // And the NEW row carries the rebuilt query, so the next read of it is not poisoned too.
+      const results = step.attachments!.find((a) => a.role === 'results')!.content as ResultsContent
+      expect(results.query.place).toBe('Tokyo')
+      expect(results.query.country).toBe('JP')
+      // Jev checked it, so the pane does not say "Not checked against your request".
+      expect(results.verdicts).toBeDefined()
+    })
+  })
+
   it('re-runs a stored hotels search, re-ranked the same way the flights list is', async () => {
     await withTestDb(async (sql) => {
       const s = await seed(sql, '03')
@@ -223,7 +297,10 @@ describeDb('handleRefresh', () => {
       const step = await handleRefresh(deps(sql, fetchImpl, sup), ctx(s), { kind: 'hotel' })
 
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.message).toBe('Prices refreshed.')
+      // Section 8b: the words follow the STAGE. There is no accepted flights-only proposal in
+      // this seed, so the conversation is still at `flights` — and a hotels refresh says what it
+      // refreshed either way, because that is the list she is looking at.
+      expect(step.message).toBe('Hotel prices are up to date.')
       expect(hotelSpy).toHaveBeenCalledTimes(1)
       // The query it re-ran is the one the ORIGINAL search sent, words and market both.
       expect(hotelSpy.mock.calls[0]![0]).toMatchObject({

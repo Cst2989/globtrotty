@@ -5,6 +5,7 @@ import type {
   Supplier, SupplierItem, SupplierCapabilities, SearchParams, HotelSearch,
   QuoteOutcome, PriceBasis, HotelDetail, NearbyPlace,
 } from './types.js'
+import { HOTEL_MAX_AGE_SECONDS } from './types.js'
 import { withTracking, isRegistrableHost, BookingUrlError } from './urls.js'
 
 const ENDPOINT = 'https://www.searchapi.io/api/v1/search'
@@ -175,7 +176,10 @@ export const SEARCHAPI_CAPABILITIES: SupplierCapabilities = {
   // property_token is stable across searches, so a re-quote is a re-search
   // plus a find — the same shape as Kiwi's.
   mayRequote: true,
-  maxAgeSeconds: 3600,
+  // A day, not the hour this used to claim — see `HOTEL_MAX_AGE_SECONDS`. The hour was caution
+  // with no evidence behind it, and it turned a list of real Tokyo hotels into a screen of
+  // out-of-date warnings before she had finished reading it.
+  maxAgeSeconds: HOTEL_MAX_AGE_SECONDS,
   pricePersistence: 'session',
 }
 

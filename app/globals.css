@@ -1159,6 +1159,36 @@ select {
 }
 
 /*
+ * "Refresh prices": a text link at the end of the bar, the size of the muted line under it.
+ * This is what replaced a full-width banner across the top of the list. The banner was an
+ * apology, and there is nothing to apologise for — the cards say how old their prices are and
+ * Select re-quotes before it commits. This is one small offer, and it looks like one.
+ */
+.summary-refresh {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.summary-refresh:hover {
+  color: var(--ink);
+}
+
+.summary-refresh:disabled {
+  color: var(--ink-3);
+  text-decoration: none;
+  cursor: default;
+}
+
+/*
  * Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It is the
  * real summary minus what only the server can know (the total, the hand-off button), so it reads
  * as the same object half-filled rather than as a different one.
@@ -1172,34 +1202,24 @@ select {
   text-transform: uppercase;
 }
 
-/* ---------- stale prices (pass 3, section 1) ---------- */
+/* ---------- stale prices ---------- */
 
 /*
  * Kiwi gives a flight price fifteen minutes. Past that the cards stay on
  * screen (web/data.ts's `loadResults` keeps them and flags them) rather than
- * vanishing, and the pane re-runs the search by itself — the price becomes a
- * shimmering block for the few seconds that takes, and nothing else on the
- * card moves, because a ttl expires the money and nothing else.
+ * vanishing, and they stay at FULL strength: the polish pass took the dimming
+ * off entirely.
  *
- * `data-expired` is therefore the FAILED case, and only that: the refresh did
- * not come back, so these are the numbers we have and the card says how old
- * they are.
- */
-.flight-card[data-expired='true'] .flight-card-main,
-.flight-card[data-expired='true'] .flight-card-price,
-.flight-card[data-expired='true'] .flight-card-per,
-.hotel-card[data-expired='true'] .hotel-card-main,
-.hotel-card[data-expired='true'] .hotel-card-photo,
-.hotel-card[data-expired='true'] .hotel-card-price,
-.hotel-card[data-expired='true'] .hotel-card-per,
-.result-row[data-expired='true'] .result-row-main,
-.result-row[data-expired='true'] .result-row-price {
-  opacity: 0.7;
-}
-
-/*
- * The age is the one line on a dimmed card that has to stay readable: it is
- * what explains the dimming.
+ * The author's ruling, and it is the right one. A ttl expires the money and
+ * nothing else — the photograph, the rating, the walk to the station and the
+ * room type are all exactly as true at three hours as they were at three
+ * minutes. Greying the card said "this whole result is suspect", which is both
+ * untrue and the opposite of useful on the one screen where she is comparing
+ * twenty of them. The age line says the one thing that IS in doubt, in words,
+ * and Select re-quotes before it commits to anything (`quoteForChoice`,
+ * src/agents/choose.ts).
+ *
+ * `data-expired` survives on the element for that age line alone.
  */
 .flight-card[data-expired='true'] .flight-card-age,
 .hotel-card[data-expired='true'] .hotel-card-age,

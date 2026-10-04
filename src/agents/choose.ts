@@ -30,14 +30,15 @@ import { rehydrate, recordResults } from '../repo/toolResults.js'
 import { readLatestResults } from '../repo/messages.js'
 import { countPriorGateRuns, beginToolCall, finishToolCall } from '../repo/toolCalls.js'
 import { assertSupplierBudget } from '../tools/supplierBudget.js'
-import { placeForCode, type Place } from '../intake/places.js'
-import { addDays } from '../intake/dates.js'
-import { hotelSearchFor, withDistanceFromCentre } from './hotels.js'
+import { type Place } from '../intake/places.js'
+import { hotelSearchFor, stayWindowForFlight, withDistanceFromCentre } from './hotels.js'
+import { ResearchSupplierError, planFor, rerunSearch, resultsAttachment } from './research.js'
+import { conversationStage, nextStepsForList } from './stage.js'
 import { nightsBetween } from '../supplier/dates.js'
 import { rankItems } from '../intake/rank.js'
 import { recordJevCall } from '../jev/record.js'
 import type { TripBrief } from '../intake/brief.js'
-import { isFlight, isHotel, type SupplierItem } from '../supplier/types.js'
+import { isFlight, isHotel, type StoredItem, type SupplierItem } from '../supplier/types.js'
 
 /** The router's own shape for a `choose` action, matching Task 7's own documented interface —
  * the full `ActionPayload` carries `action: 'choose'` too, but that field has already done its
@@ -127,6 +128,89 @@ function briefForHotelRank(args: { adults: number; checkIn: string; checkOut: st
 }
 
 /**
+ * Polish pass, section 7: Select never goes dead.
+ *
+ * The author could not select ANY hotel. Every card on her screen was past its ttl, and an
+ * expired card disabled its own Select with "Refresh prices first" — so the one list she had was
+ * a list of buttons that did nothing, and the refresh that was supposed to rescue them had
+ * quietly skipped that row. A disabled button is the office making its own bookkeeping her
+ * problem; what she means by pressing Select is "I want this one", and the honest answer to a
+ * price we are no longer sure of is to go and ask again.
+ *
+ * So the button stays live (web/components/HotelCard.tsx, FlightCard.tsx) and the handler does
+ * the work: an expired quote is re-searched FIRST, through the same budget/`tool_calls`/corpus
+ * door every other search in this office goes through. If the same `sourceId` comes back fresh,
+ * nothing else changes — the normal choose flow continues with the new quote, and the gates see
+ * a price they can approve. If it does not, she gets the updated list and one sentence saying
+ * why, instead of a gate rejection about provenance.
+ *
+ * Falling back to the stale item is deliberate on every path that is not "it is gone": no plan
+ * to re-run, a supplier that would not answer, an empty answer, an exhausted per-turn budget.
+ * The freshness gate (src/tools/gate.ts) is downstream of all of them and refuses an expired
+ * price in its own words; this function exists to AVOID that, not to duplicate it.
+ */
+const REQUOTE_GONE = 'That one is no longer available at that price. Here is the updated list.'
+
+/** Past its own ttl, by the same arithmetic the freshness gate and `loadResults` both use. */
+function pastTtl(item: StoredItem, now: Date): boolean {
+  return item.fetchedAt.getTime() + item.ttlSeconds * 1000 < now.getTime()
+}
+
+type Chosen =
+  /** Go on with this item; `cost` is whatever a re-quote spent getting it. */
+  | { status: 'ok'; item: StoredItem; cost: bigint }
+  /** Answer with this step instead. */
+  | { status: 'step'; step: AgentStep }
+
+async function quoteForChoice(
+  deps: IntakeDeps, ctx: AgentContext, kind: 'flight' | 'hotel', sourceId: string, missing: string,
+): Promise<Chosen> {
+  const { sql } = deps
+  const ofKind = kind === 'flight' ? isFlight : isHotel
+  const stored = await rehydrate(sql, ctx.conversationId, [sourceId])
+  const item = stored.get(sourceId)
+  if (!item || !ofKind(item)) {
+    return { status: 'step', step: { kind: 'park', message: missing, costMicros: 0n } }
+  }
+
+  const now = new Date(deps.now())
+  if (!pastTtl(item, now)) return { status: 'ok', item, cost: 0n }
+
+  const plan = await planFor(deps, ctx, kind)
+  if (!plan) return { status: 'ok', item, cost: 0n }
+
+  let run
+  try {
+    run = await rerunSearch(deps, ctx, plan, kind === 'flight' ? 'requote-flights' : 'requote-hotels')
+  } catch (err) {
+    // A supplier that will not answer is not a reason to refuse her press. `ResearchSupplierError`
+    // and a bookkeeping throw are treated alike here for once: either way the only quote this
+    // office has is the one it already had, and the gates are what decide whether it stands.
+    void (err instanceof ResearchSupplierError)
+    return { status: 'ok', item, cost: 0n }
+  }
+  if (run.status !== 'ok') return { status: 'ok', item, cost: 0n }
+
+  const after = await rehydrate(sql, ctx.conversationId, [sourceId])
+  const fresh = after.get(sourceId)
+  if (fresh && ofKind(fresh) && !pastTtl(fresh, now)) {
+    return { status: 'ok', item: fresh, cost: run.cost }
+  }
+
+  const stage = await conversationStage(sql, ctx.conversationId, ctx.userId)
+  return {
+    status: 'step',
+    step: {
+      kind: 'park', message: REQUOTE_GONE, costMicros: run.cost,
+      attachments: [
+        resultsAttachment(plan, run, { limit: 10 }),
+        nextStepsAttachment(nextStepsForList(stage, plan.rowKind)),
+      ],
+    },
+  }
+}
+
+/**
  * Choosing a flight: a flights-only proposal through the gates and the
  * reviewer, accepted, then a hotel search for the window the chosen flight
  * itself implies — check-in the outbound leg's own arrival date, check-out
@@ -150,14 +234,19 @@ async function handleChooseFlight(
   deps: IntakeDeps, ctx: AgentContext, sourceId: string,
 ): Promise<AgentStep> {
   const { sql } = deps
-  const stored = await rehydrate(sql, ctx.conversationId, [sourceId])
-  const item = stored.get(sourceId)
-  if (!item || !isFlight(item)) {
+  const quote = await quoteForChoice(
+    deps, ctx, 'flight', sourceId, 'That flight is no longer available. Pick another.',
+  )
+  if (quote.status === 'step') return quote.step
+  const item = quote.item
+  if (!isFlight(item)) {
     return { kind: 'park', message: 'That flight is no longer available. Pick another.', costMicros: 0n }
   }
 
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
-  const spent = { micros: 0n }
+  // Section 7's re-quote may already have cost a Jev re-rank; it rides the same `spent` total
+  // the reviewer's call does, and is reported on `recordedMicros` exactly the same way.
+  const spent = { micros: quote.cost }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-flight')
   let pathText: string
   try {
@@ -192,13 +281,14 @@ async function handleChooseFlight(
   })
 
   // The chosen flight names an AIRPORT ("NRT"), and the place table is keyed on METROS ("TYO").
-  // `placeForCode` is what bridges the two (src/intake/places.ts); before the hotels pass this
-  // read `CODE_MAP.get('NRT')`, got nothing, and sent the bare code to the hotel engine.
-  const destination = placeForCode(item.detail.outbound.to)
-  const checkIn = item.detail.outbound.arrivalLocal.slice(0, 10)
-  const checkOut = item.detail.inbound
-    ? item.detail.inbound.departureLocal.slice(0, 10)
-    : addDays(checkIn, 7)
+  // `stayWindowForFlight` (src/agents/hotels.ts) is what bridges the two; before the hotels pass
+  // this read `CODE_MAP.get('NRT')`, got nothing, and sent the bare code to the hotel engine.
+  // It lives in that module rather than here so `handleRefresh` can ask the identical question
+  // of the identical flight — the polish pass's section 2.
+  const window = stayWindowForFlight(item.detail)
+  const destination = window?.place ?? null
+  const checkIn = window?.checkIn ?? ''
+  const checkOut = window?.checkOut ?? ''
 
   if (destination === null) {
     return {
@@ -378,11 +468,10 @@ async function handleChooseHotel(
   deps: IntakeDeps, ctx: AgentContext, sourceId: string,
 ): Promise<AgentStep> {
   const { sql } = deps
-  const stored = await rehydrate(sql, ctx.conversationId, [sourceId])
-  const item = stored.get(sourceId)
-  if (!item || !isHotel(item)) {
-    return { kind: 'park', message: 'That hotel is no longer available. Pick another.', costMicros: 0n }
-  }
+  const quote = await quoteForChoice(
+    deps, ctx, 'hotel', sourceId, 'That hotel is no longer available. Pick another.',
+  )
+  if (quote.status === 'step') return quote.step
 
   const priorItinerary = await loadNewestAcceptedItinerary(sql, ctx.conversationId)
   const flightSourceId = priorItinerary?.items.find((i) => i.slot === 'flight')?.sourceId ?? null
@@ -391,7 +480,7 @@ async function handleChooseHotel(
   }
 
   const notebook = await loadNotebook(sql, ctx.conversationId, ctx.userId)
-  const spent = { micros: 0n }
+  const spent = { micros: quote.cost }
   const round = await countPriorGateRuns(sql, ctx.turnId, 'choose-hotel')
   let pathText: string
   try {

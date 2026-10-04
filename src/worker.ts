@@ -511,7 +511,16 @@ async function loop(
         // is not a failure, and recording it as one would make "how often
         // does the driver actually fail?" unanswerable.
         await completeTurn(sql, claim, {
-          state, agentMessage: await screenReply(sql, deps.notifier, claim, step.message),
+          state,
+          // Polish pass, section 8: an EMPTY park message means say nothing. A refresh of the
+          // flights list while she is choosing a hotel has a row to land and no business
+          // interrupting the conversation to announce it, and the alternative the author saw —
+          // "Prices refreshed." under a list of hotels, with flight chips — is the office
+          // narrating its own bookkeeping. The attachments still land; `completeTurn` writes
+          // them with or without a message.
+          agentMessage: step.message === ''
+            ? null
+            : await screenReply(sql, deps.notifier, claim, step.message),
           parked: true, spendMicros: turnSpend.total,
           attachments: buildAttachmentRows(step.attachments),
         })

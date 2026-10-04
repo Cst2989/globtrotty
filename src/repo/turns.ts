@@ -174,8 +174,9 @@ export async function completeTurn(
      * rather than the `agentMessage` insert's implicit `now()` default, so it
      * sorts strictly after the agent's text within this same transaction
      * (`now()` is frozen for the whole transaction; `clock_timestamp()` is
-     * not). Written only when `agentMessage` is non-null — an attachment with
-     * no agent message to follow is not a shape this plan produces.
+     * not). Written whether or not there is an `agentMessage`: the polish pass
+     * made a silent turn a real shape (a background refresh that has a new
+     * `results` row to land and nothing to say about it).
      */
     attachments?: { role: 'results' | 'choices'; content: string }[]
   },
@@ -194,12 +195,18 @@ export async function completeTurn(
       await tx`insert into messages (conversation_id, user_id, turn_id, role, content)
                values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
                        'agent', ${opts.agentMessage})`
+    }
 
-      for (const a of opts.attachments ?? []) {
-        await tx`insert into messages (conversation_id, user_id, turn_id, role, content, created_at)
-                 values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
-                         ${a.role}, ${a.content}, clock_timestamp())`
-      }
+    // Outside the `if` since the polish pass: a SILENT turn is now a real shape. A refresh of
+    // the flights list while she is choosing a hotel has a new `results` row to land and
+    // nothing worth saying about it, and dropping the row with the sentence would leave the
+    // pane showing the prices the turn just replaced. The ordering argument above is unchanged
+    // either way — `clock_timestamp()` puts each attachment strictly after the agent's text
+    // when there is one.
+    for (const a of opts.attachments ?? []) {
+      await tx`insert into messages (conversation_id, user_id, turn_id, role, content, created_at)
+               values (${claim.conversationId}, ${claim.userId}, ${claim.turnId},
+                       ${a.role}, ${a.content}, clock_timestamp())`
     }
 
     // `case when status = 'escalated' then 'escalated' else ...`: an escalation

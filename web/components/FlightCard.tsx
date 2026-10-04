@@ -68,16 +68,18 @@ export function durationWords(minutes: number): string {
 }
 
 /**
- * Pass 3: an expired card's Select says why it is disabled rather than just being dead. Pressing
- * it could never have worked anyway — the freshness gate (src/gates/freshnessGate.ts) rejects a
- * proposal built on an expired price.
+ * The one state that still disables Select is "another choice is already in flight" — one press
+ * is one instruction, and a second would be refused with a 409 anyway.
  *
- * `UPDATING` is the ordinary case and lasts a few seconds: the pane re-runs the search by itself
- * the moment it notices the prices have aged out. `STALE` is what is left when that re-run
- * failed, which is the one state with nothing useful to offer her but the truth.
+ * An EXPIRED price no longer does. The author could not select anything on her screen, because
+ * every card had aged out and every Select was dead with "Refresh prices first" on it; the
+ * button was the office asking her to fix its bookkeeping before it would listen. Pressing
+ * Select means "I want this one", and the handler answers it by re-quoting that very option
+ * first (`quoteForChoice`, src/agents/choose.ts) and only saying no if it has really gone.
+ *
+ * `UPDATING` is what the price reads while an explicit `Refresh prices` is in flight.
  */
 const UPDATING = 'Updating prices'
-const STALE = 'These prices are out of date'
 
 /** How many carrier logos fit on one leg's line before the rest become a `+N`. */
 const MAX_LOGOS = 2
@@ -210,8 +212,8 @@ export function FlightCard(
           <button
             type="button"
             className="btn btn-primary"
-            disabled={item.expired || selectDisabled}
-            title={updating ? UPDATING : (item.expired ? STALE : undefined)}
+            disabled={selectDisabled}
+            title={updating ? UPDATING : undefined}
             onClick={() => onChoose(item.sourceId)}
           >
             Select
