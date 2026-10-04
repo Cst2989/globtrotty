@@ -40,8 +40,8 @@ function exists(file: string): boolean {
 describe('cspFor', () => {
   const csp = cspFor('https://fhqsiydgoqmwvihqsbap.supabase.co')
 
-  it('restricts images to self and data URIs', () => {
-    expect(csp).toContain("img-src 'self' data:")
+  it('restricts images to self, data URIs and the Kiwi logo host', () => {
+    expect(csp).toContain("img-src 'self' data: https://images.kiwi.com")
   })
 
   it('forbids framing', () => {

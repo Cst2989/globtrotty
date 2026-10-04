@@ -1,8 +1,10 @@
-import { expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type postgres from 'postgres'
 import tokyo from './fixtures/jev/tokyo.json' with { type: 'json' }
 import { withTestDb, describeDb } from './helpers/db.js'
-import { makeIntake } from '../src/agents/intake.js'
+import { makeIntake, replyText, tripTitle } from '../src/agents/intake.js'
+import type { TripBrief } from '../src/intake/brief.js'
+import { nextSteps } from '../src/agents/nextSteps.js'
 import { MockSupplier } from '../src/supplier/mock.js'
 import { LogNotifier } from '../src/notify.js'
 import { DEFAULT_LIMITS } from '../src/limits.js'
@@ -71,9 +73,15 @@ describeDb('makeIntake', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.attachments).toHaveLength(1)
+      // F2: the results row, then the next-step chips.
+      expect(step.attachments!.map((a) => a.role)).toEqual(['results', 'choices'])
       const attachment = step.attachments![0]!
-      expect(attachment.role).toBe('results')
+      const chips = step.attachments![1]!.content as { questionId: string; options: { id: string; label: string }[] }
+      expect(chips.questionId).toBe('next')
+      expect(chips.options.map((o) => o.id)).toEqual(['direct_only', 'cheapest', 'day_earlier', 'change_dates'])
+      expect(chips.options.map((o) => o.label)).toEqual([
+        'Direct flights only', 'Cheapest first', 'Leave a day earlier', 'Change the dates',
+      ])
       const content = attachment.content as {
         kind: string
         query: { from?: string; to?: string; outbound: string; inbound: string | null; adults: number; cabin?: string }
@@ -118,11 +126,14 @@ describeDb('makeIntake', () => {
         adults: 2, cabinClass: 'PremiumEconomy', currency: 'EUR', maxStops: null,
       })
 
-      // Fixed English, built only from the brief's own enum/ISO values and the place table.
+      // F1: fixed English, built only from the brief's own enum/ISO values and the place table —
+      // and the assumption sentence is `assumptionSentence`'s, word for word the line the
+      // results pane prints under its summary bar.
       expect(step.message).toBe(
-        'Here are flights for 2 adults, Barcelona to Tokyo, 19 Nov to 6 Dec, premium economy. '
-        + 'I assumed: the year 2026; leaving a day early so you arrive on the 20th. '
-        + 'Change anything with the chips above the list or just tell me.',
+        "Great, let's start with flights. Barcelona to Tokyo, 19 Nov to 6 Dec, 2 adults, "
+        + 'premium economy on the long legs. '
+        + 'Assumed: the year 2026, and leaving on the 19th to arrive by the 20th. '
+        + "Pick one and I'll line up hotels next.",
       )
 
       // The notebook picked up what the brief resolved, in its own key vocabulary.
@@ -149,8 +160,12 @@ describeDb('makeIntake', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
+      // A real QUESTION card, and only that: a choice card is the office waiting for an answer,
+      // so it gets no next-step chips offering her something else to do instead (F2's list of
+      // replies that attach them deliberately excludes this path).
       expect(step.attachments).toHaveLength(1)
       expect(step.attachments![0]!.role).toBe('choices')
+      expect((step.attachments![0]!.content as { questionId: string }).questionId).toBe('origin')
       expect(fetchImpl).toHaveBeenCalledTimes(1) // no rerank call: the turn never reached a search
       expect(searchSpy).not.toHaveBeenCalled()
 
@@ -272,5 +287,71 @@ describeDb('makeIntake', () => {
       const results = await sql`select 1 from tool_results where conversation_id = ${s.conversationId}`
       expect(results).toHaveLength(0)
     })
+  })
+})
+
+/**
+ * Results UI pass 2, F1 and F2. `replyText` and the chip sets are pure, so they are pinned here
+ * without a database — the DB cases above only prove the one real brief reaches them.
+ */
+describe('replyText', () => {
+  const BRIEF: TripBrief = {
+    origin: 'BCN', destination: 'TYO', sideTrip: null,
+    outbound: '2026-11-19', inbound: '2026-12-06', adults: 2,
+    cabinLong: 'premium_economy', cabinShort: 'economy',
+    maxStops: null, hotels: true, arriveBy: true, assumptions: [],
+  }
+
+  it('opens with what is happening and closes with what happens after she picks', () => {
+    expect(replyText(BRIEF, 10)).toBe(
+      "Great, let's start with flights. Barcelona to Tokyo, 19 Nov to 6 Dec, 2 adults, "
+      + "premium economy on the long legs. Pick one and I'll line up hotels next.",
+    )
+  })
+
+  it('says "one way" where the return date would be', () => {
+    expect(replyText({ ...BRIEF, inbound: null }, 10)).toContain('19 Nov, one way, 2 adults')
+  })
+
+  it('says "1 adult" in the singular', () => {
+    expect(replyText({ ...BRIEF, adults: 1 }, 10)).toContain('1 adult,')
+  })
+
+  it('carries the assumption sentence the results pane prints, word for word', () => {
+    const withAssumptions = replyText({
+      ...BRIEF,
+      assumptions: [
+        { field: 'year', value: '2026', reason: 'year' },
+        { field: 'outbound', value: '2026-11-19', reason: 'defaulted' },
+      ],
+    }, 10)
+    expect(withAssumptions).toContain('Assumed: the year 2026, and leaving on the 19th to arrive by the 20th.')
+  })
+
+  it('never tells her to pick one when there was nothing to pick', () => {
+    const empty = replyText(BRIEF, 0)
+    expect(empty).toContain('I could not find flights for that.')
+    expect(empty).toContain('Try leaving a day earlier, or give me different dates.')
+    expect(empty).not.toContain('Pick one')
+  })
+
+  it('builds the title from the brief alone', () => {
+    expect(tripTitle(BRIEF)).toBe('Barcelona to Tokyo, 19 Nov to 6 Dec')
+  })
+})
+
+describe('nextSteps', () => {
+  it('keeps every set inside spec section 3\'s 2-to-4 range, which the schema enforces', () => {
+    for (const set of ['flights', 'zero_flights', 'filter', 'hotels', 'zero_hotels', 'summary'] as const) {
+      const content = nextSteps(set)
+      expect(content.questionId).toBe('next')
+      expect(content.options.length).toBeGreaterThanOrEqual(2)
+      expect(content.options.length).toBeLessThanOrEqual(4)
+      // Snake_case ids, and a label that reads as a message she could have typed.
+      for (const option of content.options) {
+        expect(option.id).toMatch(/^[a-z][a-z0-9_]*$/)
+        expect(option.label.length).toBeGreaterThan(0)
+      }
+    }
   })
 })

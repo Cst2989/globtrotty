@@ -1,4 +1,5 @@
 import { parseChoices } from '@/src/results'
+import { NEXT_QUESTION_ID } from '@/src/agents/nextSteps'
 import { ChoiceCard, ChoiceCardLive } from './ChoiceCard'
 
 export type MessageRole = 'user' | 'agent' | 'action' | 'results' | 'choices'
@@ -34,6 +35,11 @@ export type MessageBubbleProps = {
  * React children, never as raw HTML): `src/results.ts`'s own doc comment
  * establishes that it is built entirely from our own masked prose plus
  * ids/enums.
+ *
+ * A `choices` row whose `questionId` is `'next'` (results UI pass 2, F3) renders as a row of
+ * small ghost chips instead of the question card: the office asked nothing, these are the three
+ * or four next steps it is offering, and a card with a question heading would claim it is waiting
+ * for one of them. Every OTHER `questionId` is a real question and keeps the card.
  */
 export function MessageBubble({ role, content, conversationId, pending }: MessageBubbleProps) {
   if (role === 'choices') {
@@ -51,17 +57,19 @@ export function MessageBubble({ role, content, conversationId, pending }: Messag
         </div>
       )
     }
+    const variant = parsed.questionId === NEXT_QUESTION_ID ? 'chips' : 'card'
     return (
-      <div className="message-row" data-role="choices">
+      <div className="message-row" data-role="choices" data-variant={variant}>
         {conversationId ? (
           <ChoiceCardLive
             conversationId={conversationId}
             questionId={parsed.questionId}
             question={parsed.question}
             options={parsed.options}
+            variant={variant}
           />
         ) : (
-          <ChoiceCard question={parsed.question} options={parsed.options} onPick={() => {}} />
+          <ChoiceCard question={parsed.question} options={parsed.options} variant={variant} onPick={() => {}} />
         )}
       </div>
     )

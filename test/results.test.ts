@@ -31,6 +31,21 @@ describe('results rows', () => {
     expect(masked!.filter!.airlines).toEqual(['LH?X'])
   })
 
+  // Results UI pass 2, D: the rail's bag minimums and hotel rating are stored `Filter` fields,
+  // so the schema is where their range is settled — not the UI that happens to write them.
+  it('round-trips the bag minimums and the hotel rating, bounded', () => {
+    const row = (filter: unknown) => JSON.stringify({
+      kind: 'flights',
+      query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+      sourceIds: ['kiwi:a'], assumptions: [], filter,
+    })
+    const parsed = parseResults(row({ minCabinBags: 1, minCheckedBags: 2, minRating: 4 }))
+    expect(parsed!.filter).toEqual({ minCabinBags: 1, minCheckedBags: 2, minRating: 4 })
+    expect(parseResults(row({ minCabinBags: -1 }))).toBeNull()
+    expect(parseResults(row({ minCheckedBags: 1.5 }))).toBeNull()
+    expect(parseResults(row({ minRating: 6 }))).toBeNull()
+  })
+
   it('rejects extra fields and user text in a choices row', () => {
     // Two options throughout this file now: `options` is `.min(2).max(4)` (spec section 3's
     // range, C2), so a one-option fixture would be rejected for the wrong reason and this

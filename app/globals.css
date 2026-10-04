@@ -1132,32 +1132,308 @@ select {
   gap: 0.75rem;
 }
 
-.assumption-chips {
+/*
+ * The summary bar (results UI pass 2, B) replaced a row of dashed "Assumed: …"
+ * chips: static pills saying what was searched for, with every guess on one
+ * muted line under them.
+ */
+.summary-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.summary-pills {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-.assumption-chip {
-  padding: 0.3rem 0.8rem;
+.summary-pill {
+  padding: 0.3rem 0.75rem;
   border-radius: var(--r-pill);
-  border: 1px dashed var(--line-strong);
-  background: var(--surface);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.summary-pill:first-child {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  border-color: var(--line-strong);
+}
+
+.summary-assumed {
+  margin: 0;
   color: var(--ink-3);
   font-size: 0.85rem;
 }
 
-/* ---------- filter chips ---------- */
+/* ---------- results layout: the filter rail beside the list ---------- */
 
-.filter-chips {
+/*
+ * A 240px rail to the left of the list at wide widths; below 1100px the grid
+ * collapses to one column and the rail becomes a compact wrapping strip ABOVE
+ * the list (it is first in the DOM, so nothing has to move for that).
+ */
+.results-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.results-main {
+  min-width: 0;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.filter-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.filter-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 0.5rem;
 }
+
+.filter-rail-title {
+  margin: 0;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.filter-rail-head .link-button {
+  font-size: 0.8rem;
+}
+
+.filter-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.filter-group-title {
+  padding: 0;
+  color: var(--ink-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.filter-radio,
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.filter-radio:hover,
+.filter-check:hover {
+  color: var(--ink);
+}
+
+.filter-radio input,
+.filter-check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.filter-check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-check-count {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.bag-stepper-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.bag-stepper-value {
+  min-width: 1.25rem;
+  text-align: center;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.bag-stepper .btn {
+  min-height: 26px;
+  width: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+}
+
+.filter-price-cap {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-price-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+@media (max-width: 1100px) {
+  .results-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-rail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.75rem 1.5rem;
+  }
+
+  .filter-rail-head {
+    flex-basis: 100%;
+  }
+
+  .filter-group {
+    flex: 0 1 auto;
+  }
+
+  /* Four radios down a column is fine in a rail and wasteful in a strip. */
+  .filter-group:has(.filter-radio) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+  }
+
+  .filter-group:has(.filter-radio) .filter-group-title {
+    flex-basis: 100%;
+  }
+
+  .filter-group:has(.filter-check) {
+    flex-basis: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
+  }
+
+  .filter-group:has(.filter-check) .filter-check {
+    flex: 0 1 auto;
+  }
+
+  .filter-group:has(.filter-check) .filter-check-name {
+    flex: 0 1 auto;
+  }
+
+  .filter-group:has(.filter-price-slider) {
+    flex: 1 1 14rem;
+  }
+}
+
+/* ---------- sort tabs ---------- */
+
+/*
+ * Three ways to read the same list, each saying what it would lead with, so
+ * the row is a comparison and not just a control. `Best` is the stored order
+ * (Jev's own re-rank against the brief), which is why it reorders nothing.
+ */
+.sort-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.sort-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  text-align: left;
+  cursor: pointer;
+  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+}
+
+.sort-tab:hover {
+  color: var(--ink-2);
+}
+
+.sort-tab[aria-pressed='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.sort-tab-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sort-tab-summary {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- filter chips ---------- */
 
 .chip {
   display: inline-flex;
@@ -1187,21 +1463,298 @@ select {
   color: var(--ink);
 }
 
-.chip-select {
-  display: inline-flex;
+.chip-sm {
+  min-height: 32px;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
 }
 
-.chip-select select {
-  min-height: 40px;
-  padding: 0 0.75rem;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
+/* ---------- flight cards (results UI pass 2) ---------- */
+
+/*
+ * One card per itinerary, read left to right: a row per leg (time over code,
+ * a rule carrying the duration above it and the carrier logo on it, stops
+ * under it, arrival time over code), bags and warnings under the rows, and the
+ * money plus the one button in a column on the right. The point of the shape
+ * is vertical comparison — times, durations and prices line up down the list,
+ * which a single flat line of text could never do.
+ */
+.flight-card {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
   background: var(--surface);
-  color: var(--ink-2);
-  font-size: 0.85rem;
+  transition: border-color 180ms var(--ease), background-color 180ms var(--ease);
 }
 
-/* ---------- flight / hotel lists ---------- */
+.flight-card:hover {
+  border-color: var(--line-strong);
+}
+
+.flight-card[data-chosen='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flight-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.flight-card-ribbon {
+  align-self: flex-start;
+  padding: 0.15rem 0.7rem;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.leg-row {
+  display: grid;
+  grid-template-columns: 5rem auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 0.9rem;
+}
+
+.leg-label {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.leg-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 3.4rem;
+}
+
+.leg-end-arrive {
+  align-items: flex-end;
+}
+
+.leg-time {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.leg-day-offset {
+  margin-left: 0.1rem;
+  color: var(--accent);
+  font-size: 0.65em;
+  font-weight: 600;
+}
+
+.leg-code {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.leg-middle {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.leg-duration {
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rule itself is the two pseudo-elements; the logos sit between them, so
+ * they read as being ON the line rather than next to it. */
+.leg-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.leg-rule::before,
+.leg-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.leg-carriers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.leg-carriers-more {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+
+/*
+ * White, not a surface token: these are the carriers' own marks, drawn in dark
+ * ink for a light background, and on `--surface-2` half of them disappeared
+ * into the card. A 2px inset keeps the mark off the edge of the disc.
+ */
+.airline-logo {
+  display: block;
+  border-radius: 50%;
+  padding: 2px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.airline-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.leg-stops {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.leg-stops[data-direct='true'] {
+  color: var(--ok);
+}
+
+.flight-card-extras {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.flight-bags {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.flight-bag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.flight-bag[data-included='false'] {
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+
+.flight-self-transfer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
+.flight-card-side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.35rem;
+  padding-left: 1.25rem;
+  border-left: 1px solid var(--line);
+  min-width: 9.5rem;
+}
+
+.flight-card-price {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.flight-card-per,
+.flight-card-age {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+}
+
+.flight-card-side .btn {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 760px) {
+  .flight-card {
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+
+  .flight-card-side {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-left: 0;
+    padding-top: 0.75rem;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+
+  .flight-card-side .btn {
+    width: auto;
+    margin-top: 0;
+    order: 3;
+  }
+
+  .flight-card-age {
+    order: 4;
+    width: 100%;
+  }
+
+  .leg-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .leg-label {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- hotel list ---------- */
 
 .flight-list,
 .hotel-list {
@@ -1236,33 +1789,15 @@ select {
   gap: 0.25rem;
 }
 
-.result-row-airlines,
 .result-row-name {
   font-weight: 500;
   overflow-wrap: anywhere;
-}
-
-.result-row-times {
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-2);
 }
 
 .result-row-meta,
 .result-row-age {
   color: var(--ink-3);
   font-size: 0.85rem;
-}
-
-.result-row-bags {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--ink-3);
-  font-size: 0.85rem;
-}
-
-.result-row-bags svg {
-  flex-shrink: 0;
 }
 
 .result-row-side {
@@ -1320,6 +1855,25 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/*
+ * The next-step chips (results UI pass 2, F3). Deliberately the `.suggestion`
+ * look the landing page already uses for "here is something you could say":
+ * nothing was asked, so these must not read as a question waiting for an
+ * answer the way `.choice-card` does.
+ */
+.next-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 85%;
+}
+
+.next-chips .suggestion {
+  min-height: 32px;
+  padding: 0 0.75rem;
+  font-size: 0.82rem;
 }
 
 /* ---------- pinned summary ---------- */
@@ -1505,6 +2059,166 @@ select {
 
   .split-pane-results {
     flex: 1;
+  }
+}
+
+/* ---------- results skeleton (results UI pass 2, E) ---------- */
+
+/*
+ * The shape the answer will arrive in, shown the instant a search starts. The
+ * shimmer is behind `prefers-reduced-motion: no-preference`; with the
+ * preference set these stay flat blocks, which still read as "a list is
+ * coming".
+ */
+.results-skeleton .filter-rail,
+.results-skeleton .sort-tabs {
+  opacity: 0.55;
+}
+
+.results-skeleton-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+
+.skeleton-card {
+  pointer-events: none;
+}
+
+.skeleton-pill,
+.skeleton-line,
+.skeleton-tab {
+  display: block;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+}
+
+.skeleton-pill {
+  height: 26px;
+  width: 7rem;
+}
+
+.skeleton-pill-wide {
+  width: 13rem;
+}
+
+.skeleton-pill-narrow {
+  width: 4.5rem;
+}
+
+.skeleton-tab {
+  height: 34px;
+  width: 6rem;
+  margin-bottom: 0.4rem;
+}
+
+.skeleton-line {
+  height: 14px;
+  width: 100%;
+}
+
+.skeleton-line-title {
+  height: 11px;
+  width: 4.5rem;
+}
+
+.skeleton-line-short {
+  width: 55%;
+}
+
+.skeleton-line-leg {
+  height: 34px;
+  border-radius: var(--r-control);
+}
+
+.skeleton-line-price {
+  height: 26px;
+  width: 6rem;
+}
+
+.results-skeleton .filter-rail {
+  gap: 0.6rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-pill,
+  .skeleton-line,
+  .skeleton-tab {
+    background: linear-gradient(
+      90deg,
+      var(--surface-2) 0%,
+      var(--surface-3) 50%,
+      var(--surface-2) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1400ms var(--ease) infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+/* ---------- view transitions (results UI pass 2, E) ---------- */
+
+/*
+ * The landing cross-fades into the split instead of cutting to it
+ * (`withViewTransition`, web/components/transition.ts). Each of the three
+ * regions is named so the browser pairs it across the navigation rather than
+ * cross-fading the whole document as one image.
+ *
+ * `.rail` is named only at desktop widths: below 901px it is a `position:
+ * fixed` drawer parked off-screen with a transform, and capturing that as a
+ * transition pair flashes it into view.
+ */
+/*
+ * A `view-transition-name` has to be UNIQUE in the document — a duplicate makes
+ * the browser skip the whole transition — and `.thread` lives INSIDE
+ * `.split-pane-chat` whenever the split is on screen. So the pane carries the
+ * name when it exists, and a bare thread (a conversation with no results and
+ * nothing running) carries it only as a direct child of `.shell-main`, which
+ * is the one place it appears without a pane around it.
+ */
+.split-pane-chat,
+.shell-main > .thread {
+  view-transition-name: thread;
+}
+
+.split-pane-results {
+  view-transition-name: results;
+}
+
+@media (min-width: 901px) {
+  .rail {
+    view-transition-name: rail;
+  }
+}
+
+::view-transition-old(thread),
+::view-transition-new(thread),
+::view-transition-old(results),
+::view-transition-new(results),
+::view-transition-old(rail),
+::view-transition-new(rail) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--ease);
+}
+
+/*
+ * `withViewTransition` already skips the API under this preference; this is
+ * the second half of the same promise, for a transition started any other way
+ * (a browser-driven back/forward, a future caller that forgets).
+ */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }
 

@@ -18,6 +18,9 @@ import type { ResultItemLite } from '@/web/data'
  * unaffected. `maxPriceMinor` applies to both kinds — it compares the
  * item's own total price, not anything inside `.flight`/`.hotel`.
  *
+ * `minCabinBags`/`minCheckedBags` read the fare's own included allowance; `minRating` is the
+ * hotel-only mirror of the same idea (results UI pass 2, D).
+ *
  * This module MIRRORS `src/intake/filter.ts` field for field, and the
  * ledger's deferred reconciliation is now closed on both: the departure
  * windows (Task 10) and the stops rule (the final review's I3 — every leg,
@@ -35,7 +38,20 @@ function matchesFilter(item: ResultItemLite, filter: Filter): boolean {
   }
 
   const flight = item.flight
-  if (!flight) return true // nothing else below applies to a hotel item
+  if (!flight) {
+    // `minRating` is the one filter that runs the other way round from the flight fields: only a
+    // stay can answer it, and a stay with NO rating is excluded, because "4 stars and up" is a
+    // claim about the place and an unrated one has not made it. Mirrors
+    // `src/intake/filter.ts`.
+    if (filter.minRating !== undefined) {
+      const rating = item.hotel?.rating ?? null
+      if (rating === null || rating < filter.minRating) return false
+    }
+    return true // nothing else below applies to a hotel item
+  }
+
+  if (filter.minCabinBags !== undefined && flight.bags.cabin < filter.minCabinBags) return false
+  if (filter.minCheckedBags !== undefined && flight.bags.checked < filter.minCheckedBags) return false
 
   const stops = worstLegStops(flight)
   if (filter.nonstop && stops !== 0) return false
@@ -95,28 +111,6 @@ function inWindow(hour: number, window: 'morning' | 'afternoon' | 'evening'): bo
   return hour >= 18
 }
 
-/**
- * Five ascending price points between `min` and `max` (inclusive of `max`),
- * in minor units as decimal strings — `FilterChips`'s price cap `<select>`:
- * "five steps from the min to the max price in the list". Deduplicated (a
- * narrow range can otherwise repeat the same rounded step); empty when
- * there is nothing to step over (no items, or every item the same price as
- * 0).
- */
-export function priceSteps(min: bigint, max: bigint): string[] {
-  if (max <= 0n || max <= min) return max > 0n ? [max.toString()] : []
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (let i = 1; i <= 5; i++) {
-    const v = (min + ((max - min) * BigInt(i)) / 5n).toString()
-    if (!seen.has(v)) {
-      seen.add(v)
-      out.push(v)
-    }
-  }
-  return out
-}
-
 /** The `[min, max]` of `priceMinor` across `items`, as bigints — `{ min: 0n, max: 0n }` for an empty list. */
 export function priceRange(items: ResultItemLite[]): { min: bigint; max: bigint } {
   if (items.length === 0) return { min: 0n, max: 0n }
@@ -128,4 +122,71 @@ export function priceRange(items: ResultItemLite[]): { min: bigint; max: bigint 
     if (p > max) max = p
   }
   return { min, max }
+}
+
+/**
+ * How the list is ordered. `best` is the order the `results` row itself stores — Jev's own
+ * re-rank (src/intake/rank.ts), which is the only one of the three that knows anything about the
+ * brief — so it is the default and it is deliberately NOT a sort at all.
+ */
+export type Sort = 'best' | 'cheapest' | 'fastest'
+
+/**
+ * `items`, reordered. Never mutates its argument; `best` returns a copy in the stored order so
+ * every caller can treat the result the same way.
+ *
+ * `fastest` reads `flight.durationMinutes`, the WHOLE itinerary's duration as the supplier gave
+ * it — not the per-leg figures, which for a return trip are naive-local differences carrying a
+ * timezone skew (see `LegLite.durationMinutes`). An item with no flight payload sorts as
+ * duration 0; a hotel list never offers this tab.
+ *
+ * Ties keep their stored order: `Array.prototype.sort` is stable, so two identically priced
+ * flights stay in Jev's own order relative to each other, which is the most useful tiebreak
+ * available and the least surprising.
+ */
+export function sortItemsLite(items: ResultItemLite[], sort: Sort): ResultItemLite[] {
+  const copy = [...items]
+  if (sort === 'cheapest') {
+    return copy.sort((a, b) => {
+      const pa = BigInt(a.priceMinor)
+      const pb = BigInt(b.priceMinor)
+      return pa < pb ? -1 : pa > pb ? 1 : 0
+    })
+  }
+  if (sort === 'fastest') {
+    return copy.sort((a, b) => (a.flight?.durationMinutes ?? 0) - (b.flight?.durationMinutes ?? 0))
+  }
+  return copy
+}
+
+/** The first item each sort would put at the top — what a sort tab shows as its own summary. */
+export function leadersBySort(items: ResultItemLite[], sorts: Sort[]): Map<Sort, ResultItemLite | null> {
+  return new Map(sorts.map((sort) => [sort, sortItemsLite(items, sort)[0] ?? null]))
+}
+
+/** The count of items in `items` whose flight lists `code` as a carrier — the rail's airline counts. */
+export function airlineCounts(items: ResultItemLite[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    for (const code of item.flight?.airlines ?? []) counts.set(code, (counts.get(code) ?? 0) + 1)
+  }
+  return counts
+}
+
+/** Carrier code -> the airline's name, as `web/data.ts` resolved it; code as its own fallback. */
+export function airlineNamesOf(items: ResultItemLite[]): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const item of items) {
+    const flight = item.flight
+    if (!flight) continue
+    flight.airlines.forEach((code, i) => {
+      if (!names.has(code)) names.set(code, flight.airlineNames[i] ?? code)
+    })
+  }
+  return names
+}
+
+/** True when `filter` narrows anything at all — what the rail's "Clear filters" link keys on. */
+export function isFilterSet(filter: Filter): boolean {
+  return Object.values(filter).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined))
 }

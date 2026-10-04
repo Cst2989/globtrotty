@@ -234,6 +234,24 @@ export function assembleBrief(
   outboundOverride?: string,
 ): IntakeOutcome {
   const assumptions: Assumption[] = []
+  /**
+   * Bug A (results UI pass 2): `assumptions` is a list of DISTINCT things we guessed, not a log
+   * of every place a guess was used. The year is the case that proved it — a round trip resolves
+   * two bare dates ("20th of nov", "sunday 6th of december"), each one credits
+   * `resolveDate`'s nearest-future-year rule, and the pane rendered "Assumed: 2026" twice.
+   * Deduped by the triple (field, reason, value), FIRST entry wins.
+   *
+   * That triple only collapses the two year entries because a `reason: 'year'` assumption now
+   * carries the YEAR as its `value` ('2026'), not the whole resolved ISO date: the ISO dates
+   * differ (2026-11-19 vs 2026-12-06) while the assumption they evidence is the same one.
+   * Every reader already only wanted the year — `assumptionChipText`
+   * (web/components/SummaryBar.tsx) and `assumptionPhrase` (src/intake/assumptions.ts) both
+   * `.slice(0, 4)` it — so nothing downstream loses information.
+   */
+  const pushAssumption = (a: Assumption): void => {
+    if (assumptions.some((x) => x.field === a.field && x.reason === a.reason && x.value === a.value)) return
+    assumptions.push(a)
+  }
 
   // The destination is read FIRST even though the origin card is offered first, because the
   // origin card has to be able to exclude it (I4) — and because `origin === destination` is
@@ -253,7 +271,7 @@ export function assembleBrief(
     // where she is going is not a usable origin either.
     if (lastOrigin && lastOrigin !== destination) {
       origin = lastOrigin
-      assumptions.push({ field: 'origin', value: lastOrigin, reason: 'defaulted' })
+      pushAssumption({ field: 'origin', value: lastOrigin, reason: 'defaulted' })
     } else {
       return {
         kind: 'choices', questionId: 'origin', question: QUESTION_TEXT.origin,
@@ -299,14 +317,14 @@ export function assembleBrief(
       return { kind: 'choices', questionId: 'outbound', question: QUESTION_TEXT.outbound, options: dateOptions(candidates, today) }
     }
     outbound = resolved.iso
-    if (resolved.assumed === 'year') assumptions.push({ field: 'year', value: resolved.iso, reason: 'year' })
+    if (resolved.assumed === 'year') pushAssumption({ field: 'year', value: resolved.iso.slice(0, 4), reason: 'year' })
   }
 
   const arriveBy = noulOf(answers, 'arrive_by') > NOUL_GATE
   if (!outboundOverride && arriveBy && isLongHaul(origin, destination)) {
     const adjusted = addDays(outbound, -1)
     outbound = adjusted
-    assumptions.push({ field: 'outbound', value: adjusted, reason: 'defaulted' })
+    pushAssumption({ field: 'outbound', value: adjusted, reason: 'defaulted' })
   }
 
   const isOneWay = stated(choiceOf(answers, 'trip_type')) === 'one_way'
@@ -317,21 +335,21 @@ export function assembleBrief(
     const retResolved = retMonth && retDay ? resolveDate({ month: retMonth, day: Number(retDay), year: null }, today) : null
     if (retResolved) {
       inbound = retResolved.iso
-      if (retResolved.assumed === 'year') assumptions.push({ field: 'year', value: retResolved.iso, reason: 'year' })
+      if (retResolved.assumed === 'year') pushAssumption({ field: 'year', value: retResolved.iso.slice(0, 4), reason: 'year' })
     } else {
       inbound = addDays(outbound, 7)
-      assumptions.push({ field: 'inbound', value: inbound, reason: 'defaulted' })
+      pushAssumption({ field: 'inbound', value: inbound, reason: 'defaulted' })
     }
   }
 
   const adultsRaw = stated(choiceOf(answers, 'party_adults'))
   const adults = adultsRaw ? Number(adultsRaw) : 1
-  if (!adultsRaw) assumptions.push({ field: 'adults', value: '1', reason: 'unstated' })
+  if (!adultsRaw) pushAssumption({ field: 'adults', value: '1', reason: 'unstated' })
 
   const cabinOf = (key: string): Cabin => {
     const v = stated(choiceOf(answers, key))
     if (v) return v as Cabin
-    assumptions.push({ field: key, value: 'economy', reason: 'unstated' })
+    pushAssumption({ field: key, value: 'economy', reason: 'unstated' })
     return 'economy'
   }
   const cabinLong = cabinOf('cabin_long')

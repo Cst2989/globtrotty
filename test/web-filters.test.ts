@@ -1,7 +1,10 @@
-// Plan 5, Task 9. `applyFilterLite`/`priceSteps`/`priceRange` are pure, so
-// they are tested directly here, no DB and no rendering required.
+// Plan 5, Task 9. `applyFilterLite`/`priceRange` and (results UI pass 2, D) the sort and rail
+// helpers are pure, so they are tested directly here, no DB and no rendering required.
 import { describe, expect, it } from 'vitest'
-import { applyFilterLite, priceSteps, priceRange } from '../web/filters.js'
+import {
+  applyFilterLite, priceRange, sortItemsLite, leadersBySort, airlineCounts, airlineNamesOf,
+  isFilterSet,
+} from '../web/filters.js'
 import type { ResultItemLite } from '../web/data.js'
 // Task 10: reconciling this module's departure windows with
 // `src/intake/filter.ts`'s own ones (see both files' `inWindow`).
@@ -20,13 +23,13 @@ function flight(overrides: FlightOverrides = {}): ResultItemLite {
     sourceId: 'F1', name: 'Qatar Airways', priceMinor: '45600', currency: 'EUR',
     fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
     flight: {
-      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'] },
+      outbound: { from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00', via: ['DOH'], viaCities: ['Doha'], carriers: ['QR'], carrierNames: ['Qatar Airways'], durationMinutes: 600 },
       inbound: null,
       stops: 1,
       inboundStops: null,
       durationMinutes: 855,
-      airlines: ['QR'],
-      bags: { cabin: 1, checked: 1 },
+      airlines: ['QR'], airlineNames: ['Qatar Airways'],
+      bags: { personal: 1, cabin: 1, checked: 1 },
       selfTransfer: false,
       ...flightOverrides,
     },
@@ -67,8 +70,8 @@ describe('applyFilterLite', () => {
   })
 
   it('departure window matches the outbound leg\'s local hour, read without parsing a Date', () => {
-    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [] } } })
-    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+    const morning = flight({ sourceId: 'FA', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-19T09:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
+    const evening = flight({ sourceId: 'FB', flight: { outbound: { from: 'A', to: 'B', departureLocal: '2026-11-19T21:00:00', arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
     expect(applyFilterLite([morning, evening], { departure: 'morning' }).map((i) => i.sourceId)).toEqual(['FA'])
     expect(applyFilterLite([morning, evening], { departure: 'evening' }).map((i) => i.sourceId)).toEqual(['FB'])
   })
@@ -100,30 +103,6 @@ describe('applyFilterLite', () => {
   })
 })
 
-describe('priceSteps', () => {
-  it('returns five ascending steps up to and including max', () => {
-    const steps = priceSteps(0n, 10_000n)
-    expect(steps).toHaveLength(5)
-    expect(steps[steps.length - 1]).toBe('10000')
-    expect(steps.map(Number)).toEqual([2000, 4000, 6000, 8000, 10000])
-  })
-
-  it('returns a single step when min === max (and it is positive)', () => {
-    expect(priceSteps(5000n, 5000n)).toEqual(['5000'])
-  })
-
-  it('returns no steps when max is zero', () => {
-    expect(priceSteps(0n, 0n)).toEqual([])
-  })
-
-  it('never returns a step above max or below min', () => {
-    const steps = priceSteps(1234n, 9876n).map(BigInt)
-    for (const s of steps) {
-      expect(s).toBeGreaterThanOrEqual(1234n)
-      expect(s).toBeLessThanOrEqual(9876n)
-    }
-  })
-})
 
 describe('priceRange', () => {
   it('finds the min and max priceMinor across items', () => {
@@ -172,7 +151,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('both modules classify the morning (9), afternoon (14) and evening (20) hour the same way', () => {
     for (const [window, hour] of Object.entries(HOURS) as ['morning' | 'afternoon' | 'evening', number][]) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
 
       const liteMatches = applyFilterLite([lite], { departure: window }).length === 1
@@ -185,7 +164,7 @@ describe('departure window reconciliation (web/filters.ts vs src/intake/filter.t
 
   it('each hour matches exactly one of the three windows in both modules', () => {
     for (const hour of Object.values(HOURS)) {
-      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [] } } })
+      const lite = flight({ sourceId: 'X', flight: { outbound: { from: 'A', to: 'B', departureLocal: `2026-11-19T${String(hour).padStart(2, '0')}:00:00`, arrivalLocal: '2026-11-19T23:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 } } })
       const stored = storedFlight('X', hour)
       const windows: Array<'morning' | 'afternoon' | 'evening'> = ['morning', 'afternoon', 'evening']
 
@@ -212,8 +191,8 @@ describe('stops reconciliation (web/filters.ts vs src/intake/filter.ts)', () => 
     return flight({
       sourceId,
       flight: {
-        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [] },
-        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [] },
+        outbound: { from: 'BCN', to: 'TYO', departureLocal: '2026-11-19T09:00:00', arrivalLocal: '2026-11-20T10:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
+        inbound: { from: 'TYO', to: 'BCN', departureLocal: '2026-12-06T09:00:00', arrivalLocal: '2026-12-06T20:00:00', via: [], viaCities: [], carriers: [], carrierNames: [], durationMinutes: 600 },
         stops: out,
         inboundStops: back,
       },
@@ -265,5 +244,145 @@ describe('stops reconciliation (web/filters.ts vs src/intake/filter.ts)', () => 
     const storedOneWay = storedFlight('OW', 9)   // inbound null, outbound stops 0
     expect(applyFilterLite([liteOneWay], { nonstop: true })).toHaveLength(1)
     expect(applyFilter([storedOneWay], { nonstop: true })).toHaveLength(1)
+  })
+})
+
+// Results UI pass 2, D. The bag minimums and the hotel rating are on `Filter` (src/results.ts)
+// rather than in the pane's own state so a typed message can reach the same code later, which
+// means `applyFilterLite` and `applyFilter` have to agree on them the way they already agree on
+// stops and departure windows.
+describe('bag and rating filters, in both modules', () => {
+  const noBags = flight({ sourceId: 'F0', flight: { bags: { personal: 1, cabin: 0, checked: 0 } } })
+  const cabinOnly = flight({ sourceId: 'F1', flight: { bags: { personal: 1, cabin: 1, checked: 0 } } })
+  const both = flight({ sourceId: 'F2', flight: { bags: { personal: 1, cabin: 1, checked: 1 } } })
+  const items = [noBags, cabinOnly, both]
+
+  it('minCabinBags hides a fare with fewer cabin bags included', () => {
+    expect(applyFilterLite(items, { minCabinBags: 1 }).map((i) => i.sourceId)).toEqual(['F1', 'F2'])
+  })
+
+  it('minCheckedBags hides a fare with no checked bag', () => {
+    expect(applyFilterLite(items, { minCheckedBags: 1 }).map((i) => i.sourceId)).toEqual(['F2'])
+  })
+
+  it('a zero minimum is the filter being off, not a requirement of zero bags', () => {
+    expect(applyFilterLite(items, { minCabinBags: 0 })).toHaveLength(3)
+  })
+
+  it('agrees with src/intake/filter.ts over the same bag allowances', () => {
+    const stored = (sourceId: string, cabinBag: number, checkedBag: number): StoredItem => ({
+      sourceId, supplier: 'mock', kind: 'flight', name: 'f', price: money(45_600n, 'EUR'),
+      priceBasis: 'total', fetchedAt: new Date('2026-10-01T10:00:00.000Z'), ttlSeconds: 900,
+      bookingUrl: null, searchParams: null,
+      detail: {
+        kind: 'flight',
+        outbound: {
+          from: 'BCN', to: 'HND', departureLocal: '2026-11-19T07:05:00', arrivalLocal: '2026-11-20T10:20:00',
+          stops: 1, route: ['BCN', 'DOH', 'HND'], cabinClass: 'economy', carriers: ['QR'], flightNumbers: ['QR1'],
+        },
+        inbound: null,
+        baggage: { personalItem: 1, cabinBag, checkedBag },
+        totalDurationSeconds: 51_300, selfTransfer: false,
+      },
+    })
+    const storedItems = [stored('F0', 0, 0), stored('F1', 1, 0), stored('F2', 1, 1)]
+    for (const filter of [{ minCabinBags: 1 }, { minCheckedBags: 1 }, { minCabinBags: 1, minCheckedBags: 1 }]) {
+      expect(applyFilter(storedItems, filter).map((i) => i.sourceId))
+        .toEqual(applyFilterLite(items, filter).map((i) => i.sourceId))
+    }
+  })
+
+  it('minRating keeps a stay rated at or above it, and drops an unrated one', () => {
+    const hotel = (sourceId: string, rating: number | null): ResultItemLite => ({
+      sourceId, name: 'h', priceMinor: '100000', currency: 'EUR',
+      fetchedAt: '2026-10-01T10:00:00.000Z', ttlSeconds: 900,
+      hotel: { rating, nights: 7, checkIn: '2026-11-19', checkOut: '2026-11-26' },
+    })
+    const hotels = [hotel('H3', 3), hotel('H4', 4), hotel('H0', null)]
+    expect(applyFilterLite(hotels, { minRating: 3 }).map((i) => i.sourceId)).toEqual(['H3', 'H4'])
+    expect(applyFilterLite(hotels, { minRating: 4 }).map((i) => i.sourceId)).toEqual(['H4'])
+  })
+
+  it('leaves a flight alone when minRating is set, and a stay alone when the bag minimums are', () => {
+    expect(applyFilterLite(items, { minRating: 4 })).toHaveLength(3)
+  })
+})
+
+describe('sortItemsLite', () => {
+  const a = flight({ sourceId: 'A', priceMinor: '30000', flight: { durationMinutes: 900 } })
+  const b = flight({ sourceId: 'B', priceMinor: '10000', flight: { durationMinutes: 1200 } })
+  const c = flight({ sourceId: 'C', priceMinor: '20000', flight: { durationMinutes: 600 } })
+  const items = [a, b, c]
+
+  it('best keeps the stored order — Jev\'s own re-rank, which no sort here knows better than', () => {
+    expect(sortItemsLite(items, 'best').map((i) => i.sourceId)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('cheapest sorts by price ascending', () => {
+    expect(sortItemsLite(items, 'cheapest').map((i) => i.sourceId)).toEqual(['B', 'C', 'A'])
+  })
+
+  it('fastest sorts by the whole itinerary duration ascending', () => {
+    expect(sortItemsLite(items, 'fastest').map((i) => i.sourceId)).toEqual(['C', 'A', 'B'])
+  })
+
+  it('never mutates its argument', () => {
+    sortItemsLite(items, 'cheapest')
+    expect(items.map((i) => i.sourceId)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('keeps the stored order for a tie, so a tiebreak is never arbitrary', () => {
+    const tie = [flight({ sourceId: 'X', priceMinor: '10000' }), flight({ sourceId: 'Y', priceMinor: '10000' })]
+    expect(sortItemsLite(tie, 'cheapest').map((i) => i.sourceId)).toEqual(['X', 'Y'])
+  })
+
+  it('compares prices as bigints, never as numbers in a string', () => {
+    const big = [flight({ sourceId: 'BIG', priceMinor: '900000' }), flight({ sourceId: 'SMALL', priceMinor: '1000000' })]
+    expect(sortItemsLite(big, 'cheapest').map((i) => i.sourceId)).toEqual(['BIG', 'SMALL'])
+  })
+})
+
+describe('leadersBySort', () => {
+  it('names the item each sort would put first', () => {
+    const items = [
+      flight({ sourceId: 'A', priceMinor: '30000', flight: { durationMinutes: 900 } }),
+      flight({ sourceId: 'B', priceMinor: '10000', flight: { durationMinutes: 1200 } }),
+    ]
+    const leaders = leadersBySort(items, ['best', 'cheapest', 'fastest'])
+    expect(leaders.get('best')!.sourceId).toBe('A')
+    expect(leaders.get('cheapest')!.sourceId).toBe('B')
+    expect(leaders.get('fastest')!.sourceId).toBe('A')
+  })
+
+  it('is null per sort for an empty list', () => {
+    expect(leadersBySort([], ['best', 'cheapest']).get('best')).toBeNull()
+  })
+})
+
+describe('airlineCounts / airlineNamesOf', () => {
+  const items = [
+    flight({ sourceId: 'A', flight: { airlines: ['QR'], airlineNames: ['Qatar Airways'] } }),
+    flight({ sourceId: 'B', flight: { airlines: ['QR', 'LH'], airlineNames: ['Qatar Airways', 'Lufthansa'] } }),
+  ]
+
+  it('counts how many results each carrier appears on', () => {
+    expect([...airlineCounts(items).entries()].sort()).toEqual([['LH', 1], ['QR', 2]])
+  })
+
+  it('pairs each code with the name web/data.ts resolved for it', () => {
+    expect(airlineNamesOf(items).get('LH')).toBe('Lufthansa')
+  })
+})
+
+describe('isFilterSet', () => {
+  it('is false for an empty filter and for one whose only array is empty', () => {
+    expect(isFilterSet({})).toBe(false)
+    expect(isFilterSet({ airlines: [] })).toBe(false)
+  })
+
+  it('is true as soon as anything narrows the list', () => {
+    expect(isFilterSet({ nonstop: true })).toBe(true)
+    expect(isFilterSet({ minCheckedBags: 1 })).toBe(true)
+    expect(isFilterSet({ airlines: ['QR'] })).toBe(true)
   })
 })

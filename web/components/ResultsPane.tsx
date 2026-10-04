@@ -2,13 +2,16 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { Assumption, Filter } from '@/src/results'
-import type { ResultsView, ProposalRowLite, LinkLite } from '@/web/data'
-import { applyFilterLite } from '@/web/filters'
+import type { Filter } from '@/src/results'
+import type { ResultsView, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
+import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
-import { FilterChips } from './FilterChips'
+import { FilterRail } from './FilterRail'
+import { SortTabs } from './SortTabs'
 import { PinnedSummary } from './PinnedSummary'
+import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
+import { ResultsSkeleton } from './ResultsSkeleton'
 import { errorForStatus } from './ProposalCard'
 
 export type ResultsPaneProps = {
@@ -20,68 +23,14 @@ export type ResultsPaneProps = {
   now?: Date
   pending: boolean
   error: string | null
+  /**
+   * `web/data.ts`'s `skeletonMode` (E): `'full'` replaces the whole pane with a placeholder
+   * while the first search runs, `'hotels'` puts a hotel placeholder above the flights she
+   * already has while `handleChooseFlight` searches stays, `null` shows just the results.
+   */
+  skeleton?: SkeletonMode
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
-}
-
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-function parseIsoDate(iso: string): { y: number; m: number; d: number } {
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  return { y: y!, m: m!, d: d! }
-}
-
-/** One calendar day after an ISO `yyyy-mm-dd` date, computed in UTC so no local timezone enters it. */
-function addOneDay(iso: string): string {
-  const { y, m, d } = parseIsoDate(iso)
-  const next = new Date(Date.UTC(y, m - 1, d) + 86_400_000)
-  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`
-}
-
-function ordinal(n: number): string {
-  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`
-  if (n % 10 === 1) return `${n}st`
-  if (n % 10 === 2) return `${n}nd`
-  if (n % 10 === 3) return `${n}rd`
-  return `${n}th`
-}
-
-function humanDate(iso: string): string {
-  const { m, d } = parseIsoDate(iso)
-  return `${d} ${MONTH_ABBR[m - 1]}`
-}
-
-/**
- * One assumption chip's text — spec's own examples: `{ field: 'year',
- * value: '2026-11-19', reason: 'year' }` → "Assumed: 2026";
- * `{ field: 'outbound', value: '2026-11-19', reason: 'defaulted' }` (the
- * "arrive by" day-earlier shift — `src/intake/brief.ts`'s `assembleBrief`)
- * → "Leaving 19 Nov to arrive by the 20th", where "the 20th" is one day
- * AFTER the stored (already-shifted) departure date — the day she told us
- * she must be there. Exported so it is pinned without rendering anything.
- */
-export function assumptionChipText(a: Assumption): string {
-  if (a.field === 'year') return `Assumed: ${a.value.slice(0, 4)}`
-  if (a.field === 'outbound' && a.reason === 'defaulted') {
-    return `Leaving ${humanDate(a.value)} to arrive by the ${ordinal(parseIsoDate(addOneDay(a.value)).d)}`
-  }
-  if (a.field === 'origin') return `Assumed origin: ${a.value}`
-  if (a.field === 'inbound') return `Returning ${humanDate(a.value)}`
-  if (a.field === 'adults') return 'Assumed: solo traveller'
-  if (a.field === 'cabin_long' || a.field === 'cabin_short') return 'Assumed: economy'
-  return `Assumed ${a.field}: ${a.value}`
-}
-
-function dedupeAssumptions(items: Assumption[]): Assumption[] {
-  const seen = new Set<string>()
-  const out: Assumption[] = []
-  for (const a of items) {
-    const key = `${a.field}:${a.value}:${a.reason}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(a)
-  }
-  return out
 }
 
 /** The newest `ResultsView` of one kind, or `null` when there is none — `results` arrives oldest-first. */
@@ -93,70 +42,85 @@ function newestOfKind(results: ResultsView[], kind: 'flights' | 'hotels'): Resul
 }
 
 /**
- * The chip state for one kind, tagged with the `results` row it was derived from — see the
- * reset in `ResultsPane` for why the tag is needed.
+ * The rail and tab state for one kind, tagged with the `results` row it was derived from — see
+ * the reset in `ResultsPane` for why the tag is needed.
  */
-type KindFilter = { messageId: string | null; filter: Filter }
+type KindState = { messageId: string | null; filter: Filter; sort: Sort }
 
-function chipsFor(view: ResultsView | null): KindFilter {
-  return { messageId: view?.messageId ?? null, filter: view?.filter ?? {} }
+function stateFor(view: ResultsView | null): KindState {
+  return { messageId: view?.messageId ?? null, filter: view?.filter ?? {}, sort: 'best' }
 }
 
+const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
+/** No "fastest" for a stay: nothing about a hotel row has a duration to be fast. */
+const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
+
 /**
- * Spec §5's results pane: assumption chips at the top, then the pinned
- * summary once anything is chosen, then the newest hotels list (if any),
- * then the newest flights list — in that order. Every piece here is pure
- * (callbacks as props); the filter chips' state is lifted to this component
- * (one `Filter` per kind, since the flight-only fields — nonstop, stops,
- * departure, airlines — mean nothing for a hotel list) and applied with
- * `applyFilterLite`. `test/web-results-render.test.ts` renders this directly
- * with `renderToStaticMarkup` — the local `useState` below is the same
- * pattern `ProposalCard` already uses, which that file's own tests confirm
- * is safe under static rendering (no router, no effects).
+ * Spec §5's results pane: the pinned summary once anything is chosen, then the newest hotels
+ * list (if any), then the newest flights list.
+ *
+ * Each list is one section: a `SummaryBar` (what was searched for, and what had to be guessed),
+ * then a `FilterRail` beside it and `SortTabs` above it (results UI pass 2, D). Every piece here
+ * is pure (callbacks as props); the rail's filter and the tabs' sort are lifted to this
+ * component, one pair per kind — the flight-only fields (stops, bags, departure, airlines) mean
+ * nothing for a stay, and a stay's rating means nothing for a flight — and applied with
+ * `applyFilterLite` then `sortItemsLite`, in that order, so the tab summaries describe the
+ * filtered list rather than the whole corpus.
+ *
+ * `test/web-results-render.test.ts` renders this directly with `renderToStaticMarkup` — the
+ * local `useState` below is the same pattern `ProposalCard` already uses, which that file's own
+ * tests confirm is safe under static rendering (no router, no effects).
  */
-export function ResultsPane({ results, proposal, now, pending, error, onChoose, onGetLinks }: ResultsPaneProps) {
+export function ResultsPane(
+  { results, proposal, now, pending, error, skeleton = null, onChoose, onGetLinks }: ResultsPaneProps,
+) {
   const newestFlights = newestOfKind(results, 'flights')
   const newestHotels = newestOfKind(results, 'hotels')
 
-  // M4: the chips used to start empty whatever the row said, so after a TYPED filter the chips
-  // rendered unselected while the list below them was narrowed — two different stories about
-  // the same list. `ResultsView.filter` is the row's own filter, so the chips start from it.
+  // M4: the rail used to start empty whatever the row said, so after a TYPED filter it rendered
+  // unselected while the list beside it was narrowed — two different stories about the same
+  // list. `ResultsView.filter` is the row's own filter, so the rail starts from it.
   //
   // Tracked against the row's `messageId` and reset during render (React's documented
   // adjust-state-when-props-change pattern) rather than with `useState`'s initializer alone: a
   // typed filter arrives through `router.refresh()`, which re-renders this instance instead of
-  // remounting it, so an initializer-only version would keep showing the PREVIOUS row's chips.
-  // Her own chip clicks are kept while the row is unchanged, which is the whole point of the
-  // state. No effect is involved, so `renderToStaticMarkup` is unaffected.
-  const [flightChips, setFlightChips] = useState<KindFilter>(() => chipsFor(newestFlights))
-  const [hotelChips, setHotelChips] = useState<KindFilter>(() => chipsFor(newestHotels))
-  if (flightChips.messageId !== (newestFlights?.messageId ?? null)) setFlightChips(chipsFor(newestFlights))
-  if (hotelChips.messageId !== (newestHotels?.messageId ?? null)) setHotelChips(chipsFor(newestHotels))
-  const flightFilter = flightChips.filter
-  const hotelFilter = hotelChips.filter
-  const setFlightFilter = (filter: Filter) =>
-    setFlightChips({ messageId: newestFlights?.messageId ?? null, filter })
-  const setHotelFilter = (filter: Filter) =>
-    setHotelChips({ messageId: newestHotels?.messageId ?? null, filter })
+  // remounting it, so an initializer-only version would keep showing the PREVIOUS row's state.
+  // Her own clicks are kept while the row is unchanged, which is the whole point of the state —
+  // and the sort tab resets with it, because "Cheapest" over last search's corpus is not an
+  // answer about this one. No effect is involved, so `renderToStaticMarkup` is unaffected.
+  const [flightState, setFlightState] = useState<KindState>(() => stateFor(newestFlights))
+  const [hotelState, setHotelState] = useState<KindState>(() => stateFor(newestHotels))
+  if (flightState.messageId !== (newestFlights?.messageId ?? null)) setFlightState(stateFor(newestFlights))
+  if (hotelState.messageId !== (newestHotels?.messageId ?? null)) setHotelState(stateFor(newestHotels))
+  const setFlightFilter = (filter: Filter) => setFlightState({ ...flightState, filter })
+  const setHotelFilter = (filter: Filter) => setHotelState({ ...hotelState, filter })
+  const setFlightSort = (sort: Sort) => setFlightState({ ...flightState, sort })
+  const setHotelSort = (sort: Sort) => setHotelState({ ...hotelState, sort })
 
-  const assumptions = dedupeAssumptions(results.flatMap((r) => r.assumptions))
+  const flightItems = newestFlights
+    ? sortItemsLite(applyFilterLite(newestFlights.items, flightState.filter), flightState.sort)
+    : []
+  const hotelItems = newestHotels
+    ? sortItemsLite(applyFilterLite(newestHotels.items, hotelState.filter), hotelState.sort)
+    : []
 
   const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? null
   const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? null
   const hasChosen = proposal !== null && proposal.items.length > 0
 
+  // Nothing to show beside a placeholder, and nothing to put it above: the whole pane IS the
+  // skeleton. Returning early rather than rendering empty sections keeps the "searching" state
+  // from being a half-drawn version of the real one.
+  if (skeleton === 'full') {
+    return (
+      <div className="results-pane">
+        <ResultsSkeleton kind="flights" />
+      </div>
+    )
+  }
+
   return (
     <div className="results-pane">
-      {assumptions.length > 0 ? (
-        <ul className="assumption-chips" aria-label="Assumptions">
-          {assumptions.map((a) => (
-            <li key={`${a.field}:${a.value}:${a.reason}`} className="assumption-chip">
-              {assumptionChipText(a)}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
       {hasChosen ? (
         <PinnedSummary
           items={proposal!.items}
@@ -170,27 +134,54 @@ export function ResultsPane({ results, proposal, now, pending, error, onChoose, 
         />
       ) : null}
 
+      {skeleton === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
+
       {newestHotels ? (
         <section className="results-section" aria-label="Hotels">
-          <FilterChips items={newestHotels.items} filter={hotelFilter} onChange={setHotelFilter} />
-          <HotelList
-            items={applyFilterLite(newestHotels.items, hotelFilter)}
-            now={now}
-            chosenSourceId={chosenHotelSourceId}
-            onChoose={(sourceId) => onChoose('hotel', sourceId)}
-          />
+          <SummaryBar {...summaryBarPropsFor(newestHotels)} />
+          <div className="results-layout">
+            <FilterRail
+              kind="hotels" items={newestHotels.items}
+              filter={hotelState.filter} onChange={setHotelFilter}
+            />
+            <div className="results-main">
+              <SortTabs
+                items={hotelItems} sorts={HOTEL_SORTS}
+                active={hotelState.sort} onChange={setHotelSort}
+              />
+              <HotelList
+                items={hotelItems}
+                now={now}
+                chosenSourceId={chosenHotelSourceId}
+                onChoose={(sourceId) => onChoose('hotel', sourceId)}
+              />
+            </div>
+          </div>
         </section>
       ) : null}
 
       {newestFlights ? (
         <section className="results-section" aria-label="Flights">
-          <FilterChips items={newestFlights.items} filter={flightFilter} onChange={setFlightFilter} />
-          <FlightList
-            items={applyFilterLite(newestFlights.items, flightFilter)}
-            now={now}
-            chosenSourceId={chosenFlightSourceId}
-            onChoose={(sourceId) => onChoose('flight', sourceId)}
-          />
+          <SummaryBar {...summaryBarPropsFor(newestFlights)} />
+          <div className="results-layout">
+            <FilterRail
+              kind="flights" items={newestFlights.items}
+              filter={flightState.filter} onChange={setFlightFilter}
+            />
+            <div className="results-main">
+              <SortTabs
+                items={flightItems} sorts={FLIGHT_SORTS}
+                active={flightState.sort} onChange={setFlightSort}
+              />
+              <FlightList
+                items={flightItems}
+                adults={newestFlights.query.adults}
+                now={now}
+                chosenSourceId={chosenFlightSourceId}
+                onChoose={(sourceId) => onChoose('flight', sourceId)}
+              />
+            </div>
+          </div>
         </section>
       ) : null}
     </div>
@@ -201,6 +192,7 @@ export type ResultsPaneLiveProps = {
   conversationId: string
   results: ResultsView[]
   proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+  skeleton?: SkeletonMode
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
@@ -221,7 +213,7 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  * pick up the change, same pattern as every other `*Live` wrapper in this
  * codebase.
  */
-export function ResultsPaneLive({ conversationId, results, proposal }: ResultsPaneLiveProps) {
+export function ResultsPaneLive({ conversationId, results, proposal, skeleton = null }: ResultsPaneLiveProps) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -251,6 +243,7 @@ export function ResultsPaneLive({ conversationId, results, proposal }: ResultsPa
     <ResultsPane
       results={results}
       proposal={proposal}
+      skeleton={skeleton}
       pending={pending}
       error={error}
       onChoose={(kind, sourceId) => void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId })}

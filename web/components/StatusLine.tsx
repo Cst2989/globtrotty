@@ -5,15 +5,17 @@ export type StatusLineProps = {
 
 /**
  * `conversations.status` (supabase/migrations/0001_harness.sql) → plain
- * words. `sending` (Task 10) is not a real stored status: `ThreadView`
- * substitutes it in while an optimistic message is in flight and the real
- * status has not yet flipped to `working`, so she sees "Sending" then
- * "Thinking" instead of the stale "Ready for your next message" the server
- * still reports for that instant.
+ * words. `sending` (Task 10) and `searching` (results UI pass 2, E) are not
+ * real stored statuses: `ThreadView` substitutes them in while an optimistic
+ * message is in flight and the real status has not yet flipped to `working`,
+ * and while the results pane is showing a search skeleton. So she sees
+ * "Sending", then "Searching" for the stretch that really is a search, rather
+ * than the stale "Ready for your next message" and then a generic "Thinking".
  */
 const STATUS_WORDS: Record<string, string> = {
   active: 'Ready for your next message',
   sending: 'Sending',
+  searching: 'Searching',
   working: 'Thinking',
   awaiting_user: 'Waiting for your reply',
   limit_reached: "Today's limit has been reached",
@@ -36,7 +38,7 @@ const FAIL_REASON_WORDS: Record<string, string> = {
 
 /** Colour tone for the line; the CSS keys on `data-tone`. */
 function toneFor(status: string): 'working' | 'failed' | 'limit' | 'neutral' {
-  if (status === 'working' || status === 'sending') return 'working'
+  if (status === 'working' || status === 'sending' || status === 'searching') return 'working'
   if (status === 'failed') return 'failed'
   if (status === 'limit_reached' || status === 'escalated') return 'limit'
   return 'neutral'
@@ -60,7 +62,7 @@ export function StatusLine({ status, failReason }: StatusLineProps) {
         {words}
         {detail ? `: ${detail}.` : ''}
       </span>
-      {status === 'working' || status === 'sending' ? (
+      {status === 'working' || status === 'sending' || status === 'searching' ? (
         <span className="thinking" aria-hidden="true">
           <i />
           <i />

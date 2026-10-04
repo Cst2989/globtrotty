@@ -134,9 +134,12 @@ describeDb('makeRouter', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.attachments).toHaveLength(1)
+      // F2: the filtered results row, then the next-step chips.
+      expect(step.attachments!.map((a) => a.role)).toEqual(['results', 'choices'])
       const attachment = step.attachments![0]!
-      expect(attachment.role).toBe('results')
+      const chips = step.attachments![1]!.content as { questionId: string; options: { id: string }[] }
+      expect(chips.questionId).toBe('next')
+      expect(chips.options.map((o) => o.id)).toEqual(['show_all', 'evening'])
       const content = attachment.content as ResultsContent
       expect(content.sourceIds).toEqual(['F1', 'F3'])
       expect(content.filter?.nonstop).toBe(true)
@@ -612,5 +615,178 @@ describe('routeMessage', () => {
       'actually make it Lisbon instead', true)
     expect(result.intent).toBe('new_search')
     expect(result.filter).toBeUndefined()
+  })
+})
+
+/**
+ * Results UI pass 2, F3: the `next` chips. A click on one arrives as a `choice` action with
+ * `questionId: 'next'`, and it must NOT be treated as an answer to a question the office asked —
+ * which is what an origin/destination/outbound card is, and what makes intake re-run with an
+ * override. Two ids the router answers itself; the rest run through the ordinary typed path on
+ * the option's LABEL, which the `userNote` row already carries.
+ */
+describeDb('makeRouter: the `next` chips', () => {
+  const RESULTS: ResultsContent = {
+    kind: 'flights', query: { from: 'BCN', to: 'TYO', outbound: '2026-11-19', inbound: null, adults: 1 },
+    sourceIds: ['F1', 'F2', 'F3'], assumptions: [],
+  }
+  const NEXT_CHOICES: ChoicesContent = {
+    questionId: 'next', question: 'What next?',
+    options: [
+      { id: 'direct_only', label: 'Direct flights only' },
+      { id: 'get_links', label: 'Get booking links' },
+      { id: 'change_flight', label: 'Change the flight' },
+    ],
+  }
+
+  /** The rows `submitAction` really writes for a chip click: the label as a `user` row, then the action. */
+  async function seedClick(sql: postgres.Sql, s: Seeded, optionId: string, label: string) {
+    await insertMessage(sql, s, 'user', 'flights to tokyo in november', true)
+    await insertMessage(sql, s, 'results', JSON.stringify(RESULTS), true)
+    await insertMessage(sql, s, 'choices', JSON.stringify(NEXT_CHOICES), true)
+    await insertMessage(sql, s, 'user', label, true)
+    const action: ActionPayload = { action: 'choice', questionId: 'next', optionId }
+    await insertMessage(sql, s, 'action', JSON.stringify(action), true)
+  }
+
+  it('get_links points at the button and spends nothing at all', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '20')
+      await seedClick(sql, s, 'get_links', 'Get booking links')
+      const fetchImpl = vi.fn()
+      const create = vi.fn()
+
+      const step = await makeRouter(deps(sql, fetchImpl, create, new MockSupplier({ kind: 'flight' })))(
+        ctx(s, 'Get booking links'),
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('Press "Get booking links" on the summary to the right.')
+      // The hand-off is a button, not a message: no Jev classification, no driver turn.
+      expect(fetchImpl).not.toHaveBeenCalled()
+      expect(create).not.toHaveBeenCalled()
+      const calls = await sql`select 1 from model_calls where conversation_id = ${s.conversationId}`
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  it('change_flight re-shows the newest UNFILTERED flights row, with no model call', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '21')
+      await insertMessage(sql, s, 'user', 'flights to tokyo in november', true)
+      await insertMessage(sql, s, 'results', JSON.stringify(RESULTS), true)
+      // A filter's own output row sits on top of it — she must land on the full list, not this.
+      await insertMessage(sql, s, 'results', JSON.stringify({
+        ...RESULTS, sourceIds: ['F1'], filter: { nonstop: true },
+      }), true)
+      await insertMessage(sql, s, 'choices', JSON.stringify(NEXT_CHOICES), true)
+      await insertMessage(sql, s, 'user', 'Change the flight', true)
+      await insertMessage(sql, s, 'action', JSON.stringify(
+        { action: 'choice', questionId: 'next', optionId: 'change_flight' } satisfies ActionPayload,
+      ), true)
+      const fetchImpl = vi.fn()
+      const create = vi.fn()
+
+      const step = await makeRouter(deps(sql, fetchImpl, create, new MockSupplier({ kind: 'flight' })))(
+        ctx(s, 'Change the flight'),
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('Pick another flight.')
+      expect(step.attachments!.map((a) => a.role)).toEqual(['results', 'choices'])
+      const content = step.attachments![0]!.content as ResultsContent
+      expect(content.sourceIds).toEqual(['F1', 'F2', 'F3'])
+      expect(content.filter).toBeUndefined()
+      expect(fetchImpl).not.toHaveBeenCalled()
+      expect(create).not.toHaveBeenCalled()
+    })
+  })
+
+  it('change_flight says so plainly when there is no flight list to go back to', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '22')
+      await insertMessage(sql, s, 'user', 'hello', true)
+      await insertMessage(sql, s, 'choices', JSON.stringify(NEXT_CHOICES), true)
+      await insertMessage(sql, s, 'user', 'Change the flight', true)
+      await insertMessage(sql, s, 'action', JSON.stringify(
+        { action: 'choice', questionId: 'next', optionId: 'change_flight' } satisfies ActionPayload,
+      ), true)
+
+      const step = await makeRouter(deps(sql, vi.fn(), vi.fn(), new MockSupplier({ kind: 'flight' })))(
+        ctx(s, 'Change the flight'),
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('I do not have a flight list to go back to. Tell me the trip again.')
+      expect(step.attachments).toBeUndefined()
+    })
+  })
+
+  it('every other chip runs the ordinary typed path on the option LABEL, never an intake override', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '23')
+      const items: SupplierItem[] = [
+        flightItem('F1', 20_000, 0), flightItem('F2', 20_000, 1), flightItem('F3', 20_000, 0),
+      ]
+      await recordResults(sql, {
+        conversationId: s.conversationId, userId: s.userId, turnId: s.turnId, items,
+        params: {
+          kind: 'flight', from: 'BCN', to: 'TYO', departureDate: '2026-11-19', returnDate: null, flexDays: 0,
+          adults: 1, children: 0, infants: 0, cabinClass: 'Economy', currency: 'EUR', maxStops: null,
+          allowSelfTransfer: false,
+        },
+      })
+      await seedClick(sql, s, 'direct_only', 'Direct flights only')
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jevResponse({
+        model: 'jev-test', answers: FILTER_ANSWERS, usage: { input_tokens: 400, output_tokens: 100 },
+      }))
+      const flights = new MockSupplier({ kind: 'flight' })
+      const searchSpy = vi.spyOn(flights, 'search')
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), flights))(ctx(s, 'Direct flights only'))
+
+      // Exactly one Jev call, and it classified the LABEL — not her original message, and not an
+      // intake re-run (which is what a non-`next` questionId would have produced).
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse((fetchImpl.mock.calls[0]![1] as { body: string }).body) as {
+        state: { message: string }
+        questions: Record<string, unknown>
+      }
+      expect(sent.state.message).toBe('Direct flights only')
+      expect(Object.keys(sent.questions)).toContain('intent')   // the ROUTER's questions, not intake's
+      expect(Object.keys(sent.questions)).not.toContain('origin')
+      expect(searchSpy).not.toHaveBeenCalled()
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('Showing 2 of 3: nonstop.')
+      const calls = await sql<{ seat: string }[]>`
+        select seat from model_calls where conversation_id = ${s.conversationId}`
+      expect(calls.map((r) => r.seat)).toEqual(['router'])
+    })
+  })
+
+  it('still validates a `next` click against the stored row, so a forged id costs nothing', async () => {
+    await withTestDb(async (sql) => {
+      const s = await seedConversation(sql, '24')
+      await seedClick(sql, s, 'direct_only', 'Direct flights only')
+      // A forged id that was never offered.
+      await insertMessage(sql, s, 'action', JSON.stringify(
+        { action: 'choice', questionId: 'next', optionId: 'free_upgrade' } satisfies ActionPayload,
+      ), true)
+      const fetchImpl = vi.fn()
+
+      const step = await makeRouter(deps(sql, fetchImpl, vi.fn(), new MockSupplier({ kind: 'flight' })))(
+        ctx(s, 'Free upgrade'),
+      )
+
+      expect(step.kind).toBe('park')
+      if (step.kind !== 'park') throw new Error('unreachable')
+      expect(step.message).toBe('That option is no longer available. Tell me in your own words.')
+      expect(fetchImpl).not.toHaveBeenCalled()
+    })
   })
 })

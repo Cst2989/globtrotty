@@ -8,6 +8,16 @@ export type ChoiceCardProps = {
   options: { id: string; label: string }[]
   /** Disables every button while a request from the live wrapper is in flight. */
   disabled?: boolean
+  /**
+   * `'card'` is spec §3's choice card: the question, then the options as buttons — the office
+   * asked something and is waiting.
+   *
+   * `'chips'` is the next-step row (results UI pass 2, F3): the same options as small ghost
+   * chips under the reply, with the question text present only as the group's label. Nothing was
+   * asked, so a card would be claiming otherwise — these are suggestions she can ignore, and
+   * they have to look like it.
+   */
+  variant?: 'card' | 'chips'
   onPick: (optionId: string, label: string) => void
 }
 
@@ -17,7 +27,25 @@ export type ChoiceCardProps = {
  * router — so `test/web-results-render.test.ts` can render it directly with
  * `renderToStaticMarkup`. The live POST lives in `ChoiceCardLive` below.
  */
-export function ChoiceCard({ question, options, disabled, onPick }: ChoiceCardProps) {
+export function ChoiceCard({ question, options, disabled, variant = 'card', onPick }: ChoiceCardProps) {
+  if (variant === 'chips') {
+    return (
+      <div className="next-chips" role="group" aria-label={question}>
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            className="suggestion"
+            disabled={disabled}
+            onClick={() => onPick(o.id, o.label)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="choice-card" role="group" aria-label={question}>
       <p className="choice-question">{question}</p>
@@ -43,6 +71,8 @@ export type ChoiceCardLiveProps = {
   questionId: string
   question: string
   options: { id: string; label: string }[]
+  /** Forwarded to `ChoiceCard` — see its own `variant` prop. */
+  variant?: 'card' | 'chips'
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
@@ -56,7 +86,7 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  * route this hits; `idempotencyKey` is fresh per click, same convention as
  * `MessageBox`/`ProposalCardLive`.
  */
-export function ChoiceCardLive({ conversationId, questionId, question, options }: ChoiceCardLiveProps) {
+export function ChoiceCardLive({ conversationId, questionId, question, options, variant }: ChoiceCardLiveProps) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,7 +118,10 @@ export function ChoiceCardLive({ conversationId, questionId, question, options }
 
   return (
     <>
-      <ChoiceCard question={question} options={options} disabled={pending} onPick={(id, label) => void pick(id, label)} />
+      <ChoiceCard
+        question={question} options={options} disabled={pending} variant={variant}
+        onPick={(id, label) => void pick(id, label)}
+      />
       {error ? (
         <p className="alert" role="alert">
           {error}

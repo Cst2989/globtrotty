@@ -24,6 +24,24 @@ describe('assembleBrief', () => {
     expect(out.brief).toMatchObject({ origin: 'BCN', destination: 'TYO', sideTrip: 'OSA', outbound: '2026-11-19', inbound: '2026-12-06', adults: 2, cabinLong: 'premium_economy', cabinShort: 'economy', hotels: true, arriveBy: true })
     expect(out.brief.assumptions.map((a) => a.field)).toEqual(expect.arrayContaining(['year', 'outbound']))
   })
+  // Bug A (results UI pass 2): this message resolves TWO bare dates (the 20th of November and
+  // Sunday the 6th of December), each one crediting `resolveDate`'s nearest-future-year rule, so
+  // `assumptions` carried two `year` entries and the pane rendered "Assumed: 2026" twice.
+  it('records the year assumption once for a round trip whose BOTH dates assumed the year', () => {
+    const out = assembleBrief(answers, cands, today, null)
+    if (out.kind !== 'brief') throw new Error('unreachable')
+    const years = out.brief.assumptions.filter((a) => a.field === 'year')
+    expect(years).toEqual([{ field: 'year', value: '2026', reason: 'year' }])
+  })
+  it('dedupes by the (field, reason, value) triple, keeping the first entry', () => {
+    // Two cabins unstated is the other duplicate pair this triple has to keep APART: same
+    // reason and value, different field, so both survive — a dedupe on (reason, value) alone
+    // would have silently dropped one of them.
+    const out = assembleBrief(answers, cands, today, null)
+    if (out.kind !== 'brief') throw new Error('unreachable')
+    const keys = out.brief.assumptions.map((a) => `${a.field}|${a.reason}|${a.value}`)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
   // Task 5's wording fix (outbound_day now says "(arrival or departure)", same as
   // outbound_month already did; arrive_by now says the date is still the outbound date)
   // targeted exactly this message, which is explicit about an ARRIVAL deadline. Both land

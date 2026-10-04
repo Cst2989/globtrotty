@@ -30,6 +30,14 @@ export type ThreadViewProps = {
    */
   sending?: boolean
   /**
+   * Results UI pass 2 (E): true while the results pane is showing a skeleton, i.e. a SEARCH is
+   * what the turn is doing. The status line then reads "Searching" instead of the generic
+   * "Thinking", which is the same substitution `sending` already makes and for the same reason:
+   * the honest word costs nothing and "Thinking" beside five shimmering flight cards is wrong
+   * about what is happening.
+   */
+  searching?: boolean
+  /**
    * Task 10's LOAD-BEARING gap, closed by the final review's fix wave: without
    * this, `MessageBubble` always took its inert `ChoiceCard` branch with
    * `onPick={() => {}}`, so every choice card in production — intake's and the
@@ -55,8 +63,12 @@ export type ThreadViewProps = {
  * `ThreadLive` below, but `ThreadView` takes only props, which is what lets
  * `test/web-render.test.ts` render it with `renderToStaticMarkup`.
  */
-export function ThreadView({ conversation, messages, latestTurn, children, composer, tail, sending, conversationId }: ThreadViewProps) {
-  const effectiveStatus = sending && conversation.status !== 'working' ? 'sending' : conversation.status
+export function ThreadView(
+  { conversation, messages, latestTurn, children, composer, tail, sending, searching, conversationId }: ThreadViewProps,
+) {
+  const effectiveStatus = sending && conversation.status !== 'working'
+    ? 'sending'
+    : (searching && conversation.status === 'working' ? 'searching' : conversation.status)
 
   return (
     <div className="thread">
@@ -105,6 +117,8 @@ export type ThreadLiveProps = {
   latestTurn: LatestTurn | null
   children?: ReactNode
   composer?: ReactNode
+  /** Forwarded to `ThreadView` — see its own `searching` prop. */
+  searching?: boolean
 }
 
 /** How long an optimistic message waits for a matching server row before it is dropped anyway (Task 10 brief). */
@@ -137,7 +151,7 @@ const PENDING_TIMEOUT_MS = 30_000
  * merge itself is `mergePending` (`./pending.ts`), a pure function so it is
  * unit-tested directly rather than through this component.
  */
-export function ThreadLive({ userId, conversation, messages, latestTurn, children, composer }: ThreadLiveProps) {
+export function ThreadLive({ userId, conversation, messages, latestTurn, children, composer, searching }: ThreadLiveProps) {
   const router = useRouter()
   const [sb] = useState(() => createBrowserSupabase())
   const tailRef = useRef<HTMLDivElement>(null)
@@ -216,6 +230,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
       latestTurn={latestTurn}
       composer={liveComposer}
       sending={pendingMessages.length > 0}
+      searching={searching}
       tail={<div ref={tailRef} aria-hidden="true" />}
     >
       {children}

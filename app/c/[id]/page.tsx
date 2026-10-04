@@ -1,7 +1,10 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { createServerSupabase } from '@/web/supabase/server'
-import { listConversations, loadThread, loadProposals, loadAlternatives, loadResults } from '@/web/data'
+import {
+  listConversations, loadThread, loadProposals, loadAlternatives, loadResults, loadLatestAction,
+  skeletonMode,
+} from '@/web/data'
 import { AppShell } from '@/web/components/AppShell'
 import { Sidebar } from '@/web/components/Sidebar'
 import { ThreadLive } from '@/web/components/Thread'
@@ -36,13 +39,16 @@ export default async function ConversationPage({
   } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const [conversations, thread, proposals, flightAlternatives, hotelAlternatives, results] = await Promise.all([
+  const [
+    conversations, thread, proposals, flightAlternatives, hotelAlternatives, results, latestAction,
+  ] = await Promise.all([
     listConversations(sb),
     loadThread(sb, id),
     loadProposals(sb, id),
     loadAlternatives(sb, id, 'flight'),
     loadAlternatives(sb, id, 'hotel'),
     loadResults(sb, id),
+    loadLatestAction(sb, id),
   ])
 
   if (!thread.conversation) {
@@ -56,12 +62,22 @@ export default async function ConversationPage({
   const hasResults = results.length > 0
   const latestResultsId = results.length > 0 ? results[results.length - 1]!.messageId : null
 
+  // Results UI pass 2 (E): the split appears the instant a search starts, not when it finishes.
+  // `'full'` means there is nothing yet AND something is running, which is also the one case
+  // where the split renders without a single `results` row behind it.
+  const skeleton = skeletonMode({
+    status: thread.conversation.status,
+    resultKinds: results.map((r) => r.kind),
+    latestAction,
+  })
+
   const chat = (
     <ThreadLive
       userId={user.id}
       conversation={thread.conversation}
       messages={thread.messages}
       latestTurn={thread.latestTurn}
+      searching={skeleton !== null}
       composer={<MessageBox conversationId={thread.conversation.id} status={thread.conversation.status} />}
     >
       {proposals.map((p) => (
@@ -74,13 +90,17 @@ export default async function ConversationPage({
     <AppShell
       title={thread.conversation.title ?? 'New trip'}
       rail={<Sidebar conversations={conversations} activeId={id} userEmail={user.email ?? null} />}
-      collapsed={hasResults}
+      collapsed={hasResults || skeleton === 'full'}
     >
-      {hasResults ? (
+      {hasResults || skeleton === 'full' ? (
         <SplitShell
           conversationId={id}
           chat={chat}
-          results={<ResultsPaneLive conversationId={id} results={results} proposal={proposal} />}
+          results={(
+            <ResultsPaneLive
+              conversationId={id} results={results} proposal={proposal} skeleton={skeleton}
+            />
+          )}
           latestResultsId={latestResultsId}
         />
       ) : (

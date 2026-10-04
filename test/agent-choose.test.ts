@@ -104,9 +104,12 @@ describeDb('handleChoose', () => {
         kind: 'hotel', query: 'Tokyo', checkIn: '2026-11-19', checkOut: '2026-12-06', adults: 2,
       })
 
-      expect(step.attachments).toHaveLength(1)
+      // F2: the hotels row, then the next-step chips under the reply.
+      expect(step.attachments!.map((a) => a.role)).toEqual(['results', 'choices'])
       const attachment = step.attachments![0]!
-      expect(attachment.role).toBe('results')
+      const chips = step.attachments![1]!.content as { questionId: string; options: { id: string }[] }
+      expect(chips.questionId).toBe('next')
+      expect(chips.options.map((o) => o.id)).toEqual(['central', 'cheaper_hotels', 'change_hotel_dates'])
       const content = attachment.content as { kind: string; sourceIds: string[] }
       expect(content.kind).toBe('hotels')
       expect(content.sourceIds.length).toBeGreaterThan(0)
@@ -150,7 +153,12 @@ describeDb('handleChoose', () => {
       expect(hotelStep.kind).toBe('park')
       if (hotelStep.kind !== 'park') throw new Error('unreachable')
       expect(hotelStep.message).toBe('Trip summary ready. Use "Get booking links" when you want to book.')
-      expect(hotelStep.attachments).toBeUndefined()
+      // F2: no results row (nothing new was searched), just the summary's own two next steps —
+      // both of which the ROUTER answers itself rather than handing to Jev.
+      expect(hotelStep.attachments!.map((a) => a.role)).toEqual(['choices'])
+      const summaryChips = hotelStep.attachments![0]!.content as { questionId: string; options: { id: string }[] }
+      expect(summaryChips.questionId).toBe('next')
+      expect(summaryChips.options.map((o) => o.id)).toEqual(['get_links', 'change_flight'])
 
       const allProposals = await sql`select 1 from proposals where conversation_id = ${s0.conversationId}`
       expect(allProposals).toHaveLength(2)
@@ -310,7 +318,11 @@ describeDb('handleChoose', () => {
       expect(step.message).toBe(
         'I could not find hotels in Tokyo for those dates. Tell me a different area or dates.',
       )
-      expect(step.attachments).toBeUndefined()
+      // M1 still holds: no `results` row for a corpus that was never written. F2 adds the two
+      // next steps that can turn an empty hotel search into a full one.
+      expect(step.attachments!.map((a) => a.role)).toEqual(['choices'])
+      const emptyChips = step.attachments![0]!.content as { questionId: string; options: { id: string }[] }
+      expect(emptyChips.options.map((o) => o.id)).toEqual(['central', 'change_hotel_dates'])
       // The flight proposal is still accepted — only the hotel half came back empty.
       const saved = await loadNewestProposalForTurn(sql, s.turnId)
       const [proposal] = await sql<{ decision: string | null }[]>`
