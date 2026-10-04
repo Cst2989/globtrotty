@@ -30,7 +30,10 @@ describeDb('0016 plan 4 schema', () => {
       for (const t of ['conversations','messages','turns','proposals','link_clicks','agent_events','escalations','tool_results','gate_results']) {
         expect(granted.has(`${t}:SELECT`)).toBe(true)
       }
-      for (const t of ['daily_usage','model_calls','canary_runs','drift_alarms','conversions','tool_calls']) {
+      // `intake_cache` joins the deny-all list with migration 0019 (polish pass, section 10):
+      // it holds a traveller's own trip in structured form, the worker is what reads and writes
+      // it on the owner connection, and nothing in the browser has any reason to see it.
+      for (const t of ['daily_usage','model_calls','canary_runs','drift_alarms','conversions','tool_calls','intake_cache']) {
         expect([...granted].some((g) => g.startsWith(`${t}:`))).toBe(false)
       }
       expect([...granted].some((g) => /:(INSERT|UPDATE|DELETE)$/.test(g))).toBe(false)
@@ -46,6 +49,9 @@ describeDb('0016 plan 4 schema', () => {
       }
       expect(byTable.has('daily_usage')).toBe(false)
       expect(byTable.has('model_calls')).toBe(false)
+      // RLS ENABLED and no policy at all: the grant is what refuses, and a policy added here by
+      // accident must not be the only thing between this table and the browser.
+      expect(byTable.has('intake_cache')).toBe(false)
     })
   })
   /**

@@ -12,7 +12,8 @@ import type postgres from 'postgres'
 import type { Agent, AgentContext, AgentStep } from '../worker.js'
 import type { TurnState } from '../engine.js'
 import type { DriverDeps } from './driver.js'
-import { runIntake, type TripBrief, type Cabin } from '../intake/brief.js'
+import { runIntake, type IntakeOutcome, type TripBrief, type Cabin } from '../intake/brief.js'
+import { cachedBrief, rememberBrief } from './intakeCache.js'
 import { assumptionSentence } from '../intake/assumptions.js'
 import { nextStepsAttachment } from './nextSteps.js'
 import { rankItems } from '../intake/rank.js'
@@ -180,12 +181,34 @@ export async function runIntakeTurn(
   const text = opts.text
   const today = new Date(deps.now())
   const lastOrigin = opts.lastOrigin !== undefined ? opts.lastOrigin : await readLastOrigin(sql, ctx.userId)
-  const { outcome, request, response } = await runIntake({ jev: deps.jev }, text, today, lastOrigin, opts.overrides)
 
-  let cost = await recordJevCall(sql, {
-    conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
-    seat: 'intake', request, response,
-  })
+  /*
+   * Section 10: the same sentence from the same traveller inside a day is one intake call, not
+   * two. Skipped entirely when `overrides` is set — that is the router re-running intake with
+   * the answer she just clicked forced in, which is by definition a DIFFERENT reading of the
+   * same words and must reach Jev. `cachedBrief` swallows every failure and answers `null`, so
+   * this can cost one model call and never more. See src/agents/intakeCache.ts.
+   */
+  const reusable = opts.overrides === undefined
+    ? await cachedBrief(sql, ctx.userId, text, today)
+    : null
+
+  let cost = 0n
+  let outcome: IntakeOutcome
+  if (reusable !== null) {
+    outcome = { kind: 'brief', brief: reusable }
+  } else {
+    const run = await runIntake({ jev: deps.jev }, text, today, lastOrigin, opts.overrides)
+    outcome = run.outcome
+    cost = await recordJevCall(sql, {
+      conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
+      seat: 'intake', request: run.request, response: run.response,
+    })
+    // Only a BRIEF is remembered. A choice card depends on what she has already told this
+    // office, not only on the sentence, and replaying one would re-ask a question she has
+    // answered — or skip one she has not.
+    if (outcome.kind === 'brief') await rememberBrief(sql, ctx.userId, text, outcome.brief)
+  }
 
   if (outcome.kind === 'choices') {
     // Ledger ruling: desk flips to 'planning' at the end of EVERY run, brief or choices — a

@@ -99,6 +99,7 @@ const GRANTED_TABLES = [
 // tables (see the file header above), not just two.
 const DENIED_TABLES = [
   'daily_usage', 'model_calls', 'canary_runs', 'drift_alarms', 'conversions', 'tool_calls',
+  'intake_cache',
 ] as const
 
 type SeededRows = {
