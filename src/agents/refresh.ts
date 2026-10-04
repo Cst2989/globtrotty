@@ -215,9 +215,11 @@ export async function handleRefresh(
     // Both kinds are re-ranked by Jev now (the hotels pass): `rankItems` scores a stay against
     // the stay preferences and an itinerary against the flight ones, and a hotels row left in
     // SearchApi's own relevance order is six vacation rentals before the first real hotel.
+    // Same rule as `runIntakeTurn`: a list too short to re-rank was never checked either, and
+    // `null` is how that is said. See `ResultsContent.verdicts`.
     const ranked = items.length > 1
       ? await rankItems({ jev: deps.jev }, briefForRank(base.query), items)
-      : { ordered: items, request: null, response: null }
+      : { ordered: items, request: null, response: null, verdicts: null }
 
     if (ranked.response) {
       cost += await recordJevCall(sql, {
@@ -251,6 +253,7 @@ export async function handleRefresh(
             sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
             assumptions: base.assumptions,
             refreshed: true,
+            ...(ranked.verdicts ? { verdicts: ranked.verdicts } : {}),
           },
         },
         nextStepsAttachment(action.kind === 'flight' ? 'flights' : 'hotels'),

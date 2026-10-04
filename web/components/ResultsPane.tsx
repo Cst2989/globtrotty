@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import { CaretDown } from '@phosphor-icons/react'
 import { formatMoney, money } from '@/src/money'
 import type { Filter } from '@/src/results'
 import type { ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
@@ -118,6 +119,99 @@ const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
 const HOTEL_SORTS: Sort[] = ['best', 'cheapest']
 
 /**
+ * Hotels pass, section 7. Splits a filtered, sorted list into the items that match what she asked
+ * for and the ones Jev found something wrong with.
+ *
+ * An item with NO entry in `verdicts` counts as matched, deliberately: it was never checked (it
+ * sat past the twenty options Jev scores, or the row predates the field), and hiding an unchecked
+ * option behind a collapsed section would be the office claiming a finding it does not have.
+ * `verdicts === undefined` — the whole list unchecked — short-circuits to the same thing.
+ *
+ * Pure, so `test/web-results-render.test.ts` pins every branch.
+ */
+export function splitByVerdict(
+  items: ResultItemLite[], verdicts: ResultsView['verdicts'],
+): { matched: ResultItemLite[]; unmatched: ResultItemLite[] } {
+  if (!verdicts) return { matched: items, unmatched: [] }
+  const matched: ResultItemLite[] = []
+  const unmatched: ResultItemLite[] = []
+  for (const item of items) {
+    const issues = verdicts[item.sourceId]?.issues ?? []
+    if (issues.length > 0) unmatched.push(item)
+    else matched.push(item)
+  }
+  return { matched, unmatched }
+}
+
+/** `sourceId` -> its matched facts, for the cards' green chips. Empty when nothing was checked. */
+export function matchesBySourceId(verdicts: ResultsView['verdicts']): Record<string, string[]> {
+  if (!verdicts) return {}
+  return Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.matches]))
+}
+
+/** "3 flights didn't match what you asked" / "1 hotel didn't match what you asked". */
+export function unmatchedLabel(count: number, kind: 'flights' | 'hotels'): string {
+  const noun = kind === 'flights'
+    ? (count === 1 ? 'flight' : 'flights')
+    : (count === 1 ? 'hotel' : 'hotels')
+  return `${count} ${noun} didn't match what you asked`
+}
+
+/**
+ * The collapsed section under a list: what Jev found wrong, and with what.
+ *
+ * Collapsed rather than dropped, because "wrong for what she asked" is a judgment and she is the
+ * one entitled to overrule it — a self-transfer she is happy to risk, a rental she would take for
+ * the price. Each card inside carries the reasons, so expanding it answers "why" without a second
+ * click.
+ */
+function UnmatchedSection(
+  { kind, items, verdicts, children }: {
+    kind: 'flights' | 'hotels'
+    items: ResultItemLite[]
+    verdicts: NonNullable<ResultsView['verdicts']>
+    children: ReactNode
+  },
+) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  return (
+    <div className="unmatched">
+      <button
+        type="button"
+        className="unmatched-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <CaretDown size={14} aria-hidden="true" data-open={open ? 'true' : 'false'} />
+        {unmatchedLabel(items.length, kind)}
+      </button>
+      {open ? (
+        <div className="unmatched-panel" id={panelId}>
+          <ul className="unmatched-reasons">
+            {items.map((item) => (
+              <li key={item.sourceId} className="unmatched-reason">
+                <span className="unmatched-reason-name">{item.name}</span>
+                {(verdicts[item.sourceId]?.issues ?? []).map((issue) => (
+                  <span key={issue} className="issue-chip">{issue}</span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The muted line over a list nothing checked — section 7's answer to a failed Jev call. */
+function UncheckedNote() {
+  return <p className="results-unchecked">Not checked against your request</p>
+}
+
+/**
  * The pinned block for a choice the server has not confirmed yet (pass 3, section 6a): the one
  * card she picked, with its price, under the same heading the real `PinnedSummary` uses.
  *
@@ -222,6 +316,16 @@ export function ResultsPane(
     ? sortItemsLite(applyFilterLite(newestHotels.items, hotelState.filter), hotelState.sort)
     : []
 
+  // Section 7: what Jev found wrong drops out of the list and into the collapsed section under
+  // it, and the tabs count only what is left. An unchecked row splits to "everything matched",
+  // which is why `UncheckedNote` says in words that nothing was checked.
+  const { matched: flightMatched, unmatched: flightUnmatched } =
+    splitByVerdict(flightItems, newestFlights?.verdicts)
+  const { matched: hotelMatched, unmatched: hotelUnmatched } =
+    splitByVerdict(hotelItems, newestHotels?.verdicts)
+  const flightMatchChips = matchesBySourceId(newestFlights?.verdicts)
+  const hotelMatchChips = matchesBySourceId(newestHotels?.verdicts)
+
   // Pass 3, section 6a: her click counts as chosen immediately, exactly as the proposal row
   // will once it lands. The proposal wins when both exist — it is the server's own answer.
   const pendingFlight = pendingChoice?.kind === 'flight' ? pendingChoice.sourceId : null
@@ -281,19 +385,38 @@ export function ResultsPane(
             kind="hotels" items={newestHotels.items}
             filter={hotelState.filter} onChange={setHotelFilter}
           />
+          {/* The tabs summarise the MATCHED list: a tab advertising the price of a stay that is
+              hidden in the collapsed section below is the row claiming a lead it is not
+              offering — the same fault pass 3 fixed for the updating case. */}
           <SortTabs
-            items={hotelItems} sorts={HOTEL_SORTS}
+            items={hotelMatched} sorts={HOTEL_SORTS}
             active={hotelState.sort} updating={updatingHotels} onChange={setHotelSort}
           />
+          {newestHotels.verdicts ? null : <UncheckedNote />}
           <HotelList
-            items={hotelItems}
+            items={hotelMatched}
             adults={newestHotels.query.adults}
             now={now}
             chosenSourceId={chosenHotelSourceId}
             selectDisabled={choosing}
             updating={updatingHotels}
+            matchesBySourceId={hotelMatchChips}
             onChoose={(sourceId) => onChoose('hotel', sourceId)}
           />
+          {hotelUnmatched.length > 0 && newestHotels.verdicts ? (
+            <UnmatchedSection kind="hotels" items={hotelUnmatched} verdicts={newestHotels.verdicts}>
+              <HotelList
+                items={hotelUnmatched}
+                adults={newestHotels.query.adults}
+                now={now}
+                chosenSourceId={chosenHotelSourceId}
+                selectDisabled={choosing}
+                updating={updatingHotels}
+                matchesBySourceId={hotelMatchChips}
+                onChoose={(sourceId) => onChoose('hotel', sourceId)}
+              />
+            </UnmatchedSection>
+          ) : null}
         </section>
       ) : null}
 
@@ -305,18 +428,34 @@ export function ResultsPane(
             filter={flightState.filter} onChange={setFlightFilter}
           />
           <SortTabs
-            items={flightItems} sorts={FLIGHT_SORTS}
+            items={flightMatched} sorts={FLIGHT_SORTS}
             active={flightState.sort} updating={updatingFlights} onChange={setFlightSort}
           />
+          {newestFlights.verdicts ? null : <UncheckedNote />}
           <FlightList
-            items={flightItems}
+            items={flightMatched}
             adults={newestFlights.query.adults}
             now={now}
             chosenSourceId={chosenFlightSourceId}
             selectDisabled={choosing}
             updating={updatingFlights}
+            matchesBySourceId={flightMatchChips}
             onChoose={(sourceId) => onChoose('flight', sourceId)}
           />
+          {flightUnmatched.length > 0 && newestFlights.verdicts ? (
+            <UnmatchedSection kind="flights" items={flightUnmatched} verdicts={newestFlights.verdicts}>
+              <FlightList
+                items={flightUnmatched}
+                adults={newestFlights.query.adults}
+                now={now}
+                chosenSourceId={chosenFlightSourceId}
+                selectDisabled={choosing}
+                updating={updatingFlights}
+                matchesBySourceId={flightMatchChips}
+                onChoose={(sourceId) => onChoose('flight', sourceId)}
+              />
+            </UnmatchedSection>
+          ) : null}
         </section>
       ) : null}
     </div>

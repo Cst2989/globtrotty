@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { maskIdChars, maskControlChars, maskUntrustedText } from './sanitize.js'
+import { isKnownVerdictLabel } from './intake/verdicts.js'
 import type { Cabin, Assumption } from './intake/brief.js'
 
 /**
@@ -80,6 +81,18 @@ export type ResultsContent = {
    * because it IS one.
    */
   refreshed?: boolean
+  /**
+   * Hotels pass, section 7: Jev's own check of each result against what she asked for, keyed on
+   * `sourceId`. `matches` are FACTS this office computed (`matchesFor`, src/intake/rank.ts);
+   * `issues` are the findings Jev returned above the gate, each turned into one of
+   * `ISSUE_LABELS`'s fixed sentences. Every string in both lists comes from that module's own
+   * vocabulary and is re-checked here by `VerdictLabelSchema`.
+   *
+   * ABSENT means unchecked, not clean: the Jev call failed, or the row predates this field, or
+   * the item sat past `MAX_SCORED` and was never shown to Jev. The pane renders an unchecked
+   * list with a muted line saying so rather than implying everything passed.
+   */
+  verdicts?: Record<string, { matches: string[]; issues: string[] }>
 }
 
 export type ChoicesContent = {
@@ -96,6 +109,18 @@ const AssumptionSchema = z.strictObject({
   field: z.string().min(1).max(64),
   value: z.string().min(1).max(256),
   reason: z.enum(['unstated', 'defaulted', 'year']),
+})
+
+/**
+ * Section 7's fixed vocabulary, enforced at the boundary rather than trusted.
+ *
+ * `isKnownVerdictLabel` (src/intake/rank.ts) owns the list; this is the same check applied where
+ * a `results` row is parsed, so a verdict string that no version of that module could have
+ * produced cannot reach the pane whatever wrote the row. The same instinct as `strictObject`
+ * everywhere else in this file: the boundary is where a surprise is refused.
+ */
+const VerdictLabelSchema = z.string().min(1).max(64).refine(isKnownVerdictLabel, {
+  message: 'not a known verdict label',
 })
 
 const FilterSchema = z.strictObject({
@@ -148,6 +173,14 @@ export const ResultsContentSchema = z.strictObject({
   assumptions: z.array(AssumptionSchema),
   filter: FilterSchema.optional(),
   refreshed: z.boolean().optional(),
+  // The key is a supplier `sourceId`, same shape and cap as `sourceIds` above.
+  verdicts: z.record(
+    z.string().min(1).max(512),
+    z.strictObject({
+      matches: z.array(VerdictLabelSchema).max(8),
+      issues: z.array(VerdictLabelSchema).max(8),
+    }),
+  ).optional(),
 }) satisfies z.ZodType<ResultsContent>
 
 /**

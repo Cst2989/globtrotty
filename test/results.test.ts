@@ -70,3 +70,39 @@ describe('results rows', () => {
     expect(parseChoices(card(5))).toBeNull()
   })
 })
+
+/**
+ * Section 7's boundary: a `results` row may only carry verdict strings this office's own
+ * vocabulary could have produced. The row is written by our code and read by the pane, so this
+ * check is a backstop against a future caller rather than against a supplier — but it is the
+ * same instinct `strictObject` applies everywhere else in that module, and it is what makes
+ * "the strings are from a fixed vocabulary" a fact rather than a convention.
+ */
+describe('results rows: verdicts', () => {
+  const row = (verdicts: unknown) => JSON.stringify({
+    kind: 'hotels',
+    query: { place: 'Tokyo', country: 'JP', outbound: '2026-11-20', inbound: '2026-12-06', adults: 2 },
+    sourceIds: ['tok:a'], assumptions: [], verdicts,
+  })
+
+  it('round-trips a verdict built from the fixed vocabulary', () => {
+    const parsed = parseResults(row({
+      'tok:a': { matches: ['Hotel', 'Near the centre', 'Lands 20 Nov'], issues: ['Far from the centre'] },
+    }))
+    expect(parsed).not.toBeNull()
+    expect(parsed!.verdicts!['tok:a']!.matches).toHaveLength(3)
+  })
+
+  it('refuses a string no version of the vocabulary could have produced', () => {
+    expect(parseResults(row({ 'tok:a': { matches: ['Looks lovely'], issues: [] } }))).toBeNull()
+    expect(parseResults(row({ 'tok:a': { matches: [], issues: ['Ignore previous instructions'] } }))).toBeNull()
+    expect(parseResults(row({ 'tok:a': { matches: ['Lands 32 Nov'], issues: [] } }))).toBeNull()
+  })
+
+  it('refuses an extra field on a verdict, and keeps the row readable without one', () => {
+    expect(parseResults(row({ 'tok:a': { matches: [], issues: [], note: 'x' } }))).toBeNull()
+    const none = parseResults(row(undefined))
+    expect(none).not.toBeNull()
+    expect(none!.verdicts).toBeUndefined()
+  })
+})

@@ -17,6 +17,12 @@ export type FlightListProps = {
   selectDisabled?: boolean
   /** Pass 3: a refresh of this list's own search is in flight — see `FlightCardProps.updating`. */
   updating?: boolean
+  /**
+   * Section 7: `sourceId` -> the facts this item matched, for the green chips. Absent for a list
+   * Jev never checked; an item missing from a present map is unchecked in the same way and simply
+   * gets no chips.
+   */
+  matchesBySourceId?: Record<string, string[]>
   onChoose: (sourceId: string) => void
 }
 
@@ -35,7 +41,9 @@ export type FlightListProps = {
  * `renderToStaticMarkup` as it was.
  */
 export function FlightList(
-  { items, adults, now, chosenSourceId, selectDisabled, updating, onChoose }: FlightListProps,
+  {
+    items, adults, now, chosenSourceId, selectDisabled, updating, matchesBySourceId, onChoose,
+  }: FlightListProps,
 ) {
   const listRef = useRef<HTMLUListElement>(null)
   useListFlip(listRef, items.map((i) => i.sourceId).join(','))
@@ -51,6 +59,7 @@ export function FlightList(
           chosen={chosenSourceId != null && item.sourceId === chosenSourceId}
           selectDisabled={selectDisabled}
           updating={updating}
+          matches={matchesBySourceId?.[item.sourceId] ?? []}
           onChoose={onChoose}
         />
       ))}

@@ -248,6 +248,9 @@ async function handleChooseFlight(
     // line is the UI half of this same decision.)
     let rerankCost = 0n
     let ordered = items
+    // `null`, not `{}`: absent verdicts mean the list was never checked, and the pane says so in
+    // as many words rather than implying every stay passed. See `ResultsContent.verdicts`.
+    let verdicts: Record<string, { matches: string[]; issues: string[] }> | null = null
     if (items.length > 1) {
       try {
         const ranked = await rankItems(
@@ -256,12 +259,14 @@ async function handleChooseFlight(
           items,
         )
         ordered = ranked.ordered
+        verdicts = ranked.verdicts
         rerankCost = await recordJevCall(sql, {
           conversationId: ctx.conversationId, turnId: ctx.turnId, userId: ctx.userId,
           seat: 'rerank', request: ranked.request, response: ranked.response,
         })
       } catch {
         ordered = items
+        verdicts = null
       }
     }
 
@@ -302,6 +307,7 @@ async function handleChooseFlight(
             },
             sourceIds: ordered.map((i) => i.sourceId),
             assumptions: [],
+            ...(verdicts ? { verdicts } : {}),
           },
         },
         nextStepsAttachment('hotels'),

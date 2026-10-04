@@ -278,9 +278,12 @@ export async function runIntakeTurn(
       await finishToolCall(sql, ctx.turnId, callId, { sourceIds: items.map((i) => i.sourceId) })
     }
 
+    // `verdicts: null` rather than `{}` on the un-ranked branch: an empty map would say every
+    // item was checked and nothing was found, and nothing was checked at all. Section 7's rule
+    // throughout — absent means unverified, never clean.
     const ranked = items.length > 1
       ? await rankItems({ jev: deps.jev }, b, items)
-      : { ordered: items, request: null, response: null }
+      : { ordered: items, request: null, response: null, verdicts: null }
 
     if (ranked.response) {
       cost += await recordJevCall(sql, {
@@ -312,6 +315,7 @@ export async function runIntakeTurn(
             },
             sourceIds: ranked.ordered.slice(0, 10).map((i) => i.sourceId),
             assumptions: b.assumptions,
+            ...(ranked.verdicts ? { verdicts: ranked.verdicts } : {}),
           },
         },
         // F2: the three or four things she most often wants next, as chips under the reply. An

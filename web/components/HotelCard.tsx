@@ -2,6 +2,7 @@ import { Star } from '@phosphor-icons/react/dist/ssr'
 import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite } from '@/web/data'
 import { ageText, staleAgeText } from './age'
+import { MatchChips } from './MatchChips'
 
 export type HotelCardProps = {
   item: ResultItemLite
@@ -15,6 +16,11 @@ export type HotelCardProps = {
   selectDisabled?: boolean
   /** A refresh of this card's own search is in flight — its PRICE shimmers, nothing else moves. */
   updating?: boolean
+  /**
+   * Section 7: the facts about this stay that line up with what she asked for, as green check
+   * chips. Empty (or absent) for a stay Jev never checked — see `MatchChips`.
+   */
+  matches?: string[]
   onChoose: (sourceId: string) => void
 }
 
@@ -189,7 +195,10 @@ function Stars({ stars }: { stars: number }) {
  * again on the way out of the corpus (web/data.ts).
  */
 export function HotelCard(
-  { item, adults, now, chosen = false, selectDisabled = false, updating = false, onChoose }: HotelCardProps,
+  {
+    item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
+    onChoose,
+  }: HotelCardProps,
 ) {
   const hotel = item.hotel
   if (!hotel) return null
@@ -243,6 +252,7 @@ export function HotelCard(
           </span>
         ) : null}
         {essentials !== null ? <span className="hotel-card-essentials">{essentials}</span> : null}
+        <MatchChips matches={matches} />
       </div>
 
       <div className="hotel-card-side">

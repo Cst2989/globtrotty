@@ -662,6 +662,16 @@ export type ResultsView = {
    * the same posture `placeLabel` (src/agents/intake.ts) already takes.
    */
   cityNames: Record<string, string>
+  /**
+   * Hotels pass, section 7: Jev's check of each item against her request, keyed on `sourceId`,
+   * straight off the `results` row (`ResultsContent.verdicts`, already validated against its
+   * fixed vocabulary by `ResultsContentSchema`).
+   *
+   * `undefined` means this row was never checked — the pane renders the list with a muted line
+   * saying so and no collapsed section. An item MISSING from a present map is unchecked in the
+   * same way, and is shown in the main list rather than hidden.
+   */
+  verdicts: Record<string, { matches: string[]; issues: string[] }> | undefined
 }
 
 /**
@@ -993,6 +1003,7 @@ export async function loadResults(
       items,
       ...freshnessOf(items),
       cityNames: cityNamesFor(r.content),
+      verdicts: r.content.verdicts,
     }
   })
 }

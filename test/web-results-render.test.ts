@@ -20,7 +20,9 @@ import {
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
 import { PinnedSummary } from '../web/components/PinnedSummary.js'
-import { ResultsPane, outcomeForStatus, shouldAutoRefresh } from '../web/components/ResultsPane.js'
+import {
+  ResultsPane, outcomeForStatus, shouldAutoRefresh, splitByVerdict, unmatchedLabel,
+} from '../web/components/ResultsPane.js'
 import { SummaryBar, summarySegments, nightsBetween } from '../web/components/SummaryBar.js'
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
@@ -627,6 +629,7 @@ function resultsView(overrides: Partial<ResultsView> = {}): ResultsView {
     assumptions: [], filter: undefined, items: [FLIGHT_ITEM],
     fetchedAt: FLIGHT_ITEM.fetchedAt, stale: false,
     cityNames: { BCN: 'Barcelona', HND: 'Tokyo' },
+    verdicts: undefined,
     ...overrides,
   }
 }
@@ -1078,5 +1081,86 @@ describe('ResultsPane skeletons', () => {
       onChoose: () => {}, onGetLinks: () => {},
     }))
     expect(html).not.toContain('Searching')
+  })
+})
+
+/**
+ * Section 7 in the pane: matched items keep their place with green chips, what Jev found wrong
+ * drops into a collapsed section, the tabs count only the matched list, and a row nothing checked
+ * says so instead of implying everything passed.
+ */
+describe('verified results', () => {
+  const SECOND_FLIGHT: ResultItemLite = { ...FLIGHT_ITEM, sourceId: 'F2', priceMinor: '60000' }
+  const verdicts = {
+    F1: { matches: ['Premium economy', '1 stop'], issues: [] },
+    F2: { matches: [], issues: ['Not the cabin you asked for', 'Self-transfer risk'] },
+  }
+
+  it('splits on the issues, and treats an unchecked item as matched rather than hiding it', () => {
+    const items = [FLIGHT_ITEM, SECOND_FLIGHT, { ...FLIGHT_ITEM, sourceId: 'F3' }]
+    const split = splitByVerdict(items, verdicts)
+    expect(split.matched.map((i) => i.sourceId)).toEqual(['F1', 'F3'])
+    expect(split.unmatched.map((i) => i.sourceId)).toEqual(['F2'])
+    // No verdicts at all: nothing was checked, so nothing is hidden.
+    expect(splitByVerdict(items, undefined).unmatched).toEqual([])
+    expect(splitByVerdict(items, undefined).matched).toHaveLength(3)
+  })
+
+  it('counts and names what did not match', () => {
+    expect(unmatchedLabel(3, 'flights')).toBe('3 flights didn\'t match what you asked')
+    expect(unmatchedLabel(1, 'flights')).toBe('1 flight didn\'t match what you asked')
+    expect(unmatchedLabel(1, 'hotels')).toBe('1 hotel didn\'t match what you asked')
+  })
+
+  it('renders green check chips on a matched card', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT], verdicts })],
+      proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('match-chip')
+    expect(html).toContain('Premium economy')
+    expect(html).toContain('1 stop')
+  })
+
+  it('puts what did not match in a collapsed section, with its reasons, and keeps it off the tabs', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT], verdicts })],
+      proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('1 flight didn&#x27;t match what you asked')
+    // Collapsed on first render: the reasons and the second card are behind the toggle.
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('Self-transfer risk')
+    // The tabs summarise the matched list only — €845.00 is F1's price, not F2's cheaper one.
+    expect(html).toContain('€845.00')
+    expect(html).not.toContain('€600.00')
+    expect(html).not.toContain('Not checked against your request')
+  })
+
+  it('says so, once, when nothing checked the list', () => {
+    const html = renderToStaticMarkup(createElement(ResultsPane, {
+      results: [resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT], verdicts: undefined })],
+      proposal: null, now: NOW, pending: false, error: null,
+      onChoose: () => {}, onGetLinks: () => {},
+    }))
+    expect(html).toContain('Not checked against your request')
+    expect(html).not.toContain('didn&#x27;t match what you asked')
+    expect(html).not.toContain('match-chip')
+    // Both cards are in the one list.
+    expect(html).toContain('€845.00')
+    expect(html).toContain('€600.00')
+  })
+
+  it('renders the chips on a stay too', () => {
+    const html = renderToStaticMarkup(createElement(HotelCard, {
+      item: HOTEL_ITEM, adults: 2, now: NOW,
+      matches: ['Hotel', 'Near the centre', 'Well rated'],
+      onChoose: () => {},
+    }))
+    expect(html).toContain('match-chip')
+    expect(html).toContain('Near the centre')
+    expect(html).toContain('Well rated')
   })
 })

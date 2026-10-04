@@ -5,10 +5,17 @@
  * unmasked — only the enum-like summary `summary()` below builds, same trust-boundary instinct as
  * the rest of this module (src/intake/brief.ts's doc comment).
  */
-import { askJev, scoreQ, type JevDeps, type JevQuestion, type JevRequest, type JevResponse } from '../jev/client.js'
+import {
+  askJev, noulQ, scoreQ,
+  type JevDeps, type JevQuestion, type JevRequest, type JevResponse,
+} from '../jev/client.js'
 import { minorUnitExponent } from '../money.js'
 import { maskUntrustedText } from '../sanitize.js'
 import type { TripBrief } from './brief.js'
+import {
+  ISSUE_GATE, ISSUE_LABELS, FAR_FROM_CENTRE_KM, matchesFor,
+  type IssueKey, type Verdict,
+} from './verdicts.js'
 import type { SupplierItem } from '../supplier/types.js'
 
 /** At most this many options are sent to Jev for scoring — `o0`..`o19`. */
@@ -116,6 +123,52 @@ function preferencesFor(kind: 'flight' | 'hotel', brief: TripBrief) {
 }
 
 /**
+ * The per-option questions, asked in the SAME fan-out call as the scores.
+ *
+ * One Jev call for both jobs rather than two: the state it reasons over is identical, the cost is
+ * billed on input tokens (so a second call would pay for the same state twice), and a verdict
+ * that disagreed with the score it was computed beside would be two answers about one option.
+ *
+ * A question is only asked when the brief gives it something to be about — `misses_arrival` needs
+ * `arriveBy`, `too_many_stops` needs a stated cap, `self_transfer_risk` needs the item to BE a
+ * self-transfer, `far_from_centre` needs a distance past the threshold. Asking anyway would be
+ * asking Jev to rule on a preference she never stated, and every answer above the gate would be
+ * an invented complaint.
+ */
+function questionsForOption(
+  kind: 'flight' | 'hotel', brief: TripBrief, item: SupplierItem, index: number,
+): Record<string, JevQuestion> {
+  const out: Record<string, JevQuestion> = {}
+  const ask = (key: IssueKey, instructions: string) => {
+    out[`o${index}_${key}`] = noulQ(instructions)
+  }
+  if (kind === 'flight' && item.detail.kind === 'flight') {
+    const d = item.detail
+    ask('violates_cabin', `Are option o${index}'s long-haul legs NOT in her stated cabin?`)
+    if (brief.arriveBy) {
+      ask('misses_arrival', `Does option o${index} arrive AFTER the date she must be there?`)
+    }
+    if (brief.maxStops !== null) {
+      ask('too_many_stops', `Does option o${index} have more stops than she allowed?`)
+    }
+    if (d.selfTransfer) {
+      ask('self_transfer_risk', `Is option o${index}'s self-transfer a real risk for this itinerary?`)
+    }
+    return out
+  }
+  if (item.detail.kind !== 'hotel') return out
+  const d = item.detail
+  if (d.propertyType === 'rental') {
+    ask('wrong_type', `Is option o${index} a rental where she was shown hotels?`)
+  }
+  if (d.distanceKm !== null && d.distanceKm > FAR_FROM_CENTRE_KM) {
+    ask('far_from_centre', `Is option o${index} too far from the centre for the trip she described?`)
+  }
+  ask('cannot_cover_stay', `Does option o${index} fail to cover her whole stay?`)
+  return out
+}
+
+/**
  * Orders `items` by Jev's fit score (desc), then price (asc) as the tiebreak. Only the first
  * `MAX_SCORED` items are ever sent to Jev — any remainder is kept, in its original relative
  * order, after the scored-and-sorted head. Throws whatever `askJev` throws (a `JevError`): the
@@ -129,7 +182,13 @@ function preferencesFor(kind: 'flight' | 'hotel', brief: TripBrief) {
  */
 export async function rankItems(
   deps: { jev: JevDeps }, brief: TripBrief, items: SupplierItem[],
-): Promise<{ ordered: SupplierItem[]; request: JevRequest; response: JevResponse }> {
+): Promise<{
+  ordered: SupplierItem[]
+  request: JevRequest
+  response: JevResponse
+  /** Section 7's per-item answer, keyed on `sourceId` — see `Verdict` and `ISSUE_LABELS`. */
+  verdicts: Record<string, Verdict>
+}> {
   const scored = items.slice(0, MAX_SCORED)
   const rest = items.slice(MAX_SCORED)
   const kind = kindOf(scored)
@@ -142,10 +201,24 @@ export async function rankItems(
   const questions: Record<string, JevQuestion> = {}
   for (let i = 0; i < scored.length; i++) {
     questions[`o${i}`] = scoreQ(`How well does option o${i} match her preferences?`, SCORE_LEVELS)
+    Object.assign(questions, questionsForOption(kind, brief, scored[i]!, i))
   }
 
   const request: JevRequest = { state, questions }
   const response = await askJev(deps.jev, request)
+
+  // Only the items that were actually scored get a verdict. The remainder past `MAX_SCORED` was
+  // never shown to Jev, so it has not been checked and must not be claimed to have been — an
+  // absent entry reads as "unverified", never as "no issues found".
+  const verdicts: Record<string, Verdict> = {}
+  for (const [index, item] of scored.entries()) {
+    const issues: string[] = []
+    for (const key of Object.keys(ISSUE_LABELS) as IssueKey[]) {
+      const answer = response.answers[`o${index}_${key}`]
+      if (answer?.type === 'noul' && answer.noul > ISSUE_GATE) issues.push(ISSUE_LABELS[key])
+    }
+    verdicts[item.sourceId] = { matches: matchesFor(kind, brief, item), issues }
+  }
 
   const withScores = scored.map((item, index) => {
     const answer = response.answers[`o${index}`]
@@ -159,5 +232,5 @@ export async function rankItems(
     return Number(a.item.price.minor - b.item.price.minor)
   })
 
-  return { ordered: [...withScores.map((w) => w.item), ...rest], request, response }
+  return { ordered: [...withScores.map((w) => w.item), ...rest], request, response, verdicts }
 }

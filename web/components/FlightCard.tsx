@@ -2,6 +2,7 @@ import { Backpack, Bag, Suitcase, Warning } from '@phosphor-icons/react/dist/ssr
 import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite, LegLite } from '@/web/data'
 import { AirlineLogo } from './AirlineLogo'
+import { MatchChips } from './MatchChips'
 import { ageText, staleAgeText } from './age'
 
 export type FlightCardProps = {
@@ -21,6 +22,11 @@ export type FlightCardProps = {
    * exactly where it is; the one thing a ttl expires is the money.
    */
   updating?: boolean
+  /**
+   * Section 7: the facts about this itinerary that line up with what she asked for, as green
+   * check chips. Empty (or absent) for an item Jev never checked — see `MatchChips`.
+   */
+  matches?: string[]
   onChoose: (sourceId: string) => void
 }
 
@@ -137,7 +143,10 @@ function LegRow({ label, leg, stops }: { label: string; leg: LegLite; stops: num
  * `onError` fallback alone.
  */
 export function FlightCard(
-  { item, adults, now, chosen = false, selectDisabled = false, updating = false, onChoose }: FlightCardProps,
+  {
+    item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
+    onChoose,
+  }: FlightCardProps,
 ) {
   const flight = item.flight
   if (!flight) return null
@@ -163,6 +172,7 @@ export function FlightCard(
         {flight.inbound ? (
           <LegRow label="Inbound" leg={flight.inbound} stops={flight.inboundStops ?? 0} />
         ) : null}
+        <MatchChips matches={matches} />
         <div className="flight-card-extras">
           <span className="flight-bags">
             <span className="flight-bag" data-included={flight.bags.personal > 0 ? 'true' : 'false'}>

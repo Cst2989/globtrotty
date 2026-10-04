@@ -1864,6 +1864,123 @@ select {
 /* ---------- hotel list ---------- */
 
 .flight-list,
+/* ---------- verified results (hotels pass, section 7) ---------- */
+
+/*
+ * A green check per fact this option matches. Green and small on purpose: these
+ * are confirmations, not claims, and a row of loud badges would compete with
+ * the price for the one bit of attention a card gets.
+ */
+.match-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.match-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+/*
+ * What did not match is COLLAPSED, never dropped: "wrong for what she asked" is
+ * a judgment, and she is the one entitled to overrule it — a self-transfer she
+ * is happy to risk, a rental she would take at that price. The toggle says how
+ * many and the panel says why, so expanding it answers the question it raises.
+ */
+.unmatched {
+  margin-top: 0.9rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+}
+
+.unmatched-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0;
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.unmatched-toggle:hover {
+  color: var(--ink);
+}
+
+.unmatched-toggle svg {
+  transition: transform 160ms var(--ease);
+}
+
+.unmatched-toggle svg[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+.unmatched-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.unmatched-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.unmatched-reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.unmatched-reason-name {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.issue-chip {
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--r-pill);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+/*
+ * No Jev answer for this row, so the list is shown exactly as the supplier
+ * ordered it and says so. The alternative — rendering it silently — would let
+ * an unchecked list look like a checked one that found nothing.
+ */
+.results-unchecked {
+  margin: 0 0 0.5rem;
+  color: var(--ink-3);
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unmatched-toggle svg {
+    transition: none;
+  }
+}
+
 /* ---------- the hotel card (hotels pass, section 3) ---------- */
 
 /*
