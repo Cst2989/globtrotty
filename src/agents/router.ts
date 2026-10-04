@@ -24,6 +24,8 @@ import { loadNotebook } from '../repo/notebook.js'
 import { recordSpend } from '../repo/spend.js'
 import { parseAction } from '../actions.js'
 import { applyFilter, describeFilter } from '../intake/filter.js'
+import { filterReply } from './stage.js'
+import { formatMoney } from '../money.js'
 import type { Filter, ResultsContent } from '../results.js'
 import { isFlight, type StoredItem } from '../supplier/types.js'
 import { runIntakeTurn, type IntakeDeps } from './intake.js'
@@ -263,9 +265,19 @@ async function routeTyped(
       // guarantee, so this falls back to the driver rather than crash on a missing results row.
       if (!base) return withExtraCost(sql, ctx, await driver(ctx), cost)
       const filtered = applyFilter(storedItems, result.filter ?? {})
+      // Section 8c: the same pattern as the hotels reply — say what is left AND what the best
+      // of it is, rather than only the arithmetic. The name is supplier-authored and goes
+      // through `maskDisplayName` inside `filterReply`; the price is this office's own
+      // `formatMoney` output.
+      const cheapest = [...filtered].sort(
+        (a, b) => (a.price.minor < b.price.minor ? -1 : a.price.minor > b.price.minor ? 1 : 0),
+      )[0] ?? null
       return {
         kind: 'park',
-        message: `Showing ${filtered.length} of ${storedItems.length}: ${describeFilter(result.filter ?? {})}.`,
+        message: filterReply(
+          filtered.length, storedItems.length, describeFilter(result.filter ?? {}),
+          cheapest === null ? null : { name: cheapest.name, price: formatMoney(cheapest.price) },
+        ),
         costMicros: cost,
         attachments: [
           {

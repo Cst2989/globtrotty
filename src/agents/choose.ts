@@ -33,7 +33,7 @@ import { assertSupplierBudget } from '../tools/supplierBudget.js'
 import { type Place } from '../intake/places.js'
 import { hotelSearchFor, stayWindowForFlight, withDistanceFromCentre } from './hotels.js'
 import { ResearchSupplierError, planFor, rerunSearch, resultsAttachment } from './research.js'
-import { conversationStage, nextStepsForList } from './stage.js'
+import { conversationStage, hotelsFoundReply, nextStepsForList } from './stage.js'
 import { nightsBetween } from '../supplier/dates.js'
 import { rankItems } from '../intake/rank.js'
 import { recordJevCall } from '../jev/record.js'
@@ -396,12 +396,24 @@ async function handleChooseFlight(
       }
     }
 
+    // Section 8c: the desk CONTINUES the conversation instead of filing a receipt for its own
+    // search. "Here are hotels in Tokyo for 20 Nov to 6 Dec, 16 nights, two adults." says only
+    // what the summary bar above the list already says, and leaves her with a blank composer in
+    // front of eighteen cards. `hotelsFoundReply` says what is IN the list and asks the question
+    // a travel agent would ask next; the window stays, because it is the one fact of the search
+    // that nothing else in the reply repeats.
+    const found = hotelsFoundReply(destination.city, ordered)
     return {
       kind: 'park',
-      message: `Nice choice. Here are hotels in ${destination.city} for `
-        + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}, ${nights} `
-        + `${nights === 1 ? 'night' : 'nights'}, ${countWord(adults)} `
-        + `${adults === 1 ? 'adult' : 'adults'}.`,
+      message: found === null
+        ? `Nice choice. Here are hotels in ${destination.city} for `
+          + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}, ${nights} `
+          + `${nights === 1 ? 'night' : 'nights'}, ${countWord(adults)} `
+          + `${adults === 1 ? 'adult' : 'adults'}.`
+        : `Nice choice. ${found} That is `
+          + `${dateLabel(checkIn)} to ${dateLabel(checkOut)}, ${nights} `
+          + `${nights === 1 ? 'night' : 'nights'}, ${countWord(adults)} `
+          + `${adults === 1 ? 'adult' : 'adults'}.`,
       costMicros: rerankCost,
       recordedMicros: spent.micros,
       attachments: [

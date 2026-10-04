@@ -16,8 +16,10 @@
  * supplier wrote can move the stage.
  */
 import type postgres from 'postgres'
+import { maskDisplayName } from '../sanitize.js'
 import type { NextStepSet } from './nextSteps.js'
 import type { StoredItinerary } from '../repo/proposals.js'
+import { isHotel, type SupplierItem } from '../supplier/types.js'
 
 export type Stage = 'flights' | 'hotels' | 'summary'
 
@@ -90,4 +92,86 @@ export function refreshReplyFor(stage: Stage, rowKind: 'flights' | 'hotels'): st
  */
 export function chosenFlightMovedTo(formattedPrice: string): string {
   return `Your chosen flight is now ${formattedPrice}.`
+}
+
+/**
+ * The one line the DRIVER is told about where the trip is, so a typed question is answered in
+ * context instead of as if the conversation had just started (section 8d).
+ *
+ * It joins the notebook and the expired notice in the driver's volatile suffix: per-turn, after
+ * the cache breakpoint, fixed English with no id and no supplier string in it.
+ */
+export function stageNote(stage: Stage): string {
+  switch (stage) {
+    case 'flights':
+      return 'Stage: flights, nothing chosen yet.'
+    case 'hotels':
+      return 'Stage: hotels, flight chosen.'
+    case 'summary':
+      return 'Stage: summary, flight and stay both chosen.'
+  }
+}
+
+/** 'at 1.2 km' / 'at 820 m'. One decimal under ten kilometres, whole numbers above. */
+function distanceWords(km: number): string {
+  if (km < 1) return `${Math.round(km * 1000)} m`
+  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`
+}
+
+/**
+ * What the desk says once a list of stays is on screen (section 8c).
+ *
+ * The author's complaint was that the conversation STOPPED: "Nice choice. Here are hotels in
+ * Tokyo for 20 Nov to 6 Dec, 16 nights, two adults." is a receipt for the search, not a
+ * contribution to the conversation, and it left her with a blank composer in front of eighteen
+ * cards. This says what is actually in the list — how many are hotels and how many are whole
+ * places, and which one is closest to the centre — and then asks the question a travel agent
+ * would ask next.
+ *
+ * `city` is the bundled place table's own name. The one supplier-authored string that reaches
+ * her is the stay's name, through `maskDisplayName`, exactly as the cards already show it.
+ * Returns `null` when the list is too thin to say anything interesting about, and the caller
+ * keeps its plainer sentence.
+ */
+export function hotelsFoundReply(city: string, items: SupplierItem[]): string | null {
+  if (items.length === 0) return null
+  const stays = items.filter(isHotel)
+  const rentals = stays.filter((i) => i.detail.propertyType === 'rental').length
+  const hotels = stays.filter((i) => i.detail.propertyType === 'hotel').length
+
+  // Further out than this and "the closest to the centre" is not a recommendation, it is an
+  // apology — and a stay the supplier placed somewhere implausible (or a place table whose
+  // centre is wrong) would otherwise produce a confident sentence about a hotel 11,000 km from
+  // Tokyo. Past the cap the clause is simply left out.
+  const NEAR_ENOUGH_KM = 50
+  const placed = stays
+    .filter((i) => i.detail.distanceKm !== null && i.detail.distanceKm <= NEAR_ENOUGH_KM)
+    .sort((a, b) => a.detail.distanceKm! - b.detail.distanceKm!)
+  const closest = placed[0] ?? null
+
+  // The semicolon joins the two clauses when both exist, and becomes a full stop when the
+  // second one is missing — a sentence this office prints should never end on a semicolon.
+  const hasNearest = closest !== null
+  const mix = hotels > 0 && rentals > 0
+    ? ` ${hotels} ${hotels === 1 ? 'is a hotel' : 'are hotels'}, `
+      + `${rentals} ${rentals === 1 ? 'is a rental' : 'are rentals'}${hasNearest ? ';' : '.'}`
+    : ''
+  const nearest = closest === null
+    ? ''
+    : `${mix === '' ? ' The' : ' the'} closest to the centre is ${maskDisplayName(closest.name)} `
+      + `at ${distanceWords(closest.detail.distanceKm!)}.`
+
+  return `I found ${items.length} ${items.length === 1 ? 'place' : 'places'} in ${city} for those `
+    + `dates.${mix}${nearest}`
+    + ' Pick one, or tell me what matters: area, budget, breakfast.'
+}
+
+/**
+ * What the desk says after a filter: how many are left and the best thing among them, rather
+ * than only the arithmetic. Same shape, same reason, same masking.
+ */
+export function filterReply(left: number, total: number, description: string, cheapest: { name: string; price: string } | null): string {
+  const head = `Showing ${left} of ${total}: ${description}.`
+  if (left === 0 || cheapest === null) return head
+  return `${head} The cheapest is ${maskDisplayName(cheapest.name)} at ${cheapest.price}.`
 }

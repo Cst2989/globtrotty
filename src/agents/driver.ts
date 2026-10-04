@@ -16,6 +16,7 @@ import { toolsForDesk } from '../tools/registry.js'
 import { fenceResult, trimForContext, validateToolCall } from '../tools/validate.js'
 import { assertSupplierBudget, SUPPLIER_DOORS } from '../tools/supplierBudget.js'
 import { applyRequirementsPatch, loadNotebook, renderNotebook } from '../repo/notebook.js'
+import { conversationStage, stageNote } from './stage.js'
 import { runProposalPath } from './proposalPath.js'
 import { researchDestination } from './scout.js'
 import { buildRevisedRefs, type ReviseInput } from '../tools/revise.js'
@@ -91,6 +92,12 @@ export function makeDriver(deps: DriverDeps): Agent {
     // `propose_itinerary` would refuse it anyway (spec section 4's price half
     // of `trimForContext`, done here instead — see validate.ts).
     const expired = await listExpiredSourceIds(sql, ctx.conversationId, new Date(deps.now()))
+    // Section 8d: one line saying where the trip actually is, so a typed question is answered in
+    // context rather than as if the conversation had just started. The author's complaint about
+    // the chat staying "very primitive" was partly this: the driver had the transcript but no
+    // statement of the stage, and answered a question about hotels as though nothing were
+    // chosen. Fixed English from `stageNote`, read off the proposals table.
+    const stage = await conversationStage(sql, ctx.conversationId, ctx.userId)
 
     const args: CallArgs = {
       seat,
@@ -104,7 +111,7 @@ export function makeDriver(deps: DriverDeps): Agent {
       // turns — and is dropped entirely (rather than appended empty) when
       // nothing is stale, so a driver call with a fresh corpus sends exactly
       // the notebook it always sent.
-      suffix: [renderNotebook(notebook), renderExpiredNotice(expired)]
+      suffix: [renderNotebook(notebook), stageNote(stage), renderExpiredNotice(expired)]
         .filter((s) => s.length > 0).join('\n\n'),
       // Spec section 4: "a date without a year is the next one in the
       // future" only holds if she is told what today is, every call. UTC —

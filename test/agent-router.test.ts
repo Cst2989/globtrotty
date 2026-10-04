@@ -143,7 +143,8 @@ describeDb('makeRouter', () => {
       const content = attachment.content as ResultsContent
       expect(content.sourceIds).toEqual(['F1', 'F3'])
       expect(content.filter?.nonstop).toBe(true)
-      expect(step.message).toBe('Showing 2 of 3: nonstop.')
+      // Section 8c: the reply names the best of what is left, not only the arithmetic.
+      expect(step.message).toBe('Showing 2 of 3: nonstop. The cheapest is flight F1 at €200.00.')
       expect(searchSpy).not.toHaveBeenCalled()
       expect(create).not.toHaveBeenCalled()
 
@@ -194,7 +195,7 @@ describeDb('makeRouter', () => {
       const content = step.attachments![0]!.content as ResultsContent
       expect(content.sourceIds).toEqual(['F1', 'F2', 'F3'])      // widened, not compounded
       expect(content.filter?.maxStops).toBe(1)
-      expect(step.message).toBe('Showing 3 of 3: up to 1 stop.')
+      expect(step.message).toBe('Showing 3 of 3: up to 1 stop. The cheapest is flight F1 at €200.00.')
     })
   })
 
@@ -237,7 +238,7 @@ describeDb('makeRouter', () => {
       if (step.kind !== 'park') throw new Error('unreachable')
       const content = step.attachments![0]!.content as ResultsContent
       expect(content.sourceIds).toEqual(['F1', 'F2', 'F3'])
-      expect(step.message).toBe('Showing 3 of 3: all results.')
+      expect(step.message).toBe('Showing 3 of 3: all results. The cheapest is flight F1 at €200.00.')
     })
   })
 
@@ -788,7 +789,8 @@ describeDb('makeRouter: the `next` chips', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
-      expect(step.message).toBe('Showing 2 of 3: nonstop.')
+      // Section 8c: the reply names the best of what is left, not only the arithmetic.
+      expect(step.message).toBe('Showing 2 of 3: nonstop. The cheapest is flight F1 at €200.00.')
       const calls = await sql<{ seat: string }[]>`
         select seat from model_calls where conversation_id = ${s.conversationId}`
       expect(calls.map((r) => r.seat)).toEqual(['router'])

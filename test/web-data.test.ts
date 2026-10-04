@@ -12,7 +12,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   toThreadView, firstMessagePerConversation, itineraryItemsLite, newestAlternativePerSourceId,
   dropExpiredAlternatives, newestResultItemPerSourceId, isExpired, freshnessOf, cityNamesFor,
-  naiveMinutesBetween, skeletonMode, describeResultsForUi,
+  naiveMinutesBetween, skeletonMode, describeResultsForUi, shouldRecoverResults,
+  threadClaimsResults,
   type ThreadMessage, type AlternativeLite, type ResultItemLite,
 } from '../web/data.js'
 
@@ -33,6 +34,26 @@ describe('toThreadView', () => {
     expect(view[1]!.content).not.toContain(PROPOSAL_ID)
     expect(view[1]!.content).not.toContain('hand_off')
     expect(view[1]!.content).not.toContain('proposalId')
+  })
+
+  /*
+   * Polish pass, sections 8a and 12. "You asked to refresh prices" appeared in threads she had
+   * only opened — the pane re-ran aged-out searches by itself and every one of them wore her
+   * name. The row stays in the database and in the model's transcript; it leaves the one place
+   * it never belonged.
+   */
+  it('drops a refresh action from the thread entirely, keeping everything around it', () => {
+    const rows: ThreadMessage[] = [
+      { id: 'm1', role: 'user', content: 'hi', created_at: 't1' },
+      { id: 'm2', role: 'action', content: JSON.stringify({ action: 'refresh', kind: 'flight' }), created_at: 't2' },
+      { id: 'm3', role: 'agent', content: 'Prices refreshed.', created_at: 't3' },
+    ]
+
+    const view = toThreadView(rows)
+
+    expect(view).toHaveLength(2)
+    expect(view.map((v) => v.id)).toEqual(['m1', 'm3'])
+    expect(JSON.stringify(view)).not.toContain('refresh prices')
   })
 
   it('falls back to a fixed sentence for a malformed action row, never the raw text', () => {
@@ -605,5 +626,37 @@ describe('skeletonMode', () => {
     expect(skeletonMode({
       status: 'working', resultKinds: ['flights', 'hotels'], latestAction: { action: 'refresh', kind: 'hotel' },
     })).toBe('hotels')
+  })
+})
+
+/*
+ * Polish pass, section 11 (Critical, the author's "BROKEN"). A fresh chat split correctly on
+ * send and then, once the results had arrived, re-rendered as the plain thread — rail expanded,
+ * no results pane — although the `results` row and its "10 flights shown" marker were both
+ * there and the conversation was at `awaiting_user`.
+ *
+ * `loadThread` found the row and `loadResults` did not. Both read the same table through the
+ * same RLS-scoped client, so a disagreement is either a transient read or a bug not yet found;
+ * either way the page can notice it, log it, and re-read itself once.
+ */
+describe('the page noticing its own two reads disagree', () => {
+  it('sees the transcript claim results', () => {
+    expect(threadClaimsResults([{ role: 'user' }, { role: 'results' }])).toBe(true)
+    expect(threadClaimsResults([{ role: 'user' }, { role: 'agent' }])).toBe(false)
+    expect(threadClaimsResults([])).toBe(false)
+  })
+
+  it('recovers exactly once, and only when the two reads actually disagree', () => {
+    expect(shouldRecoverResults({ threadClaimsResults: true, resultRows: 0, alreadyTried: false }))
+      .toBe(true)
+    // The ordinary case: both reads agree, nothing to do.
+    expect(shouldRecoverResults({ threadClaimsResults: true, resultRows: 1, alreadyTried: false }))
+      .toBe(false)
+    // A conversation with no search in it yet is not broken.
+    expect(shouldRecoverResults({ threadClaimsResults: false, resultRows: 0, alreadyTried: false }))
+      .toBe(false)
+    // And a row this reader genuinely cannot resolve must not refresh the page forever.
+    expect(shouldRecoverResults({ threadClaimsResults: true, resultRows: 0, alreadyTried: true }))
+      .toBe(false)
   })
 })

@@ -120,8 +120,12 @@ describeDb('handleChoose', () => {
 
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
+      // Section 8c: the desk says what is IN the list and asks the next question, instead of
+      // filing a receipt for its own search. The window stays, because nothing else says it.
       expect(step.message).toBe(
-        'Nice choice. Here are hotels in Tokyo for 19 Nov to 6 Dec, 17 nights, two adults.')
+        'Nice choice. I found 5 places in Tokyo for those dates. 3 are hotels, 2 are rentals.'
+        + ' Pick one, or tell me what matters: area, budget, breakfast.'
+        + ' That is 19 Nov to 6 Dec, 17 nights, two adults.')
       expect(searchSpy).toHaveBeenCalledTimes(1)
       // The hotels pass, section 1: the chosen flight arrives at an AIRPORT code, and what goes
       // out is the metro that airport serves, as words, with its market. `q=TYO` (and `q=Tokyo`)
@@ -435,7 +439,7 @@ describeDb('handleChoose', () => {
       expect(step.kind).toBe('park')
       if (step.kind !== 'park') throw new Error('unreachable')
       // The normal flow continued: a flights-only proposal was accepted and hotels were searched.
-      expect(step.message).toContain('Here are hotels in Tokyo')
+      expect(step.message).toContain('places in Tokyo for those dates')
       const [accepted] = await sql`
         select decision from proposals where conversation_id = ${s.conversationId}`
       expect(accepted!.decision).toBe('accept')

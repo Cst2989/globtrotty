@@ -640,13 +640,16 @@ describeDb('driver', () => {
       const lastBlock = messages.at(-1)!.content.at(-1)!
       const text = String(lastBlock.text)
       expect(text).not.toContain('## Expired results')
-      // With nothing expired, the suffix block is today's date line followed
-      // by the rendered notebook alone. The date line itself is not a fixed
-      // string here (deps.now() is the real clock), so it is matched by
-      // shape, not by exact value.
+      // With nothing expired, the suffix block is today's date line, the rendered notebook and
+      // the one stage line (polish pass, section 8d) — and nothing else. The date line itself is
+      // not a fixed string here (deps.now() is the real clock), so it is matched by shape, not
+      // by exact value.
       expect(text).toMatch(/^Today is \d{4}-\d{2}-\d{2}\.\n\n/)
       const notebook = await loadNotebook(sql, s.conversationId, s.userId)
-      expect(text.endsWith(`\n\n${renderNotebook(notebook)}`)).toBe(true)
+      expect(text).toContain(`\n\n${renderNotebook(notebook)}`)
+      // Nothing is chosen in this seed, so the driver is told so in as many words rather than
+      // being left to infer it from a transcript.
+      expect(text.endsWith('\n\nStage: flights, nothing chosen yet.')).toBe(true)
     })
   })
 

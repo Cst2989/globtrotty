@@ -1042,6 +1042,41 @@ export async function loadResults(
   })
 }
 
+/**
+ * Polish pass, section 11: does the TRANSCRIPT say there are results?
+ *
+ * The bug, in the author's words: a fresh chat split correctly on send, and then, once the
+ * results had arrived, re-rendered as the plain thread — rail expanded, no results pane —
+ * although a `results` row and its "10 flights shown" marker were both there and the
+ * conversation was at `awaiting_user`.
+ *
+ * The two reads disagreeing is the whole of the symptom: `loadThread` found the row and
+ * `loadResults` did not. They read the same table through the same RLS-scoped client, so a
+ * disagreement is either a transient read (one of the two served from before the turn's commit)
+ * or a bug this office has not found yet. Either way the page knows it is in a state it should
+ * not be in, and it can say so and recover rather than quietly render the wrong layout.
+ *
+ * Pure, so `test/web-data.test.ts` pins it without a live DB.
+ */
+export function threadClaimsResults(messages: { role: string }[]): boolean {
+  return messages.some((m) => m.role === 'results')
+}
+
+/**
+ * Whether the page should re-read itself once because the two reads above disagree.
+ *
+ * `once` is the whole of the safety: a conversation that genuinely has a `results` row naming a
+ * corpus this reader cannot resolve would otherwise refresh forever. One retry turns a transient
+ * read into a correct screen and leaves everything else exactly as it was.
+ */
+export function shouldRecoverResults(input: {
+  threadClaimsResults: boolean
+  resultRows: number
+  alreadyTried: boolean
+}): boolean {
+  return input.threadClaimsResults && input.resultRows === 0 && !input.alreadyTried
+}
+
 /* ---------- Results UI pass 2 (E): the skeleton's own two inputs ---------- */
 
 /**

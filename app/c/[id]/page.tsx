@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { createServerSupabase } from '@/web/supabase/server'
 import {
   listConversations, loadThread, loadProposals, loadAlternatives, loadResults, loadLatestAction,
-  skeletonMode,
+  skeletonMode, shouldRecoverResults, threadClaimsResults,
 } from '@/web/data'
 import { AppShell } from '@/web/components/AppShell'
 import { Sidebar } from '@/web/components/Sidebar'
@@ -12,6 +12,7 @@ import { MessageBox } from '@/web/components/MessageBox'
 import { ProposalCardLive } from '@/web/components/ProposalCard'
 import { SplitShell } from '@/web/components/SplitShell'
 import { ResultsPaneLive } from '@/web/components/ResultsPane'
+import { ResultsRecovery } from '@/web/components/ResultsRecovery'
 import { ActivityProvider } from '@/web/components/activity'
 
 /**
@@ -57,6 +58,25 @@ export default async function ConversationPage({
   }
 
   const alternatives = { flight: flightAlternatives, hotel: hotelAlternatives }
+
+  /*
+   * Polish pass, section 11. The two reads disagree: the transcript holds a `results` row (it is
+   * rendering "10 flights shown" right there in the thread) and `loadResults` came back with
+   * nothing, so this render is about to be the plain one-column thread over a conversation that
+   * has a list of flights in it — rail expanded, no pane, exactly what the author saw.
+   *
+   * Both reads go through the same RLS-scoped client against the same table, so the
+   * disagreement is either a transient read or a bug not yet found. This logs it where a
+   * deployed function log will show it, with the conversation id and nothing else, and renders
+   * `ResultsRecovery`, which re-reads the page once a second later.
+   */
+  const claimsResults = threadClaimsResults(thread.messages)
+  const recoverResults = shouldRecoverResults({
+    threadClaimsResults: claimsResults, resultRows: results.length, alreadyTried: false,
+  })
+  if (recoverResults) {
+    console.error('loadResults: 0 rows for a thread that holds a results row', id)
+  }
   // `loadProposals` is newest-first; the results pane only ever shows the
   // current one — whatever `choose`/`decide` most recently touched.
   const proposal = proposals[0] ?? null
@@ -111,7 +131,10 @@ export default async function ConversationPage({
             latestResultsId={latestResultsId}
           />
         ) : (
-          chat
+          <>
+            {chat}
+            {recoverResults ? <ResultsRecovery /> : null}
+          </>
         )}
       </ActivityProvider>
     </AppShell>
