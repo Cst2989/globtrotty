@@ -29,7 +29,6 @@ import {
 } from '../web/components/FilterBar.js'
 import { SortTabs, tabSummary } from '../web/components/SortTabs.js'
 import { ResultsSkeleton } from '../web/components/ResultsSkeleton.js'
-import { PinnedSummary, flightLine, priceAgeNote, stayLine } from '../web/components/PinnedSummary.js'
 import {
   REFRESH_TIMEOUT_MS, ResultsPane, outcomeForStatus, refreshPhase, splitByVerdict, unmatchedLabel,
 } from '../web/components/ResultsPane.js'
@@ -37,6 +36,7 @@ import { SummaryBar, summarySegments, nightsBetween } from '../web/components/Su
 import { MessageBubble } from '../web/components/MessageBubble.js'
 import { applyFilterLite } from '../web/filters.js'
 import type { ResultItemLite, ResultsView, ProposalRowLite, LinkLite } from '../web/data.js'
+import type { PendingAction } from '../web/components/pending.js'
 import { hotelLite } from './helpers/web-lite.js'
 
 const NOW = new Date('2026-11-18T09:00:00.000Z')
@@ -607,132 +607,6 @@ describe('SortTabs', () => {
   })
 })
 
-describe('PinnedSummary', () => {
-  const items = [
-    {
-      slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BCN→HND',
-      priceMinor: '84500', currency: 'EUR', fetchedAt: NOW.toISOString(),
-      route: { from: 'BCN', to: 'NRT', fromCity: 'Barcelona', toCity: 'Tokyo' },
-      outbound: '2026-11-19', inbound: '2026-12-06', airline: 'China Eastern',
-      stars: null, nights: null, ttlSeconds: 900,
-    },
-  ]
-
-  /*
-   * Polish pass, section 4, the author's own line: the summary read `BCN-NRT`,
-   * `2026-11-19 → 2026-12-06`, `found 3 h ago`. A database row read aloud, in the one place on
-   * the screen whose whole job is to say what she has decided.
-   */
-  it('says the trip the way a traveller says it', () => {
-    // The carrier joins the line only when it is not already the name on the row above. A Kiwi
-    // flight's own `name` IS its carrier, and the line read "China Eastern · ... · China
-    // Eastern" until the screenshot caught it.
-    expect(flightLine(items[0]!)).toEqual([
-      'Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec', 'China Eastern',
-    ])
-    expect(flightLine({ ...items[0]!, name: 'China Eastern' }))
-      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
-    // And loosely, because the two strings come from different places: the supplier's own and
-    // this office's airline table.
-    expect(flightLine({ ...items[0]!, name: 'China Eastern Airlines' }))
-      .toEqual(['Barcelona BCN → Tokyo NRT', 'Thu 19 Nov to Sun 6 Dec'])
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Barcelona BCN → Tokyo NRT · Thu 19 Nov to Sun 6 Dec · China Eastern')
-    expect(html).not.toContain('2026-11-19')
-    // The decision is a chip, not a word floating beside a heading.
-    expect(html).toContain('Waiting for your decision')
-    expect(html).toContain('pinned-status')
-  })
-
-  it('says Accepted once she has accepted it', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: 'accept' as const, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Accepted')
-    expect(html).not.toContain('Waiting for your decision')
-  })
-
-  it('names a stay by its class and its length of stay', () => {
-    const stay = {
-      slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Hotel Gracery',
-      priceMinor: '430000', currency: 'EUR', fetchedAt: NOW.toISOString(),
-      route: null, outbound: '2026-11-20', inbound: '2026-12-06', airline: null,
-      stars: 4, nights: 16, ttlSeconds: 86_400,
-    }
-    expect(stayLine(stay)).toEqual(['16 nights', 'Fri 20 Nov to Sun 6 Dec'])
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items: [stay], totalMinor: '430000', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, now: NOW, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Hotel Gracery')
-    expect(html).toContain('hotel-stars')
-    expect(html).toContain('16 nights')
-  })
-
-  /*
-   * `found 3 h ago` sat on every summary whatever its age — a fact about our corpus dressed up
-   * as a warning. An age is worth her attention exactly when the price behind it may have moved.
-   */
-  it('mentions the age of a price only once it has actually aged out', () => {
-    expect(priceAgeNote(items[0]!, NOW)).toBeNull()
-    const later = new Date(NOW.getTime() + 3 * 3_600_000)
-    expect(priceAgeNote(items[0]!, later)).toBe('Prices checked 3 h ago')
-    // Nothing to judge it by, so nothing said.
-    expect(priceAgeNote({ ...items[0]!, ttlSeconds: null }, later)).toBeNull()
-  })
-
-  it('shows chosen items, the total, and Get booking links while undecided', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: false, error: null, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('BCN→HND')
-    expect(html).toContain('€845.00')
-    expect(html).toContain('Get booking links')
-    expect(html).not.toContain('<a ')
-  })
-
-  // Pass 3, section 6d: the hand-off re-checks every price with the supplier before it mints a
-  // link, which takes seconds; an unchanged button through all of them reads as one that did
-  // nothing.
-  it('says Checking prices… while the hand-off is in flight', () => {
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: null, links: [],
-        pending: true, error: null, onGetLinks: () => {},
-      }),
-    )
-    expect(html).toContain('Checking prices…')
-    expect(html).not.toContain('Get booking links')
-    expect(html).toContain('disabled=""')
-  })
-
-  it('shows only the links once accepted — no Get booking links button', () => {
-    const links: LinkLite[] = [{ itemId: 'F1', url: 'https://mock.example/book/F1?gt_ref=abc', quotedMinor: '84500', currency: 'EUR' }]
-    const html = renderToStaticMarkup(
-      createElement(PinnedSummary, {
-        items, totalMinor: '84500', currency: 'EUR', decision: 'accept', links,
-        pending: false, error: null, onGetLinks: () => {},
-      }),
-    )
-    const hrefs = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1])
-    expect(hrefs).toEqual([links[0]!.url])
-    expect(html).not.toContain('Get booking links')
-  })
-})
-
 function proposal(overrides: Partial<ProposalRowLite & { links: LinkLite[] }> = {}): ProposalRowLite & { links: LinkLite[] } {
   return {
     id: 'p1', totalMinor: '84500', currency: 'EUR', gateOutcome: 'approved', reviewIssues: [],
@@ -834,20 +708,21 @@ describe('ResultsPane', () => {
   })
 
   /*
-   * Section 3, found by looking at the picture. Between choosing a flight and choosing a stay the
-   * proposal holds ONE item, and the summary and the `Chosen flight` card then said the same
-   * thing twice, one above the other, over a "Total" that was just the flight's own price. The
-   * summary is for a TRIP; until there is a trip, the chosen-flight card is the whole of what
-   * there is to pin.
+   * Trip-stage pass, section 2. Between choosing a flight and choosing a stay the proposal holds
+   * ONE item, and the pane used to put a `Proposed trip` summary above the `Chosen flight` card
+   * saying the same thing twice, over a "Total" that was just the flight's own price. Until
+   * there is a trip, the chosen-flight card is the whole of what there is to pin — and once
+   * there is one, a totals block says what it costs rather than a second copy of the cards.
    */
-  it('shows the pinned summary only once the trip has both halves', () => {
+  it('pins the chosen flight alone until a stay is chosen too, then shows the totals', () => {
     const noneChosen = renderToStaticMarkup(
       createElement(ResultsPane, {
         results: [resultsView()], proposal: null, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(noneChosen).not.toContain('pinned-summary')
+    expect(noneChosen).not.toContain('Chosen flight')
+    expect(noneChosen).not.toContain('trip-totals')
 
     const flightOnly = renderToStaticMarkup(
       createElement(ResultsPane, {
@@ -855,7 +730,7 @@ describe('ResultsPane', () => {
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(flightOnly).not.toContain('pinned-summary')
+    expect(flightOnly).not.toContain('trip-totals')
     expect(flightOnly).toContain('Chosen flight')
 
     const wholeTrip = proposal()
@@ -866,12 +741,16 @@ describe('ResultsPane', () => {
     }]
     const chosen = renderToStaticMarkup(
       createElement(ResultsPane, {
-        results: [resultsView()], proposal: wholeTrip, now: NOW, pending: false, error: null,
+        results: [resultsView(), resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
+        proposal: wholeTrip, now: NOW, pending: false, error: null,
         onChoose: () => {}, onGetLinks: () => {},
       }),
     )
-    expect(chosen).toContain('pinned-summary')
-    expect(chosen).toContain('Get booking links')
+    expect(chosen).toContain('trip-totals')
+    expect(chosen).toContain('Accept this trip')
+    // Section 4's money: the totals block drops the `.00` on a whole number.
+    expect(chosen).toContain('Total')
+    expect(chosen).toMatch(/trip-total-sum[\s\S]*?€845</)
   })
 
   it('renders the newest hotels list above the newest flights list', () => {
@@ -1237,59 +1116,62 @@ describe('the stylesheet rules the flight list cannot do without', () => {
   })
 })
 
-describe('ResultsPane with a pendingChoice', () => {
+/**
+ * Trip-stage pass, sections 1 and 2: the pane reads ONE pending action off the shared store, and
+ * `paneLayout` turns it, plus the rows and the proposal, into exactly one layout.
+ */
+describe('ResultsPane with a pending action', () => {
   const SECOND_FLIGHT: ResultItemLite = {
     ...FLIGHT_ITEM, sourceId: 'F2', name: 'Finnair',
     flight: { ...FLIGHT_ITEM.flight!, stops: 0, airlines: ['AY'], airlineNames: ['Finnair'] },
   }
 
-  function paneWith(pendingChoice: { kind: 'flight' | 'hotel'; sourceId: string } | null, results = [
+  function paneWith(pendingAction: PendingAction | null, results = [
     resultsView({ items: [FLIGHT_ITEM, SECOND_FLIGHT] }),
   ]) {
     return renderToStaticMarkup(createElement(ResultsPane, {
-      results, proposal: null, now: NOW, pending: false, error: null, pendingChoice,
+      results, proposal: null, now: NOW, pending: false, error: null, pendingAction,
       onChoose: () => {}, onGetLinks: () => {},
     }))
   }
 
+  const choose = (kind: 'choose_flight' | 'choose_hotel', sourceId: string): PendingAction =>
+    ({ kind, label: '', at: Date.now(), sourceId })
+
   it('collapses the list into the chosen card the moment she picks one', () => {
-    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
-    // Section 3: one card on screen — hers, ribboned — and no list under it. Two full result
-    // sections stacked was the complaint, and the list she has finished with is the one to go.
+    const html = paneWith(choose('choose_flight', 'F1'))
+    // One card on screen — hers, ribboned — and no list under it. Two full result sections
+    // stacked was the complaint, and the list she has finished with is the one to go.
     expect(html).toContain('Selected')
     expect([...html.matchAll(/flight-card-ribbon/g)]).toHaveLength(1)
     expect([...html.matchAll(/flight-card"/g)]).toHaveLength(1)
     // Nothing left to press, because there is nothing left to choose between.
     expect([...html.matchAll(/>Select</g)]).toHaveLength(0)
-    // The pinned block, with her card's own name and price — above the lists — and one link
-    // back to the list she came from.
     expect(html).toContain('Chosen flight')
-    expect(html).toContain('€845.00')
-    // The card is pinned ABOVE the way back to the list, not under it.
-    expect(html).toContain('Change flight')
-    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Change flight'))
+    expect(html).toContain('€845')
+    // `Change` sits in the ribbon row on the card itself, and the way back to the whole list is
+    // below the pinned card rather than above it.
+    expect(html).toContain('card-change')
+    expect(html).toContain('Other flights')
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Other flights'))
   })
 
-  it('promises the hotel search a chosen flight starts', () => {
-    const html = paneWith({ kind: 'flight', sourceId: 'F1' })
+  it('promises the hotel search a chosen flight starts, BELOW the card she chose', () => {
+    const html = paneWith(choose('choose_flight', 'F1'))
     expect(html).toContain('Searching hotels…')
-    expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
+    expect(html.indexOf('Chosen flight')).toBeLessThan(html.indexOf('Searching hotels…'))
   })
 
   it('promises the trip summary a chosen HOTEL starts, not another list', () => {
     const html = paneWith(
-      { kind: 'hotel', sourceId: 'H1' },
+      choose('choose_hotel', 'H1'),
       [resultsView({ messageId: 'm2', kind: 'hotels', items: [HOTEL_ITEM] })],
     )
     expect(html).toContain('Putting the trip together…')
     expect(html).not.toContain('Searching hotels…')
-    expect(html).toContain('Chosen hotel')
-    // Her row keeps its "Chosen" marker and loses its button, like the real thing.
-    expect(html).toContain('result-row-chosen')
-    expect(html).not.toContain('>Choose<')
   })
 
-  it('leaves every Select alive and promises nothing with no pendingChoice', () => {
+  it('leaves every Select alive and promises nothing with no pending action', () => {
     const html = paneWith(null)
     expect([...html.matchAll(/>Select</g)]).toHaveLength(2)
     // Both Select buttons, neither disabled. (The filter bar's own steppers carry a `disabled`
@@ -1298,7 +1180,6 @@ describe('ResultsPane with a pendingChoice', () => {
     expect(html).not.toContain('Chosen flight')
     expect(html).not.toContain('Searching hotels…')
   })
-
 })
 
 describe('ResultsPane skeletons', () => {
@@ -1319,6 +1200,8 @@ describe('ResultsPane skeletons', () => {
     expect(html.indexOf('Searching hotels…')).toBeGreaterThan(-1)
     expect(html.indexOf('Searching hotels…')).toBeLessThan(html.indexOf('flight-card'))
     expect(html).toContain('Barcelona BCN → Tokyo HND')
+    // Never a skeleton and a list of the same kind together (section 2's last rule).
+    expect(html).not.toContain('hotel-card')
   })
 
   it('shows no skeleton at all once the results are in', () => {

@@ -1,18 +1,14 @@
 'use client'
 
-import {
-  cloneElement, isValidElement, useCallback, useEffect, useRef, useState,
-  type ReactElement, type ReactNode,
-} from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { ConversationHeader, LatestTurn, ThreadMessage } from '@/web/data'
 import { subscribeConversation } from '@/web/realtime'
 import { createBrowserSupabase } from '@/web/supabase/browser'
-import { mergePending, type MergedMessage, type PendingMessage } from './pending'
-import { useActivity } from './activity'
+import { actionNote, mergePending, type MergedMessage } from './pending'
+import { useOptimistic } from './optimistic'
 import { MessageBubble } from './MessageBubble'
 import { StatusLine } from './StatusLine'
-import type { MessageBoxProps } from './MessageBox'
 
 /**
  * Streamed reveal: the extra, all-optional fields `ThreadLive` attaches to a just-arrived
@@ -81,6 +77,14 @@ export type ThreadViewProps = {
    * makes the live wiring an explicit choice at exactly one call site.
    */
   conversationId?: string
+  /**
+   * Trip-stage pass, section 1: the words the pending-action note reads, or `null` for no note.
+   * It is a centred `data-pending` row under the messages, exactly where the server's own
+   * `action` row will land a round trip later saying the same thing — see `actionNote`.
+   */
+  pendingNote?: string | null
+  /** Re-posts the optimistic message whose POST failed — see `MessageBubbleProps.onRetry`. */
+  onRetry?: (pendingId: string) => void
 }
 
 /**
@@ -95,7 +99,7 @@ export type ThreadViewProps = {
 export function ThreadView(
   {
     conversation, messages, latestTurn, children, composer, tail, sending, searching, updating,
-    conversationId,
+    conversationId, pendingNote = null, onRetry,
   }: ThreadViewProps,
 ) {
   const working = updating === true
@@ -137,6 +141,10 @@ export function ThreadView(
                       content={m.content}
                       conversationId={conversationId}
                       pending={'pending' in m ? m.pending : undefined}
+                      failed={'failed' in m ? m.failed : undefined}
+                      onRetry={'pendingId' in m && m.pendingId && onRetry
+                        ? () => onRetry(m.pendingId!)
+                        : undefined}
                       animate={m.animate}
                       onRevealed={m.onRevealed}
                       gated={gatedForThisRow}
@@ -146,6 +154,13 @@ export function ThreadView(
               })
             })()}
           </ul>
+          {/* Section 1: what she just did, said in the chat in the same tick she did it, in the
+              place and the words the server's own `action` row will use once it lands. */}
+          {pendingNote ? (
+            <div className="message-row" data-role="action" data-pending="true">
+              <p className="message message-action" data-role="action">{pendingNote}</p>
+            </div>
+          ) : null}
           {/* Pass 3, section 5e/6b: driven by the same `working` as the status line, so the
               typing dots appear in the tick she presses send rather than after the POST. */}
           {working ? (
@@ -179,35 +194,25 @@ export type ThreadLiveProps = {
   searching?: boolean
 }
 
-/** How long an optimistic message waits for a matching server row before it is dropped anyway (Task 10 brief). */
-const PENDING_TIMEOUT_MS = 30_000
-
 /**
  * The client island: owns the Realtime subscription (`subscribeConversation`,
- * `web/realtime.ts`) and calls `router.refresh()` on every change; the
- * server component (`app/c/[id]/page.tsx`) re-runs `loadThread` and this
- * re-renders with fresh, RLS-scoped data. The subscription payload itself is
- * never read (see `web/realtime.ts`). It also keeps the column scrolled to
- * the newest content, the way every chat client does, whenever the message
+ * `web/realtime.ts`) and calls `router.refresh()` on every change; the server component
+ * (`app/c/[id]/page.tsx`) re-runs `loadThread` and this re-renders with fresh, RLS-scoped data.
+ * The subscription payload itself is never read (see `web/realtime.ts`). It also keeps the
+ * column scrolled to the newest content, the way every chat client does, whenever the message
  * count or the status changes.
  *
- * The browser Supabase client is created lazily with `useState`'s
- * initializer so it is built exactly once per mount; a client instance is
- * not serialisable across the server/client boundary, so the Server
- * Component parent passes only JSON-safe props.
+ * The browser Supabase client is created lazily with `useState`'s initializer so it is built
+ * exactly once per mount; a client instance is not serialisable across the server/client
+ * boundary, so the Server Component parent passes only JSON-safe props.
  *
- * Task 10, optimistic send: `composer` arrives as an already-built
- * `<MessageBox .../>` element (the server-rendered page decides its
- * `conversationId`/`status` props); this wraps it with `cloneElement` to
- * inject `onOptimistic`/`onOptimisticError` without the page needing to
- * know anything about pending state. `onOptimistic` appends a
- * `PendingMessage` (and schedules its own `PENDING_TIMEOUT_MS` fallback
- * removal); `onOptimisticError` removes one by content when the POST itself
- * failed outright (not the 409/busy or 429/limit cases, which DID write her
- * message — see `MessageBox.messageForStatus`'s own doc comment — so there
- * the pending bubble is left for the next refresh to match and drop). The
- * merge itself is `mergePending` (`./pending.ts`), a pure function so it is
- * unit-tested directly rather than through this component.
+ * Trip-stage pass, section 1: this no longer owns any optimistic state. The pending bubbles, the
+ * pending-action note, the thinking row and the status line all read ONE store
+ * (`./optimistic.tsx`), which the pane writes to as well — which is the whole point: a Select
+ * pressed in the pane changes this column in the same tick, and a chip clicked in this column
+ * changes the pane. The merge is still `mergePending` (`./pending.ts`), pure, unit-tested
+ * directly; what changed is that the store has already settled anything the server carries, so
+ * the merge no longer has a drop rule of its own.
  *
  * Streamed reveal: `mountedIdsRef` is the set of message ids this instance opened with, so an
  * `agent` row that shows up afterward (the ordinary case, a reply landing through the Realtime
@@ -220,11 +225,9 @@ const PENDING_TIMEOUT_MS = 30_000
  */
 export function ThreadLive({ userId, conversation, messages, latestTurn, children, composer, searching }: ThreadLiveProps) {
   const router = useRouter()
-  const activity = useActivity()
+  const optimistic = useOptimistic()
   const [sb] = useState(() => createBrowserSupabase())
   const tailRef = useRef<HTMLDivElement>(null)
-  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([])
-  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   /**
    * Streamed reveal: every message id present the FIRST time this component rendered — on the
@@ -240,65 +243,14 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
   // Ids of agent messages whose `StreamedText` reveal has finished. Only ever grows; a message
   // never in here and not in `mountedIdsRef` is the one currently streaming.
   const [revealedIds, setRevealedIds] = useState<ReadonlySet<string>>(() => new Set())
-  const markRevealed = useCallback((id: string) => {
+  function markRevealed(id: string) {
     setRevealedIds((current) => {
       if (current.has(id)) return current
       const next = new Set(current)
       next.add(id)
       return next
     })
-  }, [])
-
-  function dropPending(predicate: (p: PendingMessage) => boolean) {
-    setPendingMessages((current) => {
-      const keep: PendingMessage[] = []
-      for (const p of current) {
-        if (predicate(p)) {
-          const timer = timersRef.current.get(p.id)
-          if (timer) clearTimeout(timer)
-          timersRef.current.delete(p.id)
-        } else {
-          keep.push(p)
-        }
-      }
-      return keep
-    })
   }
-
-  /**
-   * Task 10's optimistic append, lifted out of the `cloneElement` below so pass 3's chips and
-   * choice cards can reach it too. Stable (`useCallback` over nothing but refs and a setter), so
-   * the registration effect below runs once per mount rather than on every render.
-   */
-  const addPending = useCallback((text: string) => {
-    const id = crypto.randomUUID()
-    setPendingMessages((current) => [...current, { id, content: text }])
-    const timer = setTimeout(() => {
-      setPendingMessages((current) => {
-        const timers = timersRef.current
-        const found = current.find((p) => p.id === id)
-        if (found) timers.delete(id)
-        return current.filter((p) => p.id !== id)
-      })
-    }, PENDING_TIMEOUT_MS)
-    timersRef.current.set(id, timer)
-  }, [])
-
-  // Pass 3, section 6b: `ChoiceCardLive` is rendered deep inside this thread but has no way to
-  // reach this list; `ActivityProvider` (web/components/activity.tsx) is the seam, and this is
-  // the registration that makes `activity.optimistic(label)` land here.
-  useEffect(() => {
-    activity.register(addPending)
-    return () => activity.register(null)
-  }, [activity, addPending])
-
-  // The server has caught up: whatever a click was optimistically claiming is now the stored
-  // truth, so the shared flag goes back down and the real `status` drives the line again.
-  useEffect(() => {
-    if (conversation.status !== 'active' && conversation.status !== 'awaiting_user') {
-      activity.setBusy(false)
-    }
-  }, [conversation.status, activity])
 
   useEffect(() => {
     return subscribeConversation(sb, {
@@ -308,30 +260,11 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
     })
   }, [sb, userId, conversation.id, router])
 
-  // A refresh landed: drop any pending message the server has now matched
-  // by content (see `mergePending`'s own doc comment for why content, not id).
-  useEffect(() => {
-    dropPending((p) => messages.some((m) => m.role === 'user' && m.content === p.content))
-    // `dropPending` closes over `setPendingMessages` and `timersRef` only —
-    // both stable across renders — so `[messages]` is the complete, correct
-    // dependency list even though the function itself is not in it.
-  }, [messages])
-
-  // Every timer this instance has ever started is cleared on unmount — a
-  // change that arrives right before unmount must never fire into a
-  // torn-down component.
-  useEffect(() => {
-    return () => {
-      for (const timer of timersRef.current.values()) clearTimeout(timer)
-      timersRef.current.clear()
-    }
-  }, [])
-
   useEffect(() => {
     tailRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages.length, conversation.status, pendingMessages.length])
+  }, [messages.length, conversation.status, optimistic.pendingMessages.length])
 
-  const mergedMessages = mergePending(messages, pendingMessages)
+  const mergedMessages = mergePending(messages, optimistic.pendingMessages)
 
   // Streamed reveal: an agent row not already on the page at mount streams in; `revealed` and
   // `onRevealed` are only meaningful for those, so every other row (including the pending-merge
@@ -346,16 +279,7 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
     }
   })
 
-  const liveComposer =
-    composer && isValidElement(composer)
-      ? cloneElement(composer as ReactElement<MessageBoxProps>, {
-          onOptimistic: addPending,
-          onOptimisticError: (text: string) => {
-            dropPending((p) => p.content === text)
-            activity.setBusy(false)
-          },
-        })
-      : composer
+  const note = optimistic.pendingAction === null ? '' : actionNote(optimistic.pendingAction.kind)
 
   return (
     <ThreadView
@@ -363,10 +287,12 @@ export function ThreadLive({ userId, conversation, messages, latestTurn, childre
       conversationId={conversation.id}
       messages={revealableMessages}
       latestTurn={latestTurn}
-      composer={liveComposer}
-      sending={pendingMessages.length > 0 || activity.busy}
+      composer={composer}
+      sending={optimistic.busy}
       searching={searching}
-      updating={activity.updating}
+      updating={optimistic.updating}
+      pendingNote={note === '' ? null : note}
+      onRetry={(pendingId) => optimistic.retry(pendingId)}
       tail={<div ref={tailRef} aria-hidden="true" />}
     >
       {children}

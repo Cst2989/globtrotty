@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useActivity } from './activity'
+import { useOptimistic } from './optimistic'
 
 export type ChoiceCardProps = {
   question: string
@@ -89,47 +89,70 @@ const GENERIC_ERROR = 'That could not be sent. Please try again.'
  */
 export function ChoiceCardLive({ conversationId, questionId, question, options, variant }: ChoiceCardLiveProps) {
   const router = useRouter()
-  const activity = useActivity()
+  const optimistic = useOptimistic()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function pick(optionId: string, label: string) {
-    // Pass 3, section 6b: all three before the fetch. The label IS the message this click posts
-    // (spec §3), so it is exactly what the pending bubble should say, and `ThreadLive` owns that
-    // list — `activity.optimistic` is how a card this deep in the thread reaches it.
+  async function post(
+    optionId: string, label: string, idempotencyKey: string,
+    entries: { message: string; action: string },
+  ) {
     setPending(true)
     setError(null)
-    activity.optimistic(label)
-    activity.setBusy(true)
     try {
       const res = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           text: label,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey,
           choice: { questionId, optionId },
         }),
       })
       if (!res.ok) {
         setError(GENERIC_ERROR)
-        activity.setBusy(false)
+        optimistic.fail(entries.action)
+        optimistic.fail(entries.message)
         return
       }
       router.refresh()
     } catch {
       setError(GENERIC_ERROR)
-      activity.setBusy(false)
+      optimistic.fail(entries.action)
+      optimistic.fail(entries.message)
     } finally {
       setPending(false)
     }
+  }
+
+  /**
+   * Trip-stage pass, section 1: both writes happen before the fetch. The label IS the message
+   * this click posts (spec §3), so it is exactly what the pending bubble should say; the action
+   * entry beside it is what keeps the status line and the thinking row up while the turn runs.
+   * A `next` chip and a question card's option are told apart because they are different things
+   * to the office — one is a suggestion she took, the other an answer she gave.
+   */
+  function pick(optionId: string, label: string) {
+    const idempotencyKey = crypto.randomUUID()
+    const entries = { message: '', action: '' }
+    entries.message = optimistic.add({
+      kind: 'message',
+      text: label,
+      idempotencyKey,
+      onRetry: () => void post(optionId, label, idempotencyKey, entries),
+    })
+    entries.action = optimistic.add({
+      kind: variant === 'chips' ? 'next' : 'choice',
+      text: label,
+    })
+    void post(optionId, label, idempotencyKey, entries)
   }
 
   return (
     <>
       <ChoiceCard
         question={question} options={options} disabled={pending} variant={variant}
-        onPick={(id, label) => void pick(id, label)}
+        onPick={(id, label) => pick(id, label)}
       />
       {error ? (
         <p className="alert" role="alert">

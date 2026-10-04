@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Backpack, Bag, Suitcase, Warning } from '@phosphor-icons/react/dist/ssr'
 import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite, LegLite } from '@/web/data'
@@ -27,6 +28,11 @@ export type FlightCardProps = {
    * check chips. Empty (or absent) for an item Jev never checked — see `MatchChips`.
    */
   matches?: string[]
+  /**
+   * Trip-stage pass, section 2: what sits beside the `Selected` ribbon on a card the pane has
+   * pinned — the `Change` button. A plain node, so this card knows nothing about what it does.
+   */
+  ribbonAction?: ReactNode
   onChoose: (sourceId: string) => void
 }
 
@@ -147,7 +153,7 @@ function LegRow({ label, leg, stops }: { label: string; leg: LegLite; stops: num
 export function FlightCard(
   {
     item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
-    onChoose,
+    ribbonAction, onChoose,
   }: FlightCardProps,
 ) {
   const flight = item.flight
@@ -169,7 +175,12 @@ export function FlightCard(
       style={{ viewTransitionName: `card-${item.sourceId.replace(/[^A-Za-z0-9]/g, '-')}` }}
     >
       <div className="flight-card-main">
-        {chosen ? <span className="flight-card-ribbon">Selected</span> : null}
+        {chosen ? (
+          <span className="card-ribbon-row">
+            <span className="flight-card-ribbon">Selected</span>
+            {ribbonAction}
+          </span>
+        ) : null}
         <LegRow label="Outbound" leg={flight.outbound} stops={flight.stops} />
         {flight.inbound ? (
           <LegRow label="Inbound" leg={flight.inbound} stops={flight.inboundStops ?? 0} />

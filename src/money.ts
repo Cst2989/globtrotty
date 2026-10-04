@@ -68,3 +68,27 @@ export function formatMoney(m: Money): string {
     maximumFractionDigits: exp,
   }).format(value)
 }
+
+/**
+ * The same amount with a whole-number fraction dropped: `€3,248`, `€12.50`, `¥5,400`.
+ *
+ * Trip-stage pass, section 4. Every price on a card, a tab, a pin, a summary bar and a totals
+ * block is this one, because `.00` on a four-figure number is two characters of noise on the
+ * figure a traveller is actually comparing, and because `€3,248.00` beside `€203.00 per night`
+ * reads as a page of decimals rather than as two prices. A real fraction is never hidden:
+ * `€12.50` keeps both its digits, and a zero-exponent currency is unaffected either way.
+ *
+ * `formatMoney` stays exactly as it is for anywhere an exact figure is the point.
+ */
+export function formatMoneyShort(m: Money): string {
+  const exp = minorUnitExponent(m.currency)
+  const value = Number(m.minor) / 10 ** exp
+  const whole = exp === 0 || m.minor % 10n ** BigInt(exp) === 0n
+  const digits = whole ? 0 : exp
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: m.currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value)
+}

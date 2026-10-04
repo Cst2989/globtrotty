@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Star } from '@phosphor-icons/react/dist/ssr'
 import { formatMoney, money } from '@/src/money'
 import type { ResultItemLite } from '@/web/data'
@@ -26,6 +27,8 @@ export type HotelCardProps = {
   highlighted?: boolean
   /** Hovering a card lights up its pin; `null` on the way out. */
   onHover?: (sourceId: string | null) => void
+  /** Trip-stage pass, section 2: the `Change` button beside the ribbon — see `FlightCardProps`. */
+  ribbonAction?: ReactNode
   onChoose: (sourceId: string) => void
 }
 
@@ -201,7 +204,7 @@ export function Stars({ stars }: { stars: number }) {
 export function HotelCard(
   {
     item, adults, now, chosen = false, selectDisabled = false, updating = false, matches = [],
-    highlighted = false, onHover, onChoose,
+    highlighted = false, onHover, ribbonAction, onChoose,
   }: HotelCardProps,
 ) {
   const hotel = item.hotel
@@ -246,7 +249,12 @@ export function HotelCard(
       </div>
 
       <div className="hotel-card-main">
-        {chosen ? <span className="flight-card-ribbon">Selected</span> : null}
+        {chosen ? (
+          <span className="card-ribbon-row">
+            <span className="flight-card-ribbon">Selected</span>
+            {ribbonAction}
+          </span>
+        ) : null}
         <div className="hotel-card-head">
           <span className="hotel-card-name">{item.name}</span>
           {hotel.stars !== null && hotel.stars > 0 ? <Stars stars={Math.round(hotel.stars)} /> : null}

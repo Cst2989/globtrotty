@@ -14,14 +14,11 @@ import { messageForStatus, nextLocation, landingPhaseAfterResponse } from '../we
 import { LandingLive } from '../web/components/LandingLive.js'
 import { readFileSync } from 'node:fs'
 import { userInitial } from '../web/components/Sidebar.js'
-import { ProposalCard, errorForStatus } from '../web/components/ProposalCard.js'
-import { SwapPicker, effectiveChoice } from '../web/components/SwapPicker.js'
 import { mergePending } from '../web/components/pending.js'
 import { SplitShell } from '../web/components/SplitShell.js'
 import { AppShell } from '../web/components/AppShell.js'
 import { revealSchedule, visibleSlice } from '../web/components/stream.js'
 import { StreamedText } from '../web/components/StreamedText.js'
-import type { ProposalRowLite, LinkLite, AlternativeLite } from '../web/data.js'
 
 describe('MessageBubble', () => {
   it('renders an agent message as escaped plain text — no markdown, no script', () => {
@@ -55,9 +52,9 @@ describe('MessageBubble', () => {
   // JSON handling left in this component at all).
   it('renders an action row\'s already-prepared sentence with the message-action styling hook', () => {
     const html = renderToStaticMarkup(
-      createElement(MessageBubble, { role: 'action', content: 'You accepted the proposal' }),
+      createElement(MessageBubble, { role: 'action', content: 'You accepted the trip' }),
     )
-    expect(html).toContain('You accepted the proposal')
+    expect(html).toContain('You accepted the trip')
     expect(html).toContain('message-action')
   })
 
@@ -257,7 +254,7 @@ describe('ThreadView', () => {
             // mapping itself.
             id: 'm2',
             role: 'action',
-            content: 'You accepted the proposal',
+            content: 'You accepted the trip',
             created_at: new Date().toISOString(),
           },
           {
@@ -270,7 +267,7 @@ describe('ThreadView', () => {
       }),
     )
     expect(html).toContain('a week in Lisbon')
-    expect(html).toContain('You accepted the proposal')
+    expect(html).toContain('You accepted the trip')
     expect(html).not.toContain('<script>')
   })
 
@@ -447,40 +444,45 @@ describe('ThreadView', () => {
   })
 })
 
-describe('mergePending (Task 10)', () => {
+describe('mergePending', () => {
   const SERVER_NOW = [
     { id: 's1', role: 'user' as const, content: 'a week in Lisbon', created_at: '2026-10-03T10:00:00.000Z' },
   ]
 
   it('appends a pending message that has no matching server row yet', () => {
-    const merged = mergePending([], [{ id: 'p1', content: 'a week in Lisbon' }])
+    const merged = mergePending([], [{ id: 'p1', content: 'a week in Lisbon', at: 0, idempotencyKey: 'k', failed: false }])
     expect(merged).toHaveLength(1)
     expect(merged[0]).toMatchObject({ id: 'p1', role: 'user', content: 'a week in Lisbon', pending: true })
   })
 
-  it('drops a pending message once the server already has a user row with the same text', () => {
-    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a week in Lisbon' }])
-    expect(merged).toHaveLength(1)
+  /*
+   * Trip-stage pass, section 1: the merge no longer has a drop rule of its own. Deciding whether
+   * the server has caught up is `settlePending`'s job and `settlePending`'s only
+   * (test/web-optimistic.test.ts), so an entry that reaches this function is by construction one
+   * with no server row behind it — and appending it unconditionally is the whole of the merge.
+   */
+  it('appends whatever it is given, and leaves the settle rule to the store', () => {
+    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a week in Lisbon', at: 0, idempotencyKey: 'k', failed: false }])
+    expect(merged).toHaveLength(2)
     expect(merged[0]).toEqual(SERVER_NOW[0])
+    expect(merged[1]).toMatchObject({ pending: true, pendingId: 'p1' })
+  })
+
+  it('keeps the server row untouched', () => {
+    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a different trip', at: 0, idempotencyKey: 'k', failed: false }])
+    expect(merged.map((m) => m.content)).toEqual(['a week in Lisbon', 'a different trip'])
     expect((merged[0] as { pending?: boolean }).pending).toBeUndefined()
   })
 
-  it('keeps a pending message whose text does not match any server row', () => {
-    const merged = mergePending(SERVER_NOW, [{ id: 'p1', content: 'a different trip' }])
-    expect(merged.map((m) => m.content)).toEqual(['a week in Lisbon', 'a different trip'])
-  })
-
-  it('never matches a pending message against a non-user server row with the same text', () => {
-    const agentEcho = [{ id: 's1', role: 'agent' as const, content: 'a week in Lisbon', created_at: '2026-10-03T10:00:00.000Z' }]
-    const merged = mergePending(agentEcho, [{ id: 'p1', content: 'a week in Lisbon' }])
-    expect(merged).toHaveLength(2)
-    expect(merged[1]).toMatchObject({ pending: true })
+  it('carries the failed mark through, so the bubble can offer a retry', () => {
+    const merged = mergePending([], [{ id: 'p1', content: 'a week in Lisbon', at: 0, idempotencyKey: 'k', failed: true }])
+    expect(merged[0]).toMatchObject({ failed: true })
   })
 
   it('preserves server order and appends still-pending entries in send order, after', () => {
     const merged = mergePending(SERVER_NOW, [
-      { id: 'p1', content: 'first pending' },
-      { id: 'p2', content: 'second pending' },
+      { id: 'p1', content: 'first pending', at: 0, idempotencyKey: 'k', failed: false },
+      { id: 'p2', content: 'second pending', at: 0, idempotencyKey: 'k', failed: false },
     ])
     expect(merged.map((m) => m.id)).toEqual(['s1', 'p1', 'p2'])
   })
@@ -528,215 +530,6 @@ describe('SplitShell (Task 10)', () => {
       }),
     )
     expect(html).toContain('split-tab-badge')
-  })
-})
-
-const BASE_ITEMS = [
-  {
-    slot: 'outbound', sourceId: 'F1', kind: 'flight' as const, name: 'BER→FAO',
-    priceMinor: '12300', currency: 'EUR', fetchedAt: new Date().toISOString(),
-    route: { from: 'BER', to: 'FAO', fromCity: 'Berlin', toCity: 'Faro' },
-    outbound: '2026-09-12', inbound: '2026-09-19', airline: 'TAP Air Portugal',
-    stars: null, nights: null, ttlSeconds: 900,
-  },
-  {
-    slot: 'stay', sourceId: 'H1', kind: 'hotel' as const, name: 'Casa Bela',
-    priceMinor: '45600', currency: 'EUR', fetchedAt: new Date().toISOString(),
-    route: null, outbound: '2026-09-12', inbound: '2026-09-19', airline: null,
-    stars: 4, nights: 7, ttlSeconds: 86_400,
-  },
-]
-const NO_ALTERNATIVES = { flight: [], hotel: [] }
-const ONE_ALTERNATIVE = {
-  flight: [{ sourceId: 'F2', name: 'BER→FAO (alt)', priceMinor: '11000', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 }],
-  hotel: [],
-}
-
-function proposal(overrides: Partial<ProposalRowLite & { links: LinkLite[] }> = {}): ProposalRowLite & { links: LinkLite[] } {
-  return {
-    id: 'p1', totalMinor: '57900', currency: 'EUR', gateOutcome: 'approved', reviewIssues: [],
-    decision: null, items: BASE_ITEMS, links: [],
-    ...overrides,
-  }
-}
-
-const NOOP_HANDLERS = {
-  pending: false, error: null,
-  onAccept: () => {}, onReject: () => {}, onSwap: () => {}, onShift: () => {},
-}
-
-describe('ProposalCard', () => {
-  it('a pending (decision: null) card shows Accept/Reject buttons and no anchors', () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
-    )
-    expect(html).toContain('Accept')
-    expect(html).toContain('Reject')
-    expect(html).not.toContain('<a ')
-  })
-
-  it('an accepted card with two links renders exactly those two anchors, with the stored hrefs and rel', () => {
-    const links: LinkLite[] = [
-      { itemId: 'F1', url: 'https://mock.example/book/F1?gt_ref=abc', quotedMinor: '12300', currency: 'EUR' },
-      { itemId: 'H1', url: 'https://mock.example/book/H1?gt_ref=def', quotedMinor: '45600', currency: 'EUR' },
-    ]
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, {
-        proposal: proposal({ decision: 'accept', links }),
-        alternatives: NO_ALTERNATIVES,
-        ...NOOP_HANDLERS,
-      }),
-    )
-    const hrefs = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1])
-    expect(hrefs).toHaveLength(2)
-    expect(hrefs).toEqual(links.map((l) => l.url))
-    expect(html).toContain('rel="noopener noreferrer"')
-    // Decided: no more buttons (note: "Accepted" below legitimately
-    // contains the substring "Accept", so this checks for the button itself).
-    expect(html).not.toContain('<button')
-    expect(html).toContain('Accepted')
-  })
-
-  it('a rejected card has no anchors and no buttons', () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, { proposal: proposal({ decision: 'reject' }), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
-    )
-    expect(html).not.toContain('<a ')
-    expect(html).not.toContain('Accept')
-  })
-
-  it('a shipped_unapproved card shows the reviewer\'s issues text', () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, {
-        proposal: proposal({ gateOutcome: 'shipped_unapproved', reviewIssues: ['the stay is far from the beach'] }),
-        alternatives: NO_ALTERNATIVES,
-        ...NOOP_HANDLERS,
-      }),
-    )
-    expect(html).toContain('the stay is far from the beach')
-  })
-
-  // Task 8 review, Minor #9.
-  /*
-   * Polish pass, section 4. It used to read `2026-09-12 → 2026-09-19` — the ISO pair straight
-   * off the stored detail. The card now says the trip the way a traveller says it, through the
-   * same formatter the summary bar above the results list uses, so one date is written one way
-   * on this screen.
-   */
-  it("says each item's dates the way a traveller says them, read from the stored detail", () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, { proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS }),
-    )
-    expect(html).not.toContain('2026-09-12 → 2026-09-19')
-    expect(html).toContain('Berlin BER → Faro FAO')
-    expect(html).toContain('Sat 12 Sep to Sat 19 Sep')
-    expect(html).toContain('TAP Air Portugal')
-    // The stay's own line: how long, and when.
-    expect(html).toContain('7 nights')
-  })
-
-  /**
-   * Final review, M3. A 429 from decide/revise is the spend ceiling —
-   * `submitAction` returns `limit_reached` before its transaction, so nothing
-   * was written — and the old mapping sent it to the generic "Please try
-   * again", advice that cannot work today however many times she takes it.
-   * `MessageBox.messageForStatus` already gets this right for the message
-   * box; this is the card's version, minus that one's "Your message is
-   * saved", which would be false here.
-   */
-  it('maps 409 to the busy copy, 429 to the spend-ceiling copy, and everything else to the generic one', () => {
-    expect(errorForStatus(409)).toContain('already working on this proposal')
-    expect(errorForStatus(429)).toContain("Today's spending limit is reached")
-    expect(errorForStatus(429)).not.toMatch(/try again/i)
-    expect(errorForStatus(429)).not.toMatch(/saved/i)
-    expect(errorForStatus(500)).toBe('That could not be sent. Please try again.')
-    expect(errorForStatus(404)).toBe('That could not be sent. Please try again.')
-  })
-
-  it('renders whatever error copy it is given, as plain text', () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, {
-        proposal: proposal(), alternatives: NO_ALTERNATIVES, ...NOOP_HANDLERS,
-        error: errorForStatus(429),
-      }),
-    )
-    expect(html).toContain('Today&#x27;s spending limit is reached')
-  })
-
-  // Task 8 review, Minor #6: Accept/Reject/Shift and the SwapPicker's own
-  // "Swap" button are all disabled while a request from this card is in
-  // flight.
-  it('disables Accept, Reject, Shift and Swap while pending', () => {
-    const html = renderToStaticMarkup(
-      createElement(ProposalCard, {
-        proposal: proposal(), alternatives: ONE_ALTERNATIVE, ...NOOP_HANDLERS, pending: true,
-      }),
-    )
-    const buttons = [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
-    expect(buttons.length).toBeGreaterThan(0)
-    for (const [tag] of buttons) {
-      expect(tag).toContain('disabled')
-    }
-  })
-})
-
-/**
- * Final review, M2. `SwapPicker`'s `choice` is `useState`, initialised once,
- * and the component stays mounted across `router.refresh()` — so a card that
- * first rendered with NO alternatives for its slot seeded `choice` with the
- * item's own `selectedSourceId`, and kept it after a later search added real
- * alternatives. "Confirm swap" then POSTed the item's own id, which passes
- * `reviseRoute`'s corpus pre-check and burns a turn on a no-op swap.
- *
- * A static render always produces a CONSISTENT first frame — state and props
- * agree by construction — which is exactly why a render test could not see
- * this. So the stale combination is pinned on the pure `effectiveChoice`
- * (state and props as two separate inputs, the shape the second render
- * actually has), and the render tests pin that whatever the `<select>` shows
- * as selected is always one of the options it rendered.
- */
-describe('SwapPicker', () => {
-  const ALTS: AlternativeLite[] = [
-    { sourceId: 'F2', name: 'BER→FAO (alt)', priceMinor: '11000', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 },
-    { sourceId: 'F3', name: 'BER→FAO (alt 2)', priceMinor: '10500', currency: 'EUR', fetchedAt: new Date().toISOString(), ttlSeconds: 900 },
-  ]
-  const PICKER = {
-    selectedSourceId: 'F1', open: true, pending: false, now: new Date(),
-    onToggle: () => {}, onPick: () => {},
-  }
-
-  it('keeps a choice that is still among the alternatives', () => {
-    expect(effectiveChoice('F3', ALTS)).toBe('F3')
-  })
-
-  it('falls back to the first alternative when the choice is no longer one of them', () => {
-    // The real stale case: seeded with the item's own id while the corpus had
-    // no alternative for this slot, then alternatives arrived.
-    expect(effectiveChoice('F1', ALTS)).toBe('F2')
-    // And the same for an alternative that has since expired out of the list
-    // (`loadAlternatives` drops expired ids — see web/data.ts).
-    expect(effectiveChoice('F9', ALTS)).toBe('F2')
-  })
-
-  it('is undefined — never the item\'s own id — when there is nothing to swap to', () => {
-    expect(effectiveChoice('F1', [])).toBeUndefined()
-  })
-
-  it('marks a rendered option as selected, and only one', () => {
-    const html = renderToStaticMarkup(
-      createElement(SwapPicker, { ...PICKER, alternatives: ALTS }),
-    )
-    const selected = [...html.matchAll(/<option value="([^"]+)" selected=""/g)].map((m) => m[1])
-    expect(selected).toEqual(['F2'])
-  })
-
-  it('disables Confirm swap when there is nothing to swap to', () => {
-    // `value === undefined` — not `others.length === 0` at one call site and
-    // `choice` at another, which is how the stale id got through before.
-    const html = renderToStaticMarkup(
-      createElement(SwapPicker, { ...PICKER, alternatives: [] }),
-    )
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Confirm swap<\/button>/)
   })
 })
 

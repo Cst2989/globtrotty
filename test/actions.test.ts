@@ -79,7 +79,7 @@ describe('actions', () => {
   })
 
   it('describes for the UI without ids', () => {
-    expect(describeActionForUi({ action: 'hand_off', proposalId: P })).toBe('You accepted the proposal')
+    expect(describeActionForUi({ action: 'hand_off', proposalId: P })).toBe('You accepted the trip')
   })
 
   it('parses choose and choice, and refuses user text in optionId', () => {

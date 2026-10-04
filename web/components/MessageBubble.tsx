@@ -34,6 +34,13 @@ export type MessageBubbleProps = {
    * `prefers-reduced-motion: reduce`).
    */
   gated?: boolean
+  /**
+   * Trip-stage pass, section 1: the POST behind this optimistic bubble came back unusable, so
+   * the bubble offers the one thing that can still help. Pressing it re-posts with the SAME
+   * idempotency key, which is what stops a retry becoming a second row.
+   */
+  failed?: boolean
+  onRetry?: () => void
 }
 
 /**
@@ -59,7 +66,9 @@ export type MessageBubbleProps = {
  * or four next steps it is offering, and a card with a question heading would claim it is waiting
  * for one of them. Every OTHER `questionId` is a real question and keeps the card.
  */
-export function MessageBubble({ role, content, conversationId, pending, animate, onRevealed, gated }: MessageBubbleProps) {
+export function MessageBubble({
+  role, content, conversationId, pending, animate, onRevealed, gated, failed, onRetry,
+}: MessageBubbleProps) {
   if (role === 'choices') {
     const parsed = parseChoices(content)
     if (!parsed) {
@@ -105,12 +114,18 @@ export function MessageBubble({ role, content, conversationId, pending, animate,
       className="message-row"
       data-role={role}
       data-pending={pending ? 'true' : undefined}
+      data-failed={failed ? 'true' : undefined}
       data-gated={isMarker && gated ? 'true' : undefined}
       inert={(isMarker && gated) || undefined}
     >
       <p className={isMarker ? 'message message-action' : 'message'} data-role={role}>
         {role === 'agent' ? <StreamedText text={content} animate={animate === true} onDone={onRevealed} /> : content}
       </p>
+      {failed ? (
+        <button type="button" className="message-retry" onClick={onRetry}>
+          Not sent, tap to retry
+        </button>
+      ) : null}
     </div>
   )
 }

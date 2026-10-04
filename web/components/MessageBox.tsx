@@ -4,6 +4,7 @@ import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowUp, CalendarBlank, UsersThree, Wallet } from '@phosphor-icons/react'
 import { withViewTransition } from './transition'
+import { useOptimistic } from './optimistic'
 
 export type MessageBoxProps = {
   /** The conversation to post to, or `'new'` for the landing box. */
@@ -165,6 +166,7 @@ export function MessageBox({
   onOptimistic, onOptimisticError, initialText = '', initialError = null,
 }: MessageBoxProps) {
   const router = useRouter()
+  const optimistic = useOptimistic()
   const [text, setText] = useState(initialText)
   const [when, setWhen] = useState('')
   const [who, setWho] = useState('')
@@ -177,17 +179,16 @@ export function MessageBox({
   const disabled = !statusAllows || pending
   const canSend = !disabled && text.trim().length > 0
 
-  async function send() {
-    const typed = text.trim()
-    if (!typed || disabled) return
-    const trimmed = quickOptions ? withQuickOptions(typed, { when, who, budget }) : typed
-
-    // Task 10: the bubble renders and the box clears before the POST even
-    // starts — `pending` below still disables the composer against a
-    // double-click, but it no longer gates how fast she SEES her own
-    // message land.
-    onOptimistic?.(trimmed)
-    setText('')
+  /**
+   * The POST itself, lifted out of `send` so a RETRY can make exactly the same request.
+   *
+   * `idempotencyKey` is generated once per send and handed back in on every retry — the whole
+   * point of the retry bubble (trip-stage pass, section 1): a network error after the request
+   * reached the server looks identical to one that never sent, and the key is what stops the
+   * second attempt becoming a second row. `entry` names the store entry this request is the
+   * truth-or-otherwise of; it is filled in by `send` before the first call.
+   */
+  async function post(trimmed: string, idempotencyKey: string, entry: { current: string }) {
     setPending(true)
     setError(null)
 
@@ -195,7 +196,7 @@ export function MessageBox({
       const res = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: trimmed, idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ text: trimmed, idempotencyKey }),
       })
 
       if (!res.ok) {
@@ -207,7 +208,7 @@ export function MessageBox({
           ? landingPhaseAfterResponse(res.status) === 'navigate'
           // For an existing conversation, 409 and 429 both still WROTE her
           // message (see messageForStatus), so the optimistic bubble stays
-          // put for the next refresh to match by text and drop.
+          // put for the store to settle against the row that arrives.
           : (res.status === 409 || res.status === 429)
         if (keepGoing) {
           const body = (await res.json()) as { conversationId: string }
@@ -216,11 +217,12 @@ export function MessageBox({
           else router.refresh()
           return
         }
-        // A genuine failure: nothing usable was written, so the optimistic
-        // bubble (or the whole optimistic split) is wrong and so is an empty
-        // box — undo both.
+        // A genuine failure: nothing usable was written. The bubble stays, marked for retry, and
+        // her words go back in the box — the landing has no thread to leave a bubble in, so it
+        // puts the whole screen back instead (`onOptimisticError`).
+        optimistic.fail(entry.current)
         onOptimisticError?.(trimmed, res.status)
-        setText(trimmed)
+        if (landingBox) setText(trimmed)
         return
       }
 
@@ -237,26 +239,55 @@ export function MessageBox({
       else router.refresh()
     } catch {
       setError(messageForStatus(0))
+      optimistic.fail(entry.current)
       onOptimisticError?.(trimmed, 0)
-      setText(trimmed)
+      if (landingBox) setText(trimmed)
     } finally {
       setPending(false)
     }
   }
 
+  function send() {
+    const typed = text.trim()
+    if (!typed || disabled) return
+    const trimmed = quickOptions ? withQuickOptions(typed, { when, who, budget }) : typed
+    const idempotencyKey = crypto.randomUUID()
+
+    // Task 10, and section 1's store: the bubble renders and the box clears before the POST even
+    // starts. `pending` below still guards against a double-click, but it no longer gates how
+    // fast she SEES her own message land.
+    onOptimistic?.(trimmed)
+    const entry = { current: '' }
+    entry.current = optimistic.add({
+      kind: 'message',
+      text: trimmed,
+      idempotencyKey,
+      onRetry: () => void post(trimmed, idempotencyKey, entry),
+    })
+    setText('')
+    void post(trimmed, idempotencyKey, entry)
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void send()
+    send()
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      void send()
+      send()
     }
   }
 
-  const effectivePlaceholder = blockedPlaceholder(status) ?? placeholder ?? 'Message the travel desk'
+  /*
+   * Section 1: the box says the desk has her message in the tick she sends it, rather than a
+   * round trip later when `conversations.status` finally reads `working`. `blockedPlaceholder`
+   * says the same words for the stored status, so the line never changes as the two swap over.
+   */
+  const effectivePlaceholder = blockedPlaceholder(status)
+    ?? (optimistic.busy ? 'The desk is working on your last message' : null)
+    ?? placeholder ?? 'Message the travel desk'
 
   const textarea = (
     <textarea

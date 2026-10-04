@@ -3,10 +3,12 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
-import { CaretDown } from '@phosphor-icons/react'
-import { formatMoney, money } from '@/src/money'
+import { ArrowSquareOut, CaretDown } from '@phosphor-icons/react'
+import { formatMoneyShort, money } from '@/src/money'
 import type { Filter } from '@/src/results'
-import type { ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMode } from '@/web/data'
+import type {
+  ResultsView, ResultItemLite, ProposalRowLite, LinkLite, SkeletonMode, ProposalItemLite,
+} from '@/web/data'
 import { applyFilterLite, sortItemsLite, type Sort } from '@/web/filters'
 import { FlightList } from './FlightList'
 import { HotelList } from './HotelList'
@@ -14,45 +16,42 @@ import { stayCardId } from './HotelCard'
 import { prefersReducedMotion, useMediaQuery, SPLIT_QUERY } from './media'
 import { FilterBar } from './FilterBar'
 import { SortTabs } from './SortTabs'
-import { PinnedSummary } from './PinnedSummary'
 import { SummaryBar, summaryBarPropsFor } from './SummaryBar'
 import { ResultsSkeleton } from './ResultsSkeleton'
-import { errorForStatus } from './ProposalCard'
-import { useActivity } from './activity'
+import { errorForStatus } from './errors'
+import { useOptimistic } from './optimistic'
+import { paneLayout, UPDATED_REASON, type PaneLayout } from './paneLayout'
+import type { PendingAction } from './pending'
 
 export type ResultsPaneProps = {
   /** Every `results` row for this conversation, oldest first — `web/data.ts`'s `loadResults`. */
   results: ResultsView[]
-  /** The proposal recording what's chosen so far (links already scoped to an accepted one), or `null` before anything is chosen. */
+  /** The NEWEST proposal, links included, or `null` before anything is chosen. */
   proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+  /**
+   * The newest ACCEPTED proposal that holds a stay — see `PaneLayoutInput` for why the flag on
+   * `proposal` is not the same question. `null` until the trip itself is accepted.
+   */
+  acceptedProposal?: (ProposalRowLite & { links: LinkLite[] }) | null
   /** Injectable for tests; production passes nothing (`new Date()` each render). */
   now?: Date
   pending: boolean
   error: string | null
-  /**
-   * `web/data.ts`'s `skeletonMode` (E): `'full'` replaces the whole pane with a placeholder
-   * while the first search runs, `'hotels'` puts a hotel placeholder above the flights she
-   * already has while `handleChooseFlight` searches stays, `null` shows just the results.
-   */
+  /** `web/data.ts`'s `skeletonMode` — the server's own answer to "is a search running". */
   skeleton?: SkeletonMode
+  /** `conversations.status`, for the failed and hand-off-in-flight states. */
+  status?: string
   onChoose: (kind: 'flight' | 'hotel', sourceId: string) => void
   onGetLinks: () => void
   /** "Refresh prices", pressed on the bar above one list. Absent in a static render. */
   onRefresh?: (kind: 'flights' | 'hotels') => void
   /**
-   * Pass 3, section 6a: the card she just pressed Select on, set by `ResultsPaneLive`
-   * SYNCHRONOUSLY — before its POST — and cleared only if that POST comes back unusable.
-   *
-   * Pressing Select used to change nothing for about three seconds: the action row, the turn,
-   * the proposal path and the hotel search all had to land before `router.refresh()` brought
-   * back a page that finally said "Selected". Everything that answer eventually shows is
-   * already known here the moment she clicks: WHICH card she picked, that the others are no
-   * longer offers, and what the office does next. So this renders all three at once — the
-   * ribbon, the disabled Selects, the pinned block, and the placeholder for the search that is
-   * starting — and the server's own version of the same state replaces it without moving
-   * anything.
+   * Trip-stage pass, section 1: the one thing the screen is claiming ahead of the server, read
+   * straight off the shared store. It replaced this component's own `pendingChoice` state and
+   * the `pendingLanded` hotfix that grew on top of it; `settlePending`
+   * (`web/components/pending.ts`) is now the only answer to "has the server caught up".
    */
-  pendingChoice?: PendingChoice | null
+  pendingAction?: PendingAction | null
   /**
    * Pass 3 (author's correction to section 1): the kinds whose search is being re-run right now.
    * Every card in those lists shows a shimmering block where its price was, and nothing else
@@ -60,8 +59,6 @@ export type ResultsPaneProps = {
    */
   updatingKinds?: ('flights' | 'hotels')[]
 }
-
-export type PendingChoice = { kind: 'flight' | 'hotel'; sourceId: string }
 
 /**
  * Whether an optimistic state survives the response that eventually arrives.
@@ -96,12 +93,6 @@ export const REFRESH_TIMEOUT_MS = 20_000
  * `idle` draws real prices with their age. `refreshing` draws the shimmer. `settled` and
  * `timed_out` both draw the real prices again — they are kept apart because they are different
  * facts about the same screen, and the caller clears its own state on either.
- *
- * `rowChanged` is the signal that matters: the pane does not get told "your refresh finished",
- * it gets told "here is a different newest row for that kind". Anything else — a non-OK POST, a
- * Realtime update that brings no new row of that kind, or simply time passing — leaves the
- * prices she already had on screen, which is the honest answer: these are the numbers we have,
- * and this is how old they are.
  *
  * Pure, so `test/web-results-render.test.ts` pins every transition without a timer or a fetch.
  */
@@ -149,7 +140,7 @@ const FLIGHT_SORTS: Sort[] = ['best', 'cheapest', 'fastest']
 const HOTEL_SORTS: Sort[] = ['best', 'cheapest', 'rated']
 
 /**
- * Loaded only in the browser: Leaflet reads `window` while it evaluates, so a server render of
+ * Loaded only in the browser: MapLibre reads `window` while it evaluates, so a server render of
  * this component throws. `ssr: false` is the documented way to say that in Next, and the
  * placeholder is what stands in its place until the chunk lands.
  */
@@ -297,32 +288,6 @@ function UncheckedNote() {
 }
 
 /**
- * The pinned block for a choice the server has not confirmed yet (pass 3, section 6a): the one
- * card she picked, with its price, under the same heading the real `PinnedSummary` uses.
- *
- * No total and no "Get booking links": a total needs the gates' own arithmetic and the button
- * needs a proposal id, neither of which exists yet. Promising either would be the optimistic
- * screen claiming something the server has not said.
- */
-function PendingPinned(
-  { item, kind }: { item: ResultItemLite; kind: 'flight' | 'hotel' },
-) {
-  return (
-    <section className="pinned-summary" aria-label="Your trip so far">
-      <p className="pinned-pending-label">{kind === 'flight' ? 'Chosen flight' : 'Chosen hotel'}</p>
-      <ul className="pinned-items">
-        <li className="pinned-item">
-          <span className="pinned-item-name">{item.name}</span>
-          <span className="pinned-item-price">
-            {formatMoney(money(BigInt(item.priceMinor), item.currency))}
-          </span>
-        </li>
-      </ul>
-    </section>
-  )
-}
-
-/**
  * What a chosen HOTEL promises: not another list, but the summary of the whole trip, which
  * `handleChooseHotel` is off building through the gates and the reviewer. A skeleton list would
  * be a lie about what is coming.
@@ -341,32 +306,148 @@ function PendingTripSummary() {
   )
 }
 
-/** The item one `sourceId` names in a row, or `null` — what the pending pinned block renders. */
-function itemById(view: ResultsView | null, sourceId: string): ResultItemLite | null {
+/** The item one `sourceId` names in a row, or `null` — what a pinned card renders. */
+function itemById(view: ResultsView | null, sourceId: string | null): ResultItemLite | null {
+  if (sourceId === null) return null
   return view?.items.find((i) => i.sourceId === sourceId) ?? null
 }
 
+/** `Change`, as it sits beside a pinned card's own `Selected` ribbon. */
+function ChangeButton({ what, onClick }: { what: string; onClick: () => void }) {
+  return (
+    <button type="button" className="card-change" onClick={onClick}>
+      Change
+      <span className="visually-hidden"> the {what}</span>
+    </button>
+  )
+}
+
 /**
- * Spec §5's results pane: the pinned summary once anything is chosen, then the newest hotels
- * list (if any), then the newest flights list.
+ * Section 2's totals block: what each half costs, what the trip costs, and what that is each.
  *
- * Each list is one section, stacked: a `SummaryBar` (what was searched for, and what had to be
- * guessed), the stale banner when its prices have aged out, the horizontal `FilterBar` (pass 3,
- * section 3 — it replaced the left rail results UI pass 2 put beside the list), the `SortTabs`,
- * and the list. Every piece here is pure (callbacks as props); the bar's filter and the tabs'
- * sort are lifted to this component, one pair per kind — the flight-only fields (stops, bags, departure, airlines) mean
- * nothing for a stay, and a stay's rating means nothing for a flight — and applied with
- * `applyFilterLite` then `sortItemsLite`, in that order, so the tab summaries describe the
- * filtered list rather than the whole corpus.
+ * `per person` is the arithmetic she would otherwise do herself with a phone, and the party size
+ * is the one the search was actually run for rather than anything stored on the proposal.
+ */
+export function TripTotals(
+  { items, totalMinor, currency, adults }: {
+    items: ProposalItemLite[]
+    totalMinor: string
+    currency: string
+    adults: number
+  },
+) {
+  const perPerson = adults > 0 ? BigInt(totalMinor) / BigInt(adults) : null
+  return (
+    <section className="trip-totals" aria-label="What the trip costs">
+      {items.map((item) => (
+        <p key={item.slot} className="trip-total-row">
+          <span>{item.kind === 'flight' ? 'Flight' : 'Stay'}</span>
+          <span>{formatMoneyShort(money(BigInt(item.priceMinor), item.currency))}</span>
+        </p>
+      ))}
+      <p className="trip-total-row trip-total-sum">
+        <span>Total</span>
+        <span>{formatMoneyShort(money(BigInt(totalMinor), currency))}</span>
+      </p>
+      {perPerson !== null ? (
+        <p className="trip-total-per">{formatMoneyShort(money(perPerson, currency))} per person</p>
+      ) : null}
+    </section>
+  )
+}
+
+/** Fixed copy per kind: there is one flight supplier, and the stay's own name is already above. */
+function bookLabel(kind: 'flight' | 'hotel'): string {
+  return kind === 'flight' ? 'Book flight on Kiwi.com' : 'Book hotel'
+}
+
+/** The badge on an item the cashier replaced between her accept and the links. Fixed copy. */
+function UpdatedBadge() {
+  return (
+    <p className="trip-updated">
+      <span className="trip-updated-badge">Updated</span>
+      {UPDATED_REASON}
+    </p>
+  )
+}
+
+/**
+ * Section 2's action area: the one thing to press at the trip and accepted stages, and the words
+ * for every state in between. `layout.action` decides which; nothing here re-derives it.
+ */
+function ActionArea(
+  { layout, proposal, failReason, pending, onAccept }: {
+    layout: PaneLayout
+    proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+    failReason: string | null
+    pending: boolean
+    onAccept: () => void
+  },
+) {
+  if (layout.action === 'none') return null
+
+  if (layout.action === 'working') {
+    return (
+      <p className="trip-action-note" role="status">Checking prices and getting your booking links…</p>
+    )
+  }
+
+  if (layout.action === 'retry') {
+    return (
+      <div className="trip-action">
+        <p className="alert" role="alert">{failReason ?? 'That turn did not finish.'}</p>
+        <button type="button" className="btn btn-primary" disabled={pending} onClick={onAccept}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (layout.action === 'book') {
+    const byKind = new Map((proposal?.items ?? []).map((i) => [i.sourceId, i.kind]))
+    return (
+      <div className="trip-action trip-book">
+        <ul className="trip-links">
+          {(proposal?.links ?? []).map((link) => (
+            <li key={link.itemId}>
+              <a href={link.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                {bookLabel(byKind.get(link.itemId) ?? 'hotel')}
+                <ArrowSquareOut size={16} aria-hidden="true" />
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p className="trip-action-note">Prices were checked just now</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="trip-action">
+      <button type="button" className="btn btn-primary trip-accept" disabled={pending} onClick={onAccept}>
+        {layout.action === 'accept_updated' ? 'Accept the updated trip' : 'Accept this trip'}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Spec §5's results pane, re-cut by the trip-stage pass: `paneLayout` decides the shape and this
+ * draws it. Four stages, one at a time — a flights list; a chosen flight above a list of stays;
+ * both chosen, with a total and one button; and the accepted trip with its booking links.
  *
- * `test/web-results-render.test.ts` renders this directly with `renderToStaticMarkup` — the
- * local `useState` below is the same pattern `ProposalCard` already uses, which that file's own
- * tests confirm is safe under static rendering (no router, no effects).
+ * What this replaced was eight independent conditions, and the screenshots are what that cost:
+ * the hotels list still open under the stay she had already chosen, a `Proposed trip` card in the
+ * chat repeating the pinned block beside it, two totals disagreeing about the same trip.
+ *
+ * `test/web-results-render.test.ts` renders this directly with `renderToStaticMarkup` — the local
+ * `useState` below is the same pattern `ProposalCard` already uses, which that file's own tests
+ * confirm is safe under static rendering (no router, no effects).
  */
 export function ResultsPane(
   {
-    results, proposal, now, pending, error, skeleton = null, pendingChoice = null, updatingKinds = [],
-    onChoose, onGetLinks, onRefresh,
+    results, proposal, acceptedProposal = null, now, pending, error, skeleton = null, status,
+    pendingAction = null, updatingKinds = [], onChoose, onGetLinks, onRefresh,
   }: ResultsPaneProps,
 ) {
   const updatingFlights = updatingKinds.includes('flights')
@@ -382,9 +463,6 @@ export function ResultsPane(
   // adjust-state-when-props-change pattern) rather than with `useState`'s initializer alone: a
   // typed filter arrives through `router.refresh()`, which re-renders this instance instead of
   // remounting it, so an initializer-only version would keep showing the PREVIOUS row's state.
-  // Her own clicks are kept while the row is unchanged, which is the whole point of the state —
-  // and the sort tab resets with it, because "Cheapest" over last search's corpus is not an
-  // answer about this one. No effect is involved, so `renderToStaticMarkup` is unaffected.
   const [flightState, setFlightState] = useState<KindState>(() => stateFor(newestFlights))
   const [hotelState, setHotelState] = useState<KindState>(() => stateFor(newestHotels))
   if (flightState.messageId !== (newestFlights?.messageId ?? null)) setFlightState(stateFor(newestFlights))
@@ -394,6 +472,20 @@ export function ResultsPane(
   const setFlightSort = (sort: Sort) => setFlightState({ ...flightState, sort })
   const setHotelSort = (sort: Sort) => setHotelState({ ...hotelState, sort })
 
+  // Section 5. `split` is false on the first render everywhere (there is no viewport during a
+  // server render) and corrects itself a frame later — see `useMediaQuery`.
+  const split = useMediaQuery(SPLIT_QUERY)
+  const [hotelView, setHotelView] = useState<HotelView>('list')
+  const [highlightedStay, setHighlightedStay] = useState<string | null>(null)
+  /** Section 2: `Change` on the pinned flight, and `Other hotels` / `Change` on the pinned stay. */
+  const [flightsExpanded, setFlightsExpanded] = useState(false)
+  const [hotelsExpanded, setHotelsExpanded] = useState(false)
+
+  const layout = paneLayout({
+    results, proposal, acceptedProposal, pending: pendingAction, skeleton, status,
+    flightsExpanded, hotelsExpanded,
+  })
+
   const flightItems = newestFlights
     ? sortItemsLite(applyFilterLite(newestFlights.items, flightState.filter), flightState.sort)
     : []
@@ -402,8 +494,7 @@ export function ResultsPane(
     : []
 
   // Section 7: what Jev found wrong drops out of the list and into the collapsed section under
-  // it, and the tabs count only what is left. An unchecked row splits to "everything matched",
-  // which is why `UncheckedNote` says in words that nothing was checked.
+  // it, and the tabs count only what is left.
   const { matched: flightMatched, unmatched: flightUnmatched } =
     splitByVerdict(flightItems, newestFlights?.verdicts)
   const { matched: hotelMatched, unmatched: hotelUnmatched } =
@@ -411,152 +502,75 @@ export function ResultsPane(
   const flightMatchChips = matchesBySourceId(newestFlights?.verdicts)
   const hotelMatchChips = matchesBySourceId(newestHotels?.verdicts)
 
-  // Section 5. `split` is false on the first render everywhere (there is no viewport during a
-  // server render) and corrects itself a frame later — see `useMediaQuery`. The hovered or
-  // picked stay is one piece of state shared by the list and the map, which is what makes the
-  // two halves feel like one thing rather than two views of the same data.
-  const split = useMediaQuery(SPLIT_QUERY)
-  const [hotelView, setHotelView] = useState<HotelView>('list')
-  const [highlightedStay, setHighlightedStay] = useState<string | null>(null)
-  /** Section 3: the flights list, once it has collapsed, reopened by "Change flight". */
-  const [flightsOpen, setFlightsOpen] = useState(false)
-
-  // Pass 3, section 6a: her click counts as chosen immediately, exactly as the proposal row
-  // will once it lands. The proposal wins when both exist — it is the server's own answer.
-  const pendingFlight = pendingChoice?.kind === 'flight' ? pendingChoice.sourceId : null
-  const pendingHotel = pendingChoice?.kind === 'hotel' ? pendingChoice.sourceId : null
-  const chosenFlightSourceId = proposal?.items.find((i) => i.kind === 'flight')?.sourceId ?? pendingFlight
-  const chosenHotelSourceId = proposal?.items.find((i) => i.kind === 'hotel')?.sourceId ?? pendingHotel
-  const hasChosen = proposal !== null && proposal.items.length > 0
-  /*
-   * Section 3 again, found by looking at the picture. Between choosing a flight and choosing a
-   * stay, the proposal holds ONE item — and the pinned summary and the `Chosen flight` card then
-   * said the same thing twice, one above the other, with a "Total" that was just the flight's own
-   * price. The summary is for a TRIP; until there is a trip, the chosen-flight card is the whole
-   * of what there is to pin.
-   */
-  const hasStay = proposal?.items.some((i) => i.kind === 'hotel') ?? false
   // Every OTHER card's Select goes dead while a choice is in flight: one press is one
-  // instruction, and a second one would be refused with a 409 anyway (`submitAction`).
-  // Hotfix 2026-10-04: a pending choice the server has ALREADY answered must not keep the
-  // pane frozen. The flight choice has landed once a hotels row exists (or the proposal holds a
-  // flight); the hotel choice has landed once the proposal holds a stay. Before this, the flag
-  // survived the successful round trip, so the hotels skeleton rendered above the real list and
-  // every Select stayed disabled for good.
-  const pendingLanded = pendingChoice !== null && (
-    (pendingChoice.kind === 'flight' && (newestHotels !== null || chosenFlightSourceId === pendingChoice.sourceId && proposal !== null))
-    || (pendingChoice.kind === 'hotel' && hasStay)
-  )
-  const choosing = pendingChoice !== null && !pendingLanded
-  const pendingItem = pendingChoice === null
-    ? null
-    : itemById(pendingChoice.kind === 'flight' ? newestFlights : newestHotels, pendingChoice.sourceId)
+  // instruction, and a second one would be refused with a 409 anyway (`submitAction`). The store
+  // settles the moment the server answers, so this can no longer outlive the round trip.
+  const choosing = pendingAction?.kind === 'choose_flight' || pendingAction?.kind === 'choose_hotel'
 
-  // Section 3. The flights list collapses the moment a flight is chosen — into the pinned card
-  // above, with one link to bring it back. `chosenFlightItem` is null when the chosen id is not
-  // in the newest row (a refreshed list that no longer carries it), and the list then stays open
-  // rather than collapsing into a card that cannot be drawn.
-  const chosenFlightItem = chosenFlightSourceId === null
-    ? null
-    : itemById(newestFlights, chosenFlightSourceId)
-  const flightsCollapsed = chosenFlightItem !== null && !flightsOpen
+  const chosenFlightItem = itemById(newestFlights, layout.chosenFlight)
+  const chosenHotelItem = itemById(newestHotels, layout.chosenHotel)
+  // The accepted trip is the one with the links on it; a swap puts a newer, undecided proposal
+  // in front of it, and THAT is what the cards and the total then describe.
+  const shownProposal = layout.stage === 'accepted' && layout.updatedSlots.length === 0
+    ? (acceptedProposal ?? proposal)
+    : proposal
+  const adults = newestHotels?.query.adults ?? newestFlights?.query.adults ?? 1
 
   // Nothing to show beside a placeholder, and nothing to put it above: the whole pane IS the
-  // skeleton. Returning early rather than rendering empty sections keeps the "searching" state
-  // from being a half-drawn version of the real one.
-  if (skeleton === 'full') {
+  // skeleton.
+  if (layout.skeleton === 'flights') {
     return (
-      <div className="results-pane">
+      <div className="results-pane" data-stage={layout.stage}>
         <ResultsSkeleton kind="flights" />
       </div>
     )
   }
 
-  return (
-    <div className="results-pane">
-      {hasChosen && hasStay ? (
-        <PinnedSummary
-          items={proposal!.items}
-          totalMinor={proposal!.totalMinor}
-          currency={proposal!.currency}
-          decision={proposal!.decision}
-          links={proposal!.links}
-          pending={pending}
-          error={error}
-          onGetLinks={onGetLinks}
+  const hotelsSection = newestHotels ? (
+    <>
+      <SummaryBar
+        {...summaryBarPropsFor(newestHotels)}
+        stale={newestHotels.stale} refreshing={updatingHotels}
+        onRefresh={onRefresh ? () => onRefresh('hotels') : undefined}
+      />
+      <div className="filter-bar-row">
+        <FilterBar
+          kind="hotels" items={newestHotels.items}
+          filter={hotelState.filter} onChange={setHotelFilter}
         />
-      ) : null}
-
-      {/* Pass 3, section 6a: the pinned block for a choice the server has not confirmed yet. It
-          stands in for `PinnedSummary` above, never beside it — and, since section 3, only for a
-          HOTEL: a chosen flight gets the richer `Chosen flight` block below, which is the same
-          card she pressed rather than a two-line summary of it. */}
-      {!hasChosen && pendingItem && pendingChoice?.kind === 'hotel' ? (
-        <PendingPinned item={pendingItem} kind={pendingChoice.kind} />
-      ) : null}
-
-      {/* The placeholder for what the office does next with her choice: hotels after a flight,
-          the trip summary after a hotel. The server's own `skeleton` says the same thing one
-          round trip later, so whichever arrives first renders the same shape. */}
-      {(skeleton === 'hotels' || (pendingChoice?.kind === 'flight' && !pendingLanded)) && newestHotels === null
-        ? <ResultsSkeleton kind="hotels" /> : null}
-      {pendingChoice?.kind === 'hotel' && !pendingLanded ? <PendingTripSummary /> : null}
-
-      {/* Section 3: once a flight is chosen the flights list collapses into THIS — the same
-          FlightCard she picked, with its `Selected` ribbon, pinned above the stays. Two full
-          result sections stacked was the complaint, and it was the right one: the list she has
-          finished with was taking the top half of the pane away from the one she is working in,
-          and nothing on screen said which flight she had actually chosen. */}
-      {chosenFlightItem && newestFlights ? (
-        <section className="results-section chosen-flight" aria-label="Chosen flight">
-          <h2 className="chosen-flight-heading">Chosen flight</h2>
-          <FlightList
-            items={[chosenFlightItem]}
-            adults={newestFlights.query.adults}
+        {/* Nothing to toggle once both are on screen — above the split width this is gone. */}
+        {split ? null : <ViewToggle view={hotelView} onChange={setHotelView} />}
+      </div>
+      {/* The tabs summarise the MATCHED list: a tab advertising the price of a stay hidden in
+          the collapsed section below is the row claiming a lead it is not offering. */}
+      <SortTabs
+        items={hotelMatched} sorts={HOTEL_SORTS}
+        active={hotelState.sort} updating={updatingHotels} onChange={setHotelSort}
+      />
+      {newestHotels.verdicts ? null : <UncheckedNote />}
+      {/* Airbnb's own split: the list reads down the left, the map holds its place on the right.
+          Below the split width only one is on screen at a time and the toggle picks which. */}
+      <div className="hotel-split" data-split={split ? 'true' : 'false'} data-view={hotelView}>
+        <div className="hotel-split-list">
+          <HotelList
+            items={hotelMatched}
+            adults={newestHotels.query.adults}
             now={now}
-            chosenSourceId={chosenFlightSourceId}
+            chosenSourceId={layout.chosenHotel}
             selectDisabled={choosing}
-            updating={updatingFlights}
-            matchesBySourceId={flightMatchChips}
-            onChoose={(sourceId) => onChoose('flight', sourceId)}
+            updating={updatingHotels}
+            matchesBySourceId={hotelMatchChips}
+            highlightedSourceId={highlightedStay}
+            onHover={setHighlightedStay}
+            onChoose={(sourceId) => onChoose('hotel', sourceId)}
           />
-        </section>
-      ) : null}
-
-      {newestHotels ? (
-        <section className="results-section" aria-label="Hotels">
-          <SummaryBar
-            {...summaryBarPropsFor(newestHotels)}
-            stale={newestHotels.stale} refreshing={updatingHotels}
-            onRefresh={onRefresh ? () => onRefresh('hotels') : undefined}
-          />
-          <div className="filter-bar-row">
-            <FilterBar
-              kind="hotels" items={newestHotels.items}
-              filter={hotelState.filter} onChange={setHotelFilter}
-            />
-            {/* Nothing to toggle once both are on screen — above the split width this is gone. */}
-            {split ? null : <ViewToggle view={hotelView} onChange={setHotelView} />}
-          </div>
-          {/* The tabs summarise the MATCHED list: a tab advertising the price of a stay that is
-              hidden in the collapsed section below is the row claiming a lead it is not
-              offering — the same fault pass 3 fixed for the updating case. */}
-          <SortTabs
-            items={hotelMatched} sorts={HOTEL_SORTS}
-            active={hotelState.sort} updating={updatingHotels} onChange={setHotelSort}
-          />
-          {newestHotels.verdicts ? null : <UncheckedNote />}
-          {/* Airbnb's own split: the list reads down the left, the map holds its place on the
-              right. Below the split width only one is on screen at a time and the toggle picks
-              which — a 45% map on a laptop is a map nobody can read beside a list nobody can
-              compare in. */}
-          <div className="hotel-split" data-split={split ? 'true' : 'false'} data-view={hotelView}>
-            <div className="hotel-split-list">
+          {hotelUnmatched.length > 0 && newestHotels.verdicts ? (
+            <UnmatchedSection kind="hotels" items={hotelUnmatched} verdicts={newestHotels.verdicts}>
               <HotelList
-                items={hotelMatched}
+                items={hotelUnmatched}
                 adults={newestHotels.query.adults}
                 now={now}
-                chosenSourceId={chosenHotelSourceId}
+                chosenSourceId={layout.chosenHotel}
                 selectDisabled={choosing}
                 updating={updatingHotels}
                 matchesBySourceId={hotelMatchChips}
@@ -564,62 +578,155 @@ export function ResultsPane(
                 onHover={setHighlightedStay}
                 onChoose={(sourceId) => onChoose('hotel', sourceId)}
               />
-              {hotelUnmatched.length > 0 && newestHotels.verdicts ? (
-                <UnmatchedSection kind="hotels" items={hotelUnmatched} verdicts={newestHotels.verdicts}>
-                  <HotelList
-                    items={hotelUnmatched}
-                    adults={newestHotels.query.adults}
-                    now={now}
-                    chosenSourceId={chosenHotelSourceId}
-                    selectDisabled={choosing}
-                    updating={updatingHotels}
-                    matchesBySourceId={hotelMatchChips}
-                    highlightedSourceId={highlightedStay}
-                    onHover={setHighlightedStay}
-                    onChoose={(sourceId) => onChoose('hotel', sourceId)}
-                  />
-                </UnmatchedSection>
-              ) : null}
-            </div>
-            {/* Mounted only when it is actually on screen: Leaflet measures its container when it
-                initialises, and a map built inside a hidden element comes up 0x0. */}
-            {split || hotelView === 'map' ? (
-              <div className="hotel-split-map">
-                <HotelMap
-                  items={hotelMatched}
-                  centre={newestHotels.centre}
-                  chosenSourceId={chosenHotelSourceId}
-                  highlightedSourceId={highlightedStay}
-                  onPick={(sourceId) => {
-                    setHighlightedStay(sourceId)
-                    scrollToStay(sourceId)
-                  }}
-                />
-              </div>
-            ) : null}
+            </UnmatchedSection>
+          ) : null}
+        </div>
+        {/* Mounted only when it is actually on screen: a map measures its container when it
+            initialises, and one built inside a hidden element comes up 0x0. */}
+        {split || hotelView === 'map' ? (
+          <div className="hotel-split-map">
+            <HotelMap
+              items={hotelMatched}
+              centre={newestHotels.centre}
+              chosenSourceId={layout.chosenHotel}
+              highlightedSourceId={highlightedStay}
+              onPick={(sourceId) => {
+                setHighlightedStay(sourceId)
+                scrollToStay(sourceId)
+              }}
+            />
           </div>
+        ) : null}
+      </div>
+    </>
+  ) : null
+
+  return (
+    <div className="results-pane" data-stage={layout.stage}>
+      {/* Section 2: what she has chosen, pinned, as the cards she chose rather than a two-line
+          summary of them. The flight first, the stay under it, in the order she picked them. */}
+      {layout.pinFlight && chosenFlightItem && newestFlights ? (
+        <section className="results-section chosen-item" aria-label="Chosen flight">
+          <h2 className="chosen-item-heading">Chosen flight</h2>
+          <FlightList
+            items={[chosenFlightItem]}
+            adults={newestFlights.query.adults}
+            now={now}
+            chosenSourceId={layout.chosenFlight}
+            selectDisabled={choosing}
+            updating={updatingFlights}
+            matchesBySourceId={flightMatchChips}
+            ribbonAction={layout.changeable ? (
+              <ChangeButton what="flight" onClick={() => setFlightsExpanded(true)} />
+            ) : undefined}
+            onChoose={(sourceId) => onChoose('flight', sourceId)}
+          />
+          {layout.updatedSlots.includes('flight') ? <UpdatedBadge /> : null}
         </section>
       ) : null}
 
-      {newestFlights && flightsCollapsed ? (
+      {layout.pinHotel && chosenHotelItem && newestHotels ? (
+        <section className="results-section chosen-item" aria-label="Chosen hotel">
+          <h2 className="chosen-item-heading">Chosen hotel</h2>
+          <HotelList
+            items={[chosenHotelItem]}
+            adults={newestHotels.query.adults}
+            now={now}
+            chosenSourceId={layout.chosenHotel}
+            selectDisabled={choosing}
+            updating={updatingHotels}
+            matchesBySourceId={hotelMatchChips}
+            ribbonAction={layout.changeable ? (
+              <ChangeButton what="hotel" onClick={() => setHotelsExpanded(true)} />
+            ) : undefined}
+            onChoose={(sourceId) => onChoose('hotel', sourceId)}
+          />
+          {layout.updatedSlots.includes('stay') ? <UpdatedBadge /> : null}
+        </section>
+      ) : null}
+
+      {layout.totals && shownProposal ? (
+        <TripTotals
+          items={shownProposal.items}
+          totalMinor={shownProposal.totalMinor}
+          currency={shownProposal.currency}
+          adults={adults}
+        />
+      ) : null}
+
+      {layout.issues.length > 0 ? (
+        <div className="trip-issues">
+          <p>The reviewer flagged this trip:</p>
+          <ul>
+            {layout.issues.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
+      <ActionArea
+        layout={layout}
+        proposal={shownProposal}
+        failReason={error}
+        pending={pending}
+        onAccept={onGetLinks}
+      />
+
+      {error && layout.action !== 'retry' ? <p className="alert" role="alert">{error}</p> : null}
+
+      {/* The placeholder for what the office does next with her choice: hotels after a flight,
+          the trip summary after a hotel. Never beside a list of the same kind — see
+          `paneLayout`, which is the only place that decides it. */}
+      {layout.skeleton === 'hotels' ? <ResultsSkeleton kind="hotels" /> : null}
+      {layout.skeleton === 'trip' ? <PendingTripSummary /> : null}
+
+      {/* Section 2: at the trip stage the stays go behind `Other hotels` — she has chosen one,
+          and a full list under the card that says so is the pane arguing with itself. */}
+      {layout.hotelsCollapsible && !layout.hotelsOpen ? (
         <button
           type="button"
           className="change-flight"
           aria-expanded={false}
-          onClick={() => setFlightsOpen(true)}
+          onClick={() => setHotelsExpanded(true)}
         >
-          Change flight
+          Other hotels
         </button>
       ) : null}
 
-      {newestFlights && !flightsCollapsed ? (
-        <section className="results-section" aria-label="Flights">
-          {chosenFlightItem ? (
+      {layout.hotelsOpen ? (
+        <section className="results-section" aria-label="Hotels">
+          {layout.hotelsCollapsible ? (
             <button
               type="button"
               className="change-flight"
               aria-expanded
-              onClick={() => setFlightsOpen(false)}
+              onClick={() => setHotelsExpanded(false)}
+            >
+              Hide the other hotels
+            </button>
+          ) : null}
+          {hotelsSection}
+        </section>
+      ) : null}
+
+      {layout.pinFlight && !layout.flightsOpen && newestFlights ? (
+        <button
+          type="button"
+          className="change-flight"
+          aria-expanded={false}
+          onClick={() => setFlightsExpanded(true)}
+        >
+          Other flights
+        </button>
+      ) : null}
+
+      {layout.flightsOpen && newestFlights ? (
+        <section className="results-section" aria-label="Flights">
+          {layout.pinFlight ? (
+            <button
+              type="button"
+              className="change-flight"
+              aria-expanded
+              onClick={() => setFlightsExpanded(false)}
             >
               Hide the other flights
             </button>
@@ -642,7 +749,7 @@ export function ResultsPane(
             items={flightMatched}
             adults={newestFlights.query.adults}
             now={now}
-            chosenSourceId={chosenFlightSourceId}
+            chosenSourceId={layout.chosenFlight}
             selectDisabled={choosing}
             updating={updatingFlights}
             matchesBySourceId={flightMatchChips}
@@ -654,7 +761,7 @@ export function ResultsPane(
                 items={flightUnmatched}
                 adults={newestFlights.query.adults}
                 now={now}
-                chosenSourceId={chosenFlightSourceId}
+                chosenSourceId={layout.chosenFlight}
                 selectDisabled={choosing}
                 updating={updatingFlights}
                 matchesBySourceId={flightMatchChips}
@@ -672,51 +779,43 @@ export type ResultsPaneLiveProps = {
   conversationId: string
   results: ResultsView[]
   proposal: (ProposalRowLite & { links: LinkLite[] }) | null
+  acceptedProposal: (ProposalRowLite & { links: LinkLite[] }) | null
   skeleton?: SkeletonMode
-  /** `conversations.status` — the one guard on the background refresh; see `shouldAutoRefresh`. */
+  /** `conversations.status` — what tells a failed turn from a hand-off still running. */
   status: string
 }
 
 const GENERIC_ERROR = 'That could not be sent. Please try again.'
 
 /**
- * Task 10: the client island for the results pane. `onChoose` POSTs
- * `{ kind, sourceId }` to `/api/conversations/[id]/choose` (Task 7's route —
- * `web/chooseRoute.ts`, a different task, in flight alongside this one; a
- * 404 there falls through `errorForStatus`'s own default branch to the same
- * generic copy as any other unhandled status, never a route-specific
- * message). `onGetLinks` reuses the existing `/api/proposals/[id]/decide`
- * endpoint with `{ decision: 'accept' }`, the same request
- * `ProposalCardLive`'s Accept button makes, and only fires it while
- * `proposal.decision` is still `null` — the button itself
- * (`PinnedSummary`) already only renders in that state, this is just the
- * same guard kept here too rather than trusted blindly. `router.refresh()`
- * on success lets the RLS-scoped server read (`loadResults`/`loadProposals`)
- * pick up the change, same pattern as every other `*Live` wrapper in this
- * codebase.
+ * The client island for the results pane.
+ *
+ * `onChoose` POSTs `{ kind, sourceId }` to `/api/conversations/[id]/choose`; `onGetLinks` reuses
+ * `/api/proposals/[id]/decide` with `{ decision: 'accept' }`. Both write to the SHARED optimistic
+ * store first, synchronously, which is what makes the chat column move in the same tick as this
+ * one — see `web/components/optimistic.tsx`. `router.refresh()` on success lets the RLS-scoped
+ * server read pick up the change, the same pattern as every other `*Live` wrapper here.
  */
 export function ResultsPaneLive(
-  { conversationId, results, proposal, skeleton = null, status }: ResultsPaneLiveProps,
+  { conversationId, results, proposal, acceptedProposal, skeleton = null, status }: ResultsPaneLiveProps,
 ) {
   const router = useRouter()
-  const activity = useActivity()
+  const optimistic = useOptimistic()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
   const [updatingKinds, setUpdatingKinds] = useState<('flights' | 'hotels')[]>([])
   /**
-   * The `messageId` each in-flight refresh was fired against, so the skeleton can come down the
+   * The `messageId` each in-flight refresh was fired against, so the shimmer can come down the
    * moment a DIFFERENT newest row of that kind arrives — see `refreshPhase`. A ref rather than
-   * state because it must not cause a render of its own; the `updatingKinds` change that follows
-   * it does.
+   * state because it must not cause a render of its own.
    */
   const refreshedFrom = useRef<Map<'flights' | 'hotels', string | null>>(new Map())
 
   /**
-   * Pass 3, section 6: `rollback` runs on every path that leaves the screen claiming something
-   * the server did not do — a non-200 response (see `outcomeForStatus`) or a thrown fetch. On a
-   * 200 the optimistic state is LEFT in place and `router.refresh()` replaces it with the
-   * server's identical own, so nothing jumps in between.
+   * `rollback` runs on every path that leaves the screen claiming something the server did not
+   * do — a non-200 response (see `outcomeForStatus`) or a thrown fetch. On a 200 the optimistic
+   * state is LEFT in place and the store retires it against the server's own answer, so nothing
+   * jumps in between.
    */
   async function post(path: string, body: unknown, rollback?: () => void) {
     setPending(true)
@@ -741,44 +840,30 @@ export function ResultsPaneLive(
     }
   }
 
-  function rollbackChoice() {
-    setPendingChoice(null)
-    activity.setBusy(false)
-  }
-
-  /**
-   * "Refresh prices", pressed.
-   *
-   * It used to run by itself, from an effect, on every aged-out row the page loaded onto. The
-   * author's ruling removed that outright and she is right about every part of it: opening a
-   * conversation started a TURN, which flipped the chat to `working`, wrote "You asked to
-   * refresh prices" into a thread she had not touched, and answered itself with "Prices
-   * refreshed." and flight chips under a list of hotels. Two of them fired at once on a page
-   * with both lists, the second was refused with a 409 by `submitAction`'s one-active-turn
-   * index, and the row it was meant to replace kept its skeleton with nothing left to come and
-   * fill it. Navigating between chats now makes no request to the agent at all: the page renders
-   * the rows it has, with their prices and how old they are.
-   *
-   * So this is an event handler again, and the only thing that calls it is her press.
-   *
-   * On success nothing is done here — no `router.refresh()`. The turn flips the conversation to
-   * `working`, which `ThreadLive`'s Realtime subscription already refreshes on, and the new row
-   * arrives through the same path every other row does. On a refusal, a thrown fetch, or twenty
-   * seconds of nothing (`REFRESH_TIMEOUT_MS`), the old prices come back.
-   */
   function stopUpdating(kind: 'flights' | 'hotels') {
     setUpdatingKinds((current) => {
       const next = current.filter((k) => k !== kind)
-      if (next.length === 0) activity.setUpdating(false)
+      if (next.length === 0) optimistic.setUpdating(false)
       return next
     })
   }
 
+  /**
+   * "Refresh prices", pressed. It is an event handler and her press is the only thing that calls
+   * it — the version that ran by itself from an effect is what wrote "You asked to refresh
+   * prices" into threads she had not touched.
+   *
+   * On success nothing is done here: the turn flips the conversation to `working`, which
+   * `ThreadLive`'s Realtime subscription already refreshes on, and the new row arrives through
+   * the same path every other row does.
+   */
   async function refreshPrices(kind: 'flights' | 'hotels') {
     if (updatingKinds.includes(kind)) return
-    refreshedFrom.current.set(kind, newestOfKind(results, kind)?.messageId ?? null)
+    const from = newestOfKind(results, kind)?.messageId ?? null
+    refreshedFrom.current.set(kind, from)
     setUpdatingKinds((current) => (current.includes(kind) ? current : [...current, kind]))
-    activity.setUpdating(true)
+    optimistic.setUpdating(true)
+    const entry = optimistic.add({ kind: 'refresh', text: '', sourceId: from ?? undefined })
     window.setTimeout(() => stopUpdating(kind), REFRESH_TIMEOUT_MS)
     try {
       const res = await fetch(`/api/conversations/${conversationId}/refresh`, {
@@ -791,35 +876,15 @@ export function ResultsPaneLive(
     } catch {
       setError(GENERIC_ERROR)
     }
+    optimistic.fail(entry)
     stopUpdating(kind)
   }
 
   // A DIFFERENT newest row of that kind has arrived, which is the only evidence this component
-  // ever gets that a refresh finished — see `refreshPhase`. Staleness is not that evidence: a
-  // re-quote can legitimately come back with prices that are themselves already past a
-  // fifteen-minute ttl, and keying on it is how a skeleton outlives the turn that caused it.
+  // ever gets that a refresh finished — see `refreshPhase`.
   const landed = updatingKinds.filter(
     (kind) => (newestOfKind(results, kind)?.messageId ?? null) !== (refreshedFrom.current.get(kind) ?? null),
   )
-  // Hotfix 2026-10-04: drop the pending choice once the server has answered it (a hotels row
-  // after a flight choice; a stay in the proposal after a hotel choice), and after 20 s no
-  // matter what, so the pane can never stay frozen on a flag the server already satisfied.
-  const choiceLanded = pendingChoice !== null && (
-    (pendingChoice.kind === 'flight' && newestOfKind(results, 'hotels') !== null)
-    || (pendingChoice.kind === 'hotel' && (proposal?.items.some((i) => i.kind === 'hotel') ?? false))
-  )
-  useEffect(() => {
-    if (!choiceLanded) return
-    setPendingChoice(null)
-    activity.setBusy(false)
-  }, [choiceLanded])
-  useEffect(() => {
-    if (pendingChoice === null) return
-    const t = setTimeout(() => { setPendingChoice(null); activity.setBusy(false) }, REFRESH_TIMEOUT_MS)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingChoice])
-
   const landedKey = landed.join(',')
   useEffect(() => {
     for (const kind of landed) stopUpdating(kind)
@@ -832,24 +897,36 @@ export function ResultsPaneLive(
     <ResultsPane
       results={results}
       proposal={proposal}
+      acceptedProposal={acceptedProposal}
       skeleton={skeleton}
+      status={status}
       pending={pending}
       error={error}
-      pendingChoice={pendingChoice}
+      pendingAction={optimistic.pendingAction}
       updatingKinds={updatingKinds}
       onChoose={(kind, sourceId) => {
-        // Before the fetch, deliberately: this is the whole of section 6a.
-        setPendingChoice({ kind, sourceId })
-        activity.setBusy(true)
-        void post(`/api/conversations/${conversationId}/choose`, { kind, sourceId }, rollbackChoice)
+        // Before the fetch, deliberately: this is the whole of section 1.
+        const entry = optimistic.add({
+          kind: kind === 'flight' ? 'choose_flight' : 'choose_hotel',
+          text: '',
+          sourceId,
+        })
+        void post(
+          `/api/conversations/${conversationId}/choose`,
+          { kind, sourceId },
+          () => optimistic.fail(entry),
+        )
       }}
       onRefresh={(kind) => void refreshPrices(kind)}
       onGetLinks={() => {
-        if (!proposal || proposal.decision !== null) return
-        // `pending` (set first thing in `post`, synchronously) is what turns the button into
-        // "Checking prices…" — see `PinnedSummary`.
-        activity.setBusy(true)
-        void post(`/api/proposals/${proposal.id}/decide`, { decision: 'accept' }, () => activity.setBusy(false))
+        const target = proposal ?? acceptedProposal
+        if (!target || target.decision !== null) return
+        const entry = optimistic.add({ kind: 'accept', text: '', sourceId: target.id })
+        void post(
+          `/api/proposals/${target.id}/decide`,
+          { decision: 'accept' },
+          () => optimistic.fail(entry),
+        )
       }}
     />
   )
